@@ -86,7 +86,10 @@ export class ReceiverLight implements IReceiverModule {
         payloadOff: 'OFF',
         device: {
           identifiers: [this.config.receiverId],
-          name: taxonomy.rawQuoi,
+          // Nom complet (norme quoi---lieu du projet) — taxonomy.rawQuoi seul donnait le même
+          // nom de device à tous les récepteurs partageant un "quoi" (ex: tous les "lampadaire"),
+          // impossibles à distinguer dans HA.
+          name: this.config.name,
           manufacturer: 'RFXCOM',
           model: this.config.isDimmable ? 'ReceiverLight (variateur)' : 'ReceiverLight'
         }

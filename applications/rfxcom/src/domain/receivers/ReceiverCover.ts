@@ -136,7 +136,8 @@ export class ReceiverCover implements IReceiverModule {
         commandEnabled: true,
         device: {
           identifiers: [this.config.receiverId],
-          name: taxonomy.rawQuoi,
+          // Nom complet (norme quoi---lieu du projet) — voir ReceiverLight.ts pour le pourquoi.
+          name: this.config.name,
           manufacturer: 'RFXCOM',
           model: `ReceiverCover (${this.config.coverType})`
         }

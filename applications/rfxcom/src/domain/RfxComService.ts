@@ -14,8 +14,7 @@ import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from 
 import { createRfxComError, getCommandTopic } from '../../../core/src/exports';
 import { rfxcomConfigSchema, type RfxComConfig } from './config-schema';
 import type { RfxComDevicesConfigFile, ReceiverConfigEntry } from './devices-config-schema';
-import { ALL_RFXCOM_DEVICE_TYPES } from './types';
-import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, RfxComDeviceType, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult } from './types';
+import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult } from './types';
 import { DeviceManager } from './devices/DeviceManager';
 import { ReceiverManager } from './receivers/ReceiverManager';
 import { SceneManager } from './scenes/SceneManager';
@@ -27,6 +26,7 @@ import { getDefaultComponent, getDefaultUnit, buildStateDeviceId } from './class
 import { extractTaxonomy, buildAttributsTaxonomie } from './taxonomy';
 
 const MODULE_NAME = 'rfxcom';
+
 /** Préfixe du deviceId d'une scène dans les topics MQTT (fonctionnelles-rfxcom_specs §14.3.4). */
 const SCENE_DEVICE_ID_PREFIX = 'scene_';
 
@@ -49,6 +49,12 @@ export class RfxComService implements IRfxComService {
   private lastDiscovery: string | null = null;
   /** Scènes dont l'exécution séquentielle en cours doit s'arrêter à la prochaine étape. */
   private cancelledScenes: Set<string> = new Set();
+  // ⚠️ configureRFX (RfxComTransceiver.pushEnabledProtocols) déclenche lui-même un nouvel
+  // événement 'status' en retour (accusé de réception, même mécanisme que la requête initiale) —
+  // sans ce verrou, onHardwareStatus rappellerait pushEnabledHardwareProtocols() indéfiniment
+  // (boucle infinie constatée en conditions réelles : 500+ allers-retours en quelques secondes).
+  // Une seule poussée par connexion, réarmé à chaque (re)connect() dans start()/handleUsbReconnect.
+  private hasPushedHardwareProtocolsThisSession = false;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -90,7 +96,6 @@ export class RfxComService implements IRfxComService {
     this.deviceManager.loadConfigured(this.devicesConfig.rfxcom_devices);
     this.receiverManager.loadReceivers(this.devicesConfig.rfxcom_receivers);
     this.sceneManager.loadScenes(this.devicesConfig.rfxcom_receivers);
-    this.transceiver.setEnabledTypes(this.config.enabledProtocols as RfxComDeviceType[]);
 
     this.setupSocleEventListeners();
     this.setupSocketEventListeners();
@@ -107,6 +112,20 @@ export class RfxComService implements IRfxComService {
     // l'EventBus). Hors périmètre de cette passe, voir le rapport final.
     this.transceiver.onMessage((message) => this.handleRfxMessage(message));
     this.transceiver.onConnectionChange(() => this.emitStatus());
+    // Pas de garantie d'ordre entre 'status' et la résolution de connect() (voir
+    // RfxComTransceiver.onHardwareStatus) — callback plutôt qu'un appel juste après l'await.
+    // Verrou hasPushedHardwareProtocolsThisSession : notre propre push déclenche EN RETOUR un
+    // nouveau 'status' (accusé de réception, même mécanisme que la requête initiale) — sans lui,
+    // ce callback se rappellerait indéfiniment. Une seule poussée AUTOMATIQUE par connexion ; les
+    // poussées manuelles (updateEnabledHardwareProtocols, déclenchées par une coche utilisateur)
+    // ne passent pas par ce callback et restent donc toujours possibles.
+    this.transceiver.onHardwareStatus(() => {
+      if (!this.hasPushedHardwareProtocolsThisSession) {
+        this.hasPushedHardwareProtocolsThisSession = true;
+        this.pushEnabledHardwareProtocols();
+      }
+      this.emitProtocolsList();
+    });
 
     const port = this.resolvePort();
     try {
@@ -196,6 +215,7 @@ export class RfxComService implements IRfxComService {
 
     this.logger.info('RfxComService', 'Configuration du port série modifiée — reconnexion à chaud...');
     this.transceiver.disconnect();
+    this.hasPushedHardwareProtocolsThisSession = false;
     try {
       await this.transceiver.connect({ port: newPort, baudRate: this.config.baudRate });
       this.logger.info('RfxComService', 'Reconnexion au transceiver RFXCOM réussie après changement de configuration');
@@ -290,7 +310,10 @@ export class RfxComService implements IRfxComService {
       unitOfMeasurement: getDefaultUnit(device.subType),
       device: {
         identifiers: [device.uniqueId],
-        name: `RFXCOM ${device.type} ${device.subType}`,
+        // Nom complet selon la norme du projet (quoi---lieu_precis--lieu--pere--grand_pere), pas
+        // un libellé générique par protocole — sinon tous les devices Lighting2/AC par exemple
+        // affichaient le même nom "RFXCOM Lighting2 AC" dans HA, impossibles à distinguer.
+        name: device.name,
         manufacturer: 'RFXCOM',
         model: device.protocole.toUpperCase()
       }
@@ -418,7 +441,9 @@ export class RfxComService implements IRfxComService {
       commandEnabled: true,
       device: {
         identifiers: [`rfxcom_scene_${scene.receiverId}`],
-        name: `RFXCOM Scène ${taxonomy.rawQuoi}`,
+        // Nom complet de la scène (norme quoi---lieu du projet), pas un libellé générique — même
+        // correctif que publishDeviceDiscovery ci-dessus.
+        name: scene.name,
         manufacturer: 'RFXCOM',
         model: 'Scene'
       },
@@ -615,45 +640,91 @@ export class RfxComService implements IRfxComService {
     this.eventBus.emitGeneric('rfxcom:scenes:list', { scenes: this.sceneManager.getAllScenes() });
   }
 
-  /** Liste vide en config = tous activés (rfxcomConfigSchema) — reflété tel quel côté UI. */
+  /**
+   * Seul filtre de protocoles restant (fonctionnelles-rfxcom_specs §8.2) — matériel uniquement,
+   * voir RfxComTransceiver. L'ancien filtre logiciel après décodage (enabledProtocols, granularité
+   * Lighting1/2/4/5/6/Blinds1/RFXSensor/RFXMeter) a été retiré le 2026-07-26 (voir le commentaire
+   * sur RfxComTransceiver.hardwareStatus pour la limitation RFXMeter que ça laisse).
+   */
   private emitProtocolsList(): void {
-    const enabled = this.config.enabledProtocols.length > 0 ? this.config.enabledProtocols : ALL_RFXCOM_DEVICE_TYPES;
+    const hardware = this.transceiver.getHardwareStatus();
     this.eventBus.emitGeneric('rfxcom:protocols:list', {
-      available: ALL_RFXCOM_DEVICE_TYPES,
-      enabled
+      // Statut matériel brut (receiverType/firmware/ce qui est actuellement actif côté matériel) —
+      // informatif. Catalogue+sélection éditable pour le push RAM : hardwareAvailable/hardwareEnabled.
+      hardware,
+      hardwareAvailable: hardware?.availableProtocols ?? [],
+      hardwareEnabled: this.config.enabledHardwareProtocols.length > 0
+        ? this.config.enabledHardwareProtocols
+        : (hardware?.availableProtocols ?? [])
     });
   }
 
   /**
-   * Persiste la nouvelle liste de protocoles activés et l'applique immédiatement au filtre
-   * logiciel du transceiver (RfxComTransceiver.setEnabledTypes) — pas de redémarrage nécessaire.
+   * Pousse notre liste persistée de protocoles matériel (enabledHardwareProtocols, granularité
+   * X10/ARC/AC/...) AU RFXtrx433 — pour la session en cours uniquement (RAM, voir
+   * RfxComTransceiver.pushEnabledProtocols), à chaque connexion. Notre config reste la seule
+   * source de vérité : ce que le matériel rapportait AVANT ce push (hardware.enabledProtocols) est
+   * ignoré ici, jamais utilisé pour modifier notre liste — seule updateEnabledHardwareProtocols()
+   * (déclenchée par l'utilisateur) modifie enabledHardwareProtocols.
    */
-  private updateEnabledProtocols(protocols: string[]): void {
-    // Tous cochés = équivalent à la liste vide (comportement par défaut du schéma) — normalise
-    // pour ne pas se retrouver figé sur une liste explicite si un type est ajouté au code plus tard.
-    const normalized = protocols.length >= ALL_RFXCOM_DEVICE_TYPES.length ? [] : protocols;
-    // ⚠️ IAppConfigProvider.savePartialConfig() REMPLACE toute la section 'rfxcom' malgré son nom
-    // (ConfigService.savePartialConfig: `{...this.config, [section]: partialConfig}` — pas de
-    // fusion interne) — il faut donc repartir de this.config au complet, sous peine d'effacer
-    // port/bridgeInstance/baudRate/autoDiscovery à la première bascule de protocole.
-    const result = this.configProvider.savePartialConfig({ ...this.config, enabledProtocols: normalized });
-    if (!result.success) {
-      this.logger.error('RfxComService', `Échec de sauvegarde des protocoles activés: ${result.error}`);
-      this.eventBus.emitGeneric('rfxcom:error',
-        createRfxComError('RFXCOM_COMMAND_FAILED', result.error ?? 'Erreur inconnue', 'rfxcom:protocols'));
-      this.emitProtocolsList(); // republie l'état réel (inchangé) pour resynchroniser le client
+  private pushEnabledHardwareProtocols(): void {
+    const hardware = this.transceiver.getHardwareStatus();
+    if (!hardware) {
+      this.logger.warn('RfxComService', 'Pas de statut matériel reçu, push des protocoles matériel ignoré.');
       return;
     }
-    // ⚠️ ConfigService.savePartialConfig() écrit sur disque mais ne rafraîchit jamais sa propre
-    // config en mémoire (contrairement à AppService.handleModuleConfigSave, qui appelle reload()
-    // avant d'émettre app:module:config:saved) — sans ce reload() explicite, loadConfig()
-    // ci-dessous relit l'ancienne valeur en mémoire malgré une écriture disque réussie. Constaté
-    // en direct : le fichier était correctement mis à jour, mais un rechargement de page
-    // réaffichait l'ancien état tant que le serveur n'avait pas redémarré.
+
+    const names = this.config.enabledHardwareProtocols.length > 0
+      ? this.config.enabledHardwareProtocols
+      : hardware.availableProtocols;
+
+    this.transceiver.pushEnabledProtocols(names).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('RfxComService', `Échec du push des protocoles matériel: ${message}`);
+      this.eventBus.emitGeneric('rfxcom:error',
+        createRfxComError('RFXCOM_COMMAND_FAILED', message, 'rfxcom:protocols:hardware'));
+    });
+  }
+
+  /**
+   * Persiste la nouvelle liste de protocoles matériel à pousser au RFXtrx433 — sans la pousser
+   * immédiatement : une coche individuelle ne déclenche plus de commande vers le matériel, elle
+   * modifie seulement la sélection en attente. L'envoi effectif au RFXtrx433 (session en cours,
+   * RAM) se fait en une seule fois via le bouton dédié (voir pushEnabledHardwareProtocolsNow).
+   */
+  private updateEnabledHardwareProtocols(protocols: string[]): void {
+    const hardware = this.transceiver.getHardwareStatus();
+    const catalog = hardware?.availableProtocols ?? protocols;
+    const normalized = protocols.length >= catalog.length ? [] : protocols;
+
+    const result = this.configProvider.savePartialConfig({ ...this.config, enabledHardwareProtocols: normalized });
+    if (!result.success) {
+      this.logger.error('RfxComService', `Échec de sauvegarde des protocoles matériel: ${result.error}`);
+      this.eventBus.emitGeneric('rfxcom:error',
+        createRfxComError('RFXCOM_COMMAND_FAILED', result.error ?? 'Erreur inconnue', 'rfxcom:protocols:hardware'));
+      this.emitProtocolsList();
+      return;
+    }
     this.configProvider.reload();
     this.config = this.loadConfig();
-    this.transceiver.setEnabledTypes(this.config.enabledProtocols as RfxComDeviceType[]);
     this.emitProtocolsList();
+  }
+
+  /** Pousse au RFXtrx433, en une seule fois, la sélection actuellement persistée — déclenché par
+   *  le bouton dédié de l'onglet Protocoles (rfxcom:hardware-protocols:push). */
+  private pushEnabledHardwareProtocolsNow(): void {
+    this.pushEnabledHardwareProtocols();
+  }
+
+  /** Redemande au matériel son statut (bouton "Rafraîchir" de l'onglet Protocoles) — la réponse
+   *  met à jour hardwareStatus via onHardwareStatus et re-déclenche emitProtocolsList(). */
+  private refreshHardwareStatusNow(): void {
+    this.transceiver.refreshHardwareStatus().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('RfxComService', `Échec du rafraîchissement du statut matériel: ${message}`);
+      this.eventBus.emitGeneric('rfxcom:error',
+        createRfxComError('RFXCOM_COMMAND_FAILED', message, 'rfxcom:protocols:hardware'));
+    });
   }
 
   // ==========================================================================
@@ -793,16 +864,18 @@ export class RfxComService implements IRfxComService {
 
     this.eventBus.onGeneric('rfxcom:protocols:list:get', () => this.emitProtocolsList());
 
-    this.eventBus.onGeneric<{ protocol: string; enabled: boolean }>('rfxcom:protocol:toggle', (data) => {
-      const current = new Set(this.config.enabledProtocols.length > 0 ? this.config.enabledProtocols : ALL_RFXCOM_DEVICE_TYPES);
+    this.eventBus.onGeneric<{ protocol: string; enabled: boolean }>('rfxcom:hardware-protocol:toggle', (data) => {
+      const hardware = this.transceiver.getHardwareStatus();
+      const catalog = hardware?.availableProtocols ?? [];
+      const current = new Set(this.config.enabledHardwareProtocols.length > 0 ? this.config.enabledHardwareProtocols : catalog);
       if (data.enabled) current.add(data.protocol);
       else current.delete(data.protocol);
-      this.updateEnabledProtocols(Array.from(current));
+      this.updateEnabledHardwareProtocols(Array.from(current));
     });
 
-    this.eventBus.onGeneric<{ protocols: string[] }>('rfxcom:protocols:update', (data) => {
-      this.updateEnabledProtocols(data.protocols);
-    });
+    this.eventBus.onGeneric('rfxcom:hardware-protocols:push', () => this.pushEnabledHardwareProtocolsNow());
+
+    this.eventBus.onGeneric('rfxcom:hardware-status:refresh', () => this.refreshHardwareStatusNow());
   }
 
   /** Sauvegarde l'état courant des devices/récepteurs/scènes dans config-rfxcom-devices-v1.0.yaml. */

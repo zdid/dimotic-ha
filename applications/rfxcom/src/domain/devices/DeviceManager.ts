@@ -58,7 +58,18 @@ export class DeviceManager {
    */
   handleRawMessage(message: RfxComRawMessage): { uniqueId: string; isNew: boolean } {
     const protocole = getProtocole(message.type);
-    const uniqueId = `${protocole}_${message.sensorId.toLowerCase()}`;
+    // unitCode distingue les boutons d'une même télécommande multi-unités (ex: HomeEasy AC 2 ou
+    // 4 boutons, tous sur le même sensorId/house code) — sans lui, tous les boutons d'une même
+    // télécommande physique collisionnaient sur le même uniqueId, rendant impossible de les
+    // associer à des récepteurs différents. Absent pour les devices sans notion d'unité
+    // (capteurs, compteurs), donc suffixe omis dans ce cas.
+    const unitSuffix = message.unitCode !== undefined ? `_${message.unitCode}` : '';
+    // subType distingue les entités multiples d'un même capteur physique (ex: un capteur TH9
+    // "baromètre" envoie Temperature ET Humidity avec le même sensorId — sans le subType dans
+    // l'id, la seconde lecture écraserait silencieusement la première au lieu de créer une
+    // entité séparée). Cohérent avec buildStateDeviceId() (classification.ts) qui inclut déjà
+    // le subType pour la même raison.
+    const uniqueId = `${protocole}_${message.subType.toLowerCase()}_${message.sensorId.toLowerCase()}${unitSuffix}`;
 
     const configured = this.configuredDevices.get(uniqueId);
     if (configured) {

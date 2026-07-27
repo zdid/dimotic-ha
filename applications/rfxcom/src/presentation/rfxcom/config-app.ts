@@ -82,6 +82,52 @@ interface SceneExecutionResult {
 const SCENE_COMMANDS = ['turn_on', 'turn_off', 'toggle', 'set_level', 'open', 'close', 'stop', 'set_position'];
 
 // ============================================================================
+// Taxonomie QUOI/OÙ — miroir client de domain/taxonomy.ts (extractTaxonomy), pour scinder le
+// champ `name` (format `quoi---lieu_precis--lieu--pere--grand_pere`) en 5 entrées éditables
+// séparément, comme pour EVOO7.
+// ============================================================================
+
+interface SplitTaxonomy {
+  quoi: string;
+  lieuPrecis: string;
+  lieu: string;
+  pere: string;
+  grandPere: string;
+}
+
+function splitTaxonomyName(fullName: string): SplitTaxonomy {
+  const parts = (fullName || '').split('---');
+  const quoi = (parts[0] || '').trim();
+  const lieux = parts[1] ? parts[1].split('--').map((s) => s.trim()) : [];
+  return {
+    quoi,
+    lieuPrecis: lieux[0] || '',
+    lieu: lieux.length > 1 ? (lieux[1] || '') : (lieux[0] || ''),
+    pere: lieux[2] || '',
+    grandPere: lieux[3] || ''
+  };
+}
+
+function composeTaxonomyName(t: SplitTaxonomy): string {
+  let out = `${t.quoi}---${t.lieuPrecis}`;
+  for (const seg of [t.lieu, t.pere, t.grandPere]) {
+    if (seg) out += `--${seg}`;
+  }
+  return out;
+}
+
+/**
+ * Libellé lisible pour un device dans une liste déroulante d'émetteur — la taxonomie scindée
+ * (quoi + lieux), pas le uniqueId brut ni le name avec ses séparateurs `---`/`--`, sinon on ne
+ * sait pas de quoi il s'agit en choisissant un émetteur appairé.
+ */
+function formatDeviceLabel(d: RfxComDeviceInfo): string {
+  const t = splitTaxonomyName(d.name);
+  const lieux = [t.lieuPrecis, t.lieu, t.pere, t.grandPere].filter(Boolean).join(' — ');
+  return `${t.quoi || d.uniqueId}${lieux ? ' · ' + lieux : ''} (${d.uniqueId})`;
+}
+
+// ============================================================================
 // État
 // ============================================================================
 
@@ -90,10 +136,20 @@ let configuredDevices: RfxComDeviceInfo[] = [];
 let discoveredDevices: RfxComDiscoveredDevice[] = [];
 let receivers: ReceiverConfig[] = [];
 let editingReceiverId: string | null = null;
+let editingDeviceUniqueId: string | null = null;
 let scenes: ReceiverSceneConfig[] = [];
 let editingSceneId: string | null = null;
-let availableProtocols: string[] = [];
-let enabledProtocols: string[] = [];
+/** Statut matériel RFXtrx433 (miroir de RfxComTransceiver.RfxComHardwareStatus) — null tant que non reçu. */
+interface RfxComHardwareStatus {
+  receiverType: string;
+  firmwareVersion: number;
+  firmwareType: string;
+  enabledProtocols: string[];
+}
+let hardwareStatus: RfxComHardwareStatus | null = null;
+/** Catalogue + sélection de protocoles matériel (granularité X10/ARC/AC/OREGON/...), poussés au RFXtrx433 en une seule fois via le bouton dédié (RAM, pas d'écriture EEPROM). */
+let hardwareAvailableProtocols: string[] = [];
+let hardwareEnabledProtocols: string[] = [];
 
 // ============================================================================
 // Initialisation
@@ -160,9 +216,13 @@ function setupSocketListeners(): void {
     );
   });
 
-  socket.on('rfxcom:protocols:list', (data: { available: string[]; enabled: string[] }) => {
-    availableProtocols = data.available;
-    enabledProtocols = data.enabled;
+  socket.on('rfxcom:protocols:list', (data: {
+    hardware: RfxComHardwareStatus | null;
+    hardwareAvailable: string[]; hardwareEnabled: string[];
+  }) => {
+    hardwareStatus = data.hardware;
+    hardwareAvailableProtocols = data.hardwareAvailable;
+    hardwareEnabledProtocols = data.hardwareEnabled;
     renderProtocols();
   });
 }
@@ -197,6 +257,9 @@ function setupUiListeners(): void {
     socket.emit('rfxcom:devices:list:get');
   });
 
+  document.getElementById('dv-cancel')?.addEventListener('click', closeDeviceModal);
+  document.getElementById('dv-save')?.addEventListener('click', saveDeviceModal);
+
   document.getElementById('btn-add-receiver')?.addEventListener('click', () => openReceiverForm(null));
   document.getElementById('rf-cancel')?.addEventListener('click', closeReceiverForm);
   document.getElementById('rf-save')?.addEventListener('click', saveReceiver);
@@ -209,6 +272,11 @@ function setupUiListeners(): void {
   document.getElementById('sc-save')?.addEventListener('click', saveScene);
   document.getElementById('sc-add-action')?.addEventListener('click', () => addActionRow());
 
+  // Clic sur l'arrière-plan (pas sur la carte elle-même) = fermer la modale, comme Annuler.
+  document.getElementById('device-modal-overlay')?.addEventListener('click', (e) => { if (e.target === e.currentTarget) closeDeviceModal(); });
+  document.getElementById('receiver-modal-overlay')?.addEventListener('click', (e) => { if (e.target === e.currentTarget) closeReceiverForm(); });
+  document.getElementById('scene-modal-overlay')?.addEventListener('click', (e) => { if (e.target === e.currentTarget) closeSceneForm(); });
+
   // Délégation d'événements pour les boutons générés dynamiquement
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement;
@@ -216,7 +284,7 @@ function setupUiListeners(): void {
     const id = target.closest('[data-id]')?.getAttribute('data-id');
     if (!action) return;
 
-    if (action === 'set-device-name' && id) return setDeviceName(id);
+    if (action === 'edit-device' && id) return openDeviceModal(id);
     if (action === 'toggle-transmit' && id) return toggleDeviceTransmit(id);
     if (action === 'edit-receiver' && id) return openReceiverForm(id);
     if (action === 'delete-receiver' && id) return deleteReceiver(id);
@@ -232,7 +300,9 @@ function setupUiListeners(): void {
       target.closest('.emitter-row')?.remove();
       return;
     }
-    if (action === 'toggle-protocol' && id) return toggleProtocol(id);
+    if (action === 'toggle-hardware-protocol' && id) return toggleHardwareProtocol(id);
+    if (action === 'push-hardware-protocols') return pushHardwareProtocols();
+    if (action === 'refresh-hardware-status') return refreshHardwareStatus();
   });
 }
 
@@ -244,17 +314,24 @@ function renderConfiguredDevices(): void {
   const body = document.getElementById('configured-devices-body');
   if (!body) return;
 
-  body.innerHTML = configuredDevices.map((d) => `
+  body.innerHTML = configuredDevices.map((d) => {
+    const t = splitTaxonomyName(d.name);
+    return `
     <tr>
       <td class="mono">${escapeHtml(d.uniqueId)}</td>
-      <td>${escapeHtml(d.name)}</td>
+      <td>${escapeHtml(t.quoi)}</td>
+      <td>${escapeHtml(t.lieuPrecis)}</td>
+      <td>${escapeHtml(t.lieu)}</td>
+      <td>${escapeHtml(t.pere)}</td>
+      <td>${escapeHtml(t.grandPere)}</td>
       <td>
         <input type="checkbox" data-action="toggle-transmit" data-id="${escapeHtml(d.uniqueId)}" ${d.transmitToHa ? 'checked' : ''}>
       </td>
       <td>${d.lastSeen ? new Date(d.lastSeen).toLocaleString('fr-FR') : '--'}</td>
-      <td><button class="btn btn-secondary" data-action="set-device-name" data-id="${escapeHtml(d.uniqueId)}">✏️</button></td>
+      <td><button class="btn btn-secondary" data-action="edit-device" data-id="${escapeHtml(d.uniqueId)}">✏️</button></td>
     </tr>
-  `).join('') || '<tr><td colspan="5">Aucun device paramétré</td></tr>';
+  `;
+  }).join('') || '<tr><td colspan="9">Aucun device paramétré</td></tr>';
 }
 
 function renderDiscoveredDevices(): void {
@@ -266,25 +343,57 @@ function renderDiscoveredDevices(): void {
       <td class="mono">${escapeHtml(d.uniqueId)}</td>
       <td>${escapeHtml(d.defaultQuoi)}</td>
       <td>${new Date(d.detectedAt).toLocaleString('fr-FR')}</td>
-      <td><button class="btn btn-primary" data-action="set-device-name" data-id="${escapeHtml(d.uniqueId)}">Paramétrer</button></td>
+      <td><button class="btn btn-primary" data-action="edit-device" data-id="${escapeHtml(d.uniqueId)}">✏️</button></td>
     </tr>
   `).join('') || '<tr><td colspan="4">Aucun device en auto-découverte</td></tr>';
 }
 
-function setDeviceName(uniqueId: string): void {
+/** Ouvre la modale de taxonomie pour un device configuré OU en auto-découverte (même mécanisme). */
+function openDeviceModal(uniqueId: string): void {
+  editingDeviceUniqueId = uniqueId;
+  const overlay = document.getElementById('device-modal-overlay');
+  const title = document.getElementById('device-form-title');
+  if (!overlay) return;
+
   const existing = configuredDevices.find((d) => d.uniqueId === uniqueId);
   const discovered = discoveredDevices.find((d) => d.uniqueId === uniqueId);
-  const defaultQuoi = existing?.name.split('---')[0] || discovered?.defaultQuoi || '';
+  const t = existing ? splitTaxonomyName(existing.name) : { quoi: discovered?.defaultQuoi || '', lieuPrecis: '', lieu: '', pere: '', grandPere: '' };
 
-  const currentLieu = existing?.name.includes('---') ? existing.name.split('---')[1] : '';
-  const lieu = prompt(
-    `Localisation (OÙ) pour ${uniqueId}\nQUOI: ${defaultQuoi}\n\nFormat: lieu_principal (ou lieu_precis--lieu_principal)`,
-    currentLieu || ''
-  );
-  if (lieu === null || lieu.trim() === '') return;
+  if (title) title.textContent = existing ? `Modifier ${uniqueId}` : `Paramétrer ${uniqueId}`;
+  setValue('dv-uniqueId', uniqueId);
+  setValue('dv-taxo-quoi', t.quoi);
+  setValue('dv-taxo-lieuprecis', t.lieuPrecis);
+  setValue('dv-taxo-lieu', t.lieu);
+  setValue('dv-taxo-pere', t.pere);
+  setValue('dv-taxo-grandpere', t.grandPere);
 
-  const name = `${defaultQuoi}---${lieu.trim()}`;
-  socket.emit('rfxcom:device:set_name', { uniqueId, name });
+  overlay.classList.add('active');
+}
+
+function closeDeviceModal(): void {
+  document.getElementById('device-modal-overlay')?.classList.remove('active');
+  editingDeviceUniqueId = null;
+}
+
+function saveDeviceModal(): void {
+  if (!editingDeviceUniqueId) return;
+
+  const t: SplitTaxonomy = {
+    quoi: getValue('dv-taxo-quoi').trim(),
+    lieuPrecis: getValue('dv-taxo-lieuprecis').trim(),
+    lieu: getValue('dv-taxo-lieu').trim(),
+    pere: getValue('dv-taxo-pere').trim(),
+    grandPere: getValue('dv-taxo-grandpere').trim()
+  };
+
+  if (!t.quoi) {
+    showAlert('Le champ "Quoi" est requis', 'error');
+    return;
+  }
+
+  socket.emit('rfxcom:device:set_name', { uniqueId: editingDeviceUniqueId, name: composeTaxonomyName(t) });
+  showAlert(`Device "${editingDeviceUniqueId}" mis à jour`, 'success');
+  closeDeviceModal();
 }
 
 function toggleDeviceTransmit(uniqueId: string): void {
@@ -296,6 +405,12 @@ function toggleDeviceTransmit(uniqueId: string): void {
 // ============================================================================
 // Récepteurs
 // ============================================================================
+
+/** Libellé lisible pour un émetteur référencé par uniqueId (récepteur.primaryEmitter/emitters). */
+function emitterLabel(uniqueId: string): string {
+  const device = configuredDevices.find((d) => d.uniqueId === uniqueId);
+  return device ? formatDeviceLabel(device) : uniqueId;
+}
 
 function renderReceivers(): void {
   const listEl = document.getElementById('receivers-list');
@@ -310,9 +425,9 @@ function renderReceivers(): void {
           <button class="btn btn-danger" data-action="delete-receiver" data-id="${escapeHtml(r.receiverId)}">🗑️</button>
         </div>
       </div>
-      <div>primaryEmitter: <span class="mono">${escapeHtml(r.primaryEmitter)}</span></div>
+      <div>Émetteur principal : ${escapeHtml(emitterLabel(r.primaryEmitter))}</div>
       <div>Vers HA: <span class="badge ${r.transmitToHa ? 'on' : 'off'}">${r.transmitToHa ? 'oui' : 'non'}</span></div>
-      <div>Émetteurs appairés: ${r.emitters.map((e) => `<span class="mono">${escapeHtml(e.emitterId)}</span> (${escapeHtml(e.action)})`).join(', ') || 'aucun'}</div>
+      <div>Émetteurs appairés: ${r.emitters.map((e) => `${escapeHtml(emitterLabel(e.emitterId))} (${escapeHtml(e.action)})`).join(', ') || 'aucun'}</div>
     </div>
   `).join('') || '<p>Aucun récepteur configuré</p>';
 }
@@ -323,16 +438,16 @@ function renderPrimaryEmitterOptions(): void {
 
   // Seuls les devices de type Lighting*/Blinds1 sont des émetteurs commandables
   const emitters = configuredDevices.filter((d) => d.type.startsWith('Lighting') || d.type === 'Blinds1');
-  select.innerHTML = emitters.map((d) => `<option value="${escapeHtml(d.uniqueId)}">${escapeHtml(d.uniqueId)} (${escapeHtml(d.name)})</option>`).join('');
+  select.innerHTML = emitters.map((d) => `<option value="${escapeHtml(d.uniqueId)}">${escapeHtml(formatDeviceLabel(d))}</option>`).join('');
 }
 
 function openReceiverForm(receiverId: string | null): void {
   editingReceiverId = receiverId;
-  const card = document.getElementById('receiver-form-card');
+  const overlay = document.getElementById('receiver-modal-overlay');
   const title = document.getElementById('receiver-form-title');
-  if (!card) return;
+  if (!overlay) return;
 
-  card.classList.remove('hidden');
+  overlay.classList.add('active');
   renderPrimaryEmitterOptions();
 
   const existing = receiverId ? receivers.find((r) => r.receiverId === receiverId) : null;
@@ -341,7 +456,12 @@ function openReceiverForm(receiverId: string | null): void {
 
   setValue('rf-receiverId', existing?.receiverId || `recepteur_${String(receivers.length + 1).padStart(3, '0')}`);
   (document.getElementById('rf-receiverId') as HTMLInputElement).disabled = !!existing;
-  setValue('rf-name', existing?.name || '');
+  const t = splitTaxonomyName(existing?.name || '');
+  setValue('rf-taxo-quoi', t.quoi);
+  setValue('rf-taxo-lieuprecis', t.lieuPrecis);
+  setValue('rf-taxo-lieu', t.lieu);
+  setValue('rf-taxo-pere', t.pere);
+  setValue('rf-taxo-grandpere', t.grandPere);
   setValue('rf-type', existing?.type || 'switch');
   setValue('rf-primaryEmitter', existing?.primaryEmitter || '');
   setChecked('rf-isDimmable', existing?.isDimmable || false);
@@ -359,11 +479,10 @@ function openReceiverForm(receiverId: string | null): void {
   }
 
   updateTypeSpecificFields();
-  card.scrollIntoView({ behavior: 'smooth' });
 }
 
 function closeReceiverForm(): void {
-  document.getElementById('receiver-form-card')?.classList.add('hidden');
+  document.getElementById('receiver-modal-overlay')?.classList.remove('active');
   editingReceiverId = null;
 }
 
@@ -379,7 +498,7 @@ function addEmitterRow(existing?: AssociatedEmitter): void {
 
   const emitterOptions = configuredDevices
     .filter((d) => d.type.startsWith('Lighting') || d.type === 'Blinds1')
-    .map((d) => `<option value="${escapeHtml(d.uniqueId)}" ${existing?.emitterId === d.uniqueId ? 'selected' : ''}>${escapeHtml(d.uniqueId)}</option>`)
+    .map((d) => `<option value="${escapeHtml(d.uniqueId)}" ${existing?.emitterId === d.uniqueId ? 'selected' : ''}>${escapeHtml(formatDeviceLabel(d))}</option>`)
     .join('');
 
   const row = document.createElement('div');
@@ -398,11 +517,18 @@ function addEmitterRow(existing?: AssociatedEmitter): void {
 
 function saveReceiver(): void {
   const receiverId = getValue('rf-receiverId').trim();
-  const name = getValue('rf-name').trim();
+  const taxoQuoi = getValue('rf-taxo-quoi').trim();
+  const name = composeTaxonomyName({
+    quoi: taxoQuoi,
+    lieuPrecis: getValue('rf-taxo-lieuprecis').trim(),
+    lieu: getValue('rf-taxo-lieu').trim(),
+    pere: getValue('rf-taxo-pere').trim(),
+    grandPere: getValue('rf-taxo-grandpere').trim()
+  });
   const type = getValue('rf-type') as ReceiverConfig['type'];
   const primaryEmitter = getValue('rf-primaryEmitter');
 
-  if (!receiverId || !name || !primaryEmitter) {
+  if (!receiverId || !taxoQuoi || !primaryEmitter) {
     showAlert('Identifiant, nom et émetteur principal sont requis', 'error');
     return;
   }
@@ -479,11 +605,11 @@ function renderScenes(): void {
 
 function openSceneForm(sceneId: string | null): void {
   editingSceneId = sceneId;
-  const card = document.getElementById('scene-form-card');
+  const overlay = document.getElementById('scene-modal-overlay');
   const title = document.getElementById('scene-form-title');
-  if (!card) return;
+  if (!overlay) return;
 
-  card.classList.remove('hidden');
+  overlay.classList.add('active');
 
   const existing = sceneId ? scenes.find((s) => s.receiverId === sceneId) : null;
 
@@ -504,11 +630,10 @@ function openSceneForm(sceneId: string | null): void {
     if (!existing) addActionRow();
   }
 
-  card.scrollIntoView({ behavior: 'smooth' });
 }
 
 function closeSceneForm(): void {
-  document.getElementById('scene-form-card')?.classList.add('hidden');
+  document.getElementById('scene-modal-overlay')?.classList.remove('active');
   editingSceneId = null;
 }
 
@@ -591,22 +716,54 @@ function deleteScene(sceneId: string): void {
 // Protocoles
 // ============================================================================
 
-function renderProtocols(): void {
-  const container = document.getElementById('protocols-list');
+function renderHardwareStatus(): void {
+  const container = document.getElementById('hardware-status');
   if (!container) return;
 
-  container.innerHTML = availableProtocols.map((p) => `
-    <div class="checkbox-group" style="margin-bottom:10px;">
-      <input type="checkbox" id="proto-${escapeHtml(p)}" data-action="toggle-protocol" data-id="${escapeHtml(p)}" ${enabledProtocols.includes(p) ? 'checked' : ''}>
-      <label for="proto-${escapeHtml(p)}" style="margin:0;cursor:pointer;">${escapeHtml(p)}</label>
-    </div>
-  `).join('') || '<p>Aucun protocole disponible</p>';
+  if (!hardwareStatus) {
+    container.innerHTML = '<p style="color:var(--color-text-muted);">Statut matériel pas encore reçu (en attente de la connexion au transceiver).</p>';
+    return;
+  }
+
+  container.innerHTML = `
+    <div>Récepteur : <strong>${escapeHtml(hardwareStatus.receiverType)}</strong></div>
+    <div>Firmware : <strong>${escapeHtml(hardwareStatus.firmwareType)} v${hardwareStatus.firmwareVersion}</strong></div>
+  `;
 }
 
-function toggleProtocol(protocol: string): void {
-  const checkbox = document.getElementById(`proto-${protocol}`) as HTMLInputElement | null;
+/** Liste à cocher éditable, granularité matérielle (X10/ARC/AC/...) — sélection persistée à chaque
+ *  coche, mais poussée au RFXtrx433 en une seule fois via le bouton dédié (RAM, jamais écrit en EEPROM). */
+function renderHardwareProtocols(): void {
+  const container = document.getElementById('hardware-protocols-list');
+  if (!container) return;
+
+  container.innerHTML = hardwareAvailableProtocols.map((p) => `
+    <div class="checkbox-group" style="margin-bottom:10px;">
+      <input type="checkbox" id="hwproto-${escapeHtml(p)}" data-action="toggle-hardware-protocol" data-id="${escapeHtml(p)}" ${hardwareEnabledProtocols.includes(p) ? 'checked' : ''}>
+      <label for="hwproto-${escapeHtml(p)}" style="margin:0;cursor:pointer;">${escapeHtml(p)}</label>
+    </div>
+  `).join('') || '<p style="color:var(--color-text-muted);">Catalogue pas encore reçu (en attente du statut matériel).</p>';
+}
+
+function renderProtocols(): void {
+  renderHardwareStatus();
+  renderHardwareProtocols();
+}
+
+function toggleHardwareProtocol(protocol: string): void {
+  const checkbox = document.getElementById(`hwproto-${protocol}`) as HTMLInputElement | null;
   const enabled = checkbox?.checked ?? false;
-  socket.emit('rfxcom:protocol:toggle', { protocol, enabled });
+  socket.emit('rfxcom:hardware-protocol:toggle', { protocol, enabled });
+}
+
+function pushHardwareProtocols(): void {
+  socket.emit('rfxcom:hardware-protocols:push');
+  showAlert('Protocoles matériel envoyés au RFXtrx433.', 'success');
+}
+
+function refreshHardwareStatus(): void {
+  socket.emit('rfxcom:hardware-status:refresh');
+  showAlert('Statut matériel rafraîchi.', 'success');
 }
 
 function executeScene(sceneId: string): void {
@@ -654,10 +811,16 @@ function hideLoading(): void {
   if (el) el.style.display = 'none';
 }
 
+// N'échappe pas seulement &/</> : ce helper sert aussi à insérer des valeurs dans des attributs
+// value="..." — un guillemet non échappé y referme l'attribut prématurément (voir même bug
+// corrigé dans evoo7/config-app.ts, TODO.md).
 function escapeHtml(text: string): string {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 if (document.readyState === 'loading') {

@@ -30,12 +30,13 @@
       padding: 8px 16px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em;
     }
     .btn-primary { background: var(--color-accent); color: white; }
-    .btn-secondary { background: var(--color-background); color: var(--color-text); border: 1px solid var(--color-primary); }
+    .btn-secondary { background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-primary); }
     .btn-danger { background: var(--color-error); color: white; }
     .btn-add { background: var(--color-success); color: white; margin-top: 10px; }
 
+    .table-scroll { overflow-x: auto; max-width: 100%; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--color-primary); font-size: 0.9em; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--color-primary); font-size: 0.9em; vertical-align: top; }
     th { color: var(--color-text-muted); font-weight: normal; }
     td.mono { font-family: monospace; }
 
@@ -47,8 +48,13 @@
     .form-group label { display: block; margin-bottom: 4px; font-size: 0.9em; color: var(--color-text-muted); }
     .form-control, .select-control {
       width: 100%; padding: 8px; border: 1px solid var(--color-primary); border-radius: var(--radius);
-      background: var(--color-background); color: var(--color-text);
+      background: var(--color-bg); color: var(--color-text);
+      /* Sans ça, certains navigateurs rendent quand même la liste déroulante ouverte d'un
+         <select> avec des couleurs claires par défaut (popup natif hors de portée du CSS de la
+         page), illisible avec notre texte clair sur fond clair (même bug corrigé dans EVOO7). */
+      color-scheme: dark;
     }
+    .form-control option, .select-control option { background: var(--color-bg); color: var(--color-text); }
     .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
     .checkbox-group { display: flex; align-items: center; gap: 8px; }
 
@@ -61,6 +67,13 @@
 
     .emitter-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
     .emitter-row select, .emitter-row input { flex: 1; }
+
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+      z-index: 1000; align-items: flex-start; justify-content: center; padding: 40px 20px; overflow-y: auto;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-overlay .card { max-width: 640px; width: 100%; margin-bottom: 0; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
 
     .alert { padding: 12px; border-radius: var(--radius); margin: 10px 0; display: none; }
     .alert-success { background: rgba(76, 175, 80, 0.1); border: 1px solid var(--color-success); color: var(--color-success); }
@@ -97,22 +110,30 @@
         </div>
 
         <h3>Devices paramétrés</h3>
-        <table>
-          <thead>
-            <tr><th>Identifiant</th><th>QUOI---OÙ</th><th>Vers HA</th><th>Dernière réception</th><th></th></tr>
-          </thead>
-          <tbody id="configured-devices-body"></tbody>
-        </table>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Identifiant</th><th>Quoi</th><th>Lieu précis</th><th>Lieu</th><th>Père</th><th>Grand-père</th>
+                <th>Vers HA</th><th>Dernière réception</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="configured-devices-body"></tbody>
+          </table>
+        </div>
       </div>
 
       <div class="card">
         <h3>Devices en auto-découverte (non paramétrés)</h3>
-        <table>
-          <thead>
-            <tr><th>Identifiant</th><th>QUOI (auto)</th><th>Détecté à</th><th></th></tr>
-          </thead>
-          <tbody id="discovered-devices-body"></tbody>
-        </table>
+        <p style="color:var(--color-text-muted);font-size:0.9em;">✏️ pour saisir la taxonomie et paramétrer le device (le fait passer dans la liste ci-dessus).</p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Identifiant</th><th>Quoi (auto)</th><th>Détecté à</th><th></th></tr>
+            </thead>
+            <tbody id="discovered-devices-body"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -139,17 +160,70 @@
     <!-- Onglet Protocoles -->
     <div class="tab-panel" id="tab-protocols">
       <div class="card">
-        <h3>Protocoles RF433 traités</h3>
+        <h3>Statut matériel du RFXtrx433</h3>
+        <p style="color:var(--color-text-muted);font-size:0.9em;">Reçu du transceiver à la connexion.</p>
+        <div id="hardware-status"></div>
+        <button type="button" class="btn btn-secondary" data-action="refresh-hardware-status" style="margin-top:10px;">
+          🔄 Rafraîchir
+        </button>
+      </div>
+
+      <div class="card">
+        <h3>Protocoles matériel (poussés au RFXtrx433)</h3>
         <p style="color:var(--color-text-muted);font-size:0.9em;">
-          Décocher un protocole ignore désormais tous les messages de ce type reçus par le transceiver
-          (filtre logiciel, appliqué immédiatement — pas de redémarrage nécessaire). Tout coché = comportement par défaut.
+          Ce qu'on demande au matériel de recevoir — pour la session en cours uniquement (mémoire RAM du
+          RFXtrx433, jamais écrit dans sa mémoire non volatile). Notre choix ici est la seule référence : ce
+          que le matériel rapportait à la connexion n'écrase jamais cette liste. Tout coché = tous les
+          protocoles gérables par ce récepteur sont demandés par défaut. Les coches sont enregistrées
+          immédiatement mais l'envoi au matériel ne se fait qu'au clic sur le bouton ci-dessous.
         </p>
-        <div id="protocols-list"></div>
+        <div id="hardware-protocols-list"></div>
+        <button type="button" class="btn btn-primary" data-action="push-hardware-protocols" style="margin-top:10px;">
+          Envoyer au RFXtrx433
+        </button>
       </div>
     </div>
 
-    <!-- Formulaire scène (créée/éditée) -->
-    <div class="card hidden" id="scene-form-card">
+    <!-- Modale device (taxonomie) -->
+    <div class="modal-overlay" id="device-modal-overlay">
+      <div class="card">
+        <h3 id="device-form-title">Paramétrer le device</h3>
+        <div class="form-group">
+          <label>Identifiant</label>
+          <input type="text" class="form-control" id="dv-uniqueId" disabled>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Quoi</label>
+            <input type="text" class="form-control" id="dv-taxo-quoi" placeholder="Bouton">
+          </div>
+          <div class="form-group">
+            <label>Lieu précis</label>
+            <input type="text" class="form-control" id="dv-taxo-lieuprecis" placeholder="Plafonnier">
+          </div>
+          <div class="form-group">
+            <label>Lieu</label>
+            <input type="text" class="form-control" id="dv-taxo-lieu" placeholder="Salon">
+          </div>
+          <div class="form-group">
+            <label>Père</label>
+            <input type="text" class="form-control" id="dv-taxo-pere" placeholder="Rez-de-chaussée">
+          </div>
+          <div class="form-group">
+            <label>Grand-père</label>
+            <input type="text" class="form-control" id="dv-taxo-grandpere" placeholder="Maison">
+          </div>
+        </div>
+        <div class="toolbar">
+          <button class="btn btn-secondary" id="dv-cancel">Annuler</button>
+          <button class="btn btn-primary" id="dv-save">💾 Enregistrer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modale scène (créée/éditée) -->
+    <div class="modal-overlay" id="scene-modal-overlay">
+    <div class="card" id="scene-form-card">
       <h3 id="scene-form-title">Nouvelle scène</h3>
       <div class="form-row">
         <div class="form-group">
@@ -197,18 +271,36 @@
         <button class="btn btn-primary" id="sc-save">💾 Enregistrer</button>
       </div>
     </div>
+    </div>
 
-    <!-- Formulaire récepteur (créé/édité) -->
-    <div class="card hidden" id="receiver-form-card">
+    <!-- Modale récepteur (créé/édité) -->
+    <div class="modal-overlay" id="receiver-modal-overlay">
+    <div class="card" id="receiver-form-card">
       <h3 id="receiver-form-title">Nouveau récepteur</h3>
+      <div class="form-group">
+        <label>Identifiant</label>
+        <input type="text" class="form-control" id="rf-receiverId" placeholder="recepteur_001">
+      </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Identifiant</label>
-          <input type="text" class="form-control" id="rf-receiverId" placeholder="recepteur_001">
+          <label>Quoi</label>
+          <input type="text" class="form-control" id="rf-taxo-quoi" placeholder="Lumière">
         </div>
         <div class="form-group">
-          <label>Nom (QUOI---OÙ)</label>
-          <input type="text" class="form-control" id="rf-name" placeholder="Lumière---Salon">
+          <label>Lieu précis</label>
+          <input type="text" class="form-control" id="rf-taxo-lieuprecis" placeholder="Plafonnier">
+        </div>
+        <div class="form-group">
+          <label>Lieu</label>
+          <input type="text" class="form-control" id="rf-taxo-lieu" placeholder="Salon">
+        </div>
+        <div class="form-group">
+          <label>Père</label>
+          <input type="text" class="form-control" id="rf-taxo-pere" placeholder="Rez-de-chaussée">
+        </div>
+        <div class="form-group">
+          <label>Grand-père</label>
+          <input type="text" class="form-control" id="rf-taxo-grandpere" placeholder="Maison">
         </div>
       </div>
       <div class="form-row">
@@ -275,6 +367,7 @@
         <button class="btn btn-primary" id="rf-save">💾 Enregistrer</button>
       </div>
     </div>
+    </div>
 
     <div class="loading" id="loading" style="text-align:center;padding:20px;color:var(--color-text-muted);">
       Chargement...
@@ -287,6 +380,7 @@
   <script defer src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script type="module" src="/applications/rfxcom/presentation/rfxcom/config-app.js"></script>
 
-  <!-- Derniere modification: 2026-07-24 - Ajout de l'onglet Protocoles (gestion des protocoles RF433 traités) -->
+  <!-- Derniere modification: 2026-07-26 - Push des protocoles matériel (granularité X10/ARC/AC/...) au RFXtrx433 à chaque connexion (RAM, jamais écrit en EEPROM), liste éditable, notre config reste la seule source de vérité -->
+
 </body>
 </html>

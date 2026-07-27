@@ -81,8 +81,10 @@ export const RFXCOM_CLIENT_EVENTS = {
 
   // --- Protocoles (fonctionnelles-rfxcom_specs §8.2) ---
   GET_PROTOCOLS: 'rfxcom:protocols:list:get',
-  PROTOCOL_TOGGLE: 'rfxcom:protocol:toggle',
-  PROTOCOLS_UPDATE: 'rfxcom:protocols:update'
+  // --- Protocoles matériel (poussés au RFXtrx433, granularité X10/ARC/AC/...) ---
+  HARDWARE_PROTOCOL_TOGGLE: 'rfxcom:hardware-protocol:toggle',
+  HARDWARE_PROTOCOLS_PUSH: 'rfxcom:hardware-protocols:push',
+  HARDWARE_STATUS_REFRESH: 'rfxcom:hardware-status:refresh'
 } as const;
 
 // ============================================================================

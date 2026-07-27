@@ -50,7 +50,8 @@ export class ReceiverSwitch implements IReceiverModule {
         payloadOff: 'OFF',
         device: {
           identifiers: [this.config.receiverId],
-          name: taxonomy.rawQuoi,
+          // Nom complet (norme quoi---lieu du projet) — voir ReceiverLight.ts pour le pourquoi.
+          name: this.config.name,
           manufacturer: 'RFXCOM',
           model: 'ReceiverSwitch'
         }

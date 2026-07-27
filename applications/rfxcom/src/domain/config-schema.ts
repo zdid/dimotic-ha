@@ -23,9 +23,13 @@ export const rfxcomConfigSchema = z.object({
   // Détection continue des nouveaux devices RF433 (fonctionnelles-rfxcom_specs §11.2)
   autoDiscovery: z.boolean().default(true),
 
-  // Protocoles RF433 activés sur le transceiver (fonctionnelles-rfxcom_specs §8.2) —
-  // liste vide = tous les protocoles supportés par le transceiver sont activés par défaut
-  enabledProtocols: z.array(z.string()).default([])
+  // Protocoles matériel RFXtrx433 (granularité X10/ARC/AC/OREGON/..., voir
+  // node_modules/rfxcom/lib/index.js::protocols_RFXtrx433) à pousser AU MATÉRIEL, en une seule
+  // fois via le bouton dédié de l'onglet Protocoles — pour la session en cours uniquement (RAM),
+  // jamais écrit en EEPROM du RFXtrx433. Liste vide = tous les protocoles gérables par ce
+  // récepteur sont poussés par défaut. Seul mécanisme de filtrage de protocoles restant (un filtre
+  // logiciel après décodage existait ici auparavant — retiré le 2026-07-26).
+  enabledHardwareProtocols: z.array(z.string()).default([])
 });
 
 export type RfxComConfig = z.infer<typeof rfxcomConfigSchema>;
@@ -37,5 +41,5 @@ export const DEFAULT_RFXCOM_CONFIG: RfxComConfig = {
   bridgeInstance: 'rfx_bridge_0001',
   devicesConfigFile: 'config-rfxcom-devices-v1.0.yaml',
   autoDiscovery: true,
-  enabledProtocols: []
+  enabledHardwareProtocols: []
 };

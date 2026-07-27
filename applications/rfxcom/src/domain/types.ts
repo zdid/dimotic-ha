@@ -21,16 +21,6 @@ export type RfxComDeviceType =
   | 'Blinds1';
 
 /**
- * Tous les types gérés — utilisé comme catalogue complet pour la case à cocher "Gestion des
- * protocoles" (fonctionnelles-rfxcom_specs §8.2) : liste ce que RfxComTransceiver sait décoder,
- * pas les sous-protocoles bas niveau de la bibliothèque `rfxcom` (bitmap AC/ARC/X10/HOMEEASY/...),
- * qui ne correspond pas à l'exemple d'UI de la spec (checkboxes Lighting1/2/4/5/6/RfxSensor/RfxMeter).
- */
-export const ALL_RFXCOM_DEVICE_TYPES: RfxComDeviceType[] = [
-  'Lighting1', 'Lighting2', 'Lighting4', 'Lighting5', 'Lighting6', 'Blinds1', 'RFXSensor', 'RFXMeter'
-];
-
-/**
  * Message RF433 normalisé, produit par RfxComTransceiver à partir de l'événement
  * `device` de la bibliothèque npm `rfxcom` (fonctionnelles-rfxcom_specs §6.1).
  */
