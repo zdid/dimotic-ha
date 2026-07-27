@@ -1,8 +1,17 @@
 # Spécifications Fonctionnelles - Récepteurs et Émetteurs RFXCOM
 
-*Version 5.2 - 21 Juillet 2026*
+*Version 5.3 - 27 Juillet 2026*
 *Complément aux [spécifications principales](specs-fonctionnelles-rfxcom-v5.0.md)*
 *Conforme à [spec-nommage-v1.0.md](spec-nommage-v1.0.md) et [specs-techniques-socle-ha-mqtt.md](specs-techniques-socle-ha-mqtt.md)*
+
+> **v5.3** : **Mise à jour du workflow UI (§11.3)** pour refléter l'interface réelle : la saisie de
+> la taxonomie se fait désormais en **5 champs séparés** (Quoi/Lieu précis/Lieu/Père/Grand-père,
+> sauvegarde individuelle par icône disquette) dans une **fenêtre modale**, au lieu d'un unique champ
+> `OÙ` en texte libre présenté inline — le contrat Socket.io lui-même (`rfxcom:device:set_name`,
+> §11.2) est inchangé, seule l'UI qui compose le `name` avant envoi a changé (voir
+> `fonctionnelles-rfxcom_specs_v5.8.md` §12.2 pour le détail complet de cette UI, commun à
+> Devices/Récepteurs). Précise aussi que la liste `emitters`/`primaryEmitter` du formulaire Récepteur
+> (§11.3 Étape 3) affiche un libellé lisible dérivé de la taxonomie, pas le `uniqueId` brut.
 
 > **v5.2** : **Implémentation réelle des Scènes** (§6, §10, §12.1 — checklist mise à jour, toutes
 > tâches de cette passe désormais ✅). Corrige un défaut de conception hérité de v5.0 :
@@ -1062,32 +1071,38 @@ UI → Émet: 'rfxcom:devices:list'
 UI → Affiche liste avec QUOI prérempli
 ```
 
-**Étape 2 : Configuration QUOI/OÙ pour un device**
+**Étape 2 : Configuration QUOI/OÙ pour un device** *(⭐ v5.3 — UI mise à jour, contrat Socket.io inchangé)*
 ```
-Utilisateur sélectionne rfxsensor_0xa5b3
-UI → Affiche: QUOI = "Température" (prérempli), OÙ = "[à compléter]"
-Utilisateur saisit OÙ = "Salon"
-UI → Émet: 'rfxcom:device:set_name' avec {
+Utilisateur sélectionne rfxsensor_0xa5b3 → ouvre la fenêtre modale de paramétrage
+UI → Affiche 5 champs séparés, chacun avec sa propre icône de sauvegarde (💾) :
+  Quoi = "Température" (prérempli)
+  Lieu précis = "" (optionnel)
+  Lieu = "" (obligatoire — à compléter)
+  Père = "" (optionnel)
+  Grand-père = "" (optionnel)
+Utilisateur saisit Lieu = "Salon"
+UI → Recompose les 5 champs en un seul name et émet (inchangé) : 'rfxcom:device:set_name' avec {
   uniqueId: "rfxsensor_0xa5b3",
   name: "Température---Salon"
 }
 Serveur → Met à jour config-rfxcom-devices-v1.0.yaml et publie Discovery MQTT
 ```
 
-**Étape 3 : Création Récepteur + PrimaryEmitter + Émetteurs**
+**Étape 3 : Création Récepteur + PrimaryEmitter + Émetteurs** *(⭐ v5.3 — fenêtre modale, libellés lisibles)*
 ```
-Utilisateur clique "Créer Récepteur"
+Utilisateur clique "Créer Récepteur" → ouvre la fenêtre modale
 UI → Affiche formulaire:
   - receiverId: "recepteur_001" (auto-généré)
-  - QUOI: "Lumière" (sélection ou saisie)
-  - OÙ: "Salon" (sélection de pièce)
+  - Taxonomie en 5 champs séparés (Quoi/Lieu précis/Lieu/Père/Grand-père — voir Étape 2), au lieu
+    d'un unique champ OÙ
   - type: "light" (sélection)
-  - primaryEmitter: "lighting2_0x02b3" (sélection du device qui enverra les commandes)
+  - primaryEmitter: sélection dans une liste déroulante affichant un libellé lisible dérivé de la
+    taxonomie du device (ex: "Bouton · Salon (lighting2_0x02b3)"), pas le uniqueId brut seul
   - isDimmable: ✓ (coché pour variateur)
   - defaultLevel: 80
-  - emitters: ["lighting2_0x02b3", "lighting2_0x1001"] (multi-sélection)
+  - emitters: multi-sélection sur la même liste à libellés lisibles (ex: "lighting2_0x02b3", "lighting2_0x1001")
     - Pour chaque émetteur: action à définir
-UI → Émet: 'rfxcom:receiver:create' avec config complète
+UI → Émet: 'rfxcom:receiver:create' avec config complète (payload inchangé, seul l'affichage a changé)
 Serveur → Sauvegarde dans config-rfxcom-devices-v1.0.yaml et publie Discovery MQTT
 ```
 
@@ -1135,6 +1150,7 @@ Serveur → Sauvegarde dans config-rfxcom-devices-v1.0.yaml et publie Discovery 
 | 5.0 | 2026-07-09 | Mistral Vibe | **Fichier YAML centralisé, primaryEmitter, émetteurs dans récepteur, attributs_taxonomie validé** |
 | 5.1 | 2026-07-21 | Claude | **Refonte topics MQTT §8.5** conforme à `techniques-socle-ha-mqtt_specs_v4.10.md` : un seul broker, `bridge_instance`, nouveaux topics état/commande `/rfxcom/{bridgeInstance}/{deviceId}/state\|set`, LWT par bridge, encodage RFXCOM du `deviceId` (§8.5.1), retrait des topics `rfxcom/scan` (superseded par Socket.io) |
 | 5.2 | 2026-07-21 | Claude | **Implémentation réelle des Scènes** (§6, §10, §12.1) : correction de `ReceiverSceneConfig` (ne dérive plus de `BaseReceiverConfig`, primaryEmitter/emitters retirés — bloquaient la validation Zod en pratique), architecture `SceneManager`/`SceneExecutor` clarifiée (pas un 4ème `IReceiverModule`), checklist §12.1 mise à jour (Receiver*Module/RfxComService/Discovery MQTT/Socket.io handlers/Scènes tous ✅). |
+| 5.3 | 2026-07-27 | Claude | **Mise à jour du workflow UI (§11.3)** pour refléter l'interface réelle (contrat Socket.io inchangé) : taxonomie saisie en 5 champs séparés avec sauvegarde individuelle plutôt qu'un champ OÙ unique, formulaires en fenêtre modale, liste déroulante d'émetteurs (primaryEmitter/emitters) affichant un libellé lisible dérivé de la taxonomie plutôt que le uniqueId brut. Détail complet de cette UI dans `fonctionnelles-rfxcom_specs_v5.8.md` §12.2. |
 
 ---
 

@@ -1,7 +1,23 @@
 # Spécifications Fonctionnelles - Module RFXCOM
 
-*Version 5.7 - 21 Juillet 2026*
-*Intègre le fichier de configuration centralisé config-rfxcom-devices-v1.0.yaml avec primaryEmitter et émetteurs appairés dans les récepteurs. NOUVEAU: **Spécifications Cover avec Lighting2** (états up/down/intermediate, calcul position%, traduction on/off), **Traduction Commandes HA→RFXCOM par type**, **Arborescence des Programmes**, Détection automatique, toolbar Scanner/Effacer/Rafraîchir, Appairages intégrés, Gestion protocoles, Scènes implémentées et testées, transmitToHa, actions MQTT par le socle, indicateur connexion, traces détaillées.*
+*Version 5.8 - 27 Juillet 2026*
+*Intègre le fichier de configuration centralisé config-rfxcom-devices-v1.0.yaml avec primaryEmitter et émetteurs appairés dans les récepteurs. NOUVEAU: **Spécifications Cover avec Lighting2** (états up/down/intermediate, calcul position%, traduction on/off), **Traduction Commandes HA→RFXCOM par type**, **Arborescence des Programmes**, Détection automatique, toolbar Scanner/Effacer/Rafraîchir, Appairages intégrés, **Gestion des protocoles matériel** (remplace l'ancien filtre logiciel), Scènes implémentées et testées, transmitToHa, actions MQTT par le socle, indicateur connexion, traces détaillées.*
+
+> **v5.8** : **Remplacement complet de la gestion des protocoles (§8.2)** — l'ancien filtre logiciel
+> après décodage (granularité Lighting1/2/4/5/6/Blinds1/RFXSensor/RFXMeter, persistant, appliqué côté
+> application) est **supprimé** (demande utilisateur, jugé trop complexe sans réel gain face au
+> mécanisme matériel). Remplacé par un filtre **matériel unique** : le RFXtrx433 rapporte à la
+> connexion (`rfxcom:status:get`... voir §8.2) ses protocoles actifs et son catalogue complet
+> (granularité fine, ex: X10/ARC/AC/OREGON — noms de la bibliothèque `rfxcom`, pas nos catégories
+> internes) ; notre sélection persistée (`enabledHardwareProtocols`) reste la seule référence — elle
+> n'est **jamais écrasée** par ce que rapporte le matériel — et est **repoussée** au RFXtrx433 en RAM
+> uniquement (jamais en EEPROM, jamais via `saveRFXProtocols`), en un seul lot via un bouton dédié
+> "Envoyer au RFXtrx433" (plus de push automatique à chaque coche). Nouveau bouton "Rafraîchir" pour
+> réinterroger le statut matériel sans reconnexion complète. Documente aussi, dans §12, l'onglet
+> **Protocoles** (jusqu'ici absent de la liste des onglets), la saisie de la taxonomie en **5 champs
+> séparés** avec sauvegarde individuelle (Devices et Récepteurs, fenêtres modales), et les **libellés
+> lisibles dérivés de la taxonomie** dans les listes déroulantes d'émetteurs (remplace l'affichage du
+> `uniqueId` brut).
 
 > **v5.7** : **Scènes implémentées et testées** (§14.3 — le code n'existait pas malgré le "réactivées"
 > de v5.4, voir `recepteurs-emetteurs-rfxcom_specs_v5.2.md` pour le détail architecture). Noms
@@ -437,37 +453,63 @@ rfxcom:
 > - **Les actions MQTT sont gérées par le socle** - RFXCOM n'interagit pas directement avec MQTT mais utilise les services du socle
 
 
-### 8.2 Paramètres Techniques dans l'UI - Gestion des Protocoles
+### 8.2 Paramètres Techniques dans l'UI - Gestion des Protocoles (matériel, v5.8)
 
-**NOUVEAU v5.4 :**
-> - Les protocoles supportés par le transceiver RFXCOM sont **récupérés dynamiquement** depuis la librairie `rfxcom`
-> - La liste des protocoles dépend du **type de transceiver** configuré (rfxtrx433e, rfxtrx433xl, rfxcom433e)
-> - L'utilisateur peut **activer/désactiver** chaque protocole via une interface de cases à cocher dans les paramètres techniques de RFXCOM
-> - Les protocoles activés déterminent **quels messages RF433 seront traités** par le transceiver
+> **⭐ v5.8 — Remplace intégralement l'ancien mécanisme (v5.4)** : le filtre logiciel après décodage,
+> avec sa granularité interne (Lighting1/2/4/5/6/Blinds1/RFXSensor/RFXMeter) et ses événements
+> `rfxcom:protocol:toggle`/`rfxcom:protocols:update`, a été **retiré** (demande utilisateur — jugé
+> trop complexe à opérer sans documentation, sans réel gain face au filtre matériel une fois celui-ci
+> vérifié en conditions réelles). **Seul persiste désormais le filtre matériel** décrit ci-dessous.
+>
+> ⚠️ **Limitation connue et acceptée** : `RFXMeter` (compteurs élec, `elec1`/`23`/`4`/`5`) n'a **aucun
+> bit correspondant** dans la table de protocoles matériel du RFXtrx433
+> (`node_modules/rfxcom/lib/index.js::protocols_RFXtrx433`) — il n'existe donc plus aucun moyen de
+> filtrer ces messages, ni matériel ni logiciel, depuis ce retrait.
 
-**Exemple de configuration dans l'UI :**
+**Principe :**
+> - Le RFXtrx433 rapporte, à chaque connexion (poignée de main `initialise()`, événement `status` de
+>   la bibliothèque `rfxcom`), son type de récepteur, son firmware et ses protocoles **actuellement
+>   actifs matériellement** — granularité fine et propre à la bibliothèque (ex: `X10`, `ARC`, `AC`,
+>   `OREGON`, `LIGHTWAVERF`...), distincte de nos catégories internes `RfxComDeviceType`
+>   (`Lighting1`/`Lighting2`/...).
+> - **Notre sélection persistée (`enabledHardwareProtocols`) est la seule source de vérité** : ce que
+>   le matériel rapportait à la connexion **n'écrase jamais** cette liste, dans aucun sens.
+> - Cette sélection est **repoussée** au matériel (commande "mode"/`configureRFX` de la bibliothèque,
+>   PAS `saveRFXProtocols`) **en mémoire RAM du RFXtrx433 uniquement** — jamais écrite dans sa mémoire
+>   non volatile (limite documentée de 10 000 cycles d'écriture pour l'EEPROM). Le matériel oublie ce
+>   choix à la prochaine coupure d'alimentation ; c'est pourquoi le push est refait à chaque connexion.
+> - Liste vide en configuration = tous les protocoles gérables par ce récepteur sont demandés par défaut.
+
+**Interface (onglet Protocoles, voir §12) :**
 ```
-[ ] Lighting1
-[x] Lighting2
-[x] Lighting4
-[ ] Lighting5
-[ ] Lighting6
-[x] RfxSensor
-[ ] RfxMeter
-... (selon le transceiver)
+Statut matériel du RFXtrx433
+  Récepteur : 433.92MHz transceiver
+  Firmware : Ext v1006
+  [🔄 Rafraîchir]
+
+Protocoles matériel (poussés au RFXtrx433)
+  [ ] BLYSS
+  [x] RUBICSON
+  [x] FINEOFFSET
+  [x] LIGHTING4
+  ...
+  [x] AC
+  ... (catalogue complet dépend du receiverTypeCode rapporté)
+  [Envoyer au RFXtrx433]
 ```
 
 **Flux :**
-1. Au démarrage du service RFXCOM, récupération automatique des protocoles supportés depuis `rfxcom.protocols`
-2. Envoi de la liste au client via l'événement `rfxcom:protocols:list`
-3. Affichage dans l'UI avec des cases à cocher
-4. Le client envoie les modifications via `rfxcom:protocol:toggle` ou `rfxcom:protocols:update`
-5. Le service applique les filtres au transceiver
+1. À la connexion, le service reçoit le statut matériel (`RfxComTransceiver.onHardwareStatus`) : type de récepteur, firmware, protocoles actifs rapportés, et catalogue complet dérivé de `rfxcom.protocols[receiverTypeCode]`.
+2. Le service pousse **automatiquement**, une seule fois par session (verrou anti-boucle — le push lui-même redéclenche un événement `status` en retour), la sélection persistée au matériel.
+3. Le client reçoit `rfxcom:protocols:list` avec le statut matériel et le catalogue+sélection courante.
+4. Cocher/décocher une case (`rfxcom:hardware-protocol:toggle`) **persiste immédiatement** la sélection (fichier `config.yaml`, champ `enabledHardwareProtocols`) mais **n'envoie rien au matériel**.
+5. Le bouton **"Envoyer au RFXtrx433"** (`rfxcom:hardware-protocols:push`) pousse la sélection actuellement persistée **en une seule fois**, quel que soit le nombre de cases modifiées depuis le dernier envoi.
+6. Le bouton **"Rafraîchir"** (`rfxcom:hardware-status:refresh`) redemande au matériel son statut (commande "get status" de la bibliothèque) **sans reconnexion complète** — met à jour l'affichage (statut + protocoles actifs rapportés) mais ne repousse pas notre sélection.
 
 **Persistance :**
-> - La liste des protocoles activés est **stockée dans la configuration RFXCOM** (fichier `config.yaml`)
-> - Au démarrage, les protocoles précédemment activés sont **automatiquement restaurés**
-> - Par défaut, **tous les protocoles supportés sont activés**
+> - La sélection est stockée dans la configuration RFXCOM (`config.yaml`, champ `enabledHardwareProtocols: string[]`, noms au format de la bibliothèque `rfxcom`)
+> - Au démarrage, la sélection précédemment persistée est automatiquement repoussée au matériel (étape 2 ci-dessus)
+> - Par défaut (liste vide), tous les protocoles gérables par ce récepteur sont poussés
 
 ### 8.3 Actions MQTT par le Socle (NOUVEAU v5.4)
 
@@ -637,7 +679,7 @@ Voir fichier `config-rfxcom-devices-v1.0.yaml` à la racine du projet.
 ### 11.2 Fonctionnalités UI pour RFXCOM
 
 **NOUVEAU v5.4 - Organisation de l'interface :**
-- **Structure en onglets** : Devices | Récepteurs | **Scènes** (réactivées et intégrées)
+- **Structure en onglets** : Devices | Récepteurs | Scènes (réactivées et intégrées) | **Protocoles** *(⭐ v5.8, voir §8.2 pour le détail fonctionnel)*
 - **Appairages intégrés aux Récepteurs** : Les appairages (device → récepteur) sont gérés dans l'onglet Récepteurs (remplace le terme Associations)
 - **Indicateur de connexion RFX433** : Badge dans l'en-tête affichant l'état de connexion au transceiver (🟢 Connecté / 🔴 Déconnecté)
 - **Actions MQTT par le socle** : Toutes les actions MQTT (publication, abonnement) sont gérées par le socle HA-MQTT, l'application RFXCOM utilise uniquement les événements mis à disposition
@@ -656,7 +698,13 @@ Voir fichier `config-rfxcom-devices-v1.0.yaml` à la racine du projet.
 **Gestion des Devices :**
 1. **Liste des devices détectés** : Affiche tous les devices RFXCOM avec leur sensorId, type, subType
 2. **QUOI auto-rempli** : Le QUOI est prérempli depuis le subType, modifiable par l'utilisateur
-3. **Saisie du OÙ** : Formulaire pour définir la localisation (lieu_principal obligatoire)
+3. **Taxonomie en 5 champs séparés** *(⭐ v5.8)* : le formulaire de paramétrage (fenêtre modale, voir
+   note ci-dessous) sépare le `name` technique en 5 champs indépendants — **Quoi**, **Lieu précis**,
+   **Lieu** (obligatoire), **Père**, **Grand-père** — au lieu d'un unique champ `OÙ` en texte libre à
+   séparateurs `--`. Chaque champ a sa propre icône de sauvegarde (💾, même pattern que l'application
+   EVOO7), permettant de corriger un seul niveau sans ressaisir toute la hiérarchie. Côté serveur,
+   les 5 champs sont recomposés en un seul `name` (`quoi---lieu_precis--lieu--pere--grand_pere`) avant
+   envoi via `rfxcom:device:set_name` — le contrat Socket.io (§12.3) est inchangé.
 4. **Deux listes distinctes** :
    - **Devices déjà paramétrés** : Chargés depuis le fichier de configuration centralisé
    - **Devices en auto-discovery** : Détectés par scan mais non encore configurés
@@ -668,12 +716,17 @@ Voir fichier `config-rfxcom-devices-v1.0.yaml` à la racine du projet.
 | Effacer non paramétrés | 🗑️ | `rfxcom:devices:clear-unconfigured` | Supprime les devices auto-découverts non configurés |
 | Rafraîchir | 🔄 | `rfxcom:devices:refresh` | Recharge la liste des devices **déjà paramétrés** depuis le fichier |
 
-**Note :** Le bouton "Sauvegarder" a été supprimé - les sauvegardes sont déclenchées via les fenêtres modales.
+**Note :** Le bouton "Sauvegarder" a été supprimé - les sauvegardes sont déclenchées via les fenêtres
+modales. *(⭐ v5.8 — précision de périmètre)* Les formulaires d'ajout/modification des **Devices**,
+des **Récepteurs** et des **Scènes** sont tous les trois présentés en **fenêtre modale** (overlay,
+fermeture par clic sur le fond ou bouton Annuler) plutôt qu'en formulaire intégré à la page.
 
 **Gestion des Récepteurs :**
 1. **Création de récepteur** : Définir type (switch/light/cover), primaryEmitter, et liste des emitters
 2. **Configuration variateur** : Pour Lighting2, cocher "isDimmable" pour activer le mode variateur
 3. **Configuration covers** : Saisie des délais openTimeSec/closeTimeSec **OBLIGATOIRES**
+4. **Taxonomie en 5 champs séparés** *(⭐ v5.8)* : même pattern que pour les Devices (point 3
+   ci-dessus) — Quoi/Lieu précis/Lieu/Père/Grand-père saisis séparément dans la fenêtre modale.
 
 **Gestion des Appairages (Appairages) :**
 > ⚠️ **Intégrées dans l'onglet Récepteurs** (pas d'onglet séparé)
@@ -682,6 +735,10 @@ Voir fichier `config-rfxcom-devices-v1.0.yaml` à la racine du projet.
 2. **Définir l'action** : toggle, on, off, set_level (pour light), open, close, stop (pour cover)
 3. **Définir le primaryEmitter** : L'émetteur principal qui enverra les commandes RF433
 4. **Stockage** : Les appairages N↔N sont stockées directement dans la définition du récepteur (primaryEmitter + liste des émetteurs appairés)
+5. **Libellés lisibles** *(⭐ v5.8)* : les listes déroulantes de sélection d'émetteur (primaryEmitter
+   et emitters) affichent un libellé dérivé de la taxonomie (QUOI + hiérarchie de lieux, ex:
+   `Bouton · Salon (lighting2_0x02b3)`) plutôt que le `uniqueId` brut seul — sans quoi il est
+   impossible de savoir de quel device il s'agit au moment de l'appairage.
 
 **Scènes :**
 > ✅ **Fonctionnalité réactivée v5.4** - Onglet dédié disponible avec création/modification/suppression via UI
@@ -699,6 +756,12 @@ Voir fichier `config-rfxcom-devices-v1.0.yaml` à la racine du projet.
 'rfxcom:scan:start': {}                                             // Notification: scan démarré
 'rfxcom:scan:complete': { devices: RfxComDeviceInfo[] }           // Notification: scan terminé avec résultats
 'rfxcom:scan:failed': { error: string }                             // Notification: échec du scan
+'rfxcom:protocols:list': {                                          // ⭐ v5.8 — statut + catalogue/sélection matériel (voir §8.2)
+  hardware: { receiverType: string; receiverTypeCode: number; firmwareVersion: number;
+              firmwareType: string; enabledProtocols: string[]; availableProtocols: string[] } | null;
+  hardwareAvailable: string[];   // Catalogue complet pour ce receiverTypeCode
+  hardwareEnabled: string[];     // Sélection persistée (enabledHardwareProtocols)
+}
 ```
 
 **Client → Server :**
@@ -710,7 +773,14 @@ Voir fichier `config-rfxcom-devices-v1.0.yaml` à la racine du projet.
 'rfxcom:scan:start': {}                                            // NOUVEAU: Démarrer un scan de détection
 'rfxcom:devices:clear-unconfigured': {}                           // NOUVEAU: Effacer devices non paramétrés
 'config:save': AppConfig                                            // Sauvegarder la configuration globale
+'rfxcom:protocols:list:get': {}                                    // ⭐ v5.8 — Redemander le statut+catalogue+sélection matériel
+'rfxcom:hardware-protocol:toggle': { protocol: string; enabled: boolean }  // ⭐ v5.8 — Persiste la case (pas de push matériel)
+'rfxcom:hardware-protocols:push': {}                                // ⭐ v5.8 — Pousse la sélection persistée au matériel, en une fois (bouton "Envoyer au RFXtrx433")
+'rfxcom:hardware-status:refresh': {}                                // ⭐ v5.8 — Redemande le statut au matériel sans reconnexion (bouton "Rafraîchir")
 ```
+
+> **⭐ v5.8** : les événements `rfxcom:protocol:toggle` et `rfxcom:protocols:update` (ancien filtre
+> logiciel, v5.4) sont **supprimés** — voir §8.2.
 
 ---
 
@@ -1138,6 +1208,12 @@ applications/rfxcom/
 - [x] **Arborescence des Programmes** : structure modulaire (Switch/Light/Cover séparés)
 - [ ] Tests d'intégration
 
+### V5.8 (Terminé - 27 Juillet 2026)
+- [x] **Filtre de protocoles matériel** : remplace l'ancien filtre logiciel (v5.4), granularité fine de la bibliothèque `rfxcom`, push RAM uniquement en un lot via bouton dédié, bouton de rafraîchissement du statut
+- [x] **Taxonomie en 5 champs séparés** avec sauvegarde individuelle, pour Devices et Récepteurs
+- [x] **Fenêtres modales** étendues aux trois formulaires (Devices/Récepteurs/Scènes)
+- [x] **Libellés lisibles** (dérivés de la taxonomie) dans les listes déroulantes d'émetteurs
+
 ---
 
 ## 21. Annexes
@@ -1159,7 +1235,7 @@ applications/rfxcom/
 | primaryEmitter | Émetteur principal d'un récepteur, utilisé pour envoyer les commandes RF433 |
 | Appairage | **Remplace Association** - Lien entre un émetteur et un récepteur (N↔N) |
 | transmitToHa | Case à cocher dans les fenêtres modales pour autoriser l'envoi du device vers HA |
-| Protocoles autorisés | Liste des protocoles RF433 activés dans les paramètres techniques, récupérés depuis la librairie rfxcom |
+| Protocoles matériel *(⭐ v5.8, remplace "Protocoles autorisés")* | Sélection de protocoles (granularité bibliothèque `rfxcom`, ex: `AC`/`X10`/`OREGON`) poussée au RFXtrx433 en RAM, en un lot via le bouton dédié — voir §8.2 |
 
 ### 20.3 Historique
 | Version | Date | Auteur | Changements |
@@ -1174,6 +1250,7 @@ applications/rfxcom/
 | 5.5 | 2026-07-18 | Mistral Vibe | **Spécifications Cover avec Lighting2 (états up/down/intermediate, calcul position%, traduction on/off), Traduction Commandes HA→RFXCOM par type, Arborescence des Programmes modulaire** |
 | 5.6 | 2026-07-21 | Claude | Alignement des topics `state_topic` et scènes sur le nouveau format MQTT du socle (`/{moduleName}/{bridgeInstance}/{deviceId}/state\|set`), conforme à `techniques-socle-ha-mqtt_specs_v4.10.md` §8.5 |
 | 5.7 | 2026-07-21 | Claude | **Scènes implémentées et testées** (§14.3) : `SceneManager`/`SceneExecutor` (voir `recepteurs-emetteurs-rfxcom_specs_v5.2.md` §6.1), onglet UI dédié. Événements Socket.io réels documentés (`rfxcom:scenes:list`/`:list:get`, §14.3.5). Deux simplifications connues documentées (topic `device_automation` à un segment, `SceneExecutionResult` sans distinction failed/cancelled). Correction du socle (auto-abonnement aux commandes, `techniques-socle-ha-mqtt_specs_v4.11.md`) sans lequel aucune commande HA→app RFXCOM n'était jamais reçue. |
+| 5.8 | 2026-07-27 | Claude | **Remplacement complet de la gestion des protocoles (§8.2)** : l'ancien filtre logiciel après décodage (v5.4, granularité Lighting1/2/4/5/6/Blinds1/RFXSensor/RFXMeter, événements `rfxcom:protocol:toggle`/`rfxcom:protocols:update`) est retiré (demande utilisateur) et remplacé par un filtre matériel unique — sélection persistée jamais écrasée par le matériel, poussée en RAM uniquement (jamais EEPROM) en un seul lot via un bouton dédié plutôt qu'à chaque coche, plus un bouton de rafraîchissement du statut sans reconnexion. Limitation documentée : plus aucun filtrage possible pour RFXMeter (aucun bit matériel correspondant). Documente aussi l'onglet Protocoles (absent jusqu'ici de la liste des onglets, §12.2), la taxonomie en 5 champs séparés avec sauvegarde individuelle pour Devices et Récepteurs, l'extension du pattern fenêtre modale aux trois formulaires (Devices/Récepteurs/Scènes), et les libellés lisibles (dérivés de la taxonomie) dans les listes déroulantes d'émetteurs. |
 
 ---
 
