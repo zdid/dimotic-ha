@@ -53,6 +53,45 @@ export function extractTaxonomy(fullName: string): ExtractedTaxonomy {
   };
 }
 
+/**
+ * Résout la taxonomie d'une donnée EVOO7 depuis ses 5 champs saisis manuellement
+ * (taxonomieQuoi/LieuPrecis/Lieu/Pere/GrandPere) — repli sur `extractTaxonomy(description)`
+ * (comportement historique, jamais réellement exploitable puisque description est un texte
+ * libre) tant que l'utilisateur n'a rien saisi. Voir TODO.md "aucune saisie réelle de la
+ * taxonomie QUOI/OÙ pour les données sélectionnées".
+ */
+export function resolveTaxonomy(donnee: {
+  description: string;
+  taxonomieQuoi?: string;
+  taxonomieLieuPrecis?: string;
+  taxonomieLieu?: string;
+  taxonomiePere?: string;
+  taxonomieGrandPere?: string;
+}): ExtractedTaxonomy {
+  if (!donnee.taxonomieQuoi) {
+    return extractTaxonomy(donnee.description);
+  }
+
+  const rawQuoi = donnee.taxonomieQuoi;
+  const nomPrecis = donnee.taxonomieLieuPrecis || null;
+  const nomLieu = donnee.taxonomieLieu || null;
+  const nomPere = donnee.taxonomiePere || null;
+  const nomGrandPere = donnee.taxonomieGrandPere || null;
+
+  return {
+    rawQuoi,
+    slugQuoi: slugify(rawQuoi),
+    nomPrecis,
+    slugPrecis: nomPrecis ? slugify(nomPrecis) : null,
+    nomLieu,
+    slugLieu: nomLieu ? slugify(nomLieu) : null,
+    nomPere,
+    slugPere: nomPere ? slugify(nomPere) : null,
+    nomGrandPere,
+    slugGrandPere: nomGrandPere ? slugify(nomGrandPere) : null
+  };
+}
+
 /** Construit le bloc `attributs_taxonomie` obligatoire du payload de découverte. */
 export function buildAttributsTaxonomie(t: ExtractedTaxonomy): Record<string, string | null> {
   return {

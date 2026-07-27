@@ -28,12 +28,17 @@
 import type { Evoo7Component, Evoo7DataDefinition } from './types';
 
 /**
- * Composant HA déterminé automatiquement :
- * - min/max (nombre)          → number (updatable) / sensor (lecture seule)
- * - valeursPossibles (énum)   → TOUJOURS sensor (lecture seule, passthrough brut — voir note ci-dessus)
- * - ni l'un ni l'autre        → text (updatable) / sensor (lecture seule)
+ * Composant HA :
+ * - forcedComponent='binary_sensor' → toujours binary_sensor, outrepasse tout le reste (saisie
+ *   manuelle, voir types.ts) — nécessite payloadOn/payloadOff pour être exploitable.
+ * - sinon, déterminé automatiquement :
+ *   - min/max (nombre)          → number (updatable) / sensor (lecture seule)
+ *   - valeursPossibles (énum)   → TOUJOURS sensor (lecture seule, passthrough brut — voir note ci-dessus)
+ *   - ni l'un ni l'autre        → text (updatable) / sensor (lecture seule)
  */
 export function determineComponent(donnee: Evoo7DataDefinition): Evoo7Component {
+  if (donnee.forcedComponent === 'binary_sensor') return 'binary_sensor';
+
   const hasRange = donnee.min !== undefined || donnee.max !== undefined;
   const hasEnum = !!donnee.valeursPossibles && donnee.valeursPossibles.length > 0;
 

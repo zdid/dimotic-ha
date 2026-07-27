@@ -18,7 +18,7 @@ import type { Evoo7DataDefinition, Evoo7Status } from './types';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { Evoo7MqttClient } from './mqtt/Evoo7MqttClient';
 import { determineComponent, determineNumberStep, buildValueTemplate, buildCommandTemplate } from './classification';
-import { extractTaxonomy, buildAttributsTaxonomie } from './taxonomy';
+import { resolveTaxonomy, buildAttributsTaxonomie } from './taxonomy';
 import { resolveTopic, resolveCommandMessage, extractSensorValue } from './evoo7-templates';
 
 const MODULE_NAME = 'evoo7';
@@ -236,7 +236,7 @@ export class Evoo7Service implements IEvoo7Service {
     // traduit code→libellé côté affichage via value_template (voir classification.ts).
     // attributs_taxonomie porté ici (pas dans le message de découverte, ignoré par HA — voir
     // discovery.ts) : json_attributes_topic pointe vers ce même topic d'état.
-    const taxonomy = extractTaxonomy(donnee.description);
+    const taxonomy = resolveTaxonomy(donnee);
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.config.bridgeInstance,
       deviceId: id,
@@ -263,10 +263,11 @@ export class Evoo7Service implements IEvoo7Service {
 
   private publishDonneeDiscovery(donnee: Evoo7DataDefinition): void {
     const component = determineComponent(donnee);
-    const taxonomy = extractTaxonomy(donnee.description);
-    // 'sensor' (y compris toutes les énumérations, jamais commandables — voir classification.ts)
-    // n'est jamais commandable, quelle que soit la sélection utilisateur.
-    const commandEnabled = component !== 'sensor' && donnee.updatable && donnee.miseAJour;
+    const taxonomy = resolveTaxonomy(donnee);
+    // 'sensor'/'binary_sensor' (y compris toutes les énumérations, jamais commandables — voir
+    // classification.ts) ne sont jamais commandables, quelle que soit la sélection utilisateur —
+    // binary_sensor n'a pas de command_topic en découverte MQTT HA.
+    const commandEnabled = component !== 'sensor' && component !== 'binary_sensor' && donnee.updatable && donnee.miseAJour;
 
     // attributs_taxonomie n'est plus ici : un message de découverte HA est validé contre un
     // schéma strict par plateforme, les clés non reconnues (dont celle-ci) sont ignorées en
@@ -282,6 +283,16 @@ export class Evoo7Service implements IEvoo7Service {
     }
     if (commandEnabled) {
       extra.command_template = buildCommandTemplate(component);
+    }
+    if (donnee.deviceClass) {
+      extra.device_class = donnee.deviceClass;
+      if (donnee.unitOfMeasurement) {
+        extra.unit_of_measurement = donnee.unitOfMeasurement;
+      }
+    }
+    if (component === 'binary_sensor') {
+      if (donnee.payloadOn) extra.payload_on = donnee.payloadOn;
+      if (donnee.payloadOff) extra.payload_off = donnee.payloadOff;
     }
 
     const essential: EssentialEntityData = {
@@ -401,96 +412,89 @@ export class Evoo7Service implements IEvoo7Service {
     this.eventBus.onGeneric('evoo7:status:get', () => this.emitStatus());
     this.eventBus.onGeneric('evoo7:donnees:list:get', () => this.emitDonneesList());
 
-    this.eventBus.onGeneric<{ id: string; consultation: boolean; miseAJour: boolean }>(
-      'evoo7:donnee:set_selection',
-      (data) => {
-        const donnee = this.donnees.get(data.id);
-        if (!donnee) {
-          this.emitDonneeError(data.id, `Donnée inconnue: ${data.id}`, 'EVOO7_UNKNOWN_DATA');
-          return;
-        }
+    this.eventBus.onGeneric<{
+      id: string;
+      consultation: boolean;
+      miseAJour: boolean;
+      topicSensor: string;
+      formatMessageSensor: string;
+      taxonomieQuoi: string;
+      taxonomieLieuPrecis: string;
+      taxonomieLieu: string;
+      taxonomiePere: string;
+      taxonomieGrandPere: string;
+      deviceClass: string;
+      unitOfMeasurement: string;
+      forcedComponent: string;
+      payloadOn: string;
+      payloadOff: string;
+    }>('evoo7:donnee:save', (data) => {
+      const donnee = this.donnees.get(data.id);
+      if (!donnee) {
+        this.emitDonneeError(data.id, `Donnée inconnue: ${data.id}`, 'EVOO7_UNKNOWN_DATA');
+        return;
+      }
 
-        // État précédent conservé pour rollback si l'écriture disque échoue — jamais laisser le
-        // client croire qu'un changement est appliqué s'il n'a pas été réellement persisté.
-        const previous = { consultation: donnee.consultation, miseAJour: donnee.miseAJour };
+      // État précédent conservé en bloc pour rollback si l'écriture disque échoue — jamais
+      // laisser le client croire qu'un changement est appliqué s'il n'a pas été réellement
+      // persisté (voir TODO.md, même défaut déjà corrigé pour le formulaire générique de config).
+      const previous = { ...donnee };
 
-        // Se désabonner de l'ancien topic si la consultation est désactivée.
-        if (donnee.consultation && !data.consultation) {
-          this.evoo7Client.unsubscribeTopic(resolveTopic(donnee.topicSensor, donnee.id));
-          this.topicToId.delete(resolveTopic(donnee.topicSensor, donnee.id));
-        }
+      // Un seul bouton "sauvegarder la ligne" (taxonomie, classe HA, topic/format et sélection
+      // ensemble) — se désabonner de l'ancien topic si consultation était active, avant toute
+      // mutation, comme le faisaient séparément set_selection/set_topic.
+      if (donnee.consultation) {
+        this.evoo7Client.unsubscribeTopic(resolveTopic(donnee.topicSensor, donnee.id));
+        this.topicToId.delete(resolveTopic(donnee.topicSensor, donnee.id));
+      }
 
-        donnee.consultation = data.consultation;
-        // miseAJour n'a de sens que si la donnée est updatable — ignoré silencieusement sinon.
-        donnee.miseAJour = donnee.updatable ? data.miseAJour : false;
+      donnee.consultation = data.consultation;
+      // miseAJour n'a de sens que si la donnée est updatable — ignoré silencieusement sinon.
+      donnee.miseAJour = donnee.updatable ? data.miseAJour : false;
+      donnee.topicSensor = data.topicSensor;
+      donnee.formatMessageSensor = data.formatMessageSensor;
+      donnee.taxonomieQuoi = data.taxonomieQuoi || undefined;
+      donnee.taxonomieLieuPrecis = data.taxonomieLieuPrecis || undefined;
+      donnee.taxonomieLieu = data.taxonomieLieu || undefined;
+      donnee.taxonomiePere = data.taxonomiePere || undefined;
+      donnee.taxonomieGrandPere = data.taxonomieGrandPere || undefined;
+      donnee.deviceClass = data.deviceClass || undefined;
+      donnee.unitOfMeasurement = data.unitOfMeasurement || undefined;
+      donnee.forcedComponent = data.forcedComponent || undefined;
+      donnee.payloadOn = data.payloadOn || undefined;
+      donnee.payloadOff = data.payloadOff || undefined;
 
-        if (donnee.consultation) {
-          const topic = resolveTopic(donnee.topicSensor, donnee.id);
+      if (donnee.consultation) {
+        const topic = resolveTopic(donnee.topicSensor, donnee.id);
+        this.topicToId.set(topic, donnee.id);
+        this.evoo7Client.subscribeTopic(topic, this.config.mqtt.qos as 0 | 1 | 2);
+      }
+
+      const result = this.persistDonneesConfig();
+      if (!result.success) {
+        Object.assign(donnee, previous);
+        // Restaure l'abonnement d'origine si la sauvegarde échoue après le ré-abonnement ci-dessus.
+        if (previous.consultation) {
+          const topic = resolveTopic(previous.topicSensor, donnee.id);
           this.topicToId.set(topic, donnee.id);
           this.evoo7Client.subscribeTopic(topic, this.config.mqtt.qos as 0 | 1 | 2);
         }
-
-        const result = this.persistDonneesConfig();
-        if (!result.success) {
-          donnee.consultation = previous.consultation;
-          donnee.miseAJour = previous.miseAJour;
-          this.emitDonneeError(data.id, `Échec de sauvegarde: ${result.error}`);
-          this.emitDonneesList(); // republie l'état réel (annulé) pour resynchroniser le client
-          return;
-        }
-
-        const wasPublished = previous.consultation || previous.miseAJour;
-        const isPublished = donnee.consultation || donnee.miseAJour;
-        if (isPublished) {
-          this.publishDonneeDiscovery(donnee);
-        } else if (wasPublished) {
-          this.removeDonneeDiscovery(donnee);
-        }
-
-        this.eventBus.emitGeneric('evoo7:donnee:save:response', { id: data.id, success: true });
-        this.emitDonneesList();
+        this.emitDonneeError(data.id, `Échec de sauvegarde: ${result.error}`);
+        this.emitDonneesList(); // republie l'état réel (annulé) pour resynchroniser le client
+        return;
       }
-    );
 
-    this.eventBus.onGeneric<{ id: string; topicSensor: string; formatMessageSensor: string }>(
-      'evoo7:donnee:set_topic',
-      (data) => {
-        const donnee = this.donnees.get(data.id);
-        if (!donnee) {
-          this.emitDonneeError(data.id, `Donnée inconnue: ${data.id}`, 'EVOO7_UNKNOWN_DATA');
-          return;
-        }
-
-        const previous = { topicSensor: donnee.topicSensor, formatMessageSensor: donnee.formatMessageSensor };
-
-        if (donnee.consultation) {
-          this.evoo7Client.unsubscribeTopic(resolveTopic(donnee.topicSensor, donnee.id));
-          this.topicToId.delete(resolveTopic(donnee.topicSensor, donnee.id));
-        }
-
-        donnee.topicSensor = data.topicSensor;
-        donnee.formatMessageSensor = data.formatMessageSensor;
-
-        if (donnee.consultation) {
-          const topic = resolveTopic(donnee.topicSensor, donnee.id);
-          this.topicToId.set(topic, donnee.id);
-          this.evoo7Client.subscribeTopic(topic, this.config.mqtt.qos as 0 | 1 | 2);
-        }
-
-        const result = this.persistDonneesConfig();
-        if (!result.success) {
-          donnee.topicSensor = previous.topicSensor;
-          donnee.formatMessageSensor = previous.formatMessageSensor;
-          this.emitDonneeError(data.id, `Échec de sauvegarde: ${result.error}`);
-          this.emitDonneesList();
-          return;
-        }
-
-        this.eventBus.emitGeneric('evoo7:donnee:save:response', { id: data.id, success: true });
-        this.emitDonneesList();
+      const wasPublished = previous.consultation || previous.miseAJour;
+      const isPublished = donnee.consultation || donnee.miseAJour;
+      if (isPublished) {
+        this.publishDonneeDiscovery(donnee);
+      } else if (wasPublished) {
+        this.removeDonneeDiscovery(donnee);
       }
-    );
 
+      this.eventBus.emitGeneric('evoo7:donnee:save:response', { id: data.id, success: true });
+      this.emitDonneesList();
+    });
   }
 
   private emitDonneeError(deviceId: string, message: string, code: 'EVOO7_UNKNOWN_DATA' | 'EVOO7_SAVE_FAILED' = 'EVOO7_SAVE_FAILED'): void {

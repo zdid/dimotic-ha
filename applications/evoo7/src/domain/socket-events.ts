@@ -35,8 +35,9 @@ export const EVOO7_CLIENT_EVENTS = {
   GET_DONNEES: 'evoo7:donnees:list:get',
 
   // --- Données ---
-  DONNEE_SET_SELECTION: 'evoo7:donnee:set_selection',
-  DONNEE_SET_TOPIC: 'evoo7:donnee:set_topic'
+  // Un seul événement de sauvegarde par ligne (sélection + topic/format + taxonomie + classe HA)
+  // — voir TODO.md "un seul bouton de sauvegarde par ligne".
+  DONNEE_SAVE: 'evoo7:donnee:save'
 } as const;
 
 // ============================================================================

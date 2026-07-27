@@ -8,7 +8,7 @@
 // Composant HA déterminé automatiquement pour une donnée
 // ============================================================================
 
-export type Evoo7Component = 'number' | 'select' | 'sensor' | 'text';
+export type Evoo7Component = 'number' | 'select' | 'sensor' | 'text' | 'binary_sensor';
 
 // ============================================================================
 // Valeur possible d'une donnée énumérée — code réel attendu par EVOO7 sur le fil
@@ -53,6 +53,30 @@ export interface Evoo7DataDefinition {
   miseAJour: boolean;
   topicSensor: string;
   formatMessageSensor: string;
+
+  // ---- Taxonomie QUOI/OÙ (persistée, saisie manuelle — description est un texte libre figé,
+  // jamais parseable en quoi---lieu, voir TODO.md "aucune saisie réelle de la taxonomie"). Non
+  // renseigné tant que l'utilisateur n'a rien saisi (repli sur description dans ce cas).
+  taxonomieQuoi?: string;
+  taxonomieLieuPrecis?: string;
+  taxonomieLieu?: string;
+  taxonomiePere?: string;
+  taxonomieGrandPere?: string;
+
+  // ---- Classe HA / unité (persistée, saisie manuelle) — force le device_class HA (ex:
+  // "temperature") pour un affichage correct côté HA (unité, icône), le composant seul
+  // (number/sensor/text, voir classification.ts) n'en dit rien. Non renseigné = HA n'affiche
+  // aucune unité ni icône spécifique.
+  deviceClass?: string;
+  unitOfMeasurement?: string;
+
+  // ---- Type HA forcé (persisté, saisie manuelle) — outrepasse determineComponent() pour publier
+  // en binary_sensor plutôt qu'en sensor générique (ex: etat_force_on/etat_pac/etat_appoint...).
+  // payloadOn/payloadOff = valeur brute EVOO7 exacte qui signifie ON/OFF pour CETTE donnée (pas
+  // uniforme d'une donnée à l'autre, voir classification.ts sur la fiabilité des codes EVOO7).
+  forcedComponent?: string;
+  payloadOn?: string;
+  payloadOff?: string;
 }
 
 // ============================================================================

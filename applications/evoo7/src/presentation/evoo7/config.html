@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/styles/main.css">
 
   <style>
-    .config-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .config-container { max-width: 1400px; margin: 0 auto; padding: 20px; }
     .back-link { display: inline-block; margin-bottom: 15px; color: var(--color-accent); }
     .config-header { text-align: center; margin-bottom: 20px; }
     .config-header h1 { color: var(--color-accent); font-size: 1.8em; }
@@ -20,14 +20,24 @@
       padding: 8px 16px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em;
     }
     .btn-primary { background: var(--color-accent); color: white; }
-    .btn-secondary { background: var(--color-background); color: var(--color-text); border: 1px solid var(--color-primary); }
+    .btn-secondary { background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-primary); }
 
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    .table-scroll { overflow-x: auto; max-width: 100%; }
+    table { width: 100%; min-width: 1250px; border-collapse: collapse; margin-top: 10px; }
     th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--color-primary); font-size: 0.85em; vertical-align: top; }
     th { color: var(--color-text-muted); font-weight: normal; }
     td.mono { font-family: monospace; }
     td.topic-cell { min-width: 260px; }
     td.topic-cell input { width: 100%; margin-bottom: 4px; font-size: 0.85em; padding: 4px; }
+    td.taxo-cell { min-width: 200px; }
+    td.taxo-cell input { width: 100%; margin-bottom: 4px; font-size: 0.85em; padding: 4px; }
+    /* Type forcé (binary_sensor), classe HA/unité et bouton de sauvegarde empilés dans UNE seule
+       cellule — regroupés dans la même colonne pour rester dans le cadre visible du tableau ;
+       des colonnes séparées se retrouvaient hors champ (tableau plus large que l'écran) ou, en
+       position sticky, recouvraient la cellule précédente. */
+    td.device-class-cell { text-align: center; }
+    td.device-class-cell select, td.device-class-cell input { margin-bottom: 4px; }
+    td.device-class-cell .btn { margin-top: 4px; }
 
     .badge { padding: 2px 8px; border-radius: 4px; font-size: 0.75em; white-space: nowrap; }
     .badge.config { background: var(--color-text-muted); color: white; }
@@ -37,13 +47,24 @@
 
     .form-control {
       width: 100%; padding: 8px; border: 1px solid var(--color-primary); border-radius: var(--radius);
-      background: var(--color-background); color: var(--color-text);
+      background: var(--color-bg); color: var(--color-text);
+      /* Sans ça, certains navigateurs rendent quand même la liste déroulante ouverte d'un
+         <select> avec des couleurs claires par défaut (popup natif hors de portée du CSS de la
+         page), illisible avec notre texte clair sur fond clair. */
+      color-scheme: dark;
     }
+    .form-control option { background: var(--color-bg); color: var(--color-text); }
 
-    .alert { padding: 12px; border-radius: var(--radius); margin: 10px 0; display: none; }
-    .alert-success { background: rgba(76, 175, 80, 0.1); border: 1px solid var(--color-success); color: var(--color-success); }
-    .alert-error { background: rgba(244, 67, 54, 0.1); border: 1px solid var(--color-error); color: var(--color-error); }
-    .alert-info { background: rgba(33, 150, 243, 0.1); border: 1px solid var(--color-accent); color: var(--color-accent); }
+    /* Position fixe (et non plus dans le flux en haut de page) : le tableau Données peut être
+       long et défilé, un message placé en haut du document reste invisible sans y remonter. */
+    .alert {
+      position: fixed; top: 20px; right: 20px; z-index: 1000; max-width: 360px;
+      padding: 12px 16px; border-radius: var(--radius); box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+      display: none;
+    }
+    .alert-success { background: var(--color-surface); border: 1px solid var(--color-success); color: var(--color-success); }
+    .alert-error { background: var(--color-surface); border: 1px solid var(--color-error); color: var(--color-error); }
+    .alert-info { background: var(--color-surface); border: 1px solid var(--color-accent); color: var(--color-accent); }
 
     .hidden { display: none !important; }
   </style>
@@ -61,21 +82,24 @@
 
     <div id="tab-donnees">
       <div class="card">
-        <p>Cocher "Consultation" pour recevoir la donnée. Cocher "Mise à jour" pour pouvoir la modifier depuis Home Assistant (uniquement si disponible sur EVOO7). Seules les données en Consultation et/ou Mise à jour font l'objet d'une découverte Home Assistant.</p>
-        <table>
-          <thead>
-            <tr>
-              <th>ID / Description</th>
-              <th>Type</th>
-              <th>Contraintes</th>
-              <th>Consultation</th>
-              <th>Mise à jour</th>
-              <th>Topic / Format Sensor</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="donnees-body"></tbody>
-        </table>
+        <p>Cocher "Consultation" pour recevoir la donnée. Cocher "Mise à jour" pour pouvoir la modifier depuis Home Assistant (uniquement si disponible sur EVOO7). Seules les données en Consultation et/ou Mise à jour font l'objet d'une découverte Home Assistant (et affichent les champs Taxonomie/Classe HA). Un seul bouton 💾 par ligne sauvegarde tous les champs modifiés (sélection, topic/format, taxonomie, classe HA).</p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>ID / Description</th>
+                <th>Type</th>
+                <th>Contraintes</th>
+                <th>Consultation</th>
+                <th>Mise à jour</th>
+                <th>Topic / Format Sensor</th>
+                <th>Taxonomie (Quoi / Lieu précis / Lieu / Père / Grand-père)</th>
+                <th>Type forcé / Classe HA / Unité</th>
+              </tr>
+            </thead>
+            <tbody id="donnees-body"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -90,6 +114,6 @@
   <script defer src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script type="module" src="/applications/evoo7/presentation/evoo7/config-app.js"></script>
 
-  <!-- Derniere modification: 2026-07-24 00:00:00 - Retrait de l'onglet Paramétrage (doublon avec Paramètres Techniques → EVOO7), ajout du lien de retour -->
+  <!-- Derniere modification: 2026-07-26 11:55:00 - Fusion Type forcé + Classe HA/Unité dans une seule cellule (colonne séparée hors du cadre visible) -->
 </body>
 </html>

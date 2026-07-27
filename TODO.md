@@ -276,23 +276,28 @@
 - **Statut** : Non implémenté
 - **Priorité** : Moyenne (revue à la hausse — utilisé par 41 des 43 formats réels, pas "aucun" comme supposé initialement)
 
-### 🔴 EVOO7 : `formatMessageSensor` tronqué/perdu pour 2 données sur 43 dans le fichier persisté
-- **Signalé par l'utilisateur (2026-07-24)** : "on a perdu tous les formats de messages initiaux attachés à une donnée".
-- **Confirmé** : `data/evoo7/config-evoo7-donnees-v1.0.yaml` contient bien le format complet d'origine (capturé dans `applications/evoo7/seed/evoo7_donnees.json`) pour 41 des 43 données, mais pour **`pente_loi_deau`** et **`consigne_eco`**, `formatMessageSensor` vaut seulement `'{ '` (accolade ouvrante + espace) au lieu du gabarit JSON complet (ex. attendu pour `pente_loi_deau` : `{ "protocol" : "evoo7","___origine":"evoo7","___date":"$date$","command" : "text", "num" : "$name$", "status" : "$value$" }`).
-- **Cause probable** : édition manuelle via l'onglet "Données" (champ `formatMessageSensor`, sauvegarde par `evoo7:donnee:set_topic`) interrompue avant la fin de la saisie — la valeur partielle a été sauvegardée telle quelle, sans validation de format côté serveur (`Evoo7Service.ts` persiste la chaîne reçue sans vérifier qu'il s'agit d'un JSON valide/complet). Le fait qu'il s'agisse des deux SEULES données avec un format non standard parmi les 43 (`pente_loi_deau` a un format spécifique, `consigne_eco` est l'une des 8 données de type "consultation" non-config) suggère une session de test manuelle antérieure sur ces lignes précises, plutôt qu'un bug systématique touchant toutes les données.
-- **À faire** :
-  1. Restaurer les deux valeurs depuis le seed (`applications/evoo7/seed/evoo7_donnees.json`, champ `format_message_sensor`) — le seed n'est utilisé que pour le pré-remplissage initial si le fichier n'existe pas encore, donc une correction manuelle du fichier `data/` déjà existant est nécessaire, pas un simple redémarrage.
-  2. Envisager une validation serveur basique (JSON valide, non vide) avant d'accepter une sauvegarde de `formatMessageSensor` via `evoo7:donnee:set_topic`, pour empêcher qu'une future saisie interrompue n'écrase silencieusement une valeur correcte.
-- **Statut** : Diagnostiqué, pas encore corrigé (données pas encore restaurées)
-- **Priorité** : Haute (perte de données réelle sur des données déjà configurées)
+### 🟢 EVOO7 : `formatMessageSensor` tronqué/perdu pour 2 données sur 43 dans le fichier persisté — Corrigé
+- **Signalé par l'utilisateur (2026-07-24)** : "on a perdu tous les formats de messages initiaux attachés à une donnée". Re-signalé en test direct (2026-07-26) : "il a perdu toutes les descriptions des formats des messages 'Format sensor'" — revérifié à ce moment-là, l'ampleur réelle restait bien les 2 mêmes données (41/43 intactes), pas une régression plus large.
+- **Confirmé** : `data/evoo7/config-evoo7-donnees-v1.0.yaml` contient bien le format complet d'origine (capturé dans `applications/evoo7/seed/evoo7_donnees.json`) pour 41 des 43 données, mais pour **`pente_loi_deau`** et **`consigne_eco`**, `formatMessageSensor` valait seulement `'{ '` (accolade ouvrante + espace) au lieu du gabarit JSON complet.
+- **Cause probable** : édition manuelle via l'onglet "Données" (champ `formatMessageSensor`, sauvegarde par `evoo7:donnee:set_topic`) interrompue avant la fin de la saisie — la valeur partielle a été sauvegardée telle quelle, sans validation de format côté serveur (`Evoo7Service.ts` persiste la chaîne reçue sans vérifier qu'il s'agit d'un JSON valide/complet).
+- **Corrigé (2026-07-26)** : les deux valeurs restaurées depuis le seed (`applications/evoo7/seed/evoo7_donnees.json`, champ `format_message_sensor`) directement dans `data/evoo7/config-evoo7-donnees-v1.0.yaml` (sauvegarde préalable dans `backups/evoo7/`, diff vérifié — seuls ces 2 champs changent de contenu, le reste n'est qu'un réagencement de style YAML sans impact sémantique, revalidé contre `evoo7DonneesConfigSchema`).
+- **Reste à faire (non traité, périmètre différent)** : validation serveur basique (JSON valide, non vide) avant d'accepter une sauvegarde de `formatMessageSensor` via `evoo7:donnee:set_topic`, pour empêcher qu'une future saisie interrompue n'écrase silencieusement une valeur correcte — pas implémenté dans ce passage.
+- **Statut** : Corrigé (2026-07-26) — les 43 données ont un `formatMessageSensor` complet. Validation préventive côté serveur toujours à faire.
+- **Priorité** : Était Haute — perte de données résolue ; le point de robustesse restant est Moyenne.
 
-### 🔴 EVOO7 : aucune saisie réelle de la taxonomie QUOI/OÙ pour les données sélectionnées — `attributs_taxonomie` publié est actuellement erroné
-- **Demande utilisateur (2026-07-24)** : ajouter la saisie des données de taxonomie pour les données EVOO7 sélectionnées (consultation et/ou mise à jour).
-- **Constat en creusant le code** : `Evoo7Service.ts` (lignes ~239 et ~266) appelle `extractTaxonomy(donnee.description)` pour construire `attributs_taxonomie` (voir aussi le correctif "Les attributs de taxonomie n'atteignent jamais HA" plus haut, désormais publiés via `json_attributes_topic`). `extractTaxonomy()` (`applications/evoo7/src/domain/taxonomy.ts`) attend un format structuré `quoi---lieu_precis--lieu--pere--grandpere` (convention `spec-nommage`, partagée avec RFXCOM). Or le champ `description` d'une donnée EVOO7 est **une phrase en français libre**, capturée telle quelle depuis la page EVOO7 réelle au moment du seed (ex: `"Pente loi d'eau (uniquement sur plancher chauffant)."`) — jamais dans ce format. Conséquence concrète : `extractTaxonomy()` ne trouve aucun `---` séparateur, donc `rawQuoi` = la phrase entière, et tous les champs OÙ (`nomLieu`/`nomPrecis`/`nomPere`/`nomGrandPere`) restent `null` — la taxonomie réellement publiée dans HA pour les 43 données EVOO7 est donc **inexploitable** depuis le début, sans que rien ne le signale (pas d'erreur, juste des attributs vides/incohérents).
-- **Constat côté UI** : `Evoo7DataDefinition.description` est un champ **figé** ("informatif", jamais modifié par l'UI — `types.ts` ligne ~35), et l'onglet "Données" de `config.html` (`config-app.ts`) l'affiche en lecture seule (`<div>${escapeHtml(d.description)}</div>`) — aucun champ d'édition de taxonomie (QUOI, lieu précis, lieu, père, grand-père) n'existe nulle part dans cette page.
-- **À faire** : ajouter à `Evoo7DataDefinition` des champs de taxonomie éditables (probablement `nomQuoi`/`nomLieuPrecis`/`nomLieu`/`nomPere`/`nomGrandPere`, séparés du `description` figé plutôt que de continuer à essayer de le reformater), une UI de saisie dans l'onglet "Données" — vraisemblablement seulement pertinente/visible pour les données sélectionnées (`consultation === true` ou `miseAJour === true`, celles réellement publiées vers HA) — et faire construire `attributs_taxonomie` à partir de ces nouveaux champs plutôt que de `donnee.description`.
-- **Statut** : Non implémenté — nécessite de définir le périmètre exact (structure des champs, comportement par défaut, validation) avec l'utilisateur avant de coder
-- **Priorité** : Haute (fonctionnalité de taxonomie actuellement silencieusement cassée pour toute l'application EVOO7)
+### 🟢 EVOO7 : aucune saisie réelle de la taxonomie QUOI/OÙ pour les données sélectionnées — Corrigé
+- **Demande utilisateur (2026-07-24, confirmée et implémentée 2026-07-26)** : ajouter la saisie des données de taxonomie pour les données EVOO7 sélectionnées (consultation et/ou mise à jour).
+- **Constat d'origine** : `Evoo7Service.ts` construisait `attributs_taxonomie` via `extractTaxonomy(donnee.description)`, qui attend un format structuré `quoi---lieu_precis--lieu--pere--grandpere` — or `description` est une phrase en français libre figée, jamais dans ce format. La taxonomie publiée était donc inexploitable pour les 43 données depuis le début.
+- **Décisions validées avec l'utilisateur (2026-07-26)** : 5 champs séparés (Quoi / Lieu précis / Lieu / Père / Grand-père) plutôt qu'un champ texte unique au format `quoi---lieu` ; visibles/éditables uniquement pour les données sélectionnées (`consultation || miseAJour`).
+- **Implémenté (2026-07-26)** :
+  - `Evoo7DataDefinition` (`types.ts`) + `evoo7DataDefinitionSchema` (`donnees-config-schema.ts`) : 5 nouveaux champs optionnels `taxonomieQuoi`/`taxonomieLieuPrecis`/`taxonomieLieu`/`taxonomiePere`/`taxonomieGrandPere`.
+  - `taxonomy.ts` : nouvelle fonction `resolveTaxonomy(donnee)` — construit l'`ExtractedTaxonomy` directement depuis les 5 champs si `taxonomieQuoi` est renseigné, sinon repli sur l'ancien `extractTaxonomy(donnee.description)` (comportement historique, non cassé pour les données pas encore renseignées).
+  - `Evoo7Service.ts` : les 2 sites d'appel (`handleEvoo7Message`, `publishDonneeDiscovery`) utilisent désormais `resolveTaxonomy()`. Nouveau handler `evoo7:donnee:set_taxonomy` (même pattern que `set_topic` : persistance avec rollback si échec, réponse honnête via `evoo7:donnee:save:response`) qui republie immédiatement la découverte HA si la donnée est actuellement sélectionnée (le nom/les attributs publiés changent).
+  - `socket-events.ts` : nouvel événement client `DONNEE_SET_TAXONOMY`.
+  - UI (`config-app.ts` + `config.html`, onglet Données) : nouvelle colonne "Taxonomie", 5 champs texte + bouton de sauvegarde affichés uniquement quand la donnée est sélectionnée (Consultation ou Mise à jour cochée), sinon message indicatif.
+- **Vérifié** : build propre (`tsc` + `tsc -p tsconfig.ui.json`), serveur redémarré sans erreur, service EVOO7 démarré normalement.
+- **Statut** : Corrigé (2026-07-26)
+- **Priorité** : Était Haute — résolu
 
 ### 🟢 EVOO7 : formulaire générique et page dédiée éditent les mêmes champs par deux chemins de sauvegarde différents, dont un ne prend jamais effet à chaud — Corrigé
 - **Problème**, trouvé en comparant "Paramètres Techniques → EVOO7" (formulaire générique du core) et l'onglet "Paramétrage" de la page dédiée (`config.html`) :
@@ -363,6 +368,19 @@
 - **À faire** : croiser cet inventaire avec les entités déjà déclarées côté Home Assistant, puis recréer la configuration RFXCOM (devices/récepteurs/scènes) dans `applications/rfxcom` sur la base de ce fichier.
 - **Statut** : Inventaire reconstitué et sauvegardé — pas encore croisé avec HA, pas encore réinjecté dans la config RFXCOM
 - **Priorité** : Moyenne (pas de RFXCOM fonctionnel tant que non terminé, mais pas bloquant pour le reste)
+
+### 🟡 EVOO7 : entité `climate` composite (plusieurs données combinées) — non commencé
+- **Demande utilisateur (2026-07-26)**, en marge de l'ajout de `binary_sensor` (type HA forcé par donnée, voir juste au-dessus/ci-après) : élargir aussi au type `climate`.
+- **Différence fondamentale avec `binary_sensor`** : `binary_sensor` reste un simple override sur UNE donnée déjà existante (une donnée = une entité). `climate` en HA a besoin de plusieurs topics liés (température courante, consigne cible, mode/action) qui correspondent en réalité à **plusieurs données EVOO7 distinctes** — impossible de le traiter comme un simple champ "type forcé" sur une donnée isolée. Nécessite une nouvelle notion d'entité composite regroupant explicitement plusieurs `evoo7_donnees` sous une seule entité HA `climate`.
+- **Données pressenties par l'utilisateur pour la composition** : `temp_amb` (température courante), `consigne_normal` (consigne cible), `etat_fonctionnement` (mode/état), éventuellement `temp_ext` (température extérieure, probablement en attribut plutôt qu'un champ climate standard).
+- **Points à trancher avant de coder** (non discutés en détail avec l'utilisateur) :
+  - Où et comment déclarer ce regroupement (nouvelle section de config à part de `evoo7_donnees`, ou champs de référence croisée sur les données elles-mêmes) ?
+  - `consigne_normal` a un `topicCommand`/format de commande dédié pour écrire la consigne — le mécanisme de commande `climate` (`temperature_command_topic`) doit réutiliser ce chemin existant plutôt qu'en créer un nouveau.
+  - `etat_fonctionnement` pilote-t-il `mode` (hvac_mode, ex: heat/off) ou `action` (hvac_action, ex: heating/idle) côté HA — ce sont deux concepts différents dans le schéma climate MQTT de HA, à clarifier selon les valeurs réelles observées sur EVOO7 (voir la note dans `classification.ts` sur la fiabilité douteuse des codes EVOO7 documentés vs valeurs réelles sur le fil).
+  - Faut-il aussi intégrer `consigne_eco` (mode éco) dans le même climate (ex: comme un des `modes` disponibles), ou le laisser en entité séparée ?
+- **À faire** : concevoir précisément le mapping avec l'utilisateur (voir points ci-dessus) avant d'implémenter — pas de code écrit pour ce point.
+- **Statut** : Non commencé — conception à finaliser avec l'utilisateur
+- **Priorité** : Moyenne (amélioration de confort d'usage HA, rien de cassé sans elle)
 
 ---
 

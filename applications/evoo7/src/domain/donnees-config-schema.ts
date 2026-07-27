@@ -23,7 +23,20 @@ export const evoo7DataDefinitionSchema = z.object({
   consultation: z.boolean().default(false),
   miseAJour: z.boolean().default(false),
   topicSensor: z.string().min(1),
-  formatMessageSensor: z.string().min(1)
+  formatMessageSensor: z.string().min(1),
+
+  taxonomieQuoi: z.string().optional(),
+  taxonomieLieuPrecis: z.string().optional(),
+  taxonomieLieu: z.string().optional(),
+  taxonomiePere: z.string().optional(),
+  taxonomieGrandPere: z.string().optional(),
+
+  deviceClass: z.string().optional(),
+  unitOfMeasurement: z.string().optional(),
+
+  forcedComponent: z.string().optional(),
+  payloadOn: z.string().optional(),
+  payloadOff: z.string().optional()
 });
 
 export const evoo7DonneesConfigSchema = z
