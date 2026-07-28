@@ -1,9 +1,19 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.14  
-**Date :** 24 Juillet 2026  
+**Version :** 4.15  
+**Date :** 28 Juillet 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
 
+> **v4.15** : **Nouvelle §5.6 "Porte d'authentification OAuth2 HA (accès externe)"** — mécanisme
+> optionnel (désactivé par défaut, `web.auth.enabled`), sans effet sur un déploiement interne tant
+> qu'il n'est pas explicitement activé. Prévu pour une future instance externe dédiée exposée
+> derrière un reverse proxy TLS : le flux OAuth2 natif de Home Assistant sert de portail de
+> connexion (identifiant/mot de passe HA), un cookie de session signé (HMAC, sans état côté
+> serveur) protège ensuite toutes les routes REST **et** la connexion Socket.io elle-même — les
+> deux canaux étaient jusqu'ici sans aucune authentification, un modèle pensé pour un LAN de
+> confiance. Pas de permissions différenciées par utilisateur HA (choix explicite) : tout
+> utilisateur authentifié partage le même accès complet via le jeton longue durée déjà utilisé par
+> le serveur.
 > **v4.13** : **Correction §6 "Couche Présentation"** — la liste des invariants excluait encore
 > Alpine.js ("Aucun framework UI tiers... Alpine.js"), affirmation devenue fausse depuis la
 > réintroduction du framework (`presentation_specs` v4.0 + nouveau document dédié
@@ -697,6 +707,59 @@ class SchedulerService {
 
 > **📖 Pour plus de détails :** Voir [inter-app-communication_specs_v1.0.md](inter-app-communication_specs_v1.0.md)
 
+### 5.6 Porte d'authentification OAuth2 HA (accès externe)
+
+**Contexte** : le serveur (Express + Socket.io) n'a par défaut **aucune authentification** — un
+modèle pensé pour un LAN de confiance (CORS grand ouvert, aucune vérification à la connexion
+Socket.io). Ce mécanisme optionnel comble ce vide pour une future instance externe dédiée,
+exposée derrière un reverse proxy TLS (déploiement séparé, à la charge de l'exploitant — voir
+§4.3 pour la notion d'instance mono-application). **Désactivé par défaut**
+(`web.auth.enabled: false`), sans aucun effet sur un déploiement interne tant qu'il n'est pas
+explicitement activé dans `data/core/config.yaml`.
+
+**Principe** : le flux OAuth2 natif de Home Assistant sert **uniquement de portail de
+connexion** (identifiant/mot de passe HA, MFA compris) — il n'y a pas de permissions
+différenciées par utilisateur HA. Une fois authentifié, tout utilisateur partage le même accès
+complet via le jeton longue durée déjà utilisé par le serveur pour piloter HA
+(`ha.ws.token`) ; le token OAuth2 obtenu à la connexion n'est ni conservé, ni réutilisé pour
+piloter HA — seule la réussite de l'échange fait foi de l'authentification.
+
+**Flux** (conforme à `developers.home-assistant.io/docs/auth_api`) :
+
+1. `GET /auth/login` → génère un `state` aléatoire, le pose dans un cookie `httpOnly` de courte
+   durée (protection CSRF du round-trip, sans stockage serveur), redirige vers
+   `{ha_base_url}/auth/authorize?client_id=...&redirect_uri=...&state=...` (pas de
+   `response_type` — HA valide `client_id` par correspondance de domaine avec `redirect_uri`,
+   style IndieAuth, aucun enregistrement préalable requis).
+2. HA authentifie l'utilisateur puis redirige vers `redirect_uri?code=...&state=...`.
+3. `GET /auth/callback` → vérifie `state` contre le cookie posé à l'étape 1, puis
+   `POST {ha_base_url}/auth/token` (`grant_type=authorization_code`) — cet échange
+   serveur-à-serveur **est** la preuve d'authentification (un `code` reçu en paramètre seul
+   n'est jamais suffisant, il pourrait être rejoué). Succès → pose un cookie de session signé
+   HMAC-SHA256 (`crypto` natif de Node, sans dépendance npm supplémentaire, sans état côté
+   serveur — payload `{exp}` signé, `session_secret` de configuration), redirige vers la page
+   d'origine.
+4. `GET /auth/logout` → efface le cookie de session.
+
+**Portée de la garde** : un middleware Express, enregistré **avant tout autre** (y compris les
+fichiers statiques), protège toutes les routes sauf `/health` et `/auth/*`. **Socket.io est
+gardé séparément** (`io.use()` sur le handshake, vérifiant le même cookie de session) — la seule
+protection REST ne suffirait pas, Socket.io étant le canal principal de toutes les applications
+(§5.1), pas seulement les routes REST exceptionnelles (§5.5 upload HAPLAN). Les cookies
+voyagent automatiquement avec la connexion Socket.io (même origine) : aucune modification côté
+client d'aucune application n'est nécessaire, la porte est entièrement transparente une fois la
+session établie.
+
+**Configuration** (`web.auth`, voir §7) : `enabled`, `ha_base_url` (URL HTTP publique de HA,
+distincte de `ha.ws.host`/`port` qui reste réservé au WebSocket LAN), `client_id`,
+`redirect_uri`, `session_secret`, `session_ttl_hours`. Section absente du fichier tant que non
+activée explicitement ; si `enabled: true`, tous les champs sont requis (échec au démarrage
+sinon, plutôt qu'un mode dégradé silencieux).
+
+> **📖 Implémentation** : `applications/core/src/infrastructure/auth/AuthService.ts`,
+> intégré dans `PresentationServer` (routes `/auth/*` + middleware de garde) et `SocketBridge`
+> (`io.use()`).
+
 ---
 
 ## 6. Couche Présentation
@@ -756,6 +819,15 @@ ha:
 web:
   port: 8080
   host: "0.0.0.0"
+  # Optionnel — absent tant que la porte d'authentification OAuth2 HA n'est pas activée
+  # explicitement (voir §5.6). Réservé à une future instance externe dédiée.
+  # auth:
+  #   enabled: false               # true active la garde REST + Socket.io
+  #   ha_base_url: "https://ha.example.com"       # URL HTTP publique de HA (≠ ha.ws.host, LAN)
+  #   client_id: "https://cette-instance.example.com/"      # Origine publique de CETTE instance
+  #   redirect_uri: "https://cette-instance.example.com/auth/callback"  # Même origine que client_id
+  #   session_secret: ""           # Secret HMAC de signature du cookie de session — requis si enabled
+  #   session_ttl_hours: 720       # 30 jours
 
 logging:
   level: "info"                  # "debug" | "info" | "warn" | "error"
@@ -1665,6 +1737,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.15** | 28/07/2026 | Claude | **Nouvelle §5.6 "Porte d'authentification OAuth2 HA (accès externe)"**, mécanisme optionnel désactivé par défaut (`web.auth.enabled`), sans effet sur un déploiement interne — prévu pour une future instance externe dédiée derrière un reverse proxy TLS. Le flux OAuth2 natif de HA (`/auth/authorize` + `/auth/token`, vérifié contre `developers.home-assistant.io/docs/auth_api`) sert de portail de connexion uniquement ; un cookie de session signé HMAC-SHA256 (sans état côté serveur, sans nouvelle dépendance npm) protège ensuite toutes les routes REST **et** la connexion Socket.io elle-même (`io.use()` sur le handshake) — les deux canaux étaient jusqu'ici sans aucune authentification. Pas de permissions différenciées par utilisateur HA (choix explicite) : le serveur garde son propre jeton longue durée pour piloter HA. Nouveau `AuthService` (`infrastructure/auth/`), intégré dans `PresentationServer` et `SocketBridge`. Nouvelle section `web.auth` (§7.1). Vérifié sur une instance de test isolée (scratch, port séparé) : garde REST + Socket.io actives, cookie forgé/expiré rejeté, cookie valide accepté ; comportement du déploiement interne actuel inchangé (`web.auth` absent). |
 | **4.14** | 24/07/2026 | Claude | **Restructuration `data/` en un sous-répertoire par application (§4.1, §7)**, à la demande de l'utilisateur, pour faciliter le déplacement d'une application d'une machine à une autre : le fichier unique `data/config.yaml` devient `data/core/config.yaml` (`ha`/`web`/`logging`) + un `data/{app}/config.yaml` par application (objet nu). `ConfigLoader` fusionne le tout en mémoire au chargement — `getConfig()` et le reste de l'API de `ConfigService` gardent une forme identique, `IAppConfigProvider`/code métier des applications inchangés. Écriture désormais mono-fichier et isolée par application (`saveConfig()` n'écrit que `data/core/config.yaml`, `saveModuleConfig()`/`savePartialConfig()` n'écrivent que le fichier de l'application concernée). |
 | **4.13** | 22/07/2026 | Claude | **Correction §6 "Couche Présentation"** : la liste des invariants excluait encore Alpine.js ("Aucun framework UI tiers... Alpine.js"), affirmation devenue fausse depuis la réintroduction du framework le 22/07/2026 (voir `presentation_specs_v4.0.md` et le nouveau document dédié `alpinejs-implementation_specs_v1.0.md`). Le lien vers `presentation_specs` est mis à jour vers v4.0 ; la note historique v4.7 est conservée mais annotée obsolète. |
 | **4.12** | 22/07/2026 | Claude | **Remplacement du client WebSocket HA maison par `home-assistant-js-websocket`** (lib officielle HA) : supprime `HaWsTransport.ts` et le bug de double authentification par connexion qu'il contenait (auth envoyée à la fois à l'ouverture du socket et en réponse à `auth_required`) — plus de boucle de reconnexion sur jeton invalide, la lib officielle renonce immédiatement sur `auth_invalid`. `HaWsClient` garde la même API publique ; `onMessage` disparaît (pas d'équivalent officiel), `HaCommandService` simplifié pour résoudre directement depuis la Promise de `sendCommand` au lieu d'un ré-appariement par id redondant et bugué. |

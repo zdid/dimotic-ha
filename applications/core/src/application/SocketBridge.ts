@@ -13,20 +13,27 @@ import type {
 } from '../types/events';
 import type { ConfigValidationResult, TechnicalConfig, ModuleUiMetadata } from '../types/config';
 import type { Logger } from '../infrastructure/logger/index';
+import type { AuthService } from '../infrastructure/auth/AuthService';
 
 /**
  * SocketBridge - Traduit les événements EventBus ↔ Socket.io
- * 
+ *
  * Règles strictes (conforme §5 specs-techniques-socle-ha-mqtt-v4.3) :
  * - SocketBridge est le SEUL point de contact entre EventBus et Socket.io
  * - Aucun module ne connaître l'existence de Socket.io directement
  * - La présentation ne connaît pas le domaine - tout passe par Socket.io
+ *
+ * Porte d'authentification OAuth2 HA (2026-07-28, voir décision "accès externe") : quand
+ * `authService` est fourni et actif, la connexion Socket.io elle-même est gardée (handshake) —
+ * la protection REST de `PresentationServer` seule ne suffit pas, Socket.io étant le canal
+ * principal de toutes les applications (§5 specs socle), pas seulement les routes REST.
  */
 export class SocketBridge {
   private io: any;
   private eventBus: EventBus;
   private logger: Logger;
   private httpServer: HttpServer;
+  private authService?: AuthService;
   private sockets: Set<any> = new Set();
   private moduleUiMetadata: Record<string, ModuleUiMetadata> = {};
   private modulesList: ApplicationModule[] = [];
@@ -38,19 +45,22 @@ export class SocketBridge {
    * @param httpServer - Serveur HTTP Express
    * @param eventBus - Instance de l'EventBus
    * @param logger - Instance du logger
+   * @param authService - Porte d'authentification OAuth2 HA (optionnelle, inerte si absente ou désactivée)
    */
   constructor(
     httpServer: HttpServer,
     eventBus: EventBus,
-    logger: Logger
+    logger: Logger,
+    authService?: AuthService
   ) {
     this.httpServer = httpServer;
     this.eventBus = eventBus;
     this.logger = logger;
+    this.authService = authService?.isEnabled() ? authService : undefined;
 
     // Initialiser Socket.io
     this.initializeSocketIO();
-    
+
     // Configurer les handlers
     this.setupEventBusListeners();
     this.setupSocketIOHandlers();
@@ -61,7 +71,7 @@ export class SocketBridge {
    */
   private initializeSocketIO(): void {
     const { Server } = require('socket.io');
-    
+
     this.io = new Server(this.httpServer, {
       cors: {
         origin: '*',
@@ -72,6 +82,15 @@ export class SocketBridge {
         skipMiddlewares: true,
       },
     });
+
+    if (this.authService) {
+      const authService = this.authService;
+      this.io.use((socket: any, next: (err?: Error) => void) => {
+        if (authService.verifySessionCookie(socket.handshake.headers.cookie)) return next();
+        next(new Error('unauthorized'));
+      });
+      this.logger.info('SocketBridge', 'Garde d\'authentification activée sur le handshake Socket.io');
+    }
 
     this.logger.info('SocketBridge', 'Socket.io serveur initialisé');
   }

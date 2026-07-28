@@ -11,6 +11,7 @@ import type { Logger } from '../../infrastructure/logger/index';
 import type { SocketBridge } from '../../application/SocketBridge';
 import type { EventBus } from '../../application/EventBus';
 import type { ApplicationModule } from '../../types/config';
+import { AuthService } from '../../infrastructure/auth/AuthService';
 
 /**
  * Crée et configure le serveur Express + Socket.io
@@ -24,6 +25,11 @@ import type { ApplicationModule } from '../../types/config';
  *   est un problème d'une autre nature que le reste de l'appli (état/commandes) ; HTTP/multipart
  *   (`multer`) est l'outil standard pour ça, contrairement à Socket.io qui n'a pas vocation à
  *   transporter des fichiers. Voir plus bas dans `configureRoutes()`.
+ * - **Porte d'authentification OAuth2 HA** (2026-07-28, voir décision "accès externe") :
+ *   optionnelle, désactivée par défaut (`web.auth.enabled`), sans effet sur le déploiement
+ *   interne actuel. Quand active, un middleware de garde — le tout premier enregistré, avant
+ *   même `configureMiddleware()` — protège toutes les routes sauf `/health` et `/auth/*`. Voir
+ *   `AuthService` pour le détail du flux OAuth2 et de la signature du cookie de session.
  */
 export class PresentationServer {
   private app: Express;
@@ -34,31 +40,99 @@ export class PresentationServer {
   private logger: Logger;
   private port: number;
   private projectRoot: string;
+  private authService?: AuthService;
 
   /**
    * Crée un nouveau serveur de présentation
    * @param logger - Instance du logger
    * @param port - Port HTTP (default: 8080)
+   * @param authService - Porte d'authentification OAuth2 HA (optionnelle, inerte si absente ou désactivée)
    */
-  constructor(logger: Logger, port: number = 8080) {
+  constructor(logger: Logger, port: number = 8080, authService?: AuthService) {
     this.app = express();
     this.logger = logger;
     this.port = port;
     this.projectRoot = process.env.PROJECT_ROOT || path.resolve(path.join(__dirname, '../../../../..'));
-    
+    this.authService = authService?.isEnabled() ? authService : undefined;
+
     // Créer le serveur HTTP
     this.httpServer = this.app.listen(port, () => {
       this.logger.info('PresentationServer', `Serveur démarré sur http://localhost:${port}`);
     });
 
+    // Porte d'authentification — DOIT être le tout premier middleware enregistré (l'ordre
+    // d'enregistrement Express détermine qui voit la requête en premier ; un gate posé après
+    // les routes/fichiers statiques ne les protégerait pas).
+    this.configureAuthGate();
+
     // Configurer le middleware
     this.configureMiddleware();
-    
+
     // Configurer les routes
     this.configureRoutes();
-    
+
     // Gestion des erreurs
     this.configureErrorHandling();
+  }
+
+  /**
+   * Configure la porte d'authentification OAuth2 HA — inerte si `this.authService` est absent
+   * (cas normal du déploiement interne actuel). Voir `AuthService` pour le détail du flux.
+   */
+  private configureAuthGate(): void {
+    const authService = this.authService;
+    if (!authService) return;
+
+    this.app.get('/auth/login', (req: Request, res: Response) => {
+      const state = authService.generateState();
+      const rawRedirect = typeof req.query.redirect === 'string' ? req.query.redirect : '/';
+      const redirectTo = rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '/';
+
+      res.cookie(authService.stateCookieName, state, { httpOnly: true, secure: true, sameSite: 'lax', maxAge: 600_000 });
+      res.cookie(authService.redirectCookieName, redirectTo, { httpOnly: true, secure: true, sameSite: 'lax', maxAge: 600_000 });
+      res.redirect(authService.buildAuthorizeUrl(state));
+    });
+
+    this.app.get('/auth/callback', async (req: Request, res: Response) => {
+      const cookies = AuthService.parseCookies(req.headers.cookie);
+      const code = typeof req.query.code === 'string' ? req.query.code : undefined;
+      const state = typeof req.query.state === 'string' ? req.query.state : undefined;
+
+      if (!code || !state || !cookies[authService.stateCookieName] || state !== cookies[authService.stateCookieName]) {
+        res.status(400).json({ error: 'Bad Request', message: 'État OAuth2 invalide ou expiré — recommencer via /auth/login' });
+        return;
+      }
+
+      const success = await authService.exchangeCodeForToken(code);
+      res.clearCookie(authService.stateCookieName);
+      res.clearCookie(authService.redirectCookieName);
+
+      if (!success) {
+        res.status(401).json({ error: 'Unauthorized', message: "Échec de l'authentification Home Assistant" });
+        return;
+      }
+
+      res.cookie(authService.sessionCookieName, authService.signSession(), {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        maxAge: authService.sessionTtlSeconds() * 1000,
+      });
+      res.redirect(cookies[authService.redirectCookieName] || '/');
+    });
+
+    this.app.get('/auth/logout', (req: Request, res: Response) => {
+      res.clearCookie(authService.sessionCookieName);
+      res.redirect('/auth/login');
+    });
+
+    this.app.use((req: Request, res: Response, next: NextFunction) => {
+      if (req.path === '/health' || req.path.startsWith('/auth/')) return next();
+      if (authService.verifySessionCookie(req.headers.cookie)) return next();
+      res.redirect(`/auth/login?redirect=${encodeURIComponent(req.originalUrl)}`);
+    });
+
+    this.logger.info('PresentationServer', 'Porte d\'authentification OAuth2 HA activée');
   }
 
 

@@ -35,9 +35,21 @@ const haConfigSchema = z.object({
   structure: haStructureSchema,
 });
 
+// Porte d'authentification OAuth2 HA (accès externe, désactivée par défaut) — absente du fichier
+// tant qu'elle n'est pas explicitement configurée, voir infrastructure/auth/AuthService.
+const authSchema = z.object({
+  enabled: z.boolean(),
+  ha_base_url: z.string(),
+  client_id: z.string(),
+  redirect_uri: z.string(),
+  session_secret: z.string(),
+  session_ttl_hours: z.number().int().positive(),
+});
+
 const webSchema = z.object({
   port: z.number().int().positive().max(65535, 'Port must be between 1 and 65535'),
   host: z.string(),
+  auth: authSchema.optional(),
 });
 
 const loggingSchema = z.object({

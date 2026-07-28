@@ -56,6 +56,9 @@ import { AppService } from './application/AppService';
 // Import du serveur de présentation
 import { PresentationServer } from './presentation/server/index';
 
+// Import de la porte d'authentification OAuth2 HA (accès externe)
+import { AuthService } from './infrastructure/auth/AuthService';
+
 // Import des clients HA (si disponibles)
 import type { HaWsClient } from './ha/sync/HaWsClient';
 import type { HaStructureRegistry } from './ha/sync/HaStructureRegistry';
@@ -81,6 +84,7 @@ class ApplicationBootstrap {
   private restartManager?: RestartManager;
   private presentationServer?: PresentationServer;
   private socketBridge?: SocketBridge;
+  private authService?: AuthService;
   private appService?: AppService;
   private haWsClient?: HaWsClient;
   private haStructureRegistry?: HaStructureRegistry;
@@ -135,9 +139,16 @@ class ApplicationBootstrap {
     const port = config?.web?.port || 8080;
     const host = config?.web?.host || '0.0.0.0';
 
+    // Porte d'authentification OAuth2 HA — instance unique partagée avec SocketBridge (même
+    // secret/config, pas de duplication de la logique de vérification). Inerte si
+    // web.auth.enabled est absent/false (cas du déploiement interne actuel).
+    if (this.logger) {
+      this.authService = new AuthService(config?.web?.auth, this.logger);
+    }
+
     // Créer le serveur de présentation
     if (this.logger) {
-      this.presentationServer = new PresentationServer(this.logger, port);
+      this.presentationServer = new PresentationServer(this.logger, port, this.authService);
       // Récupérer le serveur HTTP du PresentationServer
       this.httpServer = this.presentationServer.getHttpServer();
       this.logger.info('Bootstrap', `Serveur de présentation initialisé sur ${host}:${port}`);
@@ -152,7 +163,7 @@ class ApplicationBootstrap {
       throw new Error('Bootstrap: Dépendances manquantes pour SocketBridge');
     }
 
-    this.socketBridge = new SocketBridge(this.httpServer, this.eventBus, this.logger);
+    this.socketBridge = new SocketBridge(this.httpServer, this.eventBus, this.logger, this.authService);
 
     // Attacher le SocketBridge au serveur de présentation
     if (this.presentationServer) {

@@ -170,10 +170,29 @@ export interface MqttConfig {
 // SECTION WEB (Serveur HTTP)
 // ============================================================================
 
+/**
+ * Configuration de la porte d'authentification OAuth2 HA — voir décision "accès externe"
+ * (conception 2026-07-28). Désactivée par défaut : aucun effet sur une instance interne tant
+ * que `enabled` n'est pas explicitement activé (prévu pour une future instance externe dédiée).
+ * Le flux OAuth2 HA (GET /auth/authorize, POST /auth/token) sert uniquement de portail de
+ * connexion — tous les utilisateurs authentifiés partagent ensuite le même accès complet via
+ * le jeton longue durée déjà utilisé par le serveur (ha.ws.token), pas de permissions
+ * différenciées par utilisateur HA (choix explicitement tranché).
+ */
+export interface AuthConfig {
+  enabled: boolean;           // Default: false
+  ha_base_url: string;        // URL HTTP publique de HA (distincte de ha.ws.host/port, LAN/WebSocket)
+  client_id: string;          // Origine publique de cette instance (ex: https://haplan.example.com/)
+  redirect_uri: string;       // ex: https://haplan.example.com/auth/callback (même origine que client_id)
+  session_secret: string;     // Secret HMAC de signature du cookie de session — requis si enabled
+  session_ttl_hours: number;  // Default: 720 (30 jours)
+}
+
 /** Configuration du serveur web */
 export interface WebConfig {
   port: number;  // Default: 8080
   host: string;  // Default: "0.0.0.0"
+  auth?: AuthConfig;
 }
 
 // ============================================================================
@@ -261,10 +280,21 @@ export const mqttSchema = z.object({
   reconnect_delay: z.number().int().nonnegative().default(5),
 });
 
+// Schéma pour la porte d'authentification OAuth2 HA (voir AuthConfig)
+export const authSchema = z.object({
+  enabled: z.boolean().default(false),
+  ha_base_url: z.string().default(""),
+  client_id: z.string().default(""),
+  redirect_uri: z.string().default(""),
+  session_secret: z.string().default(""),
+  session_ttl_hours: z.number().int().positive().default(720),
+});
+
 // Schéma pour Web
 export const webSchema = z.object({
   port: z.number().int().positive().default(8080),
   host: z.string().default("0.0.0.0"),
+  auth: authSchema.optional(),
 });
 
 // Schéma pour Logging
