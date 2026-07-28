@@ -10,6 +10,7 @@ import * as fs from 'node:fs';
 import type { Logger } from '../../infrastructure/logger/index';
 import type { SocketBridge } from '../../application/SocketBridge';
 import type { EventBus } from '../../application/EventBus';
+import type { ApplicationModule } from '../../types/config';
 
 /**
  * Crée et configure le serveur Express + Socket.io
@@ -29,6 +30,7 @@ export class PresentationServer {
   private httpServer: HttpServer;
   private socketBridge?: SocketBridge;
   private eventBus?: EventBus;
+  private modules: ApplicationModule[] = [];
   private logger: Logger;
   private port: number;
   private projectRoot: string;
@@ -226,7 +228,18 @@ export class PresentationServer {
     });
 
     // Route racine - Redirige vers index.html pour une SPA
+    // Exception : si cette instance ne fait tourner qu'une seule application métier (hors core)
+    // ET que celle-ci est classée `audience: 'end-user'` (ex: HAPLAN sur une instance dédiée à
+    // l'accès externe), on saute directement sur sa page plutôt que d'afficher le shell générique
+    // (sidebar/ModuleContainer) — voir décision "affichage par défaut" de la conception accès
+    // externe. Sans effet sur le déploiement actuel où toutes les apps tournent ensemble.
     this.app.get('/', (req: Request, res: Response) => {
+      const singleAppRedirect = this.getSingleEndUserAppRedirectPath();
+      if (singleAppRedirect) {
+        res.redirect(singleAppRedirect);
+        return;
+      }
+
       const coreRoot = path.join(process.env.PROJECT_ROOT || this.projectRoot, 'applications', 'core');
       const distPath = path.join(coreRoot, 'dist/presentation/ui');
       const srcPath = path.join(coreRoot, 'src/presentation/ui');
@@ -298,7 +311,27 @@ export class PresentationServer {
    */
   attachEventBus(eventBus: EventBus): void {
     this.eventBus = eventBus;
+    this.eventBus.on('app:modules:registered', ({ modules }) => {
+      this.modules = modules;
+    });
     this.logger.info('PresentationServer', 'EventBus attaché');
+  }
+
+  /**
+   * Chemin de redirection pour la route `/`, si cette instance ne fait tourner qu'une seule
+   * application non-core classée `audience: 'end-user'`. Retourne `undefined` sinon (shell
+   * générique affiché comme avant) — c'est le cas de figure normal du déploiement actuel où
+   * toutes les applications tournent ensemble sur la même instance.
+   */
+  private getSingleEndUserAppRedirectPath(): string | undefined {
+    const nonCoreModules = this.modules.filter((m) => m.type !== 'core');
+    if (nonCoreModules.length !== 1) return undefined;
+
+    const module = nonCoreModules[0];
+    if (!module || module.audience !== 'end-user') return undefined;
+
+    const redirectPath = (module as ApplicationModule & { menu?: { entry?: { path?: string } } }).menu?.entry?.path;
+    return redirectPath || undefined;
   }
 
   /**
