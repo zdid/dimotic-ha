@@ -61,6 +61,15 @@ export type Evoo7ErrorCode =
   | 'EVOO7_SAVE_FAILED';
 
 /**
+ * Codes d'erreur HAPLAN
+ */
+export type HaplanErrorCode =
+  | 'HAPLAN_HA_UNAVAILABLE'
+  | 'HAPLAN_UNKNOWN_ENTITY'
+  | 'HAPLAN_COMMAND_FAILED'
+  | 'HAPLAN_SAVE_FAILED';
+
+/**
  * Codes d'erreur génériques (specs-erreurs-v1.0.md §6)
  */
 export type AppErrorCode =
@@ -68,6 +77,7 @@ export type AppErrorCode =
   | MqttErrorCode
   | RfxComErrorCode
   | Evoo7ErrorCode
+  | HaplanErrorCode
   | 'APP_CONFIG_INVALID'
   | 'APP_CONFIG_MISSING'
   | 'APP_CONFIG_REQUIRED_FIELD_MISSING'
@@ -228,6 +238,18 @@ export function createEvoo7Error(
   details?: ErrorDetails
 ): AppError {
   return createAppError({ code, message, severity: 'error', module: module || 'evoo7', details });
+}
+
+/**
+ * Crée une erreur HAPLAN
+ */
+export function createHaplanError(
+  code: HaplanErrorCode,
+  message: string,
+  module?: string,
+  details?: ErrorDetails
+): AppError {
+  return createAppError({ code, message, severity: 'error', module: module || 'haplan', details });
 }
 
 /**

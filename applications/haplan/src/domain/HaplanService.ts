@@ -1,0 +1,389 @@
+/**
+ * HaplanService
+ *
+ * Orchestrateur principal de l'application HAPLAN — portage de haplanserver
+ * (github.com/zdid/haplanserver, voir le plan de portage). Phase 1 : affichage des plans déjà
+ * définis (positions importées), état en direct et commandes sur les entités déjà placées.
+ *
+ * Contrairement à RFXCOM/EVOO7, cette application ne publie AUCUNE découverte MQTT : elle
+ * lit/écrit directement des entités HA déjà existantes via HaWsClient (factory à 5 paramètres,
+ * voir domain/index.ts) — HaStructureRegistry sert uniquement à obtenir un instantané initial des
+ * états (déjà peuplé par AppService au démarrage), HaWsClient à envoyer des commandes et à
+ * recevoir les changements d'état en direct.
+ *
+ * Couche : Domaine (Métier) — orchestration uniquement, délègue à ConfigFileManager.
+ */
+
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import type { IEventBus, Logger, IAppConfigProvider, HaStructureRegistry, HaWsClient, HaRawEntity } from '../../../core/src/exports';
+import { createHaplanError } from '../../../core/src/exports';
+import { haplanConfigSchema, type HaplanConfig } from './config-schema';
+import { DEFAULT_FLOORPLANS_CONFIG, type HaplanFloorplansConfigFile } from './floorplans-config-schema';
+import type { HaplanStatus } from './types';
+import { ConfigFileManager } from './yaml/ConfigFileManager';
+import { HAPLAN_SOCKET_EVENTS, HAPLAN_CLIENT_EVENTS, HAPLAN_ALL_EVENTS, HAPLAN_PERSISTENT_EVENTS } from './socket-events';
+import { buildEntityPickerTree } from './taxonomy-tree';
+import type { HaplanPositionEntry } from './floorplans-config-schema';
+
+const MODULE_NAME = 'haplan';
+
+/** Doit rester synchronisé avec la liste blanche `fileFilter` de la route d'upload
+ *  (PresentationServer.ts, POST /api/haplan/floorplans/upload). */
+const EXTENSION_BY_MIME: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp'
+};
+
+/** Même logique que `sanitizeFloorplanBaseName` du haplanserver original (routes.ts) —
+ *  alphanumérique/tiret/underscore uniquement, jamais vide. */
+function sanitizeFloorplanFilename(id: string): string {
+  const trimmed = id.trim();
+  const sanitized = trimmed.replace(/[^a-zA-Z0-9-_]/g, '_').replace(/_+/g, '_');
+  return sanitized.length > 0 ? sanitized : 'plan';
+}
+
+export interface IHaplanService {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  getStatus(): HaplanStatus;
+}
+
+interface EntityCommandPayload {
+  entity_id: string;
+  domain: string;
+  service: string;
+  serviceData?: Record<string, unknown>;
+}
+
+export class HaplanService implements IHaplanService {
+  private config: HaplanConfig;
+  private floorplansConfig: HaplanFloorplansConfigFile = DEFAULT_FLOORPLANS_CONFIG;
+  private configFileManager: ConfigFileManager;
+  /** entity_id de toutes les entités présentes sur au moins un plan — seules celles-ci sont
+   *  republiées/commandables (pas de firehose de tout HA). Recalculé à chaque chargement. */
+  private trackedEntityIds: Set<string> = new Set();
+
+  constructor(
+    private readonly eventBus: IEventBus,
+    private readonly logger: Logger,
+    private readonly configProvider: IAppConfigProvider<HaplanConfig>,
+    private readonly haStructureRegistry: HaStructureRegistry | undefined,
+    private readonly haWsClient: HaWsClient | undefined
+  ) {
+    this.config = this.loadConfig();
+    this.configFileManager = new ConfigFileManager(this.resolveFloorplansConfigPath(), this.logger);
+  }
+
+  private resolveFloorplansConfigPath(): string {
+    return path.join(this.resolveDataDir(), this.config.floorplansConfigFile);
+  }
+
+  private resolveDataDir(): string {
+    return path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'haplan');
+  }
+
+  private resolveImagesDir(): string {
+    return path.join(this.resolveDataDir(), 'images');
+  }
+
+  private loadConfig(): HaplanConfig {
+    return haplanConfigSchema.parse(this.configProvider.getAppConfig());
+  }
+
+  // ==========================================================================
+  // Cycle de vie
+  // ==========================================================================
+
+  async start(): Promise<void> {
+    this.logger.info('HaplanService', 'Démarrage du service HAPLAN...');
+
+    this.floorplansConfig = this.configFileManager.load();
+    this.recomputeTrackedEntityIds();
+
+    this.setupSocketEventListeners();
+    this.registerSocketEvents();
+
+    // Signal interne (PresentationServer.ts, route POST /api/haplan/floorplans/upload) — jamais
+    // exposé à un client Socket.io, volontairement absent de HAPLAN_ALL_EVENTS.
+    this.eventBus.onGeneric<{ floorplanId: string; imageBuffer: Buffer; imageMimeType: string }>(
+      'haplan:internal:floorplan:create',
+      (data) => this.handleFloorplanCreate(data)
+    );
+
+    if (this.haWsClient) {
+      this.haWsClient.onStateChanged((entity) => this.handleHaStateChanged(entity));
+    } else {
+      this.logger.warn('HaplanService',
+        'HaWsClient indisponible (ha.ws_enable=false ?) — aucun état/commande en direct possible.');
+    }
+
+    this.emitStatus();
+    this.emitTaxonomyTree();
+    this.logger.info('HaplanService', 'Service HAPLAN démarré');
+  }
+
+  async stop(): Promise<void> {
+    this.logger.info('HaplanService', 'Arrêt du service HAPLAN...');
+  }
+
+  // ==========================================================================
+  // Statut
+  // ==========================================================================
+
+  getStatus(): HaplanStatus {
+    return {
+      haWsConnected: !!this.haWsClient,
+      floorplansCount: Object.keys(this.floorplansConfig.floorplans).length,
+      entitiesCount: this.trackedEntityIds.size
+    };
+  }
+
+  private emitStatus(): void {
+    this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.STATUS, this.getStatus());
+  }
+
+  private recomputeTrackedEntityIds(): void {
+    this.trackedEntityIds = new Set();
+    for (const floorplan of Object.values(this.floorplansConfig.floorplans)) {
+      for (const position of floorplan.positions) {
+        this.trackedEntityIds.add(position.entity_id);
+      }
+    }
+  }
+
+  // ==========================================================================
+  // États HA en direct
+  // ==========================================================================
+
+  private handleHaStateChanged(entity: HaRawEntity): void {
+    if (!this.trackedEntityIds.has(entity.entity_id)) return;
+    this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.ENTITY_STATE, {
+      entity_id: entity.entity_id,
+      state: entity.state,
+      attributes: entity.attributes
+    });
+  }
+
+  /** Instantané initial des états, filtré aux seules entités présentes sur un plan — depuis
+   *  HaStructureRegistry (déjà peuplé par AppService au démarrage, pas de requête HA redondante). */
+  private emitEntitiesStateBulk(): void {
+    if (!this.haStructureRegistry) {
+      this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.ENTITIES_STATE_BULK, { states: [] });
+      return;
+    }
+    const states = this.haStructureRegistry.getAllEntities()
+      .filter((entity) => this.trackedEntityIds.has(entity.entity_id))
+      .map((entity) => ({ entity_id: entity.entity_id, state: entity.state, attributes: entity.attributes }));
+    this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.ENTITIES_STATE_BULK, { states });
+  }
+
+  // ==========================================================================
+  // Commandes → HA
+  // ==========================================================================
+
+  private async handleEntityCommand(payload: EntityCommandPayload): Promise<void> {
+    if (!this.haWsClient) {
+      this.logger.warn('HaplanService', `Commande reçue pour ${payload.entity_id} mais HaWsClient indisponible`);
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_HA_UNAVAILABLE', 'Connexion Home Assistant indisponible', 'haplan:command', { entityId: payload.entity_id }));
+      return;
+    }
+
+    // Défense en profondeur : n'accepte que les entités effectivement présentes sur un plan,
+    // jamais une commande arbitraire vers une entité HA quelconque envoyée par un client malveillant.
+    if (!this.trackedEntityIds.has(payload.entity_id)) {
+      this.logger.warn('HaplanService', `Commande reçue pour une entité non présente sur un plan: ${payload.entity_id}`);
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_UNKNOWN_ENTITY', `Entité non présente sur un plan: ${payload.entity_id}`, 'haplan:command', { entityId: payload.entity_id }));
+      return;
+    }
+
+    try {
+      await this.haWsClient.sendCommand(payload.domain, payload.service, { entity_id: payload.entity_id }, payload.serviceData);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('HaplanService', `Échec de la commande ${payload.domain}.${payload.service} sur ${payload.entity_id}: ${message}`);
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_COMMAND_FAILED', message, 'haplan:command', { entityId: payload.entity_id }));
+    }
+  }
+
+  // ==========================================================================
+  // Socket.io (via SocketBridge, EventBus générique)
+  // ==========================================================================
+
+  private setupSocketEventListeners(): void {
+    this.eventBus.onGeneric(HAPLAN_CLIENT_EVENTS.GET_STATUS, () => this.emitStatus());
+
+    this.eventBus.onGeneric(HAPLAN_CLIENT_EVENTS.GET_FLOORPLANS, () => {
+      this.emitFloorplansList();
+      this.emitEntitiesStateBulk();
+    });
+
+    this.eventBus.onGeneric<EntityCommandPayload>(HAPLAN_CLIENT_EVENTS.ENTITY_COMMAND, (data) => this.handleEntityCommand(data));
+
+    this.eventBus.onGeneric(HAPLAN_CLIENT_EVENTS.GET_TAXONOMY_TREE, () => this.emitTaxonomyTree());
+
+    this.eventBus.onGeneric<{ floorplanId: string; positions: HaplanPositionEntry[] }>(
+      HAPLAN_CLIENT_EVENTS.FLOORPLAN_POSITIONS_UPDATE,
+      (data) => this.handleFloorplanPositionsUpdate(data)
+    );
+
+    this.eventBus.onGeneric<{ floorplanId: string }>(
+      HAPLAN_CLIENT_EVENTS.FLOORPLAN_DELETE,
+      (data) => this.handleFloorplanDelete(data)
+    );
+  }
+
+  private emitFloorplansList(): void {
+    this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.FLOORPLANS_LIST, { floorplans: this.floorplansConfig.floorplans });
+  }
+
+  /** Sélecteur d'entité (voir plan de portage Phase 2, taxonomy-tree.ts) — construit depuis
+   *  attributs_taxonomie de chaque entité, pas depuis les areas HA (plates, sans hiérarchie). */
+  private emitTaxonomyTree(): void {
+    const entities = this.haStructureRegistry?.getAllEntities() ?? [];
+    this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.TAXONOMY_TREE, { areas: buildEntityPickerTree(entities) });
+  }
+
+  /**
+   * Ajout/déplacement/suppression d'icône — un seul point d'entrée pour les trois cas (voir
+   * PositionManager.ts côté client, qui envoie toujours la liste COMPLÈTE des positions du plan,
+   * jamais un delta). Remplace entièrement les positions du plan concerné.
+   */
+  private handleFloorplanPositionsUpdate(data: { floorplanId: string; positions: HaplanPositionEntry[] }): void {
+    const floorplan = this.floorplansConfig.floorplans[data.floorplanId];
+    if (!floorplan) {
+      this.logger.warn('HaplanService', `Positions reçues pour un plan inconnu: ${data.floorplanId}`);
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_UNKNOWN_ENTITY', `Plan inconnu: ${data.floorplanId}`, 'haplan:floorplan'));
+      return;
+    }
+
+    const previousPositions = floorplan.positions;
+    floorplan.positions = data.positions;
+
+    const result = this.configFileManager.save(this.floorplansConfig);
+    if (!result.success) {
+      floorplan.positions = previousPositions;
+      this.logger.error('HaplanService', `Échec de sauvegarde des positions pour ${data.floorplanId}: ${result.error}`);
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_SAVE_FAILED', `Échec de sauvegarde: ${result.error}`, 'haplan:floorplan'));
+      this.emitFloorplansList();
+      return;
+    }
+
+    // Une entité tout juste ajoutée doit devenir suivie (état/commandes) — voir handleEntityCommand.
+    this.recomputeTrackedEntityIds();
+    this.emitFloorplansList();
+    this.emitEntitiesStateBulk();
+  }
+
+  /**
+   * Création d'un nouveau plan — déclenchée par la route REST d'upload (voir PresentationServer.ts
+   * et le commentaire sur handleFloorplanPositionsUpdate pour le choix Socket.io vs REST). Écrit
+   * l'image sur disque puis ajoute l'entrée ; si la sauvegarde YAML échoue, supprime le fichier
+   * déjà écrit pour ne pas laisser une image orpheline.
+   */
+  private handleFloorplanCreate(data: { floorplanId: string; imageBuffer: Buffer; imageMimeType: string }): void {
+    if (this.floorplansConfig.floorplans[data.floorplanId]) {
+      this.logger.warn('HaplanService', `Création refusée, plan déjà existant: ${data.floorplanId}`);
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_SAVE_FAILED', `Un plan "${data.floorplanId}" existe déjà`, 'haplan:floorplan'));
+      return;
+    }
+
+    const extension = EXTENSION_BY_MIME[data.imageMimeType];
+    if (!extension) {
+      this.logger.warn('HaplanService', `Type d'image non supporté: ${data.imageMimeType}`);
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_SAVE_FAILED', `Type d'image non supporté: ${data.imageMimeType}`, 'haplan:floorplan'));
+      return;
+    }
+
+    const filename = `${sanitizeFloorplanFilename(data.floorplanId)}${extension}`;
+    const imagePath = path.join(this.resolveImagesDir(), filename);
+
+    try {
+      fs.mkdirSync(this.resolveImagesDir(), { recursive: true });
+      fs.writeFileSync(imagePath, data.imageBuffer);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('HaplanService', `Échec d'écriture de l'image pour ${data.floorplanId}: ${message}`);
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_SAVE_FAILED', `Échec d'écriture de l'image: ${message}`, 'haplan:floorplan'));
+      return;
+    }
+
+    this.floorplansConfig.floorplans[data.floorplanId] = { filename, positions: [] };
+
+    const result = this.configFileManager.save(this.floorplansConfig);
+    if (!result.success) {
+      delete this.floorplansConfig.floorplans[data.floorplanId];
+      try { fs.unlinkSync(imagePath); } catch { /* best-effort */ }
+      this.logger.error('HaplanService', `Échec de sauvegarde du nouveau plan ${data.floorplanId}: ${result.error}`);
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_SAVE_FAILED', `Échec de sauvegarde: ${result.error}`, 'haplan:floorplan'));
+      return;
+    }
+
+    this.logger.info('HaplanService', `Plan créé: ${data.floorplanId} (${filename})`);
+    this.emitFloorplansList();
+  }
+
+  /** Suppression d'un plan — retire l'entrée puis supprime l'image (best-effort, ne bloque pas
+   *  si le fichier est déjà absent ou verrouillé). */
+  private handleFloorplanDelete(data: { floorplanId: string }): void {
+    const floorplan = this.floorplansConfig.floorplans[data.floorplanId];
+    if (!floorplan) {
+      this.logger.warn('HaplanService', `Suppression demandée pour un plan inconnu: ${data.floorplanId}`);
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_UNKNOWN_ENTITY', `Plan inconnu: ${data.floorplanId}`, 'haplan:floorplan'));
+      return;
+    }
+
+    delete this.floorplansConfig.floorplans[data.floorplanId];
+
+    const result = this.configFileManager.save(this.floorplansConfig);
+    if (!result.success) {
+      this.floorplansConfig.floorplans[data.floorplanId] = floorplan;
+      this.logger.error('HaplanService', `Échec de suppression du plan ${data.floorplanId}: ${result.error}`);
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_SAVE_FAILED', `Échec de suppression: ${result.error}`, 'haplan:floorplan'));
+      return;
+    }
+
+    try {
+      fs.unlinkSync(path.join(this.resolveImagesDir(), floorplan.filename));
+    } catch (error) {
+      this.logger.warn('HaplanService', `Image non supprimée pour ${data.floorplanId}: ${error instanceof Error ? error.message : error}`);
+    }
+
+    this.recomputeTrackedEntityIds();
+    this.logger.info('HaplanService', `Plan supprimé: ${data.floorplanId}`);
+    this.emitFloorplansList();
+  }
+
+  private registerSocketEvents(): void {
+    // HAPLAN_ALL_EVENTS (pas seulement les événements serveur→client) : SocketBridge ne relaie
+    // les événements client→serveur que pour ceux listés ici — voir le bug déjà rencontré côté
+    // RFXCOM cette session (événement non enregistré = silencieusement ignoré).
+    this.eventBus.emitGeneric('app:socket-events:registered', {
+      appId: MODULE_NAME,
+      socketEvents: HAPLAN_ALL_EVENTS,
+      persistentEvents: HAPLAN_PERSISTENT_EVENTS
+    });
+  }
+
+  static create(
+    eventBus: IEventBus,
+    logger: Logger,
+    configProvider: IAppConfigProvider<HaplanConfig>,
+    haStructureRegistry: HaStructureRegistry | undefined,
+    haWsClient: HaWsClient | undefined
+  ): HaplanService {
+    return new HaplanService(eventBus, logger, configProvider, haStructureRegistry, haWsClient);
+  }
+}

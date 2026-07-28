@@ -157,6 +157,7 @@ class ApplicationBootstrap {
     // Attacher le SocketBridge au serveur de présentation
     if (this.presentationServer) {
       this.presentationServer.attachSocketBridge(this.socketBridge);
+      this.presentationServer.attachEventBus(this.eventBus);
     }
 
     this.logger.info('Bootstrap', 'SocketBridge initialisé');

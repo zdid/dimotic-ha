@@ -1,0 +1,786 @@
+/* Conteneur principal */
+#app {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0px;
+    background-color: #f5f5f5;
+}
+
+/* Conteneur du floor plan */
+#floorplan-container {
+    background-color: rgb(14, 14, 14);
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    overflow: hidden;
+    position: relative;
+}
+
+.floorplan-image {
+    display: block;
+    width: auto;
+    height: auto;
+    pointer-events: none;
+}
+
+/* Menu system */
+
+.top-bar {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    z-index: 999;
+}
+
+.menu-quick-actions {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.menu-quick-action {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: none;
+}
+
+.menu-quick-action i {
+    color: #444;
+    font-size: 14px;
+}
+
+.menu-quick-action.menu-quick-font {
+    width: auto;
+    padding: 0 6px;
+    gap: 6px;
+}
+
+.menu-quick-text {
+    font-size: 10px;
+    color: #444;
+    white-space: nowrap;
+}
+
+.floorplan-selector-inline {
+    display: flex;
+    align-items: baseline;
+}
+
+.floorplan-entity-display {
+    line-height: 1;
+}
+
+.menu-quick-indicator {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: none;
+}
+
+.menu-quick-indicator i {
+    color: #444;
+    font-size: 14px;
+}
+
+.menu-quick-action:hover {
+    background: rgba(0,0,0,0.06);
+}
+
+.menu-panel {
+    position: absolute;
+    top: 60px;
+    left: 10px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    z-index: 100;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+}
+
+.menu-item {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    margin: 5px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.menu-icon {
+    width: 18px;
+    text-align: center;
+    color: #444;
+}
+
+.menu-item:hover {
+    background: #f5f5f5;
+}
+
+.font-size-setting {
+    display: flex;
+    justify-content: center;
+}
+
+.font-size-buttons {
+    display: flex;
+    gap: 6px;
+}
+
+.font-size-button {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+    background: #ffffff;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.12);
+}
+
+.font-size-button.active {
+    border-color: #4caf50;
+    box-shadow: 0 0 0 2px rgba(76,175,80,0.2);
+}
+
+.font-size-button:hover {
+    background: #f5f5f5;
+}
+
+.font-size-xs {
+    font-size: 12px;
+}
+
+.font-size-sm {
+    font-size: 14px;
+}
+
+.font-size-md {
+    font-size: 16px;
+}
+
+.font-size-lg {
+    font-size: 18px;
+}
+
+.font-size-xl {
+    font-size: 20px;
+}
+
+/* Floorplan selector beside menu button */
+.floorplan-select {
+    color: #111;
+    background: #ffffff;
+}
+
+.floorplan-select option {
+    color: #111;
+    background: #ffffff;
+}
+
+/* Entity selector */
+.entity-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+    width: 100%;
+}
+
+.entity-selector select {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    width: 100%;
+}
+
+.entity-selector-container {
+    margin-bottom: 10px;
+    padding: 10px;
+    background: white;
+    border-radius: 4px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+/* Styles pour les objets */
+.sensor, .light-object, .cover-object, .thermostat-object {
+    position: absolute;
+    background: white;
+    border-radius: 8px;
+    width: 60px;
+    height: 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    border: 1px solid #ddd;
+    transform: translate(-50%, -50%);
+}
+
+.light-object {
+    background: #fff9c4;
+}
+
+.light-object.on i {
+    color: #ffeb3b;
+}
+
+.light-object.off i {
+    color: #9e9e9e;
+}
+
+.dimmable-light-object {
+    width: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+}
+
+.cover-object, .blind-object {
+    width: 80px;
+    height: 100px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+}
+
+.cover-object button, .blind-object button {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 5px;
+}
+
+.cover-object .position, .blind-object .position {
+    font-weight: normal;
+    font-size: 12px;
+}
+
+.thermostat-object {
+    width: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+}
+
+.thermostat-object button {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 5px;
+}
+
+.thermostat-object .temp {
+    font-weight: normal;
+    font-size: 12px;
+}
+
+/* Trash icon for edit mode */
+.trash-icon {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    width: 40px;
+    height: 40px;
+    background: #f44336;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 20px;
+    cursor: default;
+    z-index: 99;
+    display: none;
+    transition: all 0.2s ease;
+}
+
+.floorplan-container.edit-mode .trash-icon {
+    display: flex;
+}
+
+.trash-icon.trash-highlight {
+    transform: scale(1.1);
+    box-shadow: 0 0 10px rgba(244, 67, 54, 0.5);
+}
+
+.trash-icon.trash-over {
+    background: #d32f2f;
+    transform: scale(1.2);
+}
+
+/* Conteneur de drag-and-drop */
+.floorplan-drag-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: 1px solid #CCCCCC;
+    pointer-events: auto;
+    z-index: 2;
+}
+
+.floorplan-container.edit-mode .floorplan-drag-container {
+    border: 2px dashed #ffeb3b;
+}
+
+/* Style pour les objets draggables */
+.ha-object {
+    cursor: move;
+    font-size: calc(12px * var(--plan-scale, 1));
+    font-weight: normal;
+    transition: transform 0.1s ease;
+}
+
+.ha-object.dragging {
+    opacity: 0.8;
+    transform: scale(1.05);
+    z-index: 100;
+}
+
+.ha-object-draggable {
+    cursor: move;
+    transition: transform 0.1s ease;
+    z-index: 10;
+}
+
+.ha-object-draggable:hover {
+    transform: scale(1.02);
+    box-shadow: 0 0 8px rgba(0,0,0,0.2);
+}
+
+/* Styles pour les nouvelles entités améliorées */
+.base-entity {
+    position: relative;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    overflow: hidden;
+    transition: all 0.2s ease;
+    font-family: 'Arial', sans-serif;
+    font-size: 12px;
+    font-weight: normal;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    box-sizing: border-box;
+}
+
+.base-entity:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+/* Styles pour les différents types visuels */
+.base-entity.icon-style {
+    width: 60px;
+    height: 60px;
+    padding: 2px;
+}
+
+.base-entity.card-style {
+    background: var(--entity-background-color);
+    color: var(--entity-text-color);
+    border: 1px solid #e0e0e0;
+}
+
+.base-entity.gauge-style {
+    background: linear-gradient(135deg, var(--entity-background-color) 0%, #f5f5f5 100%);
+    border: 2px solid var(--entity-primary-color);
+}
+
+.base-entity.slider-style {
+    background: var(--entity-background-color);
+    border: 1px solid var(--entity-primary-color);
+}
+
+/* Éléments communs */
+.entity-title {
+    font-size: calc(12px * var(--plan-scale, 1));
+    font-weight: normal;
+    color: var(--entity-text-color);
+    text-align: center;
+    margin-bottom: 4px;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+    width: 100%;
+}
+
+.entity-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 4px 0;
+}
+
+.entity-icon small {
+    font-size: 16px;
+}
+
+.entity-icon medium {
+    font-size: 24px;
+}
+
+.entity-icon large {
+    font-size: 32px;
+}
+
+.entity-icon i {
+    color: var(--entity-primary-color);
+    transition: all 0.2s ease;
+}
+
+.status-indicator {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.status-indicator i {
+    font-size: 12px;
+}
+
+.values-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px;
+    margin-top: 6px;
+    width: 100%;
+}
+
+.value-badge {
+    background: rgba(255,255,255,0.8);
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    padding: 2px 6px;
+    font-size: calc(12px * var(--plan-scale, 1));
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.value-badge .badge-label {
+    font-weight: normal;
+    color: #666;
+}
+
+.value-badge .badge-value {
+    color: var(--entity-text-color);
+    font-weight: normal;
+}
+
+.value-badge .badge-unit {
+    color: #999;
+    font-size: calc(8px * var(--plan-scale, 1));
+}
+
+.entity-button {
+    background: var(--entity-primary-color);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: calc(24px * var(--plan-scale, 1));
+    height: calc(24px * var(--plan-scale, 1));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    margin: 4px 0;
+    transition: all 0.2s ease;
+}
+
+.entity-button:hover {
+    background: var(--entity-secondary-color);
+    transform: scale(1.1);
+}
+
+.entity-button i {
+    font-size: calc(12px * var(--plan-scale, 1));
+}
+
+.sensor-value-display {
+    font-size: calc(12px * var(--plan-scale, 1));
+}
+
+.thermostat-temp-display {
+    font-size: calc(12px * var(--plan-scale, 1));
+}
+
+.thermostat-target-temp {
+    font-size: calc(12px * var(--plan-scale, 1));
+}
+
+.thermostat-current-temp {
+    font-size: calc(12px * var(--plan-scale, 1));
+}
+
+.entity-slider {
+    width: 80%;
+    height: 4px;
+    margin: 8px 0;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #e0e0e0;
+    border-radius: 2px;
+    outline: none;
+}
+
+.entity-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--entity-primary-color);
+    cursor: pointer;
+}
+
+.entity-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--entity-primary-color);
+    cursor: pointer;
+    border: none;
+}
+
+/* Styles spécifiques pour les lumières */
+.enhanced-light-object {
+    position: relative;
+}
+
+.enhanced-light-object .entity-icon i {
+    transition: all 0.3s ease;
+}
+
+/* Styles spécifiques pour les capteurs de température */
+.enhanced-temperature-sensor {
+    position: relative;
+}
+
+.temperature-display {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    margin: 6px 0;
+}
+
+.temperature-display .temp-value {
+    font-size: calc(20px * var(--plan-scale, 1));
+    font-weight: bold;
+    color: var(--entity-primary-color);
+}
+
+.temperature-display .temp-unit {
+    font-size: calc(12px * var(--plan-scale, 1));
+    color: var(--entity-text-color);
+    margin-left: 2px;
+}
+
+.temperature-bar-container {
+    width: 80%;
+    height: 6px;
+    background: #e0e0e0;
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 4px 0;
+}
+
+.temperature-bar {
+    height: 100%;
+    background: var(--entity-primary-color);
+    transition: width 0.5s ease, background-color 0.3s ease;
+}
+
+/* Styles pour les entités génériques */
+.generic-entity {
+    background: linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%);
+    border: 1px solid #d0d0d0;
+}
+
+/* Styles pour les fenêtres modales (context windows) */
+.context-window {
+    background-color: white;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    padding: 16px;
+    position: absolute;
+    z-index: 1000;
+    min-width: 200px;
+    max-width: 300px;
+}
+
+/* Style spécifique pour la fenêtre des lumières */
+.context-window.light-window {
+    background-color: white;
+}
+
+/* Style spécifique pour la fenêtre des thermostats */
+.context-window.thermostat-window {
+    background-color: white;
+}
+
+/* Style spécifique pour la fenêtre des interrupteurs */
+.context-window.switch-window {
+    background-color: white;
+}
+
+/* Style spécifique pour la fenêtre générique */
+.context-window.generic-window {
+    background-color: white;
+}
+
+/* Style des boutons dans les fenêtres modales */
+.context-window button {
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    margin: 4px 0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.context-window button:hover {
+    background-color: #45a049;
+}
+
+.context-window .close-button {
+    background-color: #f44336;
+}
+
+.context-window .close-button:hover {
+    background-color: #d32f2f;
+}
+
+/* Style des titres dans les fenêtres modales */
+.context-window h3 {
+    color: #333;
+    margin-top: 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 8px;
+}
+
+/* Style des contrôles de température */
+.context-window .temperature-control {
+    margin: 12px 0;
+}
+
+.context-window .temperature-control input {
+    width: 80px;
+    padding: 6px;
+    margin: 0 8px;
+}
+
+/* Style des contrôles de luminosité */
+.context-window .brightness-control {
+    margin: 12px 0;
+}
+
+.context-window .brightness-control input[type="range"] {
+    width: 100%;
+}
+
+/* Style des valeurs affichées */
+.context-window .value-row {
+    display: flex;
+    justify-content: space-between;
+    margin: 6px 0;
+    padding: 4px 0;
+}
+
+.context-window .value-label {
+    font-weight: bold;
+    color: #555;
+}
+
+.context-window .value-content {
+    color: #333;
+}
+
+/* Styles pour le dialogue de nom de plan */
+.floorplan-name-dialog {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.floorplan-name-dialog input[type="text"] {
+  width: 100%;
+  padding: 8px;
+  margin: 10px 0;
+  box-sizing: border-box;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.floorplan-name-dialog button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.floorplan-name-dialog button:first-child {
+  background: #f0f0f0;
+}
+
+.floorplan-name-dialog button:last-child {
+  background: #4CAF50;
+  color: white;
+}

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HAPLAN - Plans</title>
+  <link rel="stylesheet" href="/styles/main.css">
+  <link rel="stylesheet" href="styles.css">
+  <!-- Les icônes des objets HA (BaseEntity.createIcon/createStatusIndicator, models/objects/**)
+       utilisent des classes Font Awesome (<i class="fas fa-...">) — même dépendance que le
+       client/public/index.html original de haplanserver, jamais reprise jusqu'ici. -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    body { margin: 0; }
+    .haplan-header {
+      display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+      background: var(--color-surface); border-bottom: 1px solid var(--color-primary);
+    }
+    .haplan-header select {
+      padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--color-primary);
+      background: var(--color-bg); color: var(--color-text); color-scheme: dark;
+    }
+    .haplan-header a { color: var(--color-accent); text-decoration: none; }
+    #floorplan-container {
+      position: relative; width: 100%; height: calc(100vh - 53px); overflow: hidden;
+      background: var(--color-bg);
+    }
+    .haplan-empty {
+      display: flex; align-items: center; justify-content: center; height: 100%;
+      color: var(--color-text-muted); font-size: 1.1em;
+    }
+    .haplan-header button {
+      padding: 6px 12px; border-radius: var(--radius); border: 1px solid var(--color-primary);
+      background: var(--color-bg); color: var(--color-text); cursor: pointer; font-size: 0.9em;
+    }
+    .haplan-header button.active { background: var(--color-accent); color: white; border-color: var(--color-accent); }
+    #entity-picker-panel {
+      display: none; position: fixed; top: 53px; right: 0; width: 340px; max-height: calc(100vh - 53px);
+      overflow-y: auto; background: var(--color-surface); border-left: 1px solid var(--color-primary);
+      padding: 16px; z-index: 500;
+    }
+    #entity-picker-panel.active { display: block; }
+    #entity-picker-panel select {
+      display: block; width: 100%; margin-bottom: 10px; padding: 6px 10px; border-radius: var(--radius);
+      border: 1px solid var(--color-primary); background: var(--color-bg); color: var(--color-text); color-scheme: dark;
+    }
+    #new-floorplan-panel {
+      display: none; position: fixed; top: 53px; right: 0; width: 300px;
+      background: var(--color-surface); border-left: 1px solid var(--color-primary);
+      padding: 16px; z-index: 500;
+    }
+    #new-floorplan-panel.active { display: block; }
+    #new-floorplan-panel input[type="text"] {
+      display: block; width: 100%; margin-bottom: 10px; padding: 6px 10px; border-radius: var(--radius);
+      border: 1px solid var(--color-primary); background: var(--color-bg); color: var(--color-text); box-sizing: border-box;
+    }
+    #new-floorplan-panel input[type="file"] { display: block; width: 100%; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <div class="haplan-header">
+    <a href="/">← Retour</a>
+    <strong>🗺️ Plans</strong>
+    <select id="floorplan-select"></select>
+    <button type="button" id="btn-edit-mode">✏️ Éditer</button>
+    <button type="button" id="btn-add-entity">➕ Ajouter une entité</button>
+    <button type="button" id="btn-new-floorplan">🆕 Nouveau plan</button>
+    <button type="button" id="btn-delete-floorplan">🗑️ Supprimer ce plan</button>
+    <span id="haplan-connection-status" style="margin-left:auto;font-size:0.85em;color:var(--color-text-muted);"></span>
+  </div>
+  <div id="floorplan-container" class="floorplan-drag-container"></div>
+  <div id="entity-picker-panel">
+    <h3 style="margin-top:0;">Ajouter une entité</h3>
+    <p style="color:var(--color-text-muted);font-size:0.85em;">Classée par lieu puis par type (taxonomie QUOI/OÙ).</p>
+    <div id="entity-selector-container"></div>
+  </div>
+  <div id="new-floorplan-panel">
+    <h3 style="margin-top:0;">Nouveau plan</h3>
+    <form id="new-floorplan-form">
+      <input type="text" id="new-floorplan-name" placeholder="Nom du plan" required>
+      <input type="file" id="new-floorplan-file" accept="image/png,image/jpeg,image/webp" required>
+      <button type="submit" class="btn-primary" style="width:100%;">Créer</button>
+    </form>
+  </div>
+
+  <!-- Page de navigation complète, pas injectée dans le Shadow DOM du core — il lui faut sa
+       propre copie du script socket.io (voir rfxcom/config.html, même pattern). -->
+  <script defer src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script type="module" src="dashboard-app.js"></script>
+</body>
+</html>

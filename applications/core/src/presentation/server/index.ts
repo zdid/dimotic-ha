@@ -3,23 +3,32 @@
 // Conforme à specs-techniques-socle-ha-mqtt-v4.3.md §5 et specs-presentation-v2.0.md §3
 
 import express, { type Express, type Request, type Response, type NextFunction } from 'express';
+import multer from 'multer';
 import type { Server as HttpServer } from 'http';
 import * as path from 'node:path';
+import * as fs from 'node:fs';
 import type { Logger } from '../../infrastructure/logger/index';
 import type { SocketBridge } from '../../application/SocketBridge';
+import type { EventBus } from '../../application/EventBus';
 
 /**
  * Crée et configure le serveur Express + Socket.io
- * 
+ *
  * Règles (conforme §5 specs-techniques-socle-ha-mqtt-v4.3) :
  * - Socket.io est l'UNIQUE canal de communication UI ↔ Serveur (sauf /health)
  * - /health reste en HTTP pur pour le healthcheck Docker
  * - L'UI reste accessible même si HA n'est pas configuré
+ * - **Deuxième exception volontaire** (2026-07-27, demande explicite de l'utilisateur) :
+ *   `POST /api/haplan/floorplans/upload` — upload d'image de plan (HAPLAN). Un transfert binaire
+ *   est un problème d'une autre nature que le reste de l'appli (état/commandes) ; HTTP/multipart
+ *   (`multer`) est l'outil standard pour ça, contrairement à Socket.io qui n'a pas vocation à
+ *   transporter des fichiers. Voir plus bas dans `configureRoutes()`.
  */
 export class PresentationServer {
   private app: Express;
   private httpServer: HttpServer;
   private socketBridge?: SocketBridge;
+  private eventBus?: EventBus;
   private logger: Logger;
   private port: number;
   private projectRoot: string;
@@ -141,6 +150,14 @@ export class PresentationServer {
       next();
     });
 
+    // Sert les images de plan HAPLAN depuis data/haplan/images/ (lecture seule) — établit la
+    // convention /data/{app}/... pour du contenu utilisateur écrit dans data/, distinct de
+    // /applications/{appId}/... ci-dessus qui ne sert jamais que dist/src (code, jamais
+    // writable). À généraliser proprement si une autre app en a besoin.
+    this.app.use('/data/haplan/images', express.static(
+      path.join(process.env.PROJECT_ROOT || this.projectRoot, 'data', 'haplan', 'images')
+    ));
+
     // CORS - À configurer pour la production
     this.app.use((req: Request, res: Response, next: NextFunction) => {
       res.header('Access-Control-Allow-Origin', '*');
@@ -165,17 +182,60 @@ export class PresentationServer {
       });
     });
 
+    // Upload d'image de plan HAPLAN — voir le commentaire de tête de cette classe (deuxième
+    // exception volontaire à "tout par Socket.io"). memoryStorage : on écrit nous-mêmes le
+    // fichier final (nom sanitisé côté HaplanService), pas besoin d'un fichier temporaire sur
+    // disque. Réponse HTTP = accusé de réception uniquement (fire-and-forget, comme le reste du
+    // projet) — le résultat réel (créé ou HAPLAN_SAVE_FAILED) arrive via Socket.io
+    // (haplan:floorplans:list / haplan:error), pas dans cette réponse.
+    const haplanUpload = multer({
+      storage: multer.memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 },
+      fileFilter: (req, file, cb) => {
+        const allowed = ['image/png', 'image/jpeg', 'image/webp'];
+        if (allowed.includes(file.mimetype)) cb(null, true);
+        else cb(new Error(`Type de fichier non supporté: ${file.mimetype}`));
+      }
+    });
+
+    this.app.post('/api/haplan/floorplans/upload', (req: Request, res: Response) => {
+      haplanUpload.single('image')(req, res, (err: unknown) => {
+        if (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          res.status(415).json({ error: 'Unsupported Media Type', message });
+          return;
+        }
+        const file = (req as Request & { file?: Express.Multer.File }).file;
+        const floorplanId = req.body?.floorplanId;
+        if (!file || !floorplanId) {
+          res.status(400).json({ error: 'Bad Request', message: 'Champs "image" et "floorplanId" requis' });
+          return;
+        }
+        if (!this.eventBus) {
+          res.status(503).json({ error: 'Service Unavailable', message: 'EventBus non initialisé' });
+          return;
+        }
+
+        this.eventBus.emitGeneric('haplan:internal:floorplan:create', {
+          floorplanId,
+          imageBuffer: file.buffer,
+          imageMimeType: file.mimetype
+        });
+        res.status(200).json({ success: true });
+      });
+    });
+
     // Route racine - Redirige vers index.html pour une SPA
     this.app.get('/', (req: Request, res: Response) => {
       const coreRoot = path.join(process.env.PROJECT_ROOT || this.projectRoot, 'applications', 'core');
       const distPath = path.join(coreRoot, 'dist/presentation/ui');
       const srcPath = path.join(coreRoot, 'src/presentation/ui');
-      
-      res.sendFile('index.html', { 
+
+      res.sendFile('index.html', {
         root: distPath,
       }, (err) => {
         if (err) {
-          res.sendFile('index.html', { 
+          res.sendFile('index.html', {
             root: srcPath,
           });
         }
@@ -229,6 +289,16 @@ export class PresentationServer {
   attachSocketBridge(socketBridge: SocketBridge): void {
     this.socketBridge = socketBridge;
     this.logger.info('PresentationServer', 'SocketBridge attaché');
+  }
+
+  /**
+   * Attache l'EventBus — nécessaire pour la route d'upload HAPLAN (POST /api/haplan/floorplans/
+   * upload), seule route de ce serveur qui déclenche une action métier applicative.
+   * Doit être appelé APRES la création de l'EventBus.
+   */
+  attachEventBus(eventBus: EventBus): void {
+    this.eventBus = eventBus;
+    this.logger.info('PresentationServer', 'EventBus attaché');
   }
 
   /**
