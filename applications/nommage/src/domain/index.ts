@@ -198,6 +198,7 @@ export const NOMMAGE_APP: ApplicationModule & { menu?: ApplicationMenuConfig } =
   menu: NOMMAGE_MENU_CONFIG,
   
   type: 'integration',
+  audience: 'configuration',
   configurable: true,
   requiredMqtt: true,
   requiredHaWs: false,

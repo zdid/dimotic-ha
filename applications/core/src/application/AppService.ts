@@ -357,6 +357,7 @@ export class AppService {
       description: 'Configuration globale de l\'application',
       icon: '⚙️',
       type: 'core',
+      audience: 'configuration',
       configurable: true,
       requiredMqtt: false,
       requiredHaWs: false,

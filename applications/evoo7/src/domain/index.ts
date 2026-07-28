@@ -170,6 +170,7 @@ export const EVOO7_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   menu: EVOO7_MENU_CONFIG,
 
   type: 'integration',
+  audience: 'configuration',
   configurable: true,
   requiredMqtt: true,
   requiredHaWs: false,

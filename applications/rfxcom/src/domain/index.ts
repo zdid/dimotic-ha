@@ -131,6 +131,7 @@ export const RFXCOM_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = 
   menu: RFXCOM_MENU_CONFIG,
 
   type: 'integration',
+  audience: 'configuration',
   configurable: true,
   requiredMqtt: true,
   requiredHaWs: false,

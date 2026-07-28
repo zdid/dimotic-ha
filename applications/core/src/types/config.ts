@@ -85,6 +85,15 @@ export interface ApplicationModule {
   description: string;           // Description
   icon: string;                 // Icône (emoji)
   type: 'core' | 'integration' | 'standalone';
+  /**
+   * À qui l'application s'adresse — distinct de `type` (qui décrit le mécanisme technique).
+   * 'inspection' : consultation de ce qui est déjà configuré (ex: ArbreOuQuoi).
+   * 'configuration' : paramétrage technique de la maison, jamais destiné à un usage quotidien par
+   * toute la famille (ex: RFXCOM, EVOO7, AREXX, IA, gestion des applications).
+   * 'end-user' : usage quotidien par tous (ex: HAPLAN) — seule cette catégorie est candidate à une
+   * exposition externe (voir discussion architecture accès externe).
+   */
+  audience?: 'inspection' | 'configuration' | 'end-user';
   configurable: boolean;         // Peut être configuré via UI
   socketEvents?: Record<string, string>; // Événements Socket.io spécifiques
   requiredMqtt?: boolean;       // Nécessite MQTT

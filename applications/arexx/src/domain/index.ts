@@ -149,6 +149,7 @@ export const AREXX_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   menu: AREXX_MENU_CONFIG,
 
   type: 'integration',
+  audience: 'configuration',
   configurable: true,
   requiredMqtt: true,
   requiredHaWs: false,

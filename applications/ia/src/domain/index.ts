@@ -114,6 +114,7 @@ export const IA_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   menu: IA_MENU_CONFIG,
 
   type: 'standalone',
+  audience: 'configuration',
   configurable: true,
   requiredMqtt: false,
   requiredHaWs: true,

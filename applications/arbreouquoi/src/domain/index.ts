@@ -16,6 +16,7 @@ export const ARBREOUQUOI_APP: ApplicationModule = {
   description: 'Application de visualisation du référentiel Home Assistant organisé par Area → QUOI → Entités',
   icon: '🌳',
   type: 'standalone',
+  audience: 'inspection',
   configurable: true,
   requiredMqtt: false,
   requiredHaWs: true,

@@ -111,6 +111,7 @@ export const PLANIFICATEUR_APP: ApplicationModule & { menu?: ApplicationMenuConf
   menu: PLANIFICATEUR_MENU_CONFIG,
 
   type: 'standalone',
+  audience: 'configuration',
   configurable: true,
   requiredMqtt: false,
   requiredHaWs: true,
