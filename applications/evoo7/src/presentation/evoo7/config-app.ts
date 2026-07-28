@@ -44,6 +44,11 @@ interface Evoo7DataDefinition {
   payloadOff?: string;
 }
 
+interface Evoo7ThermostatConfig {
+  enabled: boolean;
+  allowCooling: boolean;
+}
+
 /** Classes HA courantes pour EVOO7 (chauffage) + unité par défaut associée (modifiable ensuite). */
 const DEVICE_CLASS_UNITS: Record<string, string> = {
   '': '',
@@ -68,6 +73,7 @@ const DEVICE_CLASS_LABELS: Record<string, string> = {
 
 let socket: any | null = null;
 let donnees: Evoo7DataDefinition[] = [];
+let thermostat: Evoo7ThermostatConfig = { enabled: false, allowCooling: false };
 
 /**
  * Dernier lieu de taxonomie saisi (lieu précis/lieu/père/grand-père) — préremplit les données pas
@@ -100,8 +106,10 @@ function init(): void {
 }
 
 function setupSocketListeners(): void {
-  socket.on('evoo7:donnees:list', (data: { donnees: Evoo7DataDefinition[] }) => {
+  socket.on('evoo7:donnees:list', (data: { donnees: Evoo7DataDefinition[]; thermostat: Evoo7ThermostatConfig }) => {
     donnees = data.donnees;
+    thermostat = data.thermostat;
+    renderThermostat();
     // Amorce le préremplissage depuis ce qui est déjà persisté (ex: rechargement de page après
     // une première donnée taxonomisée lors d'une session précédente) — seulement tant qu'aucune
     // saisie n'a encore eu lieu dans CETTE session (voir saveRow, qui prend le relais ensuite).
@@ -127,6 +135,10 @@ function setupSocketListeners(): void {
     if (response.success) showAlert(`Donnée "${response.id}" mise à jour`, 'success');
     // En cas d'échec, evoo7:error a déjà affiché le message détaillé — pas de double alerte.
   });
+
+  socket.on('evoo7:thermostat:save:response', (response: { success: boolean; error?: string }) => {
+    if (response.success) showAlert('Thermostat mis à jour', 'success');
+  });
 }
 
 // ============================================================================
@@ -134,6 +146,11 @@ function setupSocketListeners(): void {
 // ============================================================================
 
 function setupUiListeners(): void {
+  // Cases Thermostat : hors du tableau (pas de data-id/tr), sauvegarde immédiate à la coche —
+  // même pattern que RFXCOM (rfxcom:hardware-protocol:toggle), pas de bouton séparé.
+  document.getElementById('thermostat-enabled')?.addEventListener('change', () => saveThermostat());
+  document.getElementById('thermostat-allow-cooling')?.addEventListener('change', () => saveThermostat());
+
   // Délégation d'événements pour les éléments générés dynamiquement (table Données)
   document.addEventListener('change', (event) => {
     const target = event.target as HTMLElement;
@@ -272,6 +289,22 @@ function refreshEditableCells(row: Element, id: string): void {
   const deviceClassCell = row.querySelector('.device-class-cell');
   if (taxoCell) taxoCell.innerHTML = renderTaxonomyCell(d, published);
   if (deviceClassCell) deviceClassCell.innerHTML = renderDeviceClassCell(d, published);
+}
+
+function renderThermostat(): void {
+  const enabledCheckbox = document.getElementById('thermostat-enabled') as HTMLInputElement | null;
+  const allowCoolingCheckbox = document.getElementById('thermostat-allow-cooling') as HTMLInputElement | null;
+  if (enabledCheckbox) enabledCheckbox.checked = thermostat.enabled;
+  if (allowCoolingCheckbox) allowCoolingCheckbox.checked = thermostat.allowCooling;
+}
+
+function saveThermostat(): void {
+  const enabledCheckbox = document.getElementById('thermostat-enabled') as HTMLInputElement | null;
+  const allowCoolingCheckbox = document.getElementById('thermostat-allow-cooling') as HTMLInputElement | null;
+  socket.emit('evoo7:thermostat:save', {
+    enabled: enabledCheckbox?.checked ?? false,
+    allowCooling: allowCoolingCheckbox?.checked ?? false
+  });
 }
 
 function renderDonnees(): void {

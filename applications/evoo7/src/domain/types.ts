@@ -80,11 +80,21 @@ export interface Evoo7DataDefinition {
 }
 
 // ============================================================================
+// Entité `climate` composite (thermostat) — regroupe plusieurs données existantes
+// ============================================================================
+
+export interface Evoo7ThermostatConfig {
+  enabled: boolean;
+  allowCooling: boolean;
+}
+
+// ============================================================================
 // Fichier de configuration centralisé (config-evoo7-donnees-v1.0.yaml)
 // ============================================================================
 
 export interface Evoo7DonneesConfig {
   evoo7_donnees: Record<string, Evoo7DataDefinition>;
+  thermostat: Evoo7ThermostatConfig;
 }
 
 // ============================================================================

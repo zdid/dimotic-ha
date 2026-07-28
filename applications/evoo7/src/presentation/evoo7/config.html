@@ -67,6 +67,8 @@
     .alert-info { background: var(--color-surface); border: 1px solid var(--color-accent); color: var(--color-accent); }
 
     .hidden { display: none !important; }
+
+    .checkbox-group { display: flex; align-items: center; gap: 8px; }
   </style>
 </head>
 <body>
@@ -81,6 +83,24 @@
     <div class="alert alert-error" id="error-alert"></div>
 
     <div id="tab-donnees">
+      <div class="card">
+        <h3>Thermostat</h3>
+        <p style="color:var(--color-text-muted);font-size:0.9em;">
+          Regroupe plusieurs données existantes (température ambiante, consigne, mode, éco, circulateurs)
+          en une seule entité climate standard dans Home Assistant. Active automatiquement Consultation
+          (et Mise à jour si disponible) sur les données nécessaires — les décocher manuellement ensuite
+          n'est pas automatique.
+        </p>
+        <div class="checkbox-group" style="margin-bottom:8px;">
+          <input type="checkbox" id="thermostat-enabled">
+          <label for="thermostat-enabled" style="margin:0;cursor:pointer;">Activer le thermostat</label>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="thermostat-allow-cooling">
+          <label for="thermostat-allow-cooling" style="margin:0;cursor:pointer;">Autoriser le refroidissement</label>
+        </div>
+      </div>
+
       <div class="card">
         <p>Cocher "Consultation" pour recevoir la donnée. Cocher "Mise à jour" pour pouvoir la modifier depuis Home Assistant (uniquement si disponible sur EVOO7). Seules les données en Consultation et/ou Mise à jour font l'objet d'une découverte Home Assistant (et affichent les champs Taxonomie/Classe HA). Un seul bouton 💾 par ligne sauvegarde tous les champs modifiés (sélection, topic/format, taxonomie, classe HA).</p>
         <div class="table-scroll">

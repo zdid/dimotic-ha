@@ -11,13 +11,16 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/src/exports';
-import { createEvoo7Error } from '../../../core/src/exports';
+import { createEvoo7Error, getStateTopic, getCommandTopic } from '../../../core/src/exports';
 import { evoo7ConfigSchema, type Evoo7Config } from './config-schema';
 import type { Evoo7DonneesConfigFile } from './donnees-config-schema';
-import type { Evoo7DataDefinition, Evoo7Status } from './types';
+import type { Evoo7DataDefinition, Evoo7Status, Evoo7ThermostatConfig } from './types';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { Evoo7MqttClient } from './mqtt/Evoo7MqttClient';
-import { determineComponent, determineNumberStep, buildValueTemplate, buildCommandTemplate } from './classification';
+import {
+  determineComponent, determineNumberStep, buildValueTemplate, buildCommandTemplate,
+  buildModeStateTemplate, buildPresetModeStateTemplate
+} from './classification';
 import { resolveTaxonomy, buildAttributsTaxonomie } from './taxonomy';
 import { resolveTopic, resolveCommandMessage, extractSensorValue } from './evoo7-templates';
 
@@ -31,6 +34,21 @@ const EVOO7_DEVICE = {
   model: 'EVOO7 Control'
 };
 
+/**
+ * Entité `climate` composite (thermostat) — regroupe plusieurs données EVOO7 existantes sous une
+ * seule entité HA standard. deviceId fixe : un seul système EVOO7 dans ce déploiement.
+ */
+const THERMOSTAT_DEVICE_ID = 'thermostat';
+/** Les 7 données dont dépend le thermostat — forcées en consultation dès l'activation (voir handler evoo7:thermostat:save). */
+const THERMOSTAT_DEPENDENT_IDS = [
+  'temp_amb', 'consigne_normal', 'etat_fonctionnement',
+  'etat_circulateur_pc', 'etat_circulateur_radiateur', 'etat_eco', 'temp_ext'
+] as const;
+/** Parmi les données ci-dessus, celles dont un nouveau message doit redéclencher le calcul de `action`. */
+const THERMOSTAT_ACTION_TRIGGER_IDS = ['etat_circulateur_pc', 'etat_circulateur_radiateur', 'etat_fonctionnement', 'temp_ext'] as const;
+/** Taxonomie fixe de l'entité climate elle-même (pas une des 43 données individuelles). */
+const THERMOSTAT_TAXONOMY_SOURCE = { description: '', taxonomieQuoi: 'Thermostat', taxonomieLieu: 'Pompe à chaleur' };
+
 export interface IEvoo7Service {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -43,6 +61,10 @@ export class Evoo7Service implements IEvoo7Service {
   private donnees: Map<string, Evoo7DataDefinition> = new Map();
   /** topic MQTT résolu (avec $name$ substitué) → id de la donnée, pour router les messages entrants. */
   private topicToId: Map<string, string> = new Map();
+  private thermostat: Evoo7ThermostatConfig = { enabled: false, allowCooling: false };
+  /** Dernière valeur brute connue par donnée — nécessaire pour recalculer `action` du thermostat
+   *  quand une seule des données sources reçoit un nouveau message (les autres restent à relire). */
+  private lastRawValues: Map<string, string> = new Map();
 
   private configFileManager: ConfigFileManager;
   private evoo7Client: Evoo7MqttClient;
@@ -61,7 +83,7 @@ export class Evoo7Service implements IEvoo7Service {
       this.resolveSeedJsonPath(),
       this.logger
     );
-    this.donneesConfig = { evoo7_donnees: {} };
+    this.donneesConfig = { evoo7_donnees: {}, thermostat: { enabled: false, allowCooling: false } };
     this.evoo7Client = new Evoo7MqttClient(this.logger);
   }
 
@@ -95,6 +117,7 @@ export class Evoo7Service implements IEvoo7Service {
 
     this.donneesConfig = this.configFileManager.load();
     this.donnees = new Map(Object.entries(this.donneesConfig.evoo7_donnees));
+    this.thermostat = this.donneesConfig.thermostat;
 
     this.setupSocleEventListeners();
     this.setupSocketEventListeners();
@@ -232,6 +255,8 @@ export class Evoo7Service implements IEvoo7Service {
       return;
     }
 
+    this.lastRawValues.set(id, value);
+
     // Pas de traduction serveur pour les énumérations : le code brut est relayé tel quel, HA
     // traduit code→libellé côté affichage via value_template (voir classification.ts).
     // attributs_taxonomie porté ici (pas dans le message de découverte, ignoré par HA — voir
@@ -246,6 +271,10 @@ export class Evoo7Service implements IEvoo7Service {
       }
     });
 
+    if (this.thermostat.enabled && (THERMOSTAT_ACTION_TRIGGER_IDS as readonly string[]).includes(id)) {
+      this.publishThermostatState();
+    }
+
     this.lastMessageAt = new Date().toISOString();
   }
 
@@ -258,6 +287,10 @@ export class Evoo7Service implements IEvoo7Service {
       if (donnee.consultation || donnee.miseAJour) {
         this.publishDonneeDiscovery(donnee);
       }
+    }
+    if (this.thermostat.enabled) {
+      this.publishThermostatDiscovery();
+      this.publishThermostatState();
     }
   }
 
@@ -327,10 +360,123 @@ export class Evoo7Service implements IEvoo7Service {
   }
 
   // ==========================================================================
+  // Discovery — entité climate composite (thermostat)
+  // ==========================================================================
+
+  /**
+   * Publie la découverte `climate` du thermostat composite. Le socle n'autorise qu'un seul
+   * command_topic par entité (voir stateCommand.ts) — climate en a besoin de 3 (température,
+   * mode, preset) : les 3 pointent donc vers LE MÊME topic de commande (celui de cette entité),
+   * chacun avec son propre command_template qui enveloppe la valeur avec un discriminant `field`
+   * (voir handleThermostatCommand). Les topics d'état température/consigne/mode/preset réutilisent
+   * TELS QUELS les topics déjà publiés par les données sources (temp_amb/consigne_normal/
+   * etat_fonctionnement/etat_eco) — aucune republication dupliquée.
+   */
+  private publishThermostatDiscovery(): void {
+    const taxonomy = resolveTaxonomy(THERMOSTAT_TAXONOMY_SOURCE);
+    const bridge = this.config.bridgeInstance;
+    const commandTopic = getCommandTopic(MODULE_NAME, bridge, THERMOSTAT_DEVICE_ID);
+
+    const modes = this.thermostat.allowCooling ? ['off', 'heat', 'cool'] : ['off', 'heat'];
+
+    const extra: Record<string, unknown> = {
+      current_temperature_topic: getStateTopic(MODULE_NAME, bridge, 'temp_amb'),
+      current_temperature_template: '{{ value_json.state }}',
+
+      temperature_state_topic: getStateTopic(MODULE_NAME, bridge, 'consigne_normal'),
+      temperature_state_template: '{{ value_json.state }}',
+      temperature_command_topic: commandTopic,
+      temperature_command_template: '{"field":"temperature","value":{{ value }} }',
+      min_temp: 10,
+      max_temp: 30,
+      temp_step: 0.5,
+
+      modes,
+      mode_state_topic: getStateTopic(MODULE_NAME, bridge, 'etat_fonctionnement'),
+      mode_state_template: buildModeStateTemplate(),
+      mode_command_topic: commandTopic,
+      mode_command_template: '{"field":"mode","value":"{{ value }}"}',
+
+      preset_modes: ['eco'],
+      preset_mode_state_topic: getStateTopic(MODULE_NAME, bridge, 'etat_eco'),
+      preset_mode_value_template: buildPresetModeStateTemplate(),
+      preset_mode_command_topic: commandTopic,
+      preset_mode_command_template: '{"field":"preset_mode","value":"{{ value }}"}',
+
+      // action_topic réutilise le topic d'état par défaut de CETTE entité (calculé côté serveur,
+      // voir publishThermostatState) — buildDiscoveryPayload le fixe déjà à cette valeur pour
+      // state_topic/json_attributes_topic, on la reproduit ici pour action_topic.
+      action_topic: getStateTopic(MODULE_NAME, bridge, THERMOSTAT_DEVICE_ID),
+      action_template: '{{ value_json.state }}'
+    };
+
+    const essential: EssentialEntityData = {
+      name: taxonomy.rawQuoi,
+      commandEnabled: true,
+      device: EVOO7_DEVICE,
+      extra
+    };
+
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
+      bridgeInstance: bridge,
+      component: 'climate',
+      objectId: THERMOSTAT_DEVICE_ID,
+      deviceId: THERMOSTAT_DEVICE_ID,
+      essential
+    });
+  }
+
+  private removeThermostatDiscovery(): void {
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, {
+      bridgeInstance: this.config.bridgeInstance,
+      component: 'climate',
+      objectId: THERMOSTAT_DEVICE_ID
+    });
+  }
+
+  /**
+   * Calcule et publie `action` (état propre de l'entité climate) : `heating` si un des deux
+   * circulateurs (plancher chauffant ou radiateurs) est actif et le mode n'est pas `off`, `idle`
+   * si le mode est actif sans circulateur, `off` si le mode lui-même est `off`. Ignore si
+   * `etat_fonctionnement` n'a encore jamais été reçu (pas assez d'info pour un calcul sûr).
+   */
+  private publishThermostatState(): void {
+    const modeRaw = this.lastRawValues.get('etat_fonctionnement');
+    if (modeRaw === undefined) return;
+
+    const modeIsOff = !['1', 'on', 'Chauffage', '2', 'Refroidissement', 'Raffraichissement'].includes(modeRaw);
+    const circulateurPc = this.lastRawValues.get('etat_circulateur_pc');
+    const circulateurRadiateur = this.lastRawValues.get('etat_circulateur_radiateur');
+    const circulateurActif = circulateurPc === '1' || circulateurRadiateur === '1';
+
+    const action = modeIsOff ? 'off' : (circulateurActif ? 'heating' : 'idle');
+    const tempExt = this.lastRawValues.get('temp_ext');
+
+    const taxonomy = resolveTaxonomy(THERMOSTAT_TAXONOMY_SOURCE);
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
+      bridgeInstance: this.config.bridgeInstance,
+      deviceId: THERMOSTAT_DEVICE_ID,
+      state: {
+        state: action,
+        attributes: {
+          evoo7_id: THERMOSTAT_DEVICE_ID,
+          temp_ext: tempExt,
+          attributs_taxonomie: buildAttributsTaxonomie(taxonomy)
+        }
+      }
+    });
+  }
+
+  // ==========================================================================
   // Commandes HA → EVOO7
   // ==========================================================================
 
   private handleHaCommand(deviceId: string, payload: Record<string, unknown>): void {
+    if (deviceId === THERMOSTAT_DEVICE_ID) {
+      this.handleThermostatCommand(payload);
+      return;
+    }
+
     const donnee = this.donnees.get(deviceId);
     if (!donnee) {
       this.logger.warn('Evoo7Service', `Commande reçue pour une donnée inconnue: ${deviceId}`);
@@ -363,15 +509,69 @@ export class Evoo7Service implements IEvoo7Service {
       return;
     }
 
-    const message = resolveCommandMessage(this.config.formatMessageCommand, donnee.id, String(value));
+    this.sendEvoo7Command(donnee, String(value));
+  }
+
+  /**
+   * Commande reçue sur le topic partagé de l'entité climate composite (thermostat) — voir
+   * publishThermostatDiscovery, les 3 command_template envoient toujours `{field, value}` sur le
+   * MÊME topic. Traduit vers le code EVOO7 attendu et route vers la donnée réelle correspondante.
+   * ⚠️ Contourne DÉLIBÉRÉMENT la restriction "énumération = toujours lecture seule"
+   * (determineComponent) pour etat_fonctionnement/etat_eco : ce chemin est le seul point d'entrée
+   * qui écrit ces deux données, avec les codes documentés (jamais vérifiés fiables en conditions
+   * réelles pour la commande — voir classification.ts et le TODO). Les entités individuelles
+   * etat_fonctionnement/etat_eco restent, elles, en lecture seule comme avant.
+   */
+  private handleThermostatCommand(payload: Record<string, unknown>): void {
+    const field = payload.field;
+    const value = payload.value;
+    if (value === undefined || value === null) {
+      this.logger.warn('Evoo7Service', `Commande thermostat sans "value": ${JSON.stringify(payload)}`);
+      return;
+    }
+
+    if (field === 'temperature') {
+      const donnee = this.donnees.get('consigne_normal');
+      if (!donnee) return;
+      this.sendEvoo7Command(donnee, String(value));
+      return;
+    }
+
+    if (field === 'mode') {
+      const donnee = this.donnees.get('etat_fonctionnement');
+      if (!donnee) return;
+      const code = value === 'off' ? '0' : value === 'heat' ? '1' : value === 'cool' ? '2' : undefined;
+      if (code === undefined) {
+        this.logger.warn('Evoo7Service', `Mode thermostat inconnu: ${JSON.stringify(value)}`);
+        return;
+      }
+      this.sendEvoo7Command(donnee, code);
+      return;
+    }
+
+    if (field === 'preset_mode') {
+      const donnee = this.donnees.get('etat_eco');
+      if (!donnee) return;
+      const code = value === 'eco' ? '0' : '1';
+      this.sendEvoo7Command(donnee, code);
+      return;
+    }
+
+    this.logger.warn('Evoo7Service', `Champ de commande thermostat inconnu: ${JSON.stringify(field)}`);
+  }
+
+  /** Construit et envoie le message de commande EVOO7 (topic/format globaux, partagés par toutes
+   *  les données — désambiguïsé par "num" dans le payload, voir config-schema.ts). */
+  private sendEvoo7Command(donnee: Evoo7DataDefinition, rawValue: string): void {
+    const message = resolveCommandMessage(this.config.formatMessageCommand, donnee.id, rawValue);
 
     try {
       this.evoo7Client.publish(this.config.topicCommand, message, this.config.mqtt.qos as 0 | 1 | 2);
     } catch (error) {
       const errMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error('Evoo7Service', `Échec d'envoi de la commande EVOO7 pour ${deviceId}: ${errMessage}`);
+      this.logger.error('Evoo7Service', `Échec d'envoi de la commande EVOO7 pour ${donnee.id}: ${errMessage}`);
       this.eventBus.emitGeneric('evoo7:error',
-        createEvoo7Error('EVOO7_COMMAND_FAILED', errMessage, 'evoo7:command', { deviceId }));
+        createEvoo7Error('EVOO7_COMMAND_FAILED', errMessage, 'evoo7:command', { deviceId: donnee.id }));
     }
   }
 
@@ -401,7 +601,10 @@ export class Evoo7Service implements IEvoo7Service {
   }
 
   private emitDonneesList(): void {
-    this.eventBus.emitGeneric('evoo7:donnees:list', { donnees: Array.from(this.donnees.values()) });
+    this.eventBus.emitGeneric('evoo7:donnees:list', {
+      donnees: Array.from(this.donnees.values()),
+      thermostat: this.thermostat
+    });
   }
 
   // ==========================================================================
@@ -495,6 +698,53 @@ export class Evoo7Service implements IEvoo7Service {
       this.eventBus.emitGeneric('evoo7:donnee:save:response', { id: data.id, success: true });
       this.emitDonneesList();
     });
+
+    this.eventBus.onGeneric<{ enabled: boolean; allowCooling: boolean }>('evoo7:thermostat:save', (data) => {
+      const previousThermostat = { ...this.thermostat };
+      const previousDonnees = new Map(Array.from(this.donnees.entries()).map(([id, d]) => [id, { ...d }]));
+
+      this.thermostat = { enabled: data.enabled, allowCooling: data.allowCooling };
+
+      // Activation : force la sélection des données dont dépend le thermostat — jamais l'inverse
+      // (désactiver le thermostat ne décoche rien automatiquement, voir plan).
+      if (this.thermostat.enabled) {
+        for (const id of THERMOSTAT_DEPENDENT_IDS) {
+          const donnee = this.donnees.get(id);
+          if (!donnee) continue;
+          const wasSelected = donnee.consultation || donnee.miseAJour;
+          if (!donnee.consultation) {
+            donnee.consultation = true;
+            const topic = resolveTopic(donnee.topicSensor, donnee.id);
+            this.topicToId.set(topic, donnee.id);
+            this.evoo7Client.subscribeTopic(topic, this.config.mqtt.qos as 0 | 1 | 2);
+          }
+          if (donnee.updatable) donnee.miseAJour = true;
+          if (!wasSelected) this.publishDonneeDiscovery(donnee);
+        }
+      }
+
+      const result = this.persistDonneesConfig();
+
+      if (!result.success) {
+        this.thermostat = previousThermostat;
+        this.donnees = previousDonnees;
+        this.eventBus.emitGeneric('evoo7:error',
+          createEvoo7Error('EVOO7_SAVE_FAILED', `Échec de sauvegarde: ${result.error}`, 'evoo7:thermostat'));
+        this.eventBus.emitGeneric('evoo7:thermostat:save:response', { success: false, error: result.error });
+        this.emitDonneesList();
+        return;
+      }
+
+      if (this.thermostat.enabled) {
+        this.publishThermostatDiscovery();
+        this.publishThermostatState();
+      } else {
+        this.removeThermostatDiscovery();
+      }
+
+      this.eventBus.emitGeneric('evoo7:thermostat:save:response', { success: true });
+      this.emitDonneesList();
+    });
   }
 
   private emitDonneeError(deviceId: string, message: string, code: 'EVOO7_UNKNOWN_DATA' | 'EVOO7_SAVE_FAILED' = 'EVOO7_SAVE_FAILED'): void {
@@ -510,7 +760,8 @@ export class Evoo7Service implements IEvoo7Service {
    */
   private persistDonneesConfig(): { success: boolean; error?: string } {
     const result = this.configFileManager.save({
-      evoo7_donnees: Object.fromEntries(this.donnees)
+      evoo7_donnees: Object.fromEntries(this.donnees),
+      thermostat: this.thermostat
     });
     if (!result.success) {
       this.logger.error('Evoo7Service', `Échec de sauvegarde de la configuration EVOO7: ${result.error}`);

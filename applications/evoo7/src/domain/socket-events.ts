@@ -21,6 +21,9 @@ export const EVOO7_SOCKET_EVENTS = {
   // côté client, voir TODO.md "EVOO7 : formulaire générique... confirmation de sauvegarde".
   DONNEE_SAVE_RESPONSE: 'evoo7:donnee:save:response',
 
+  // --- Thermostat (entité climate composite) ---
+  THERMOSTAT_SAVE_RESPONSE: 'evoo7:thermostat:save:response',
+
   // --- Erreurs ---
   ERROR: 'evoo7:error'
 } as const;
@@ -37,7 +40,10 @@ export const EVOO7_CLIENT_EVENTS = {
   // --- Données ---
   // Un seul événement de sauvegarde par ligne (sélection + topic/format + taxonomie + classe HA)
   // — voir TODO.md "un seul bouton de sauvegarde par ligne".
-  DONNEE_SAVE: 'evoo7:donnee:save'
+  DONNEE_SAVE: 'evoo7:donnee:save',
+
+  // --- Thermostat (entité climate composite) ---
+  THERMOSTAT_SAVE: 'evoo7:thermostat:save'
 } as const;
 
 // ============================================================================

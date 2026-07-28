@@ -55,5 +55,5 @@ export function seedFromJsonFile(jsonPath: string): Evoo7DonneesConfig {
     };
   }
 
-  return { evoo7_donnees };
+  return { evoo7_donnees, thermostat: { enabled: false, allowCooling: false } };
 }

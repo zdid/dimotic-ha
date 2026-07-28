@@ -39,9 +39,16 @@ export const evoo7DataDefinitionSchema = z.object({
   payloadOff: z.string().optional()
 });
 
+/** Entité `climate` composite (thermostat) — regroupe plusieurs données EVOO7 existantes. */
+export const evoo7ThermostatConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  allowCooling: z.boolean().default(false)
+});
+
 export const evoo7DonneesConfigSchema = z
   .object({
-    evoo7_donnees: z.record(evoo7DataDefinitionSchema).default({})
+    evoo7_donnees: z.record(evoo7DataDefinitionSchema).default({}),
+    thermostat: evoo7ThermostatConfigSchema.default({ enabled: false, allowCooling: false })
   })
   .refine(
     (config) => {
@@ -52,8 +59,10 @@ export const evoo7DonneesConfigSchema = z
   );
 
 export type Evoo7DataDefinitionEntry = z.infer<typeof evoo7DataDefinitionSchema>;
+export type Evoo7ThermostatConfigEntry = z.infer<typeof evoo7ThermostatConfigSchema>;
 export type Evoo7DonneesConfigFile = z.infer<typeof evoo7DonneesConfigSchema>;
 
 export const DEFAULT_DONNEES_CONFIG: Evoo7DonneesConfigFile = {
-  evoo7_donnees: {}
+  evoo7_donnees: {},
+  thermostat: { enabled: false, allowCooling: false }
 };

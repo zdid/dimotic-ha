@@ -74,6 +74,31 @@ export function buildCommandTemplate(component: Evoo7Component): string {
   return '{"value": "{{ value }}"}';
 }
 
+/**
+ * value_template Jinja pour `mode_state_topic` de l'entité climate composite (thermostat),
+ * dérivé de `etat_fonctionnement`. Tolère volontairement DEUX encodages : les codes documentés
+ * (0/1/2 = Arrêt/Chauffage/Refroidissement) ET l'encodage réellement observé aujourd'hui sur le
+ * fil (un script externe côté utilisateur simplifie temporairement en "on"/"off" — voir la note
+ * en tête de fichier). Repli sûr sur `off` pour toute valeur non reconnue.
+ */
+export function buildModeStateTemplate(): string {
+  return (
+    "{% set v = value_json.state %}" +
+    "{% if v in ['1','on','Chauffage'] %}heat" +
+    "{% elif v in ['2','Refroidissement','Raffraichissement'] %}cool" +
+    "{% else %}off{% endif %}"
+  );
+}
+
+/**
+ * value_template Jinja pour `preset_mode_state_topic` de l'entité climate composite, dérivé de
+ * `etat_eco` (0=Active/1=Inactive documenté, jamais vérifié fiable — même prudence que ci-dessus).
+ * `''` (chaîne vide) = pas de preset actif, seule valeur valide pour "pas eco" côté HA.
+ */
+export function buildPresetModeStateTemplate(): string {
+  return "{% set v = value_json.state %}{% if v in ['0','on','Active'] %}eco{% else %}{% endif %}";
+}
+
 /** Table libellé→code — informatif pour l'UI (affichage de la table de correspondance documentée). */
 export function buildLabelToCodeMap(donnee: Evoo7DataDefinition): Record<string, string> {
   const map: Record<string, string> = {};
