@@ -182,7 +182,7 @@ export function getDiscoveryTopic(component: string, objectId: string): string {
  * `deviceId` est un identifiant opaque au socle, dont l'encodage est propre à chaque module.
  */
 export function getStateTopic(moduleName: string, bridgeInstance: string, deviceId: string): string {
-  return `/${moduleName}/${bridgeInstance}/${deviceId}/state`;
+  return `${moduleName}/${bridgeInstance}/${deviceId}/state`;
 }
 
 /**
@@ -190,7 +190,7 @@ export function getStateTopic(moduleName: string, bridgeInstance: string, device
  * Conforme à techniques-socle-ha-mqtt_specs v4.9 §8.5.4.
  */
 export function getCommandTopic(moduleName: string, bridgeInstance: string, deviceId: string): string {
-  return `/${moduleName}/${bridgeInstance}/${deviceId}/set`;
+  return `${moduleName}/${bridgeInstance}/${deviceId}/set`;
 }
 
 /**
@@ -200,7 +200,7 @@ export function getCommandTopic(moduleName: string, bridgeInstance: string, devi
  * source tierce relayée, son format n'est pas sous notre contrôle).
  */
 export function getAttributesTopic(moduleName: string, bridgeInstance: string, deviceId: string): string {
-  return `/${moduleName}/${bridgeInstance}/${deviceId}/attributes`;
+  return `${moduleName}/${bridgeInstance}/${deviceId}/attributes`;
 }
 
 /**
@@ -208,7 +208,7 @@ export function getAttributesTopic(moduleName: string, bridgeInstance: string, d
  * Un LWT par bridge_instance (pas par module) : voir techniques-socle-ha-mqtt_specs v4.9 §8.5.1.
  */
 export function getBridgeStatusTopic(moduleName: string, bridgeInstance: string): string {
-  return `/${moduleName}/${bridgeInstance}/status`;
+  return `${moduleName}/${bridgeInstance}/status`;
 }
 
 /**

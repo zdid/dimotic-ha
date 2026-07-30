@@ -14,7 +14,7 @@ describe('publishState', () => {
     publishState(transport, 'rfxcom', 'rfx_bridge_0001', 'rfxsensor_ac__0xa5b3', { state: '22.5' });
 
     expect(publishSpy).toHaveBeenCalledWith(
-      '/rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/state',
+      'rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/state',
       JSON.stringify({ state: '22.5' }),
       1,
       true
@@ -29,14 +29,14 @@ describe('subscribeCommands', () => {
 
     subscribeCommands(transport, 'rfxcom', 'rfx_bridge_0001', 'rfxsensor_ac__0xa5b3');
 
-    expect(subscribeSpy).toHaveBeenCalledWith('/rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/set', 1);
+    expect(subscribeSpy).toHaveBeenCalledWith('rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/set', 1);
   });
 });
 
 describe('parseIncomingCommand', () => {
   it('parse un topic de commande valide (payload string)', () => {
     const message: MqttMessage = {
-      topic: '/rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/set',
+      topic: 'rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/set',
       payload: JSON.stringify({ state: 'on' }),
       qos: 1,
       retain: false,
@@ -52,7 +52,7 @@ describe('parseIncomingCommand', () => {
 
   it('parse un topic de commande valide (payload Buffer)', () => {
     const message: MqttMessage = {
-      topic: '/rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/set',
+      topic: 'rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/set',
       payload: Buffer.from(JSON.stringify({ state: 'off' })),
       qos: 1,
       retain: false,
@@ -68,7 +68,7 @@ describe('parseIncomingCommand', () => {
 
   it("retourne null si le topic n'a pas 4 segments", () => {
     const message: MqttMessage = {
-      topic: '/rfxcom/rfx_bridge_0001/set',
+      topic: 'rfxcom/rfx_bridge_0001/set',
       payload: '{}',
       qos: 1,
       retain: false,
@@ -79,7 +79,7 @@ describe('parseIncomingCommand', () => {
 
   it("retourne null si le dernier segment n'est pas 'set'", () => {
     const message: MqttMessage = {
-      topic: '/rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/state',
+      topic: 'rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/state',
       payload: '{}',
       qos: 1,
       retain: false,
@@ -90,7 +90,7 @@ describe('parseIncomingCommand', () => {
 
   it('retourne null si le payload JSON est invalide', () => {
     const message: MqttMessage = {
-      topic: '/rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/set',
+      topic: 'rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/set',
       payload: 'not json',
       qos: 1,
       retain: false,

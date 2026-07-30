@@ -26,7 +26,7 @@ describe('buildDiscoveryPayload', () => {
 
     expect(entity.name).toBe('Température Salon');
     expect(entity.unique_id).toBe('rfxsensor_0xa5b3');
-    expect(entity.state_topic).toBe('/rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/state');
+    expect(entity.state_topic).toBe('rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/state');
     expect(entity.device_class).toBe('temperature');
     expect(entity.unit_of_measurement).toBe('°C');
     expect(entity.command_topic).toBeUndefined();
@@ -37,7 +37,7 @@ describe('buildDiscoveryPayload', () => {
   it('ajoute command_topic uniquement si commandEnabled est vrai', () => {
     const entity = buildDiscoveryPayload({ name: 'Prise Salon', commandEnabled: true }, createContext());
 
-    expect(entity.command_topic).toBe('/rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/set');
+    expect(entity.command_topic).toBe('rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/set');
   });
 });
 

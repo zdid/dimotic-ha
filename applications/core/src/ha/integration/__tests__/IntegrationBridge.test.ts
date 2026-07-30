@@ -165,8 +165,8 @@ describe('IntegrationBridge', () => {
       expect(mockTransportInstances).toHaveLength(2);
       expect(mockTransportInstances[0].config.clientId).toBe('rfxcom-rfx_bridge_0001');
       expect(mockTransportInstances[1].config.clientId).toBe('rfxcom-rfx_bridge_0002');
-      expect(mockTransportInstances[0].config.willTopic).toBe('/rfxcom/rfx_bridge_0001/status');
-      expect(mockTransportInstances[1].config.willTopic).toBe('/rfxcom/rfx_bridge_0002/status');
+      expect(mockTransportInstances[0].config.willTopic).toBe('rfxcom/rfx_bridge_0001/status');
+      expect(mockTransportInstances[1].config.willTopic).toBe('rfxcom/rfx_bridge_0002/status');
     });
 
     it('désenregistrer un bridge le déconnecte', () => {
@@ -255,7 +255,7 @@ describe('IntegrationBridge', () => {
 
       expect(mockTransportInstances[0].publishSpy).toHaveBeenCalledWith(
         'homeassistant/sensor/rfxsensor_0xa5b3/config',
-        expect.stringContaining('"state_topic":"/rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/state"'),
+        expect.stringContaining('"state_topic":"rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/state"'),
         1,
         true
       );
@@ -269,7 +269,7 @@ describe('IntegrationBridge', () => {
       });
 
       expect(mockTransportInstances[0].publishSpy).toHaveBeenCalledWith(
-        '/rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/state',
+        'rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/state',
         JSON.stringify({ state: '22.5' }),
         1,
         true
@@ -348,7 +348,7 @@ describe('IntegrationBridge', () => {
       eventBus.onGeneric('integration:rfxcom:command', (data) => received.push(data));
 
       mockTransportInstances[0].simulateIncomingMessage(
-        '/rfxcom/rfx_bridge_0001/device1/set',
+        'rfxcom/rfx_bridge_0001/device1/set',
         JSON.stringify({ state: 'on' })
       );
 
