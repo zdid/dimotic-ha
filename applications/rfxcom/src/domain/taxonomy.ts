@@ -63,6 +63,20 @@ export function buildDisplayName(t: ExtractedTaxonomy): string {
   return capitalize(label);
 }
 
+/**
+ * Nom de device pour un "bouton" (émetteur physique RFXCOM — Lighting1/2/4/5/6, Blinds1 — voir
+ * getDefaultComponent : tout sauf RFXSensor/RFXMeter). Contrairement à buildDisplayName (lieu
+ * précis seul, area déjà donnée par HA), on garde ici "quoi + lieu précis + lieu" en toutes
+ * lettres — un bouton porte le même lieu précis que la lumière qu'il pilote (ex: "Plafonnier"),
+ * les deux deviendraient indistinguables par leur seul nom sans le quoi ("Bouton") en préfixe.
+ */
+export function buildBoutonDisplayName(t: ExtractedTaxonomy): string {
+  const parts = [t.rawQuoi];
+  if (t.nomPrecis) parts.push(t.nomPrecis);
+  if (t.nomLieu && t.nomLieu !== t.nomPrecis) parts.push(t.nomLieu);
+  return parts.map(capitalize).join(' ');
+}
+
 export function capitalize(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return '';

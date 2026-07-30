@@ -23,7 +23,7 @@ import { RfxComTransceiver } from './transceiver/RfxComTransceiver';
 import { detectRfxComPort } from './transceiver/PortDetector';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { getDefaultComponent, getDefaultUnit, buildStateDeviceId } from './classification';
-import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName } from './taxonomy';
+import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName, buildBoutonDisplayName } from './taxonomy';
 
 const MODULE_NAME = 'rfxcom';
 
@@ -313,6 +313,12 @@ export class RfxComService implements IRfxComService {
     const taxonomy = extractTaxonomy(device.name);
     const { component, deviceClass } = getDefaultComponent(device.type, device.subType);
     const deviceId = buildStateDeviceId(device.protocole, device.subType, device.sensorId, device.unitCode);
+    // "Bouton" = émetteur physique (Lighting1/2/4/5/6, Blinds1 — tout sauf RFXSensor/RFXMeter,
+    // voir getDefaultComponent) : partage le même lieu précis que la lumière/récepteur qu'il
+    // pilote (ex: "Plafonnier"), les deux deviendraient indistinguables par leur nom seul sans
+    // le quoi en préfixe. Aussi classé "diagnostic" (extra) : utile pour un automatisme éventuel,
+    // pas pour un usage quotidien — a priori non visible dans le tableau de bord par défaut.
+    const isBouton = device.type !== 'RFXSensor' && device.type !== 'RFXMeter';
 
     const essential: EssentialEntityData = {
       name: taxonomy.rawQuoi,
@@ -327,14 +333,15 @@ export class RfxComService implements IRfxComService {
       device: {
         identifiers: [device.uniqueId],
         // Nom court (lieu précis) plutôt que la chaîne de taxonomie brute complète — l'area
-        // (suggested_area) donne déjà le lieu. Voir ReceiverLight.ts::buildDisplayName. Reste
-        // distinctif entre devices d'un même protocole (ex: tous les "Bouton" Lighting2/AC)
-        // puisque chaque device a son propre identifiant et son propre lieu précis/quoi.
-        name: buildDisplayName(taxonomy),
+        // (suggested_area) donne déjà le lieu. Voir ReceiverLight.ts::buildDisplayName. Les
+        // "boutons" gardent le quoi + lieu en toutes lettres (buildBoutonDisplayName) pour rester
+        // distinctifs du récepteur qu'ils pilotent, qui partage souvent le même lieu précis.
+        name: isBouton ? buildBoutonDisplayName(taxonomy) : buildDisplayName(taxonomy),
         manufacturer: 'RFXCOM',
         model: device.protocole.toUpperCase(),
         suggested_area: taxonomy.nomLieu ?? undefined
-      }
+      },
+      extra: isBouton ? { entity_category: 'diagnostic' } : undefined
       // attributs_taxonomie n'est plus ici : un message de découverte HA est validé contre un
       // schéma strict par plateforme, les clés non reconnues sont ignorées en silence — porté
       // par l'état à la place (publishDeviceState), via json_attributes_topic.
