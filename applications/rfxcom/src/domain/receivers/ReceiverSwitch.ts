@@ -53,6 +53,8 @@ export class ReceiverSwitch implements IReceiverModule {
         commandEnabled: true,
         payloadOn: 'ON',
         payloadOff: 'OFF',
+        // Voir ReceiverLight.ts : sans ça, state_topic (JSON) ne matche jamais payload_on/off brut.
+        valueTemplate: '{{ value_json.state }}',
         device: {
           identifiers: [this.config.receiverId],
           // Nom court (lieu précis) — voir ReceiverLight.ts::buildDisplayName pour le pourquoi.

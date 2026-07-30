@@ -64,12 +64,19 @@ export function parseIncomingCommand(message: MqttMessage): ParsedIncomingComman
   const bridgeInstance = segments[1] as string;
   const deviceId = segments[2] as string;
 
+  const payloadString: string = Buffer.isBuffer(message.payload) ? message.payload.toString() : message.payload;
+
+  // Schéma MQTT light/switch/cover "par défaut" de HA (aucun command_template déclaré en
+  // découverte) : le command_topic reçoit le payload BRUT ("ON"/"OFF"/"OPEN"/"CLOSE"/"STOP"),
+  // pas du JSON — vérifié en conditions réelles (2026-07-30), commande visible sur le broker
+  // mais jamais traitée (JSON.parse jetait silencieusement, ni log ni état en retour). On
+  // retombe sur { state: <payload brut> } pour rester compatible avec parseHaCommandPayload
+  // (RfxComService), qui attend déjà `payload.state`.
   let command: Record<string, unknown>;
   try {
-    const payloadString: string = Buffer.isBuffer(message.payload) ? message.payload.toString() : message.payload;
     command = JSON.parse(payloadString);
   } catch {
-    return null;
+    command = { state: payloadString.trim() };
   }
 
   return { moduleName, bridgeInstance, deviceId, command };

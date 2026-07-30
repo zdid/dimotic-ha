@@ -89,6 +89,10 @@ export class ReceiverLight implements IReceiverModule {
         commandEnabled: true,
         payloadOn: 'ON',
         payloadOff: 'OFF',
+        // Sans value_template, HA compare le state_topic brut à payload_on/payload_off — or on y
+        // publie du JSON ({state, attributes}), jamais égal à "ON"/"OFF" telle quelle. Manquant
+        // depuis l'origine, découvert en même temps que le bug de parsing des commandes ci-dessus.
+        valueTemplate: '{{ value_json.state }}',
         device: {
           identifiers: [this.config.receiverId],
           // Nom court (lieu précis, ex: "Plafonnier") plutôt que la chaîne de taxonomie brute

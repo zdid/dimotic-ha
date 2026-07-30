@@ -134,6 +134,8 @@ export class ReceiverCover implements IReceiverModule {
       essential: {
         name: taxonomy.rawQuoi,
         commandEnabled: true,
+        // Voir ReceiverLight.ts : sans ça, state_topic (JSON) n'est jamais reconnu par HA.
+        valueTemplate: '{{ value_json.state }}',
         device: {
           identifiers: [this.config.receiverId],
           // Nom court (lieu précis) — voir ReceiverLight.ts::buildDisplayName pour le pourquoi.
