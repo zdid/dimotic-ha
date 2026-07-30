@@ -50,6 +50,25 @@ export function extractTaxonomy(fullName: string): ExtractedTaxonomy {
   };
 }
 
+/**
+ * Construit un nom de device HA court et lisible, à la place de l'ancienne chaîne de taxonomie
+ * brute complète (ex: "lumière---plafonnier--cuisine--rez-de-chaussée--maison") — devenue
+ * redondante avec l'area HA (device.suggested_area/AreaEnsureService, qui donne déjà le lieu).
+ * Priorité au lieu précis (ex: "Plafonnier") ; repli sur le quoi (ex: "Lumière") si le récepteur
+ * n'a pas de lieu précis distinct du lieu lui-même (lieu_precis == lieu, ex: juste "cuisine"),
+ * pour éviter d'afficher deux fois le même mot que l'area. Capitalisé comme les areas (§8.5.4 v4.18).
+ */
+export function buildDisplayName(t: ExtractedTaxonomy): string {
+  const label = t.nomPrecis && t.nomPrecis !== t.nomLieu ? t.nomPrecis : t.rawQuoi;
+  return capitalize(label);
+}
+
+export function capitalize(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
 /** Construit le bloc `attributs_taxonomie` obligatoire du payload de découverte (fonctionnelles-rfxcom_specs §2.6). */
 export function buildAttributsTaxonomie(t: ExtractedTaxonomy): Record<string, string | null> {
   return {

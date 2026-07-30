@@ -9,7 +9,7 @@
 import type { EssentialEntityData, HaMqttStateMessage } from '../../../../core/src/exports';
 import type { EmitterAction, ReceiverLightConfig } from '../types';
 import type { IReceiverModule, ReceiverCommandResult } from './BaseReceiver';
-import { extractTaxonomy, buildAttributsTaxonomie } from '../taxonomy';
+import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName } from '../taxonomy';
 
 export class ReceiverLight implements IReceiverModule {
   private on: boolean;
@@ -91,10 +91,11 @@ export class ReceiverLight implements IReceiverModule {
         payloadOff: 'OFF',
         device: {
           identifiers: [this.config.receiverId],
-          // Nom complet (norme quoi---lieu du projet) — taxonomy.rawQuoi seul donnait le même
-          // nom de device à tous les récepteurs partageant un "quoi" (ex: tous les "lampadaire"),
-          // impossibles à distinguer dans HA.
-          name: this.config.name,
+          // Nom court (lieu précis, ex: "Plafonnier") plutôt que la chaîne de taxonomie brute
+          // complète — l'area (suggested_area ci-dessous) donne déjà le lieu, plus besoin de le
+          // répéter dans le nom. buildDisplayName retombe sur le quoi si pas de lieu précis
+          // distinct de l'area (évite une redondance style "Cuisine" dans l'area "Cuisine").
+          name: buildDisplayName(taxonomy),
           manufacturer: 'RFXCOM',
           model: this.config.isDimmable ? 'ReceiverLight (variateur)' : 'ReceiverLight',
           suggested_area: taxonomy.nomLieu ?? undefined

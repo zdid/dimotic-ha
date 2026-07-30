@@ -5,7 +5,7 @@
 import type { EssentialEntityData, HaMqttStateMessage } from '../../../../core/src/exports';
 import type { EmitterAction, ReceiverSwitchConfig } from '../types';
 import type { IReceiverModule, ReceiverCommandResult } from './BaseReceiver';
-import { extractTaxonomy, buildAttributsTaxonomie } from '../taxonomy';
+import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName } from '../taxonomy';
 
 export class ReceiverSwitch implements IReceiverModule {
   private on: boolean;
@@ -55,8 +55,8 @@ export class ReceiverSwitch implements IReceiverModule {
         payloadOff: 'OFF',
         device: {
           identifiers: [this.config.receiverId],
-          // Nom complet (norme quoi---lieu du projet) — voir ReceiverLight.ts pour le pourquoi.
-          name: this.config.name,
+          // Nom court (lieu précis) — voir ReceiverLight.ts::buildDisplayName pour le pourquoi.
+          name: buildDisplayName(taxonomy),
           manufacturer: 'RFXCOM',
           model: 'ReceiverSwitch',
           suggested_area: taxonomy.nomLieu ?? undefined

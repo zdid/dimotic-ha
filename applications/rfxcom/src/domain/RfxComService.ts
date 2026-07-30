@@ -23,7 +23,7 @@ import { RfxComTransceiver } from './transceiver/RfxComTransceiver';
 import { detectRfxComPort } from './transceiver/PortDetector';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { getDefaultComponent, getDefaultUnit, buildStateDeviceId } from './classification';
-import { extractTaxonomy, buildAttributsTaxonomie } from './taxonomy';
+import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName } from './taxonomy';
 
 const MODULE_NAME = 'rfxcom';
 
@@ -326,10 +326,11 @@ export class RfxComService implements IRfxComService {
       valueTemplate: '{{ value_json.state }}',
       device: {
         identifiers: [device.uniqueId],
-        // Nom complet selon la norme du projet (quoi---lieu_precis--lieu--pere--grand_pere), pas
-        // un libellé générique par protocole — sinon tous les devices Lighting2/AC par exemple
-        // affichaient le même nom "RFXCOM Lighting2 AC" dans HA, impossibles à distinguer.
-        name: device.name,
+        // Nom court (lieu précis) plutôt que la chaîne de taxonomie brute complète — l'area
+        // (suggested_area) donne déjà le lieu. Voir ReceiverLight.ts::buildDisplayName. Reste
+        // distinctif entre devices d'un même protocole (ex: tous les "Bouton" Lighting2/AC)
+        // puisque chaque device a son propre identifiant et son propre lieu précis/quoi.
+        name: buildDisplayName(taxonomy),
         manufacturer: 'RFXCOM',
         model: device.protocole.toUpperCase(),
         suggested_area: taxonomy.nomLieu ?? undefined
@@ -512,9 +513,10 @@ export class RfxComService implements IRfxComService {
       commandEnabled: true,
       device: {
         identifiers: [`rfxcom_scene_${scene.receiverId}`],
-        // Nom complet de la scène (norme quoi---lieu du projet), pas un libellé générique — même
-        // correctif que publishDeviceDiscovery ci-dessus.
-        name: scene.name,
+        // Nom court — voir ReceiverLight.ts::buildDisplayName. Les scènes n'ont généralement pas
+        // de lieu précis distinct du lieu (juste "scène---étage" par ex.) : repli sur "Scène",
+        // distinguées par leur area (suggested_area) plutôt que par leur nom.
+        name: buildDisplayName(taxonomy),
         manufacturer: 'RFXCOM',
         model: 'Scene',
         suggested_area: taxonomy.nomLieu ?? undefined
