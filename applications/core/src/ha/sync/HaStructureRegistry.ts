@@ -759,6 +759,14 @@ export class HaStructureRegistry {
   }
 
   /**
+   * Récupère toutes les areas connues — utilisé par AreaEnsureService pour rechercher une area
+   * par nom (dédoublonnage), aucune recherche par nom n'existant côté HA WS.
+   */
+  getAllAreas(): HaArea[] {
+    return Array.from(this.areas.values());
+  }
+
+  /**
    * Récupère toutes les devices.
    */
   getDevices(): Map<string, HaDevice> {

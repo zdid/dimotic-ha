@@ -222,6 +222,19 @@ class ApplicationBootstrap {
       this.integrationBridge = new bridgeModule.IntegrationBridge(this.eventBus, this.logger, this.configService);
       this.integrationBridge.initialize();
       this.logger.info('Bootstrap', 'IntegrationBridge initialisé');
+
+      // AreaEnsureService : optionnel, seulement si Mode A (WS) est disponible — garantit les
+      // areas suggérées par les découvertes MQTT (device.suggested_area), voir AreaEnsureService.
+      if (this.haWsClient && this.haStructureRegistry) {
+        const areaEnsureModule = await import('./ha/sync/AreaEnsureService');
+        const areaEnsureService = new areaEnsureModule.AreaEnsureService(
+          this.haWsClient,
+          this.haStructureRegistry,
+          this.eventBus,
+          this.logger
+        );
+        this.integrationBridge.attachAreaEnsureService(areaEnsureService);
+      }
     } catch (error) {
       this.logger?.warn('Bootstrap', `Échec de l'initialisation d'IntegrationBridge: ${error}`);
     }

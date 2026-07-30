@@ -14,6 +14,7 @@ import type { ConfigService } from '../../infrastructure/config/ConfigService';
 import { HaMqttIntegrationService, type HaMqttBrokerConfig } from './HaMqttIntegrationService';
 import type { EssentialEntityData } from './discovery';
 import type { HaMqttStateMessage } from './types/ha-mqtt';
+import type { AreaEnsureService } from '../sync/AreaEnsureService';
 
 // =============================================================================
 // Types des événements EventBus (voir techniques-socle-ha-mqtt_specs §8.5.5)
@@ -73,6 +74,8 @@ export class IntegrationBridge {
   private readonly configService: ConfigService;
   private readonly haMqttService: HaMqttIntegrationService;
   private mqttEnabled: boolean;
+  /** Optionnel : absent si ha.ws_enable est désactivé (Mode A/B indépendants) — voir attachAreaEnsureService. */
+  private areaEnsureService?: AreaEnsureService;
 
   /** Bridges enregistrés par les modules, indépendamment de l'état connecté/déconnecté. */
   private registeredBridges: Map<string, BridgeRegisterEvent> = new Map();
@@ -85,6 +88,17 @@ export class IntegrationBridge {
     this.mqttEnabled = this.configService.getConfig().ha?.mqtt_enable === true;
 
     this.logger.info('bridge', this.mqttEnabled ? 'MQTT est ACTIF (ha.mqtt_enable: true)' : 'MQTT est DESACTIVE (ha.mqtt_enable: false)');
+  }
+
+  /**
+   * Attache le service de garantie d'area HA — optionnel, absent si ha.ws_enable est désactivé
+   * (Mode A, indépendant du Mode B/MQTT ici). Sans lui, device.suggested_area en découverte reste
+   * sans effet (comportement inchangé). Doit être appelé après la création du HaWsClient/
+   * HaStructureRegistry, avant toute découverte.
+   */
+  attachAreaEnsureService(areaEnsureService: AreaEnsureService): void {
+    this.areaEnsureService = areaEnsureService;
+    this.logger.info('bridge', 'AreaEnsureService attaché');
   }
 
   /**
@@ -139,7 +153,7 @@ export class IntegrationBridge {
   private subscribeModuleEvents(moduleName: string): void {
     this.eventBus.onGeneric<DiscoveryRequestEvent>(`integration:${moduleName}:discovery`, (data) => {
       if (!this.mqttEnabled) return;
-      this.haMqttService.publishDiscoveryFor(moduleName, data.bridgeInstance, data.component, data.objectId, data.deviceId, data.essential);
+      void this.publishDiscoveryWithArea(moduleName, data);
     });
 
     this.eventBus.onGeneric<DiscoveryRemoveRequestEvent>(`integration:${moduleName}:discovery:remove`, (data) => {
@@ -154,13 +168,39 @@ export class IntegrationBridge {
 
     this.eventBus.onGeneric<PassthroughDiscoveryRequestEvent>(`integration:${moduleName}:passthrough:discovery`, (data) => {
       if (!this.mqttEnabled) return;
-      this.haMqttService.publishDiscoveryPassthrough(moduleName, data.bridgeInstance, data.sourceTopic, data.payload);
+      void this.publishDiscoveryPassthroughWithArea(moduleName, data);
     });
 
     this.eventBus.onGeneric<PassthroughPublishRequestEvent>(`integration:${moduleName}:passthrough:publish`, (data) => {
       if (!this.mqttEnabled) return;
       this.haMqttService.publishPassthrough(moduleName, data.bridgeInstance, data.topic, data.payload, data.qos, data.retain);
     });
+  }
+
+  /**
+   * Garantit l'area suggérée (best-effort, voir AreaEnsureService) avant de publier la
+   * découverte — jamais bloquant : un échec/dépassement n'empêche jamais la publication.
+   */
+  private async publishDiscoveryWithArea(moduleName: string, data: DiscoveryRequestEvent): Promise<void> {
+    if (this.areaEnsureService) {
+      const suggestedArea = data.essential.device?.suggested_area;
+      if (suggestedArea) {
+        await this.areaEnsureService.ensureArea(suggestedArea);
+      }
+    }
+    this.haMqttService.publishDiscoveryFor(moduleName, data.bridgeInstance, data.component, data.objectId, data.deviceId, data.essential);
+  }
+
+  /** Même garantie d'area que publishDiscoveryWithArea, pour le chemin passthrough (NOMMAGE). */
+  private async publishDiscoveryPassthroughWithArea(moduleName: string, data: PassthroughDiscoveryRequestEvent): Promise<void> {
+    if (this.areaEnsureService) {
+      const payload = data.payload as { device?: { suggested_area?: string } } | undefined;
+      const suggestedArea = payload?.device?.suggested_area;
+      if (suggestedArea) {
+        await this.areaEnsureService.ensureArea(suggestedArea);
+      }
+    }
+    this.haMqttService.publishDiscoveryPassthrough(moduleName, data.bridgeInstance, data.sourceTopic, data.payload);
   }
 
   /**

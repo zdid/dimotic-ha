@@ -264,6 +264,20 @@ export class HaWsClient {
     return this.connection.sendMessagePromise({ type: 'conversation/process', text, language });
   }
 
+  /**
+   * Crée une area HA (config/area_registry/create) — même échappatoire bas niveau que
+   * processConversation()/loadInitialRegistry() ci-dessus, pas d'équivalent haut niveau dans
+   * home-assistant-js-websocket. Utilisé par AreaEnsureService pour garantir l'existence d'une
+   * area suggérée en découverte MQTT (suggested_area), HA ne l'auto-créant pas de façon fiable.
+   */
+  createArea(name: string): Promise<{ area_id: string; name: string }> {
+    if (!this.isAuthenticated || !this.connection) {
+      throw new Error('Cannot create area: not authenticated');
+    }
+
+    return this.connection.sendMessagePromise({ type: 'config/area_registry/create', name });
+  }
+
   // ===========================================================================
   // Callbacks pour s'abonner aux événements
   // ===========================================================================
