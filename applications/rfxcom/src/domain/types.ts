@@ -70,6 +70,9 @@ export interface RfxComDeviceInfo {
   /** Voir RfxComRawMessage.commandDeviceId — absent pour les devices non pilotables (capteurs). */
   commandDeviceId?: string;
   lastSeen?: string;            // ISO8601, mis à jour à chaque réception
+  /** Dernière valeur d'état reçue (persistée) — rejouée au démarrage si assez récente, voir
+   *  RfxComService.publishDeviceStateAtStartup. */
+  lastValue?: string | number;
 }
 
 /** Device détecté par scan mais pas encore paramétré (en mémoire uniquement, jamais persisté). */
@@ -116,12 +119,17 @@ export interface BaseReceiverConfig {
 
 export interface ReceiverSwitchConfig extends BaseReceiverConfig {
   type: 'switch';
+  /** Dernier état connu (persisté) — rejoué au démarrage, voir RfxComService.publishReceiverStateAtStartup. */
+  lastOn?: boolean;
 }
 
 export interface ReceiverLightConfig extends BaseReceiverConfig {
   type: 'light';
   isDimmable: boolean;
   defaultLevel?: number;          // 0-100%
+  /** Dernier état/niveau connu (persisté) — rejoué au démarrage, voir RfxComService.publishReceiverStateAtStartup. */
+  lastOn?: boolean;
+  lastLevel?: number;
 }
 
 export interface ReceiverCoverConfig extends BaseReceiverConfig {

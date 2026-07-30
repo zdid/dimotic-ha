@@ -378,6 +378,19 @@ export class NommageService implements INommageService {
   private emitPassthroughDiscovery(discoveryMessage: DiscoveryMessage, parsed: ParsedTaxonomy): void {
     let payload: Record<string, unknown> = { ...discoveryMessage.payload };
 
+    // suggested_area (lieu de taxonomie, pas lieu_precis) — HA ne s'en sert qu'une fois, à la
+    // création de l'entité, pour lui assigner automatiquement une area si elle n'en a pas déjà
+    // une. Appliqué indépendamment de ha.injectTaxonomyAttributes (concerne les attributs
+    // d'entité, pas l'area du device) ; ne modifie le bloc device relayé que s'il existe déjà
+    // (on ne fabrique pas de device pour une source qui n'en déclarait pas).
+    const existingDevice = payload.device;
+    if (parsed.ou.lieu?.raw && existingDevice && typeof existingDevice === 'object') {
+      payload = {
+        ...payload,
+        device: { ...(existingDevice as Record<string, unknown>), suggested_area: parsed.ou.lieu.raw }
+      };
+    }
+
     // attributs_taxonomie glissé directement dans la découverte n'atteint jamais entity.attributes
     // (HA valide contre un schéma strict par plateforme, ignore les clés non reconnues — vérifié
     // en direct sur une instance HA réelle). Le state_topic de l'entité relayée appartient à la

@@ -307,7 +307,11 @@ export class Evoo7Service implements IEvoo7Service {
     // silence — porté par l'état à la place (handleEvoo7Message), via json_attributes_topic.
     const extra: Record<string, unknown> = {};
     if (donnee.isConfigData) {
-      extra.entity_category = 'config';
+      // HA rejette entity_category:"config" sur sensor/binary_sensor (lecture seule, ne peut pas
+      // "configurer" quoi que ce soit au sens HA) — constaté en direct ("entity category is set
+      // to config", entité jamais ajoutée). "diagnostic" est la catégorie valide pour ce cas ;
+      // "config" reste correct pour les composants pilotables (number/switch/select).
+      extra.entity_category = component === 'sensor' || component === 'binary_sensor' ? 'diagnostic' : 'config';
     }
     if (component === 'number') {
       extra.min = donnee.min;
@@ -332,7 +336,7 @@ export class Evoo7Service implements IEvoo7Service {
       name: taxonomy.rawQuoi,
       valueTemplate: buildValueTemplate(),
       commandEnabled,
-      device: EVOO7_DEVICE,
+      device: { ...EVOO7_DEVICE, suggested_area: taxonomy.nomLieu ?? undefined },
       extra
     };
 
@@ -413,7 +417,7 @@ export class Evoo7Service implements IEvoo7Service {
     const essential: EssentialEntityData = {
       name: taxonomy.rawQuoi,
       commandEnabled: true,
-      device: EVOO7_DEVICE,
+      device: { ...EVOO7_DEVICE, suggested_area: taxonomy.nomLieu ?? undefined },
       extra
     };
 

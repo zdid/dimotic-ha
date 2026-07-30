@@ -12,11 +12,12 @@ import type { IReceiverModule, ReceiverCommandResult } from './BaseReceiver';
 import { extractTaxonomy, buildAttributsTaxonomie } from '../taxonomy';
 
 export class ReceiverLight implements IReceiverModule {
-  private on = false;
-  private level = 0; // 0-100%, pertinent seulement si isDimmable
+  private on: boolean;
+  private level: number; // 0-100%, pertinent seulement si isDimmable
 
   constructor(public readonly config: ReceiverLightConfig) {
-    this.level = config.defaultLevel ?? 100;
+    this.on = config.lastOn ?? false;
+    this.level = config.lastLevel ?? config.defaultLevel ?? 100;
   }
 
   /** `value` en pourcentage 0-100 (converti depuis brightness HA 0-255 par l'appelant). */
@@ -56,6 +57,10 @@ export class ReceiverLight implements IReceiverModule {
       this.on = (value ?? 0) > 0;
       if (value !== undefined) this.level = value;
     }
+    // Reflété dans la config persistée pour être rejoué au démarrage — voir
+    // RfxComService.publishReceiverStateAtStartup (le service appelant se charge de sauvegarder).
+    this.config.lastOn = this.on;
+    this.config.lastLevel = this.level;
   }
 
   getState(): HaMqttStateMessage {
@@ -91,7 +96,8 @@ export class ReceiverLight implements IReceiverModule {
           // impossibles à distinguer dans HA.
           name: this.config.name,
           manufacturer: 'RFXCOM',
-          model: this.config.isDimmable ? 'ReceiverLight (variateur)' : 'ReceiverLight'
+          model: this.config.isDimmable ? 'ReceiverLight (variateur)' : 'ReceiverLight',
+          suggested_area: taxonomy.nomLieu ?? undefined
         }
         // attributs_taxonomie porté par getState() (json_attributes_topic), pas ici.
       }

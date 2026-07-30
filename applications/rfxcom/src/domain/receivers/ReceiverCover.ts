@@ -139,7 +139,8 @@ export class ReceiverCover implements IReceiverModule {
           // Nom complet (norme quoi---lieu du projet) — voir ReceiverLight.ts pour le pourquoi.
           name: this.config.name,
           manufacturer: 'RFXCOM',
-          model: `ReceiverCover (${this.config.coverType})`
+          model: `ReceiverCover (${this.config.coverType})`,
+          suggested_area: taxonomy.nomLieu ?? undefined
         }
         // attributs_taxonomie porté par getState() (json_attributes_topic), pas ici.
       }

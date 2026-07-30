@@ -52,7 +52,14 @@ export interface HaMqttDevice {
   sw_version?: string;            // Version firmware
   hw_version?: string;            // Version hardware
   via_device?: string;            // ID du device parent (si applicable)
-  area_id?: string;               // ID de l'area HA
+  /**
+   * Nom de l'area HA à suggérer (pas un area_id technique) — HA ne l'utilise qu'une fois, à la
+   * création de l'entité, pour lui assigner automatiquement une area si elle n'en a pas déjà une
+   * (jamais réappliqué ensuite). Champ réellement reconnu par la découverte MQTT de HA,
+   * contrairement à un ancien `area_id` jamais exploitable ici (clé absente du schéma MQTT
+   * discovery — confirmé par inspection directe des payloads réels, jamais alimenté nulle part).
+   */
+  suggested_area?: string;
 }
 
 /**

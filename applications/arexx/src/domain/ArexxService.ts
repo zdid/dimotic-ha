@@ -31,6 +31,9 @@ export interface IArexxService {
 }
 
 export class ArexxService implements IArexxService {
+  /** Au-delà de cet âge, une dernière valeur persistée n'est plus republiée au démarrage (§ voir publishSensorStateAtStartup). */
+  private static readonly LAST_VALUE_MAX_AGE_MS = 30 * 60 * 1000;
+
   private config: ArexxConfig;
   private sensorsConfig: ArexxSensorsConfigFile;
   private configFileManager: ConfigFileManager;
@@ -151,8 +154,33 @@ export class ArexxService implements IArexxService {
     for (const sensor of this.sensorRegistry.getConfiguredSensors()) {
       if (sensor.transmitToHa) {
         this.publishSensorDiscovery(sensor);
+        this.publishSensorStateAtStartup(sensor);
       }
     }
+  }
+
+  /**
+   * Republie la dernière valeur connue (persistée, `SensorRegistry`) au démarrage/reconnexion,
+   * pour que la taxonomie (portée par l'état, jamais la découverte) soit disponible côté HA sans
+   * attendre une nouvelle lecture. Si cette valeur date de plus de 30 minutes (ou est absente),
+   * publie `"unknown"` plutôt qu'une valeur potentiellement obsolète/trompeuse.
+   */
+  private publishSensorStateAtStartup(sensor: ArexxSensorInfo): void {
+    const taxonomy = extractTaxonomy(sensor.name);
+    const ageMs = sensor.lastSeen ? Date.now() - new Date(sensor.lastSeen).getTime() : Infinity;
+    const isFresh = sensor.lastValue !== undefined && ageMs <= ArexxService.LAST_VALUE_MAX_AGE_MS;
+
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
+      bridgeInstance: this.config.bridgeInstance,
+      deviceId: sensor.uniqueId,
+      state: {
+        state: isFresh ? (sensor.lastValue as number) : 'unknown',
+        attributes: {
+          sensor_id: sensor.uniqueId,
+          attributs_taxonomie: buildAttributsTaxonomie(taxonomy)
+        }
+      }
+    });
   }
 
   private publishSensorDiscovery(sensor: ArexxSensorInfo): void {
@@ -163,11 +191,16 @@ export class ArexxService implements IArexxService {
       name: taxonomy.rawQuoi,
       deviceClass,
       unitOfMeasurement: unit,
+      // Sans ça, HA compare l'état au JSON complet du topic d'état au lieu d'en extraire `state`
+      // — même correctif que RfxComService.publishDeviceDiscovery, bug identique constaté sur HA
+      // réel pour les capteurs bruts RFXCOM (erreur "non-numeric value").
+      valueTemplate: '{{ value_json.state }}',
       device: {
         identifiers: [sensor.uniqueId],
         name: `AREXX ${sensor.kind}`,
         manufacturer: 'AREXX',
-        model: 'BS1000/BS500'
+        model: 'BS1000/BS500',
+        suggested_area: taxonomy.nomLieu ?? undefined
       }
       // attributs_taxonomie n'est pas ici (message de découverte validé contre un schéma strict
       // par HA, clés non reconnues ignorées en silence) — porté par l'état, voir publishSensorState.

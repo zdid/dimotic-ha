@@ -37,6 +37,9 @@ export interface IRfxComService {
 }
 
 export class RfxComService implements IRfxComService {
+  /** Au-delà de cet âge, une dernière valeur persistée n'est plus republiée au démarrage (§ voir publishDeviceStateAtStartup). */
+  private static readonly LAST_VALUE_MAX_AGE_MS = 30 * 60 * 1000;
+
   private config: RfxComConfig;
   private devicesConfig: RfxComDevicesConfigFile;
   private configFileManager: ConfigFileManager;
@@ -257,6 +260,11 @@ export class RfxComService implements IRfxComService {
     const isEmitter = message.type.startsWith('Lighting');
     if (isEmitter) {
       const affectedReceivers = this.receiverManager.handleEmitterMessage(uniqueId);
+      if (affectedReceivers.length > 0) {
+        // applyEmitterCommand (appelé par handleEmitterMessage) a déjà mis à jour lastOn/lastLevel
+        // dans la config de chaque récepteur affecté — une seule sauvegarde pour tous.
+        this.persistDevicesConfig();
+      }
       for (const receiver of affectedReceivers) {
         this.publishReceiverState(receiver);
       }
@@ -284,11 +292,13 @@ export class RfxComService implements IRfxComService {
     for (const device of this.deviceManager.getConfiguredDevices()) {
       if (device.transmitToHa) {
         this.publishDeviceDiscovery(device);
+        this.publishDeviceStateAtStartup(device);
       }
     }
     for (const receiver of this.receiverManager.getAllReceivers()) {
       if (receiver.config.transmitToHa) {
         this.publishReceiverDiscovery(receiver.config.receiverId);
+        this.publishReceiverStateAtStartup(receiver);
       }
     }
     for (const scene of this.sceneManager.getAllScenes()) {
@@ -308,6 +318,12 @@ export class RfxComService implements IRfxComService {
       name: taxonomy.rawQuoi,
       deviceClass,
       unitOfMeasurement: getDefaultUnit(device.subType),
+      // Sans ça, HA compare l'état de l'entité au JSON complet du topic d'état
+      // ({"state":...,"attributes":{...}}) au lieu d'en extraire juste `state` — erreur explicite
+      // et bloquante pour sensor (valeur numérique attendue, non-numeric value), silencieusement
+      // cassé pour binary_sensor (jamais égal à payload_on/payload_off). Constaté en direct sur
+      // une instance HA réelle (logs system_log : "Value error... non-numeric value").
+      valueTemplate: '{{ value_json.state }}',
       device: {
         identifiers: [device.uniqueId],
         // Nom complet selon la norme du projet (quoi---lieu_precis--lieu--pere--grand_pere), pas
@@ -315,7 +331,8 @@ export class RfxComService implements IRfxComService {
         // affichaient le même nom "RFXCOM Lighting2 AC" dans HA, impossibles à distinguer.
         name: device.name,
         manufacturer: 'RFXCOM',
-        model: device.protocole.toUpperCase()
+        model: device.protocole.toUpperCase(),
+        suggested_area: taxonomy.nomLieu ?? undefined
       }
       // attributs_taxonomie n'est plus ici : un message de découverte HA est validé contre un
       // schéma strict par plateforme, les clés non reconnues sont ignorées en silence — porté
@@ -336,6 +353,11 @@ export class RfxComService implements IRfxComService {
     const stateValue = this.extractStateValue(device.subType, message);
     const taxonomy = extractTaxonomy(device.name);
 
+    // Persisté pour être rejoué au démarrage/reconnexion (publishDeviceStateAtStartup), sans
+    // attendre une nouvelle réception RF433 — voir aussi lastSeen ci-dessous (fraîcheur).
+    device.lastValue = stateValue;
+    this.persistDevicesConfig();
+
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.config.bridgeInstance,
       deviceId,
@@ -344,6 +366,32 @@ export class RfxComService implements IRfxComService {
         attributes: {
           signal_level: message.signalLevel,
           battery_level: message.batteryLevel,
+          sensor_id: device.uniqueId,
+          device_id: device.uniqueId,
+          attributs_taxonomie: buildAttributsTaxonomie(taxonomy)
+        }
+      }
+    });
+  }
+
+  /**
+   * Republie la dernière valeur connue (persistée) d'un device brut (sensor ET binary_sensor) au
+   * démarrage/reconnexion, pour que la taxonomie soit disponible côté HA sans attendre une
+   * nouvelle réception RF433. Si cette valeur date de plus de 30 minutes (ou est absente),
+   * publie `"unknown"` plutôt qu'une valeur potentiellement obsolète/trompeuse.
+   */
+  private publishDeviceStateAtStartup(device: RfxComDeviceInfo): void {
+    const deviceId = buildStateDeviceId(device.protocole, device.subType, device.sensorId, device.unitCode);
+    const taxonomy = extractTaxonomy(device.name);
+    const ageMs = device.lastSeen ? Date.now() - new Date(device.lastSeen).getTime() : Infinity;
+    const isFresh = device.lastValue !== undefined && ageMs <= RfxComService.LAST_VALUE_MAX_AGE_MS;
+
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
+      bridgeInstance: this.config.bridgeInstance,
+      deviceId,
+      state: {
+        state: isFresh ? (device.lastValue as string | number) : 'unknown',
+        attributes: {
           sensor_id: device.uniqueId,
           device_id: device.uniqueId,
           attributs_taxonomie: buildAttributsTaxonomie(taxonomy)
@@ -407,6 +455,29 @@ export class RfxComService implements IRfxComService {
   }
 
   /**
+   * Au démarrage/reconnexion : republie l'état persisté d'un récepteur commandable (light/switch)
+   * s'il en existe un, sinon envoie une commande OFF réelle — qui aura pour effet, via le
+   * mécanisme d'écho RF433 déjà utilisé pour toute commande HA (voir applyReceiverCommand), de
+   * publier l'état ET de le persister pour la prochaine fois. Scènes et volets non concernés :
+   * pas de notion d'état "off" déterministe pour un volet, et une scène n'a pas d'état propre.
+   */
+  private publishReceiverStateAtStartup(receiver: ReturnType<ReceiverManager['getReceiver']>): void {
+    if (!receiver) return;
+    if (receiver.config.type !== 'light' && receiver.config.type !== 'switch') return;
+
+    if (receiver.config.lastOn !== undefined) {
+      this.publishReceiverState(receiver);
+      return;
+    }
+
+    const result = this.applyReceiverCommand(receiver.config.receiverId, 'turn_off');
+    if (!result.success) {
+      this.logger.warn('RfxComService',
+        `Échec de l'envoi OFF initial pour ${receiver.config.receiverId} (aucun état connu): ${result.error}`);
+    }
+  }
+
+  /**
    * Retire une découverte de récepteur déjà publiée côté HA — désélection ou suppression.
    * `component` doit venir de `getDiscoveryEssential()` capturé AVANT la mutation/suppression du
    * récepteur (le composant dépend de son type, indisponible une fois retiré de ReceiverManager).
@@ -445,14 +516,21 @@ export class RfxComService implements IRfxComService {
         // correctif que publishDeviceDiscovery ci-dessus.
         name: scene.name,
         manufacturer: 'RFXCOM',
-        model: 'Scene'
+        model: 'Scene',
+        suggested_area: taxonomy.nomLieu ?? undefined
       },
       // Pas d'attributs_taxonomie ici : device_automation (déclencheur, pas d'état/entité au
       // sens HA classique) n'a pas d'équivalent à json_attributes_topic — et de toute façon le
       // mécanisme précédent (clé glissée dans la découverte) n'atteignait jamais HA, voir
       // publishDeviceDiscovery ci-dessus.
+      // type/subtype : requis par le schéma HA de device_automation (constaté en direct sur une
+      // instance HA réelle — "required key not provided @ data['type']", absent jusqu'ici malgré
+      // la mise en garde ci-dessus). Utilisés par HA pour labelliser le déclencheur dans son UI
+      // d'automatisations, pas de valeur "officielle" attendue ici (pas un vrai trigger matériel).
       extra: {
         automation_type: 'trigger',
+        type: 'scene_executed',
+        subtype: scene.receiverId,
         topic: commandTopic,
         payload: '{}'
       }
@@ -541,24 +619,68 @@ export class RfxComService implements IRfxComService {
     }
 
     const primaryDevice = this.deviceManager.getDevice(receiver.config.primaryEmitter);
-    if (!primaryDevice || !primaryDevice.commandDeviceId) {
-      return { success: false, error: `primaryEmitter ${receiver.config.primaryEmitter} introuvable ou jamais vu en émission` };
+    if (!primaryDevice) {
+      return { success: false, error: `primaryEmitter ${receiver.config.primaryEmitter} introuvable` };
+    }
+    const commandDeviceId = primaryDevice.commandDeviceId ?? this.resolveCommandDeviceId(primaryDevice);
+    if (!commandDeviceId) {
+      return { success: false, error: `Impossible de déterminer l'identifiant de commande pour ${receiver.config.primaryEmitter} (jamais vu en émission, et sensorId/unitCode insuffisants pour le reconstruire)` };
     }
 
     try {
       this.transceiver.sendCommand(
         primaryDevice.protocole,
         primaryDevice.subType,
-        primaryDevice.commandDeviceId,
+        commandDeviceId,
         result.action as 'on' | 'off' | 'set_level' | 'open' | 'close' | 'stop',
         result.value
       );
+      // Mise à jour optimiste de l'état interne : contrairement à ce qu'on pouvait supposer, le
+      // primaryEmitter n'est PAS réécouté en écho après l'envoi — findReceiversForEmitter ne
+      // matche que receiver.config.emitters[] (télécommandes secondaires appairées), jamais
+      // primaryEmitter lui-même. Sans cet appel explicite, l'état interne (et lastOn/lastLevel
+      // persisté) ne bougeait jamais suite à une commande envoyée via ce chemin — vérifié en
+      // conditions réelles (2026-07-30) : lastOn absent du YAML après un OFF réellement envoyé.
+      receiver.applyEmitterCommand(result.action, result.value);
+      this.persistDevicesConfig();
       this.publishReceiverState(receiver);
       return { success: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return { success: false, error: message };
     }
+  }
+
+  /**
+   * Reconstruit un `commandDeviceId` sans attendre une réception RF433, à partir des données déjà
+   * connues (persistées) — évite de dépendre d'avoir "vu" l'émetteur transmettre au moins une fois
+   * (voir RfxComTransceiver.buildCommandDeviceId pour le format cible exact, produit à la réception
+   * d'un message réel). Repose sur le fait que sensorId/unitCode dérivent des mêmes champs bruts
+   * (evt.id, evt.houseCode, evt.unitCode) que commandDeviceId — reconstructible à l'identique :
+   * - Lighting1 : sensorId = houseCode+unitCode déjà fusionnés (resolveSensorIdentity), la casse
+   *   n'a pas d'importance (Lighting1._splitDeviceId de la lib `rfxcom` uppercase le houseCode).
+   * - Lighting2 : format cible "id/unitCode". Si unitCode est un champ séparé (device détecté en
+   *   direct), on le recompose. Sinon (inventaire reconstitué depuis equipements.json après perte
+   *   de la machine d'origine — voir historique), sensorId porte parfois le unitCode fusionné
+   *   avec un underscore (ex: "0x02be2c02_13" = id "0x02be2c02" + unitCode 13) — on le déduit par
+   *   découpage plutôt que d'exiger une nouvelle réception RF433 pour chaque device concerné.
+   */
+  private resolveCommandDeviceId(device: RfxComDeviceInfo): string | undefined {
+    if (device.type === 'Lighting1') {
+      return device.sensorId;
+    }
+
+    if (device.type === 'Lighting2') {
+      if (device.unitCode !== undefined) {
+        return `${device.sensorId}/${device.unitCode}`;
+      }
+      const match = /^(.+)_(\d+)$/.exec(device.sensorId);
+      if (match) {
+        return `${match[1]}/${match[2]}`;
+      }
+    }
+
+    return undefined;
   }
 
   // ==========================================================================
@@ -768,6 +890,21 @@ export class RfxComService implements IRfxComService {
         this.removeDeviceDiscovery(device);
       }
       this.emitDevicesList();
+    });
+
+    this.eventBus.onGeneric<{ uniqueId: string }>('rfxcom:device:delete', (data) => {
+      const device = this.deviceManager.getDevice(data.uniqueId);
+      if (!device) {
+        this.logger.warn('RfxComService', `Device inconnu pour suppression: ${data.uniqueId}`);
+        return;
+      }
+      if (device.transmitToHa) {
+        this.removeDeviceDiscovery(device);
+      }
+      this.deviceManager.deleteDevice(data.uniqueId);
+      this.persistDevicesConfig();
+      this.emitDevicesList();
+      this.eventBus.emitGeneric('rfxcom:device:deleted', { uniqueId: data.uniqueId });
     });
 
     this.eventBus.onGeneric<{ config: ReceiverConfig }>('rfxcom:receiver:create', (data) => {

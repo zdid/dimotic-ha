@@ -8,9 +8,11 @@ import type { IReceiverModule, ReceiverCommandResult } from './BaseReceiver';
 import { extractTaxonomy, buildAttributsTaxonomie } from '../taxonomy';
 
 export class ReceiverSwitch implements IReceiverModule {
-  private on = false;
+  private on: boolean;
 
-  constructor(public readonly config: ReceiverSwitchConfig) {}
+  constructor(public readonly config: ReceiverSwitchConfig) {
+    this.on = config.lastOn ?? false;
+  }
 
   translateHaCommand(command: string): ReceiverCommandResult | null {
     switch (command) {
@@ -29,6 +31,9 @@ export class ReceiverSwitch implements IReceiverModule {
     if (action === 'toggle') this.on = !this.on;
     else if (action === 'on') this.on = true;
     else if (action === 'off') this.on = false;
+    // Reflété dans la config persistée pour être rejoué au démarrage — voir
+    // RfxComService.publishReceiverStateAtStartup (le service appelant se charge de sauvegarder).
+    this.config.lastOn = this.on;
   }
 
   getState(): HaMqttStateMessage {
@@ -53,7 +58,8 @@ export class ReceiverSwitch implements IReceiverModule {
           // Nom complet (norme quoi---lieu du projet) — voir ReceiverLight.ts pour le pourquoi.
           name: this.config.name,
           manufacturer: 'RFXCOM',
-          model: 'ReceiverSwitch'
+          model: 'ReceiverSwitch',
+          suggested_area: taxonomy.nomLieu ?? undefined
         }
         // attributs_taxonomie porté par getState() (json_attributes_topic), pas ici — voir
         // discovery.ts / RfxComService.publishDeviceDiscovery.
