@@ -112,27 +112,31 @@ declare module 'rfxcom' {
     constructor(rfxcom: RfxCom, subtype: number, options?: Record<string, unknown>);
   }
 
+  /** Signature réelle du callback passé aux méthodes de transmission — voir rfxcom.js::transmit,
+   *  invoqué une fois la trame écrite sur le port série (pas une confirmation RF433 du récepteur). */
+  export type TransmitCallback = (err: Error | null, response: string, seqnbr: number) => void;
+
   export class Lighting1 extends Transmitter {
-    switchOn(deviceId: string, callback?: (err: Error | null) => void): void;
-    switchOff(deviceId: string, callback?: (err: Error | null) => void): void;
+    switchOn(deviceId: string, callback?: TransmitCallback): void;
+    switchOff(deviceId: string, callback?: TransmitCallback): void;
   }
 
   export class Lighting2 extends Transmitter {
     /** deviceId au format "0xID/unitCode" (unitCode 0 = commande de groupe). */
-    switchOn(deviceId: string, callback?: (err: Error | null) => void): void;
-    switchOff(deviceId: string, callback?: (err: Error | null) => void): void;
+    switchOn(deviceId: string, callback?: TransmitCallback): void;
+    switchOff(deviceId: string, callback?: TransmitCallback): void;
     /** level: 0-15 (échelle native RFXCOM, PAS 0-100). */
-    setLevel(deviceId: string, level: number, callback?: (err: Error | null) => void): void;
+    setLevel(deviceId: string, level: number, callback?: TransmitCallback): void;
   }
 
   export class Lighting4 extends Transmitter {
-    sendData(data: string, pulseWidth: number, callback?: (err: Error | null) => void): void;
+    sendData(data: string, pulseWidth: number, callback?: TransmitCallback): void;
   }
 
   export class Blinds1 extends Transmitter {
-    open(deviceId: string, callback?: (err: Error | null) => void): void;
-    close(deviceId: string, direction?: number, callback?: (err: Error | null) => void): void;
-    stop(deviceId: string, callback?: (err: Error | null) => void): void;
+    open(deviceId: string, callback?: TransmitCallback): void;
+    close(deviceId: string, direction?: number, callback?: TransmitCallback): void;
+    stop(deviceId: string, callback?: TransmitCallback): void;
   }
 
   // Tables de protocoles (numéro ↔ nom), une par famille -------------------------------------

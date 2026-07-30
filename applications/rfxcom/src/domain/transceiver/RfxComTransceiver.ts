@@ -438,36 +438,55 @@ export class RfxComTransceiver {
       throw new Error(`Protocole non supporté pour l'envoi de commandes: ${protocole}`);
     }
 
+    const ack = this.buildAckLogger(protocole, commandDeviceId, action);
+
     switch (protocole) {
       case 'lighting1': {
         const t = transmitter as rfxcom.Lighting1;
-        if (action === 'on') t.switchOn(commandDeviceId);
-        else if (action === 'off') t.switchOff(commandDeviceId);
+        if (action === 'on') t.switchOn(commandDeviceId, ack);
+        else if (action === 'off') t.switchOff(commandDeviceId, ack);
         else throw new Error(`Action non supportée pour lighting1: ${action}`);
         break;
       }
       case 'lighting2': {
         const t = transmitter as rfxcom.Lighting2;
-        if (action === 'on') t.switchOn(commandDeviceId);
-        else if (action === 'off') t.switchOff(commandDeviceId);
+        if (action === 'on') t.switchOn(commandDeviceId, ack);
+        else if (action === 'off') t.switchOff(commandDeviceId, ack);
         else if (action === 'set_level') {
           // Échelle RFXCOM native 0-15, value reçu en 0-100%
           const level = Math.max(0, Math.min(15, Math.round(((value ?? 100) / 100) * 15)));
-          t.setLevel(commandDeviceId, level);
+          t.setLevel(commandDeviceId, level, ack);
         } else throw new Error(`Action non supportée pour lighting2: ${action}`);
         break;
       }
       case 'blinds1': {
         const t = transmitter as rfxcom.Blinds1;
-        if (action === 'open') t.open(commandDeviceId);
-        else if (action === 'close') t.close(commandDeviceId);
-        else if (action === 'stop') t.stop(commandDeviceId);
+        if (action === 'open') t.open(commandDeviceId, ack);
+        else if (action === 'close') t.close(commandDeviceId, undefined, ack);
+        else if (action === 'stop') t.stop(commandDeviceId, ack);
         else throw new Error(`Action non supportée pour blinds1: ${action}`);
         break;
       }
       default:
         throw new Error(`Protocole non supporté pour l'envoi de commandes: ${protocole}`);
     }
+  }
+
+  /**
+   * Callback passé à la lib `rfxcom` — invoqué quand la trame a été écrite sur le port série
+   * (confirmation d'écriture bas niveau, PAS une confirmation RF433 du récepteur physique : la
+   * lib ne remonte pas cette dernière jusqu'à l'appelant, voir rfxcom.js::transmit). Pour
+   * l'instant, on se contente de tracer — pas encore utilisé pour conditionner la publication
+   * d'état (voir RfxComService.applyReceiverCommand, qui reste optimiste).
+   */
+  private buildAckLogger(protocole: string, commandDeviceId: string, action: string): rfxcom.TransmitCallback {
+    return (error, response, seqnbr) => {
+      if (error) {
+        this.logger.warn('RfxComTransceiver', `ACK échoué pour ${protocole}/${commandDeviceId} (${action}), seqnbr=${seqnbr}: ${error.message}`);
+      } else {
+        this.logger.debug('RfxComTransceiver', `ACK reçu pour ${protocole}/${commandDeviceId} (${action}), seqnbr=${seqnbr}, réponse=${response}`);
+      }
+    };
   }
 
   private getOrCreateTransmitter(protocole: string, subType: string): unknown {
