@@ -34,11 +34,7 @@
     .btn-danger { background: var(--color-error); color: white; }
     .btn-add { background: var(--color-success); color: white; margin-top: 10px; }
 
-    .table-scroll { overflow-x: auto; max-width: 100%; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--color-primary); font-size: 0.9em; vertical-align: top; }
-    th { color: var(--color-text-muted); font-weight: normal; }
-    td.mono { font-family: monospace; }
+    .mono { font-family: monospace; }
 
     .badge { padding: 2px 8px; border-radius: 4px; font-size: 0.8em; }
     .badge.on { background: var(--color-success); color: white; }
@@ -60,9 +56,23 @@
 
     .receiver-item, .device-item {
       border: 1px solid var(--color-primary); border-radius: var(--radius); padding: 15px; margin-bottom: 12px;
+      /* Colonne d'icônes à gauche + contenu à droite — un nom long (QUOI---OÙ complet) ne pousse
+         plus les boutons d'action hors de la zone visible (ancien layout en ligne avec
+         justify-content: space-between), puisqu'ils ne partagent plus la même ligne. */
+      display: flex;
+      gap: 12px;
     }
-    .receiver-item .header, .device-item .header {
-      display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+    .receiver-item .icon-col, .device-item .icon-col {
+      display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;
+    }
+    .receiver-item .content-col, .device-item .content-col {
+      flex: 1; min-width: 0;
+    }
+    .receiver-item .content-col .line1 {
+      margin-bottom: 2px;
+    }
+    .receiver-item .content-col .line2 {
+      color: var(--color-text-muted); margin-bottom: 8px;
     }
 
     .emitter-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
@@ -110,30 +120,13 @@
         </div>
 
         <h3>Devices paramétrés</h3>
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Identifiant</th><th>Quoi</th><th>Lieu précis</th><th>Lieu</th><th>Père</th><th>Grand-père</th>
-                <th>Vers HA</th><th>Dernière réception</th><th></th>
-              </tr>
-            </thead>
-            <tbody id="configured-devices-body"></tbody>
-          </table>
-        </div>
+        <div id="configured-devices-body"></div>
       </div>
 
       <div class="card">
         <h3>Devices en auto-découverte (non paramétrés)</h3>
         <p style="color:var(--color-text-muted);font-size:0.9em;">✏️ pour saisir la taxonomie et paramétrer le device (le fait passer dans la liste ci-dessus).</p>
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr><th>Identifiant</th><th>Quoi (auto)</th><th>Détecté à</th><th></th></tr>
-            </thead>
-            <tbody id="discovered-devices-body"></tbody>
-          </table>
-        </div>
+        <div id="discovered-devices-body"></div>
       </div>
     </div>
 

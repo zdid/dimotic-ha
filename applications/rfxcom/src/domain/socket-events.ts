@@ -20,6 +20,7 @@ export const RFXCOM_SOCKET_EVENTS = {
   // --- Devices ---
   DEVICES_LIST: 'rfxcom:devices:list',
   DEVICE_DETECTED: 'rfxcom:device:detected',
+  DEVICE_DELETED: 'rfxcom:device:deleted',
 
   // --- Récepteurs ---
   RECEIVERS_LIST: 'rfxcom:receivers:list',
@@ -63,6 +64,7 @@ export const RFXCOM_CLIENT_EVENTS = {
   DEVICES_CLEAR_UNCONFIGURED: 'rfxcom:devices:clear-unconfigured',
   DEVICE_SET_NAME: 'rfxcom:device:set_name',
   DEVICE_SET_TRANSMIT: 'rfxcom:device:set_transmit',
+  DEVICE_DELETE: 'rfxcom:device:delete',
 
   // --- Scan ---
   SCAN_START: 'rfxcom:scan:start',

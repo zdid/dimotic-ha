@@ -183,6 +183,8 @@ function setupSocketListeners(): void {
     socket.emit('rfxcom:devices:list:get');
   });
 
+  socket.on('rfxcom:device:deleted', () => showAlert('Device supprimé', 'success'));
+
   socket.on('rfxcom:receivers:list', (data: { receivers: ReceiverConfig[] }) => {
     receivers = data.receivers;
     renderReceivers();
@@ -286,6 +288,7 @@ function setupUiListeners(): void {
 
     if (action === 'edit-device' && id) return openDeviceModal(id);
     if (action === 'toggle-transmit' && id) return toggleDeviceTransmit(id);
+    if (action === 'delete-device' && id) return deleteDevice(id);
     if (action === 'edit-receiver' && id) return openReceiverForm(id);
     if (action === 'delete-receiver' && id) return deleteReceiver(id);
     if (action === 'remove-emitter-row') {
@@ -317,21 +320,22 @@ function renderConfiguredDevices(): void {
   body.innerHTML = configuredDevices.map((d) => {
     const t = splitTaxonomyName(d.name);
     return `
-    <tr>
-      <td class="mono">${escapeHtml(d.uniqueId)}</td>
-      <td>${escapeHtml(t.quoi)}</td>
-      <td>${escapeHtml(t.lieuPrecis)}</td>
-      <td>${escapeHtml(t.lieu)}</td>
-      <td>${escapeHtml(t.pere)}</td>
-      <td>${escapeHtml(t.grandPere)}</td>
-      <td>
-        <input type="checkbox" data-action="toggle-transmit" data-id="${escapeHtml(d.uniqueId)}" ${d.transmitToHa ? 'checked' : ''}>
-      </td>
-      <td>${d.lastSeen ? new Date(d.lastSeen).toLocaleString('fr-FR') : '--'}</td>
-      <td><button class="btn btn-secondary" data-action="edit-device" data-id="${escapeHtml(d.uniqueId)}">✏️</button></td>
-    </tr>
+    <div class="receiver-item">
+      <div class="icon-col">
+        <button class="btn btn-secondary" data-action="edit-device" data-id="${escapeHtml(d.uniqueId)}">✏️</button>
+        <button class="btn btn-danger" data-action="delete-device" data-id="${escapeHtml(d.uniqueId)}">🗑️</button>
+      </div>
+      <div class="content-col">
+        <div class="line1">
+          <span class="mono">${escapeHtml(d.uniqueId)}</span>
+          &middot; Vers HA: <input type="checkbox" data-action="toggle-transmit" data-id="${escapeHtml(d.uniqueId)}" ${d.transmitToHa ? 'checked' : ''}>
+          &middot; Dernière réception: ${d.lastSeen ? new Date(d.lastSeen).toLocaleString('fr-FR') : '--'}
+        </div>
+        <div class="line2">${escapeHtml(t.quoi)} — ${escapeHtml(t.lieuPrecis)} / ${escapeHtml(t.lieu)} / ${escapeHtml(t.pere)} / ${escapeHtml(t.grandPere)}</div>
+      </div>
+    </div>
   `;
-  }).join('') || '<tr><td colspan="9">Aucun device paramétré</td></tr>';
+  }).join('') || '<p>Aucun device paramétré</p>';
 }
 
 function renderDiscoveredDevices(): void {
@@ -339,13 +343,19 @@ function renderDiscoveredDevices(): void {
   if (!body) return;
 
   body.innerHTML = discoveredDevices.map((d) => `
-    <tr>
-      <td class="mono">${escapeHtml(d.uniqueId)}</td>
-      <td>${escapeHtml(d.defaultQuoi)}</td>
-      <td>${new Date(d.detectedAt).toLocaleString('fr-FR')}</td>
-      <td><button class="btn btn-primary" data-action="edit-device" data-id="${escapeHtml(d.uniqueId)}">✏️</button></td>
-    </tr>
-  `).join('') || '<tr><td colspan="4">Aucun device en auto-découverte</td></tr>';
+    <div class="receiver-item">
+      <div class="icon-col">
+        <button class="btn btn-primary" data-action="edit-device" data-id="${escapeHtml(d.uniqueId)}">✏️</button>
+      </div>
+      <div class="content-col">
+        <div class="line1">
+          <span class="mono">${escapeHtml(d.uniqueId)}</span>
+          &middot; Détecté à: ${new Date(d.detectedAt).toLocaleString('fr-FR')}
+        </div>
+        <div class="line2">${escapeHtml(d.defaultQuoi)}</div>
+      </div>
+    </div>
+  `).join('') || '<p>Aucun device en auto-découverte</p>';
 }
 
 /** Ouvre la modale de taxonomie pour un device configuré OU en auto-découverte (même mécanisme). */
@@ -402,6 +412,11 @@ function toggleDeviceTransmit(uniqueId: string): void {
   socket.emit('rfxcom:device:set_transmit', { uniqueId, transmitToHa: !device.transmitToHa });
 }
 
+function deleteDevice(uniqueId: string): void {
+  if (!confirm(`Supprimer le device ${uniqueId} ?`)) return;
+  socket.emit('rfxcom:device:delete', { uniqueId });
+}
+
 // ============================================================================
 // Récepteurs
 // ============================================================================
@@ -418,16 +433,17 @@ function renderReceivers(): void {
 
   listEl.innerHTML = receivers.map((r) => `
     <div class="receiver-item">
-      <div class="header">
-        <strong>${escapeHtml(r.receiverId)}</strong> — ${escapeHtml(r.name)} (${escapeHtml(r.type)})
-        <div>
-          <button class="btn btn-secondary" data-action="edit-receiver" data-id="${escapeHtml(r.receiverId)}">✏️</button>
-          <button class="btn btn-danger" data-action="delete-receiver" data-id="${escapeHtml(r.receiverId)}">🗑️</button>
-        </div>
+      <div class="icon-col">
+        <button class="btn btn-secondary" data-action="edit-receiver" data-id="${escapeHtml(r.receiverId)}">✏️</button>
+        <button class="btn btn-danger" data-action="delete-receiver" data-id="${escapeHtml(r.receiverId)}">🗑️</button>
       </div>
-      <div>Émetteur principal : ${escapeHtml(emitterLabel(r.primaryEmitter))}</div>
-      <div>Vers HA: <span class="badge ${r.transmitToHa ? 'on' : 'off'}">${r.transmitToHa ? 'oui' : 'non'}</span></div>
-      <div>Émetteurs appairés: ${r.emitters.map((e) => `${escapeHtml(emitterLabel(e.emitterId))} (${escapeHtml(e.action)})`).join(', ') || 'aucun'}</div>
+      <div class="content-col">
+        <div class="line1"><strong>${escapeHtml(r.receiverId)}</strong> (${escapeHtml(r.type)})</div>
+        <div class="line2">${escapeHtml(r.name)}</div>
+        <div>Émetteur principal : ${escapeHtml(emitterLabel(r.primaryEmitter))}</div>
+        <div>Vers HA: <span class="badge ${r.transmitToHa ? 'on' : 'off'}">${r.transmitToHa ? 'oui' : 'non'}</span></div>
+        <div>Émetteurs appairés: ${r.emitters.map((e) => `${escapeHtml(emitterLabel(e.emitterId))} (${escapeHtml(e.action)})`).join(', ') || 'aucun'}</div>
+      </div>
     </div>
   `).join('') || '<p>Aucun récepteur configuré</p>';
 }
@@ -587,18 +603,19 @@ function renderScenes(): void {
 
   listEl.innerHTML = scenes.map((s) => `
     <div class="receiver-item">
-      <div class="header">
-        <strong>${escapeHtml(s.receiverId)}</strong> — ${escapeHtml(s.name)} (${escapeHtml(s.sceneType)})
-        <div>
-          <button class="btn btn-primary" data-action="execute-scene" data-id="${escapeHtml(s.receiverId)}">▶️ Exécuter</button>
-          <button class="btn btn-secondary" data-action="cancel-scene" data-id="${escapeHtml(s.receiverId)}">⏹️ Annuler</button>
-          <button class="btn btn-secondary" data-action="edit-scene" data-id="${escapeHtml(s.receiverId)}">✏️</button>
-          <button class="btn btn-danger" data-action="delete-scene" data-id="${escapeHtml(s.receiverId)}">🗑️</button>
-        </div>
+      <div class="icon-col">
+        <button class="btn btn-primary" data-action="execute-scene" data-id="${escapeHtml(s.receiverId)}">▶️</button>
+        <button class="btn btn-secondary" data-action="cancel-scene" data-id="${escapeHtml(s.receiverId)}">⏹️</button>
+        <button class="btn btn-secondary" data-action="edit-scene" data-id="${escapeHtml(s.receiverId)}">✏️</button>
+        <button class="btn btn-danger" data-action="delete-scene" data-id="${escapeHtml(s.receiverId)}">🗑️</button>
       </div>
-      ${s.description ? `<div>${escapeHtml(s.description)}</div>` : ''}
-      <div>Vers HA: <span class="badge ${s.transmitToHa ? 'on' : 'off'}">${s.transmitToHa ? 'oui' : 'non'}</span></div>
-      <div>Commandes: ${s.actions.map((a) => `<span class="mono">${escapeHtml(a.target)}</span> → ${escapeHtml(a.command)}${a.value !== undefined ? `(${a.value})` : ''}`).join(', ') || 'aucune'}</div>
+      <div class="content-col">
+        <div class="line1"><strong>${escapeHtml(s.receiverId)}</strong> (${escapeHtml(s.sceneType)})</div>
+        <div class="line2">${escapeHtml(s.name)}</div>
+        ${s.description ? `<div>${escapeHtml(s.description)}</div>` : ''}
+        <div>Vers HA: <span class="badge ${s.transmitToHa ? 'on' : 'off'}">${s.transmitToHa ? 'oui' : 'non'}</span></div>
+        <div>Commandes: ${s.actions.map((a) => `<span class="mono">${escapeHtml(a.target)}</span> → ${escapeHtml(a.command)}${a.value !== undefined ? `(${a.value})` : ''}`).join(', ') || 'aucune'}</div>
+      </div>
     </div>
   `).join('') || '<p>Aucune scène configurée</p>';
 }
