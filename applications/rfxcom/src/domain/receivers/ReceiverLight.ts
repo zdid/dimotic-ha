@@ -89,10 +89,13 @@ export class ReceiverLight implements IReceiverModule {
         commandEnabled: true,
         payloadOn: 'ON',
         payloadOff: 'OFF',
-        // Sans value_template, HA compare le state_topic brut à payload_on/payload_off — or on y
-        // publie du JSON ({state, attributes}), jamais égal à "ON"/"OFF" telle quelle. Manquant
-        // depuis l'origine, découvert en même temps que le bug de parsing des commandes ci-dessus.
-        valueTemplate: '{{ value_json.state }}',
+        // Le schéma MQTT "light" (schema_basic.py) attend state_value_template, PAS value_template
+        // (qui n'existe que pour switch/cover/sensor) — vérifié dans le code source HA du conteneur
+        // (CONF_STATE_VALUE_TEMPLATE). Sans lui, HA compare le state_topic brut à payload_on/off —
+        // or on y publie du JSON ({state, attributes}), jamais égal à "ON"/"OFF" telle quelle ; HA
+        // ignore silencieusement une clé "value_template" non reconnue pour ce schéma (validation
+        // stricte par plateforme), d'où l'état "unknown" persistant malgré un state_topic correct.
+        extra: { state_value_template: '{{ value_json.state }}' },
         device: {
           identifiers: [this.config.receiverId],
           // Nom court (lieu précis, ex: "Plafonnier") plutôt que la chaîne de taxonomie brute
