@@ -37,11 +37,7 @@ export class ReceiverSwitch implements IReceiverModule {
   }
 
   getState(): HaMqttStateMessage {
-    const taxonomy = extractTaxonomy(this.config.name);
-    return {
-      state: this.on ? 'ON' : 'OFF',
-      attributes: { attributs_taxonomie: buildAttributsTaxonomie(taxonomy) }
-    };
+    return { state: this.on ? 'ON' : 'OFF' };
   }
 
   getDiscoveryEssential(): { component: string; essential: EssentialEntityData } {
@@ -55,6 +51,7 @@ export class ReceiverSwitch implements IReceiverModule {
         payloadOff: 'OFF',
         // Voir ReceiverLight.ts : sans ça, state_topic (JSON) ne matche jamais payload_on/off brut.
         valueTemplate: '{{ value_json.state }}',
+        attributsTaxonomie: buildAttributsTaxonomie(taxonomy),
         device: {
           identifiers: [this.config.receiverId],
           // Nom court (lieu précis) — voir ReceiverLight.ts::buildDisplayName pour le pourquoi.
@@ -63,8 +60,6 @@ export class ReceiverSwitch implements IReceiverModule {
           model: 'ReceiverSwitch',
           suggested_area: taxonomy.nomLieu ?? undefined
         }
-        // attributs_taxonomie porté par getState() (json_attributes_topic), pas ici — voir
-        // discovery.ts / RfxComService.publishDeviceDiscovery.
       }
     };
   }

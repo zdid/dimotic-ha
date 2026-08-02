@@ -11,7 +11,7 @@ import { Logger } from '../../infrastructure/logger/index';
 import { createMqttError } from '../../types/errors';
 import { getBridgeStatusTopic } from './types/ha-mqtt';
 import type { HaMqttDiscoveryEntity, HaMqttStateMessage } from './types/ha-mqtt';
-import { buildDiscoveryPayload, publishDiscovery, unpublishDiscovery, type EssentialEntityData } from './discovery';
+import { buildDiscoveryPayload, publishDiscovery, publishAttributes, unpublishDiscovery, type EssentialEntityData } from './discovery';
 import { publishState, subscribeCommands, parseIncomingCommand, type ParsedIncomingCommand } from './stateCommand';
 import { publishDiscoveryPassthrough, publishPassthrough } from './passthrough';
 
@@ -139,6 +139,22 @@ export class HaMqttIntegrationService {
     if (essential.commandEnabled) {
       subscribeCommands(transport, moduleName, bridgeInstance, deviceId);
     }
+  }
+
+  /**
+   * Publie la taxonomie d'une entité sur son topic d'attributs dédié — voir
+   * discovery.ts::publishAttributes. À appeler uniquement à la (re)découverte.
+   */
+  publishAttributesFor(
+    moduleName: string,
+    bridgeInstance: string,
+    component: string,
+    objectId: string,
+    attributsTaxonomie: Record<string, unknown>
+  ): void {
+    const transport = this.getBridgeOrWarn(moduleName, bridgeInstance);
+    if (!transport) return;
+    publishAttributes(transport, component, objectId, attributsTaxonomie);
   }
 
   /**

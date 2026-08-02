@@ -161,25 +161,17 @@ export class ArexxService implements IArexxService {
 
   /**
    * Republie la dernière valeur connue (persistée, `SensorRegistry`) au démarrage/reconnexion,
-   * pour que la taxonomie (portée par l'état, jamais la découverte) soit disponible côté HA sans
-   * attendre une nouvelle lecture. Si cette valeur date de plus de 30 minutes (ou est absente),
-   * publie `"unknown"` plutôt qu'une valeur potentiellement obsolète/trompeuse.
+   * sans attendre une nouvelle lecture. Si cette valeur date de plus de 30 minutes (ou est
+   * absente), publie `"unknown"` plutôt qu'une valeur potentiellement obsolète/trompeuse.
    */
   private publishSensorStateAtStartup(sensor: ArexxSensorInfo): void {
-    const taxonomy = extractTaxonomy(sensor.name);
     const ageMs = sensor.lastSeen ? Date.now() - new Date(sensor.lastSeen).getTime() : Infinity;
     const isFresh = sensor.lastValue !== undefined && ageMs <= ArexxService.LAST_VALUE_MAX_AGE_MS;
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.config.bridgeInstance,
       deviceId: sensor.uniqueId,
-      state: {
-        state: isFresh ? (sensor.lastValue as number) : 'unknown',
-        attributes: {
-          sensor_id: sensor.uniqueId,
-          attributs_taxonomie: buildAttributsTaxonomie(taxonomy)
-        }
-      }
+      state: { state: isFresh ? (sensor.lastValue as number) : 'unknown' }
     });
   }
 
@@ -195,6 +187,7 @@ export class ArexxService implements IArexxService {
       // — même correctif que RfxComService.publishDeviceDiscovery, bug identique constaté sur HA
       // réel pour les capteurs bruts RFXCOM (erreur "non-numeric value").
       valueTemplate: '{{ value_json.state }}',
+      attributsTaxonomie: buildAttributsTaxonomie(taxonomy),
       device: {
         identifiers: [sensor.uniqueId],
         name: `AREXX ${sensor.kind}`,
@@ -202,8 +195,6 @@ export class ArexxService implements IArexxService {
         model: 'BS1000/BS500',
         suggested_area: taxonomy.nomLieu ?? undefined
       }
-      // attributs_taxonomie n'est pas ici (message de découverte validé contre un schéma strict
-      // par HA, clés non reconnues ignorées en silence) — porté par l'état, voir publishSensorState.
     };
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
@@ -216,18 +207,12 @@ export class ArexxService implements IArexxService {
   }
 
   private publishSensorState(sensor: ArexxSensorInfo, reading: ArexxRawReading): void {
-    const taxonomy = extractTaxonomy(sensor.name);
-
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.config.bridgeInstance,
       deviceId: sensor.uniqueId,
       state: {
         state: reading.value,
-        attributes: {
-          signal_dbm: reading.signalDbm,
-          sensor_id: sensor.uniqueId,
-          attributs_taxonomie: buildAttributsTaxonomie(taxonomy)
-        }
+        attributes: { signal_dbm: reading.signalDbm }
       }
     });
   }

@@ -64,19 +64,12 @@ export class ReceiverLight implements IReceiverModule {
   }
 
   getState(): HaMqttStateMessage {
-    const taxonomy = extractTaxonomy(this.config.name);
     if (!this.config.isDimmable) {
-      return {
-        state: this.on ? 'ON' : 'OFF',
-        attributes: { attributs_taxonomie: buildAttributsTaxonomie(taxonomy) }
-      };
+      return { state: this.on ? 'ON' : 'OFF' };
     }
     return {
       state: this.on ? 'ON' : 'OFF',
-      attributes: {
-        brightness: Math.round((this.level / 100) * 255),
-        attributs_taxonomie: buildAttributsTaxonomie(taxonomy)
-      }
+      attributes: { brightness: Math.round((this.level / 100) * 255) }
     };
   }
 
@@ -89,6 +82,7 @@ export class ReceiverLight implements IReceiverModule {
         commandEnabled: true,
         payloadOn: 'ON',
         payloadOff: 'OFF',
+        attributsTaxonomie: buildAttributsTaxonomie(taxonomy),
         // Le schéma MQTT "light" (schema_basic.py) attend state_value_template, PAS value_template
         // (qui n'existe que pour switch/cover/sensor) — vérifié dans le code source HA du conteneur
         // (CONF_STATE_VALUE_TEMPLATE). Sans lui, HA compare le state_topic brut à payload_on/off —
@@ -107,7 +101,6 @@ export class ReceiverLight implements IReceiverModule {
           model: this.config.isDimmable ? 'ReceiverLight (variateur)' : 'ReceiverLight',
           suggested_area: taxonomy.nomLieu ?? undefined
         }
-        // attributs_taxonomie porté par getState() (json_attributes_topic), pas ici.
       }
     };
   }

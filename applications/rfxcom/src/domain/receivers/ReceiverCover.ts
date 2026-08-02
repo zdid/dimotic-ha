@@ -117,13 +117,9 @@ export class ReceiverCover implements IReceiverModule {
   }
 
   getState(): HaMqttStateMessage {
-    const taxonomy = extractTaxonomy(this.config.name);
     return {
       state: this.runtimeState(),
-      attributes: {
-        position: Math.round(this.computePosition()),
-        attributs_taxonomie: buildAttributsTaxonomie(taxonomy)
-      }
+      attributes: { position: Math.round(this.computePosition()) }
     };
   }
 
@@ -136,6 +132,7 @@ export class ReceiverCover implements IReceiverModule {
         commandEnabled: true,
         // Voir ReceiverLight.ts : sans ça, state_topic (JSON) n'est jamais reconnu par HA.
         valueTemplate: '{{ value_json.state }}',
+        attributsTaxonomie: buildAttributsTaxonomie(taxonomy),
         device: {
           identifiers: [this.config.receiverId],
           // Nom court (lieu précis) — voir ReceiverLight.ts::buildDisplayName pour le pourquoi.
@@ -144,7 +141,6 @@ export class ReceiverCover implements IReceiverModule {
           model: `ReceiverCover (${this.config.coverType})`,
           suggested_area: taxonomy.nomLieu ?? undefined
         }
-        // attributs_taxonomie porté par getState() (json_attributes_topic), pas ici.
       }
     };
   }

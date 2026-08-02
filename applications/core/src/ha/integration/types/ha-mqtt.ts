@@ -201,13 +201,16 @@ export function getCommandTopic(moduleName: string, bridgeInstance: string, devi
 }
 
 /**
- * Construit le topic d'attributs libres (json_attributes_topic) pour un device, propre à
- * l'espace de noms de l'application. Utile uniquement quand le module ne peut pas réutiliser son
- * propre state_topic pour porter les attributs (ex: passthrough — le state_topic appartient à la
- * source tierce relayée, son format n'est pas sous notre contrôle).
+ * Construit le topic dédié aux attributs de taxonomie (json_attributes_topic) d'une entité —
+ * calqué sur le topic de découverte (même component/objectId), "attributs" à la place de
+ * "config". Publié uniquement à la (re)découverte, jamais à chaque état : la taxonomie change
+ * rarement (renommage/déplacement), contrairement à l'état. Ne contient QUE la taxonomie —
+ * jamais les identifiants internes (sensor_id/device_id/evoo7_id, déjà connus de HA via
+ * unique_id) ni les autres données techniques (signal_level, brightness, ...), qui restent
+ * publiées comme avant dans le state_topic.
  */
-export function getAttributesTopic(moduleName: string, bridgeInstance: string, deviceId: string): string {
-  return `${moduleName}/${bridgeInstance}/${deviceId}/attributes`;
+export function getAttributesTopic(component: string, objectId: string): string {
+  return `homeassistant/${component}/${objectId}/attributs`;
 }
 
 /**

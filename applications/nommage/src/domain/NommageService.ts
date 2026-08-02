@@ -18,7 +18,6 @@
  */
 
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/src/exports';
-import { getAttributesTopic } from '../../../core/src/exports';
 import type { INommageMqttIntegrationService } from '../ha/integration/nommage/NommageMqttIntegrationService';
 import { nommageConfigSchema, type NommageConfig } from './config-schema';
 import type {
@@ -396,19 +395,22 @@ export class NommageService implements INommageService {
     // en direct sur une instance HA réelle). Le state_topic de l'entité relayée appartient à la
     // source tierce (ex: Zigbee2MQTT) : contrairement à evoo7/rfxcom, NOMMAGE ne le contrôle pas et
     // ne peut pas se fier à son format pour y superposer json_attributes_topic — les attributs sont
-    // donc publiés sur un topic dédié que NOMMAGE possède, déclaré dans la découverte relayée.
+    // donc publiés sur un topic dédié, calqué sur le topic de découverte source (même convention
+    // que core/discovery.ts::getAttributesTopic — "attributs" à la place de "config") : simple
+    // substitution du suffixe, robuste au nombre de segments précédents (Zigbee2MQTT peut publier
+    // sur 4 OU 5 segments selon la présence d'un node_id — vérifié en direct).
     if (this.config.ha.injectTaxonomyAttributes) {
-      const attributesTopic = getAttributesTopic('nommage', BRIDGE_INSTANCE, parsed.haEntityId || parsed.quoi.slug);
+      const attributesTopic = discoveryMessage.topic.replace(/\/config$/, '/attributs');
       payload = {
         ...payload,
         json_attributes_topic: attributesTopic,
-        json_attributes_template: '{{ value_json.attributes | tojson }}'
+        json_attributes_template: '{{ value_json | tojson }}'
       };
 
       const publishEvent: PassthroughPublishEvent & { bridgeInstance: string } = {
         bridgeInstance: BRIDGE_INSTANCE,
         topic: attributesTopic,
-        payload: { attributes: parsed.haAttributes },
+        payload: parsed.haAttributes,
         qos: 1,
         retain: true
       };

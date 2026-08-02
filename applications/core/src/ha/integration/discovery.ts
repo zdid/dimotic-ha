@@ -8,7 +8,7 @@
 
 import type { MqttTransport } from '../../infrastructure/transport/MqttTransport';
 import type { HaMqttDevice, HaMqttDiscoveryEntity } from './types/ha-mqtt';
-import { getDiscoveryTopic, getStateTopic, getCommandTopic } from './types/ha-mqtt';
+import { getDiscoveryTopic, getStateTopic, getCommandTopic, getAttributesTopic } from './types/ha-mqtt';
 
 /**
  * Données essentielles qu'un module métier doit fournir pour une entité.
@@ -31,11 +31,17 @@ export interface EssentialEntityData {
    * valide le message de découverte contre un schéma strict par plateforme et ignore
    * silencieusement toute clé non reconnue — vérifié en direct sur une instance HA réelle,
    * confirmé par un test de bout en bout (aucun des champs "extra" custom n'atteignait jamais
-   * entity.attributes). Pour des attributs libres, les porter dans HaMqttStateMessage.attributes
-   * (publishState) — json_attributes_topic/json_attributes_template (ci-dessous) les récupère
-   * automatiquement depuis là.
+   * entity.attributes). Pour des attributs libres, voir `attributsTaxonomie` ci-dessous.
    */
   extra?: Record<string, unknown>;
+  /**
+   * Taxonomie QUOI/OÙ de l'entité (buildAttributsTaxonomie côté module métier). Si fourni,
+   * publiée sur un topic dédié (getAttributesTopic) UNIQUEMENT à la (re)découverte — jamais à
+   * chaque état, contrairement à l'ancien mécanisme qui réutilisait state_topic. Absent = pas de
+   * json_attributes_topic du tout pour cette entité (ex: scènes RFXCOM/device_automation, qui
+   * n'ont pas d'équivalent HA pour ce mécanisme).
+   */
+  attributsTaxonomie?: Record<string, unknown>;
 }
 
 /**
@@ -75,12 +81,15 @@ export function buildDiscoveryPayload(
     device: essential.device,
     retain: true,
     qos: 1,
-    // Le topic d'état publie déjà { state, attributes } en JSON (stateCommand.ts::publishState) —
-    // réutilisé tel quel pour les attributs libres de l'entité (ex: attributs_taxonomie), sans
-    // topic supplémentaire. Validé en direct sur une instance HA réelle.
-    json_attributes_topic: stateTopic,
-    json_attributes_template: '{{ value_json.attributes | tojson }}',
   };
+
+  if (essential.attributsTaxonomie) {
+    // Topic dédié, distinct du state_topic — publié une seule fois à la découverte (voir
+    // publishAttributes ci-dessous), pas à chaque état. Payload = { attributs_taxonomie: {...} }
+    // directement, donc pas de `.attributes` à déballer dans le template.
+    entity.json_attributes_topic = getAttributesTopic(context.component, context.objectId);
+    entity.json_attributes_template = '{{ value_json | tojson }}';
+  }
 
   if (essential.commandEnabled) {
     entity.command_topic = getCommandTopic(context.moduleName, context.bridgeInstance, context.deviceId);
@@ -101,6 +110,22 @@ export function publishDiscovery(
   retain: boolean = true
 ): void {
   transport.publish(getDiscoveryTopic(component, objectId), JSON.stringify(entity), qos, retain);
+}
+
+/**
+ * Publie la taxonomie d'une entité sur son topic d'attributs dédié (voir getAttributesTopic) —
+ * à appeler uniquement à la (re)découverte, jamais à chaque changement d'état.
+ */
+export function publishAttributes(
+  transport: MqttTransport,
+  component: string,
+  objectId: string,
+  attributsTaxonomie: Record<string, unknown>,
+  qos: 0 | 1 = 1,
+  retain: boolean = true
+): void {
+  const topic = getAttributesTopic(component, objectId);
+  transport.publish(topic, JSON.stringify({ attributs_taxonomie: attributsTaxonomie }), qos, retain);
 }
 
 /**

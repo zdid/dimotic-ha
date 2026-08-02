@@ -330,6 +330,7 @@ export class RfxComService implements IRfxComService {
       // cassé pour binary_sensor (jamais égal à payload_on/payload_off). Constaté en direct sur
       // une instance HA réelle (logs system_log : "Value error... non-numeric value").
       valueTemplate: '{{ value_json.state }}',
+      attributsTaxonomie: buildAttributsTaxonomie(taxonomy),
       device: {
         identifiers: [device.uniqueId],
         // Nom court (lieu précis) plutôt que la chaîne de taxonomie brute complète — l'area
@@ -342,9 +343,6 @@ export class RfxComService implements IRfxComService {
         suggested_area: taxonomy.nomLieu ?? undefined
       },
       extra: isBouton ? { entity_category: 'diagnostic' } : undefined
-      // attributs_taxonomie n'est plus ici : un message de découverte HA est validé contre un
-      // schéma strict par plateforme, les clés non reconnues sont ignorées en silence — porté
-      // par l'état à la place (publishDeviceState), via json_attributes_topic.
     };
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
@@ -359,7 +357,6 @@ export class RfxComService implements IRfxComService {
   private publishDeviceState(device: RfxComDeviceInfo, message: RfxComRawMessage): void {
     const deviceId = buildStateDeviceId(device.protocole, device.subType, device.sensorId, device.unitCode);
     const stateValue = this.extractStateValue(device.subType, message);
-    const taxonomy = extractTaxonomy(device.name);
 
     // Persisté pour être rejoué au démarrage/reconnexion (publishDeviceStateAtStartup), sans
     // attendre une nouvelle réception RF433 — voir aussi lastSeen ci-dessous (fraîcheur).
@@ -373,10 +370,7 @@ export class RfxComService implements IRfxComService {
         state: stateValue,
         attributes: {
           signal_level: message.signalLevel,
-          battery_level: message.batteryLevel,
-          sensor_id: device.uniqueId,
-          device_id: device.uniqueId,
-          attributs_taxonomie: buildAttributsTaxonomie(taxonomy)
+          battery_level: message.batteryLevel
         }
       }
     });
@@ -384,27 +378,19 @@ export class RfxComService implements IRfxComService {
 
   /**
    * Republie la dernière valeur connue (persistée) d'un device brut (sensor ET binary_sensor) au
-   * démarrage/reconnexion, pour que la taxonomie soit disponible côté HA sans attendre une
-   * nouvelle réception RF433. Si cette valeur date de plus de 30 minutes (ou est absente),
-   * publie `"unknown"` plutôt qu'une valeur potentiellement obsolète/trompeuse.
+   * démarrage/reconnexion, sans attendre une nouvelle réception RF433. Si cette valeur date de
+   * plus de 30 minutes (ou est absente), publie `"unknown"` plutôt qu'une valeur potentiellement
+   * obsolète/trompeuse.
    */
   private publishDeviceStateAtStartup(device: RfxComDeviceInfo): void {
     const deviceId = buildStateDeviceId(device.protocole, device.subType, device.sensorId, device.unitCode);
-    const taxonomy = extractTaxonomy(device.name);
     const ageMs = device.lastSeen ? Date.now() - new Date(device.lastSeen).getTime() : Infinity;
     const isFresh = device.lastValue !== undefined && ageMs <= RfxComService.LAST_VALUE_MAX_AGE_MS;
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.config.bridgeInstance,
       deviceId,
-      state: {
-        state: isFresh ? (device.lastValue as string | number) : 'unknown',
-        attributes: {
-          sensor_id: device.uniqueId,
-          device_id: device.uniqueId,
-          attributs_taxonomie: buildAttributsTaxonomie(taxonomy)
-        }
-      }
+      state: { state: isFresh ? (device.lastValue as string | number) : 'unknown' }
     });
   }
 

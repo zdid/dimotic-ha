@@ -259,16 +259,10 @@ export class Evoo7Service implements IEvoo7Service {
 
     // Pas de traduction serveur pour les énumérations : le code brut est relayé tel quel, HA
     // traduit code→libellé côté affichage via value_template (voir classification.ts).
-    // attributs_taxonomie porté ici (pas dans le message de découverte, ignoré par HA — voir
-    // discovery.ts) : json_attributes_topic pointe vers ce même topic d'état.
-    const taxonomy = resolveTaxonomy(donnee);
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.config.bridgeInstance,
       deviceId: id,
-      state: {
-        state: value,
-        attributes: { evoo7_id: id, attributs_taxonomie: buildAttributsTaxonomie(taxonomy) }
-      }
+      state: { state: value }
     });
 
     if (this.thermostat.enabled && (THERMOSTAT_ACTION_TRIGGER_IDS as readonly string[]).includes(id)) {
@@ -302,9 +296,6 @@ export class Evoo7Service implements IEvoo7Service {
     // binary_sensor n'a pas de command_topic en découverte MQTT HA.
     const commandEnabled = component !== 'sensor' && component !== 'binary_sensor' && donnee.updatable && donnee.miseAJour;
 
-    // attributs_taxonomie n'est plus ici : un message de découverte HA est validé contre un
-    // schéma strict par plateforme, les clés non reconnues (dont celle-ci) sont ignorées en
-    // silence — porté par l'état à la place (handleEvoo7Message), via json_attributes_topic.
     const extra: Record<string, unknown> = {};
     if (donnee.isConfigData) {
       // HA rejette entity_category:"config" sur sensor/binary_sensor (lecture seule, ne peut pas
@@ -336,6 +327,7 @@ export class Evoo7Service implements IEvoo7Service {
       name: taxonomy.rawQuoi,
       valueTemplate: buildValueTemplate(),
       commandEnabled,
+      attributsTaxonomie: buildAttributsTaxonomie(taxonomy),
       device: { ...EVOO7_DEVICE, suggested_area: taxonomy.nomLieu ?? undefined },
       extra
     };
@@ -409,7 +401,7 @@ export class Evoo7Service implements IEvoo7Service {
 
       // action_topic réutilise le topic d'état par défaut de CETTE entité (calculé côté serveur,
       // voir publishThermostatState) — buildDiscoveryPayload le fixe déjà à cette valeur pour
-      // state_topic/json_attributes_topic, on la reproduit ici pour action_topic.
+      // state_topic, on la reproduit ici pour action_topic.
       action_topic: getStateTopic(MODULE_NAME, bridge, THERMOSTAT_DEVICE_ID),
       action_template: '{{ value_json.state }}'
     };
@@ -417,6 +409,7 @@ export class Evoo7Service implements IEvoo7Service {
     const essential: EssentialEntityData = {
       name: taxonomy.rawQuoi,
       commandEnabled: true,
+      attributsTaxonomie: buildAttributsTaxonomie(taxonomy),
       device: { ...EVOO7_DEVICE, suggested_area: taxonomy.nomLieu ?? undefined },
       extra
     };
@@ -456,17 +449,12 @@ export class Evoo7Service implements IEvoo7Service {
     const action = modeIsOff ? 'off' : (circulateurActif ? 'heating' : 'idle');
     const tempExt = this.lastRawValues.get('temp_ext');
 
-    const taxonomy = resolveTaxonomy(THERMOSTAT_TAXONOMY_SOURCE);
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.config.bridgeInstance,
       deviceId: THERMOSTAT_DEVICE_ID,
       state: {
         state: action,
-        attributes: {
-          evoo7_id: THERMOSTAT_DEVICE_ID,
-          temp_ext: tempExt,
-          attributs_taxonomie: buildAttributsTaxonomie(taxonomy)
-        }
+        attributes: { temp_ext: tempExt }
       }
     });
   }

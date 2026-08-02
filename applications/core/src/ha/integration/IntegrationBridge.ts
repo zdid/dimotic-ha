@@ -189,6 +189,12 @@ export class IntegrationBridge {
       }
     }
     this.haMqttService.publishDiscoveryFor(moduleName, data.bridgeInstance, data.component, data.objectId, data.deviceId, data.essential);
+
+    // Taxonomie sur son topic dédié — seulement à la (re)découverte, jamais à chaque état (voir
+    // discovery.ts::EssentialEntityData.attributsTaxonomie).
+    if (data.essential.attributsTaxonomie) {
+      this.haMqttService.publishAttributesFor(moduleName, data.bridgeInstance, data.component, data.objectId, data.essential.attributsTaxonomie);
+    }
   }
 
   /** Même garantie d'area que publishDiscoveryWithArea, pour le chemin passthrough (NOMMAGE). */
