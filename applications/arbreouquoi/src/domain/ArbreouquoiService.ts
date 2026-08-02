@@ -181,7 +181,10 @@ export class ArbreouquoiService {
       
       this.configService.savePartialConfig(newConfig);
       
-      if (partialConfig.refresh?.autoRefreshInterval) {
+      // ⚠️ Vérifier !== undefined, pas la simple vérité : autoRefreshInterval=0 est une valeur
+      // valide (désactivation) mais falsy en JS — un test tronqué ignorerait silencieusement
+      // toute tentative de mise à 0, laissant tourner l'ancien minuteur indéfiniment.
+      if (partialConfig.refresh?.autoRefreshInterval !== undefined || partialConfig.refresh?.autoRefreshEnabled !== undefined) {
         if (this.refreshInterval) clearInterval(this.refreshInterval);
         if (newConfig.refresh.autoRefreshEnabled) {
           this.startAutoRefresh(newConfig.refresh.autoRefreshInterval);
