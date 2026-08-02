@@ -15,6 +15,14 @@ import { EntitySelector } from './components/EntitySelector';
 const dataService = new DataService();
 let currentContainer: FloorPlanContainer | null = null;
 let editMode = false;
+// File d'attente : deux appels à showFloorplan() qui se chevauchent (ex: reconnexion Socket.io qui
+// rejoue l'événement persistant haplan:floorplans:list pendant qu'un ajout d'entité vient d'en
+// déclencher un nouveau) ne doivent jamais s'exécuter en parallèle. cleanup() vide entièrement
+// #floorplan-container (this.container.innerHTML = '') : si un appel périmé l'exécute après qu'un
+// appel plus récent y a déjà reconstruit son propre contenu, il efface ce contenu sous ses pieds —
+// d'où la boucle de retry DOM observée dans EnhancedLightObject. Un simple jeton ne suffit pas
+// (l'appel périmé doit quand même nettoyer), donc chaque appel attend la fin complet du précédent.
+let showFloorplanQueue: Promise<void> = Promise.resolve();
 
 const entitySelectorContainer = document.getElementById('entity-selector-container') as HTMLElement;
 const entitySelector = new EntitySelector(entitySelectorContainer, (entity_id: string) => {
@@ -49,7 +57,12 @@ function populateFloorplanSelect(): void {
   select.addEventListener('change', () => showFloorplan(select.value));
 }
 
-async function showFloorplan(floorplanId: string): Promise<void> {
+function showFloorplan(floorplanId: string): Promise<void> {
+  showFloorplanQueue = showFloorplanQueue.then(() => showFloorplanNow(floorplanId));
+  return showFloorplanQueue;
+}
+
+async function showFloorplanNow(floorplanId: string): Promise<void> {
   const container = document.getElementById('floorplan-container');
   if (!container) return;
 

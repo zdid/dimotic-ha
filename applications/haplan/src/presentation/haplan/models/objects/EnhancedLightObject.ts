@@ -83,12 +83,6 @@ export class EnhancedLightObject extends EnhancedSwitchObject {
     }
 
     if (!document.contains(this.element)) {
-      setInterval(() => {
-        console.log(`[TRACE][EnhancedLightObject] Vérification de l'élément dans le DOM pour ${this.entity_id} (retry ${this.domRetryCount})`, {
-          hasElement: !!this.element,
-          inDOM: !!this.element && document.contains(this.element)
-        });
-      }, 1000);
       if (this.domRetryCount < this.maxDomRetries) {
         this.domRetryCount += 1;
         console.log(`[TRACE][EnhancedLightObject] element détaché, retry ${this.domRetryCount}/${this.maxDomRetries}`);

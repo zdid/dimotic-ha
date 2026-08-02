@@ -39,6 +39,10 @@ export class SocketBridge {
   private modulesList: ApplicationModule[] = [];
   private appSocketEvents: Map<string, Record<string, string>> = new Map();
   private persistentEvents: Map<string, { appId: string; eventName: string; lastData: unknown }> = new Map();
+  /** Listeners EventBus posés par registerAppSocketEvents(), par appId — permet de les retirer
+   *  avant un ré-enregistrement (ex: AppService.detectModules() ET Service.start() enregistrent
+   *  chacun les mêmes événements au démarrage) pour ne jamais dupliquer un broadcast. */
+  private appSocketEventListeners: Map<string, Array<{ eventName: string; listener: (data: unknown) => void }>> = new Map();
 
   /**
    * Crée un nouveau SocketBridge
@@ -353,25 +357,40 @@ export class SocketBridge {
    */
   private registerAppSocketEvents(appId: string, socketEvents: Record<string, string>, persistentEvents?: string[]): void {
     this.logger.info('SocketBridge', `Enregistrement des événements Socket.io pour ${appId}...`);
-    
+
+    // Retirer les listeners d'un enregistrement précédent pour ce appId — sans ça, une application
+    // dont les événements sont annoncés deux fois (ex: détection éager par AppService.detectModules()
+    // PUIS Service.start() lui-même) finit avec deux listeners EventBus par événement, donc chaque
+    // broadcast serveur→client part en double vers tous les clients Socket.io.
+    const previousListeners = this.appSocketEventListeners.get(appId);
+    if (previousListeners) {
+      for (const { eventName, listener } of previousListeners) {
+        this.eventBus.offGeneric(eventName, listener);
+      }
+    }
+
     // Stocker les événements pour cette application
     this.appSocketEvents.set(appId, socketEvents);
-    
+
     // Handler Server→Client : EventBus.on(eventName) → socket.broadcast(eventName)
     // Configurer un handler EventBus pour chaque événement de cette application
+    const newListeners: Array<{ eventName: string; listener: (data: unknown) => void }> = [];
     for (const [eventKey, eventName] of Object.entries(socketEvents)) {
-      this.eventBus.onGeneric(eventName, (data: unknown) => {
+      const listener = (data: unknown) => {
         this.logger.info('SocketBridge', `EventBus → Socket.io: ${eventName}`);
         this.broadcast(eventName as any, data as any);
-        
+
         // Stocker la dernière valeur si c'est un événement persistant
         if (persistentEvents?.includes(eventName)) {
           this.persistentEvents.set(eventName, { appId, eventName, lastData: data });
           this.logger.debug('SocketBridge', `Événement persistant stocké: ${eventName}`);
         }
-      });
+      };
+      this.eventBus.onGeneric(eventName, listener);
+      newListeners.push({ eventName, listener });
     }
-    
+    this.appSocketEventListeners.set(appId, newListeners);
+
     this.logger.info('SocketBridge', `Événements Socket.io enregistrés pour ${appId}: ${Object.keys(socketEvents).length} événements`);
   }
 
