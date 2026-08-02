@@ -111,8 +111,11 @@ export class EnhancedLightObject extends EnhancedSwitchObject {
         const oldColor = bulbIcon.style.color;
         
         bulbIcon.className = `fas fa-lightbulb`;
-        bulbIcon.style.opacity = this.isOn ? '1' : '0.3';
-        bulbIcon.style.color = this.isOn ? this.colorScheme.primary : '#999999';
+        // Fond du plan très sombre (--color-bg #1a1a2e) : à 0.3 d'opacité, le gris #999999 s'y fond
+        // presque entièrement (icône quasi invisible, éteinte impossible à repérer/cliquer). Reste
+        // visiblement plus terne que l'état allumé, mais lisible.
+        bulbIcon.style.opacity = this.isOn ? '1' : '0.7';
+        bulbIcon.style.color = this.isOn ? this.colorScheme.primary : '#bbbbbb';
         
         console.log(`✅ [EnhancedLightObject] Icône mise à jour pour ${this.entity_id}`, {
           oldOpacity,
