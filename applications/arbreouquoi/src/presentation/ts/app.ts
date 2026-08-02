@@ -357,7 +357,12 @@ function hideLoading(): void {
 
 function showError(message: string): void {
   state.error = message;
-  const errorEl = $('error-message')!;
+  // Pas de non-null assertion ici (contrairement à showLoading/hideLoading) : contrairement à
+  // ces deux-là, showError est aussi appelé depuis le handler socket.io 'disconnect', qui peut se
+  // déclencher après que le DOM du module ait déjà été démonté (ex: page entrée en bfcache lors
+  // d'une navigation) — $() renvoie alors null, une assertion aurait fait planter le handler.
+  const errorEl = $('error-message');
+  if (!errorEl) return;
   errorEl.textContent = message;
   errorEl.style.display = 'block';
   setTimeout(() => { if (state.error === message) hideError(); }, 5000);
@@ -365,7 +370,8 @@ function showError(message: string): void {
 
 function hideError(): void {
   state.error = null;
-  $('error-message')!.style.display = 'none';
+  const errorEl = $('error-message');
+  if (errorEl) errorEl.style.display = 'none';
 }
 
 function renderTree(): void {

@@ -614,6 +614,20 @@ export class Sidebar extends HTMLElement {
     displayModules.forEach(module => {
       const link = this.shadowRoot!.querySelector(`a[data-module-id="${module.id}"]`);
       link?.addEventListener('click', (e) => {
+        // Un module déclarant une entrée de menu vers un vrai fichier servi par le serveur
+        // (/applications/:appId/...) navigue réellement vers cette page dédiée, au lieu d'être
+        // embarqué dans ModuleContainer — même règle que renderAppParamsSubmenu() ci-dessous, qui
+        // ne s'applique qu'au sous-menu "Paramètres Techniques", pas à cette liste principale.
+        // Sans ce garde-fou, un module comme HAPLAN (audience "end-user", page dédiée
+        // dashboard.html hors de la convention presentation/index.html) tombait toujours dans le
+        // chemin générique de ModuleContainer, qui la cherchait au mauvais endroit (404 silencieux
+        // → "Aucun contenu à afficher pour ce module").
+        const entryPath = this.getAppMenuConfig(module.id)?.entry?.path;
+        if (entryPath && entryPath.startsWith('/applications/')) {
+          console.log(`[Sidebar] Navigation vers la page dédiée: ${module.id} (${entryPath})`);
+          window.location.href = entryPath;
+          return;
+        }
         e.preventDefault();
         console.log(`[Sidebar] Clic sur module: ${module.id} (${module.name})`);
         this.setActiveModuleAndShow(module.id);

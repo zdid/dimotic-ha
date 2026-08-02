@@ -51,6 +51,11 @@ export class ModuleContainer extends HTMLElement {
   // loadModuleContent() de déclencher chacun leur propre fetch()/innerHTML/executeScripts()
   // pour le même module (voir loadModuleContent ci-dessous pour le pourquoi).
   private moduleLoading: Partial<Record<string, Promise<void>>> = {};
+  // Module dont le contenu est actuellement affiché dans #module-container — distinct de
+  // activeModule (mis à jour AVANT l'appel à loadModuleContent, donc inutilisable pour détecter
+  // un re-clic sur le module déjà affiché) et de moduleInited (juste "a déjà été chargé au moins
+  // une fois", vrai même après un changement d'onglet). Voir loadModuleContent ci-dessous.
+  private displayedModule: string | null = null;
 
   constructor() {
     super();
@@ -113,6 +118,19 @@ export class ModuleContainer extends HTMLElement {
     // Ne pas charger de contenu pour le module core (géré par ConfigForm)
     // et ne pas recharger si déjà chargé et initialisé
     if (moduleId === 'core' || (this.moduleContents[moduleId] && this.moduleInited[moduleId])) {
+      // Re-clic sur le module déjà affiché à l'écran : pur no-op. Sans ce garde-fou, on
+      // remplaçait innerHTML par une copie fraîche du cache SANS jamais rappeler
+      // executeScripts() (pour ne pas ré-exécuter customElements.define()) — le script déjà en
+      // vie continuait de tourner, mais sur des nœuds DOM maintenant orphelins/remplacés :
+      // l'écran affiché redevenait l'état par défaut ("Chargement...") et restait bloqué là pour
+      // de bon, plus aucun script vivant n'étant attaché à ce qui est réellement visible. Un
+      // second clic sur un onglet qui semble bloqué est un réflexe naturel — ce bug se
+      // déclenchait donc facilement (cf TODO.md "ModuleContainer : re-clic casse le module déjà
+      // affiché").
+      if (this.displayedModule === moduleId) {
+        console.log(`[ModuleContainer] Module ${moduleId} déjà affiché, rien à faire`);
+        return;
+      }
       console.log(`[ModuleContainer] Module ${moduleId} déjà chargé, affichage du contenu existant`);
       console.log(`[ModuleContainer] moduleContents[${moduleId}] existe:`, !!this.moduleContents[moduleId]);
       console.log(`[ModuleContainer] moduleContents[${moduleId}] length:`, this.moduleContents[moduleId]?.length || 0);
@@ -120,6 +138,7 @@ export class ModuleContainer extends HTMLElement {
       console.log(`[ModuleContainer] Conteneur trouvé:`, !!container);
       if (container && this.moduleContents[moduleId]) {
         container.innerHTML = `<div class="module-content">${this.moduleContents[moduleId]}</div>`;
+        this.displayedModule = moduleId;
         console.log(`[ModuleContainer] Contenu réaffiché pour ${moduleId}`);
         console.log(`[ModuleContainer] Conteneur innerHTML length:`, container.innerHTML.length);
         // Le scan Alpine (initial + MutationObserver) ne traverse jamais une frontière Shadow
@@ -198,6 +217,7 @@ export class ModuleContainer extends HTMLElement {
         window.Alpine?.initTree(container);
 
         this.moduleInited[moduleId] = true;
+        this.displayedModule = moduleId;
         console.log(`[ModuleContainer] Module ${moduleId} marqué comme initialisé`);
 
         // Notifier que le module est chargé

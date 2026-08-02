@@ -133,7 +133,11 @@ export class ArbreouquoiService {
   }
 
   private setupEventListeners(): void {
-    this.eventBus.on('ha:structure:rebuilt', () => {
+    // 'ha:structure:rebuilt' est déclaré dans core/types/events.ts mais n'a jamais été émis nulle
+    // part (AppService.loadHaRegistry() émet 'ha:ready' à la place, une fois rebuild() terminé) —
+    // ce listener ne se déclenchait donc jamais. Restait invisible tant que le minuteur périodique
+    // (autoRefreshEnabled) finissait par rattraper le coup ; démasqué en le désactivant.
+    this.eventBus.on('ha:ready', () => {
       this.logger.info('ArbreouquoiService', 'Référentiel HA reconstruit');
       const config = this.getConfig();
       if (config.refresh.refreshOnHaUpdate) {

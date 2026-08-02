@@ -130,7 +130,6 @@ export interface AppEvents {
   'ha:area:updated': unknown; // HaArea
   'ha:device:updated': unknown; // HaDevice
   'ha:entity:updated': unknown; // HaStructuredEntity
-  'ha:structure:rebuilt': unknown; // HaStructuredRegistry
   'ha:command:result': unknown; // HaCommandResult
   
   // ------ Application → Couche HA ------
