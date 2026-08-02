@@ -298,34 +298,12 @@ export abstract class BaseEntity extends HAObject {
     }
   }
 
+  /** Nom (taxonomie QUOI/OÙ) affiché dans le bandeau flottant #haplan-entity-label — voir
+   *  dashboard-app.ts::setupEntityFocusLabel(). Déclenché au survol et au clic (setupClickHandler
+   *  ci-dessous), y compris en mode édition où onClick() n'ouvre volontairement aucune fenêtre. */
   private emitHoveredEntityLabel(): void {
-    const labelParts: string[] = [];
-    const element = this.element;
-
-    console.log('[TRACE] BaseEntity.emitHoveredEntityLabel dataset:', {
-      entity_id: this.entity_id,
-      areaName: element?.dataset.areaName,
-      deviceName: element?.dataset.deviceName,
-      entityName: element?.dataset.entityName
-    });
-
-    if (element?.dataset.areaName) {
-      labelParts.push(element.dataset.areaName);
-    }
-    if (element?.dataset.deviceName) {
-      labelParts.push(element.dataset.deviceName);
-    }
-    if (element?.dataset.entityName) {
-      labelParts.push(element.dataset.entityName);
-    }
-
-    if (labelParts.length === 0) {
-      console.log('[TRACE] BaseEntity.emitHoveredEntityLabel: no label parts');
-      return;
-    }
-
-    const label = labelParts.join(' / ');
-    console.log('[TRACE] BaseEntity.emitHoveredEntityLabel label:', label);
+    const label = this.dataService?.getTaxonomyDisplayName(this.entity_id);
+    if (!label) return;
     window.dispatchEvent(new CustomEvent('ha-object-focus', { detail: { label } }));
   }
 

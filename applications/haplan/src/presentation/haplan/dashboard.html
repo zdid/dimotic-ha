@@ -12,17 +12,23 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <style>
     body { margin: 0; }
+    .haplan-app { display: flex; flex-direction: column; height: 100vh; }
     .haplan-header {
-      display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+      display: none; align-items: center; gap: 12px; padding: 12px 20px; flex-wrap: wrap;
       background: var(--color-surface); border-bottom: 1px solid var(--color-primary);
     }
+    .haplan-header.open { display: flex; }
     .haplan-header select {
       padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--color-primary);
       background: var(--color-bg); color: var(--color-text); color-scheme: dark;
     }
     .haplan-header a { color: var(--color-accent); text-decoration: none; }
+    .haplan-body { position: relative; flex: 1; min-height: 0; }
+    /* FloorPlan.ts::initContainer() force position:relative en style inline sur cet élément (pour
+       servir de repère aux objets positionnés en absolu dessus) — donc on le remplit par
+       width/height:100% plutôt que par inset, qui n'aurait aucun effet sur du position:relative. */
     #floorplan-container {
-      position: relative; width: 100%; height: calc(100vh - 53px); overflow: hidden;
+      width: 100%; height: 100%; overflow: hidden;
       background: var(--color-bg);
     }
     .haplan-empty {
@@ -34,8 +40,28 @@
       background: var(--color-bg); color: var(--color-text); cursor: pointer; font-size: 0.9em;
     }
     .haplan-header button.active { background: var(--color-accent); color: white; border-color: var(--color-accent); }
+    /* Contrôles discrets superposés au plan : retour + bascule du menu (voir 1) ci-dessus). Restent
+       visibles que le menu soit ouvert ou fermé — seul le menu (.haplan-header) se replie. */
+    .haplan-floating-controls {
+      position: absolute; top: 12px; left: 12px; z-index: 60; display: flex; gap: 8px;
+    }
+    .haplan-icon-btn {
+      width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      background: var(--color-surface); border: 1px solid var(--color-primary); color: var(--color-text);
+      text-decoration: none; cursor: pointer; font-size: 1.1em; opacity: 0.8; transition: opacity 0.15s ease;
+    }
+    .haplan-icon-btn:hover { opacity: 1; }
+    .haplan-icon-btn.active { background: var(--color-accent); color: white; border-color: var(--color-accent); }
+    /* Nom (taxonomie QUOI/OÙ) affiché brièvement au clic sur un objet en mode édition (voir 2) ) */
+    .haplan-entity-label {
+      position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 60;
+      background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-primary);
+      border-radius: var(--radius); padding: 6px 14px; font-size: 0.95em;
+      opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+    }
+    .haplan-entity-label.visible { opacity: 1; }
     #entity-picker-panel {
-      display: none; position: fixed; top: 53px; right: 0; width: 340px; max-height: calc(100vh - 53px);
+      display: none; position: fixed; top: 0; right: 0; width: 340px; max-height: 100vh;
       overflow-y: auto; background: var(--color-surface); border-left: 1px solid var(--color-primary);
       padding: 16px; z-index: 500;
     }
@@ -45,7 +71,7 @@
       border: 1px solid var(--color-primary); background: var(--color-bg); color: var(--color-text); color-scheme: dark;
     }
     #new-floorplan-panel {
-      display: none; position: fixed; top: 53px; right: 0; width: 300px;
+      display: none; position: fixed; top: 0; right: 0; width: 300px;
       background: var(--color-surface); border-left: 1px solid var(--color-primary);
       padding: 16px; z-index: 500;
     }
@@ -58,17 +84,25 @@
   </style>
 </head>
 <body>
-  <div class="haplan-header">
-    <a href="/">← Retour</a>
-    <strong>🗺️ Plans</strong>
-    <select id="floorplan-select"></select>
-    <button type="button" id="btn-edit-mode">✏️ Éditer</button>
-    <button type="button" id="btn-add-entity">➕ Ajouter une entité</button>
-    <button type="button" id="btn-new-floorplan">🆕 Nouveau plan</button>
-    <button type="button" id="btn-delete-floorplan">🗑️ Supprimer ce plan</button>
-    <span id="haplan-connection-status" style="margin-left:auto;font-size:0.85em;color:var(--color-text-muted);"></span>
+  <div class="haplan-app">
+    <div class="haplan-header" id="haplan-header">
+      <strong>🗺️ Plans</strong>
+      <select id="floorplan-select"></select>
+      <button type="button" id="btn-edit-mode">✏️ Éditer</button>
+      <button type="button" id="btn-add-entity">➕ Ajouter une entité</button>
+      <button type="button" id="btn-new-floorplan">🆕 Nouveau plan</button>
+      <button type="button" id="btn-delete-floorplan">🗑️ Supprimer ce plan</button>
+      <span id="haplan-connection-status" style="margin-left:auto;font-size:0.85em;color:var(--color-text-muted);"></span>
+    </div>
+    <div class="haplan-body">
+      <div class="haplan-floating-controls">
+        <a href="/" class="haplan-icon-btn" title="Retour" aria-label="Retour">←</a>
+        <button type="button" id="btn-toggle-menu" class="haplan-icon-btn" title="Menu" aria-label="Menu">☰</button>
+      </div>
+      <div id="floorplan-container" class="floorplan-drag-container"></div>
+      <div id="haplan-entity-label" class="haplan-entity-label"></div>
+    </div>
   </div>
-  <div id="floorplan-container" class="floorplan-drag-container"></div>
   <div id="entity-picker-panel">
     <h3 style="margin-top:0;">Ajouter une entité</h3>
     <p style="color:var(--color-text-muted);font-size:0.85em;">Classée par lieu puis par type (taxonomie QUOI/OÙ).</p>

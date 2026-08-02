@@ -42,17 +42,7 @@ export function capitalize(str: string ): string  {
 }
 // Fonction utilitaire pour obtenir le titre formaté
 export function getFormattedWindowTitle(entity: BaseEntity): string {
-  let name = getDataService().getNameEntity(entity.getEntity_id());
-  let area = getDataService().getAreaNameOfEntity(entity.getEntity_id())
-  console.log("getFormattedWindowTitle baseEntity", entity)
-  return capitalize(area) + " - "+ capitalize(name)
-  // const entityParts = entity.getEntity_id().split('.');
-  // const entityName = entityParts.length > 1 ? entityParts[1].replace(/_/g, ' ') : entity.getEntity_id();
-  
-  // // Formater le titre
-  
-  // return capitalize(entityName);
-  
+  return getDataService().getTaxonomyDisplayName(entity.getEntity_id());
 }
 
 // Fonction utilitaire pour appliquer la taille de police

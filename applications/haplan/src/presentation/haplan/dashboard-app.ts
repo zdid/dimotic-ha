@@ -138,6 +138,37 @@ function setupNewFloorplanPanel(): void {
   });
 }
 
+/** Menu replié par défaut (voir dashboard.html) — seuls le retour et ce bouton restent visibles,
+ *  superposés au plan. À l'ouverture, le menu reprend sa place dans le flux et décale le plan vers
+ *  le bas (.haplan-header passe de display:none à flex) ; il faut donc redemander au plan de
+ *  recalculer ses dimensions, sa hauteur ayant changé. */
+function setupMenuToggle(): void {
+  const btn = document.getElementById('btn-toggle-menu') as HTMLButtonElement | null;
+  const header = document.getElementById('haplan-header');
+  if (!btn || !header) return;
+  btn.addEventListener('click', () => {
+    const isOpen = header.classList.toggle('open');
+    btn.classList.toggle('active', isOpen);
+    btn.textContent = isOpen ? '✕' : '☰';
+    currentContainer?.recalculateDimensions();
+  });
+}
+
+/** Bandeau flottant affichant le nom (taxonomie QUOI/OÙ) de l'objet survolé/cliqué — voir
+ *  BaseEntity.ts::emitHoveredEntityLabel(). Se referme seul après quelques secondes. */
+function setupEntityFocusLabel(): void {
+  const label = document.getElementById('haplan-entity-label');
+  if (!label) return;
+  let hideTimer: ReturnType<typeof setTimeout> | null = null;
+  window.addEventListener('ha-object-focus', ((event: CustomEvent<{ label: string }>) => {
+    if (!event.detail?.label) return;
+    label.textContent = event.detail.label;
+    label.classList.add('visible');
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => label.classList.remove('visible'), 3000);
+  }) as EventListener);
+}
+
 function setupDeleteFloorplanButton(): void {
   const btn = document.getElementById('btn-delete-floorplan') as HTMLButtonElement | null;
   if (!btn) return;
@@ -176,4 +207,6 @@ setupEditModeToggle();
 setupEntityPickerToggle();
 setupNewFloorplanPanel();
 setupDeleteFloorplanButton();
+setupMenuToggle();
+setupEntityFocusLabel();
 setInterval(updateConnectionStatus, 3000);

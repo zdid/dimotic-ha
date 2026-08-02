@@ -158,6 +158,26 @@ export class DataService {
     return entity?.name || entity_id;
   }
 
+  /** Nom d'affichage dérivé de la taxonomie QUOI/OÙ (quoi + lieu précis + lieu), même convention que
+   *  RFXCOM (rfxcom/src/domain/taxonomy.ts::buildBoutonDisplayName) — ex: "Lumière Plan travail
+   *  Cuisine" plutôt que le friendly_name HA brut. Retombe sur ce dernier si l'entité n'a pas
+   *  (encore) de taxonomie publiée (attributs_taxonomie, déjà présent dans l'état reçu, voir
+   *  TaxonomyHaClassifier côté serveur). */
+  getTaxonomyDisplayName(entity_id: string): string {
+    const attributes = this.states.get(entity_id)?.attributes;
+    const taxonomy = attributes?.attributs_taxonomie as
+      | { quoi?: string; lieu_precis?: string; lieu_principal?: string }
+      | undefined;
+    if (!taxonomy?.quoi) return this.getNameEntity(entity_id);
+
+    const parts = [taxonomy.quoi];
+    if (taxonomy.lieu_precis) parts.push(taxonomy.lieu_precis);
+    if (taxonomy.lieu_principal && taxonomy.lieu_principal !== taxonomy.lieu_precis) {
+      parts.push(taxonomy.lieu_principal);
+    }
+    return parts.map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+  }
+
   /** Phase 1 : pas d'arborescence area/device côté client (voir Phase 2) — toujours vide. */
   getAreaNameOfEntity(_entity_id: string): string {
     return '';
