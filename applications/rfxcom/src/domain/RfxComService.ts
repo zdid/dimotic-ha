@@ -39,6 +39,12 @@ export interface IRfxComService {
 export class RfxComService implements IRfxComService {
   /** Au-delà de cet âge, une dernière valeur persistée n'est plus republiée au démarrage (§ voir publishDeviceStateAtStartup). */
   private static readonly LAST_VALUE_MAX_AGE_MS = 30 * 60 * 1000;
+  /** Filet de sécurité de protocolsPushGate (voir le champ) — mesuré en conditions réelles :
+   *  connexion série + réception du statut matériel prend ~6 à 6,5s sur cette machine. 20s laisse
+   *  une marge large plutôt que de risquer de gagner la course contre la séquence normale (déjà
+   *  arrivé avec une première valeur de 6s, qui se déclenchait quasi systématiquement avant le
+   *  vrai statut). */
+  private static readonly PROTOCOLS_PUSH_SAFETY_TIMEOUT_MS = 20 * 1000;
 
   private config: RfxComConfig;
   private devicesConfig: RfxComDevicesConfigFile;
@@ -58,6 +64,19 @@ export class RfxComService implements IRfxComService {
   // (boucle infinie constatée en conditions réelles : 500+ allers-retours en quelques secondes).
   // Une seule poussée par connexion, réarmé à chaque (re)connect() dans start()/handleUsbReconnect.
   private hasPushedHardwareProtocolsThisSession = false;
+
+  // Retarde publishInitialDiscoveries() (donc la rafale de commandes OFF de sécurité vers les
+  // récepteurs sans état connu, voir publishReceiverStateAtStartup) jusqu'à ce que le push des
+  // protocoles activés soit terminé — les deux se disputaient sinon la même liaison série au
+  // démarrage : la rafale (≈20 commandes, ~0,6s d'accusé chacune) pouvait faire expirer le
+  // timeout de 5s du push des protocoles, coincé derrière dans la file d'attente du matériel.
+  // Résolu dès que le push a été tenté (succès ou échec) — jamais rejeté, pour ne jamais bloquer
+  // la découverte HA indéfiniment. Filet de sécurité par timeout si le statut matériel n'arrive
+  // jamais (ex: matériel silencieux malgré une connexion série réussie) — voir la constante de
+  // délai ci-dessous pour le choix de sa durée (piège déjà rencontré : trop courte, elle gagnait
+  // systématiquement la course contre la vraie séquence connexion+statut).
+  private protocolsPushGate: Promise<void> = Promise.resolve();
+  private resolveProtocolsPushGate: (() => void) | null = null;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -100,6 +119,18 @@ export class RfxComService implements IRfxComService {
     this.receiverManager.loadReceivers(this.devicesConfig.rfxcom_receivers);
     this.sceneManager.loadScenes(this.devicesConfig.rfxcom_receivers);
 
+    // Nouveau verrou pour cette connexion, créé AVANT setupSocleEventListeners()/l'émission de
+    // integration:bridge:register ci-dessous — le bridge MQTT peut être déjà connecté (partagé
+    // avec un autre module déjà démarré) et déclencher bridge:connection de façon quasi
+    // synchrone : le handler doit alors trouver un verrou déjà en attente, pas encore l'ancienne
+    // valeur par défaut du champ (Promise.resolve(), qui aurait laissé passer la rafale
+    // immédiatement — bug constaté en conditions réelles avant ce réordonnancement). Voir le
+    // commentaire sur protocolsPushGate au niveau du champ. Filet de sécurité (6s, un peu plus
+    // que le timeout interne de 5s de pushEnabledProtocols) : si le matériel ne renvoie jamais
+    // 'status', ne bloque pas publishInitialDiscoveries() indéfiniment.
+    this.protocolsPushGate = new Promise((resolve) => { this.resolveProtocolsPushGate = resolve; });
+    const safetyTimeout = setTimeout(() => this.resolveProtocolsPushGate?.(), RfxComService.PROTOCOLS_PUSH_SAFETY_TIMEOUT_MS);
+
     this.setupSocleEventListeners();
     this.setupSocketEventListeners();
 
@@ -115,6 +146,7 @@ export class RfxComService implements IRfxComService {
     // l'EventBus). Hors périmètre de cette passe, voir le rapport final.
     this.transceiver.onMessage((message) => this.handleRfxMessage(message));
     this.transceiver.onConnectionChange(() => this.emitStatus());
+
     // Pas de garantie d'ordre entre 'status' et la résolution de connect() (voir
     // RfxComTransceiver.onHardwareStatus) — callback plutôt qu'un appel juste après l'await.
     // Verrou hasPushedHardwareProtocolsThisSession : notre propre push déclenche EN RETOUR un
@@ -125,7 +157,10 @@ export class RfxComService implements IRfxComService {
     this.transceiver.onHardwareStatus(() => {
       if (!this.hasPushedHardwareProtocolsThisSession) {
         this.hasPushedHardwareProtocolsThisSession = true;
-        this.pushEnabledHardwareProtocols();
+        this.pushEnabledHardwareProtocols().finally(() => {
+          clearTimeout(safetyTimeout);
+          this.resolveProtocolsPushGate?.();
+        });
       }
       this.emitProtocolsList();
     });
@@ -141,6 +176,9 @@ export class RfxComService implements IRfxComService {
       this.logger.warn('RfxComService', `Transceiver RFXCOM indisponible au démarrage: ${message}`);
       this.eventBus.emitGeneric('rfxcom:error',
         createRfxComError('RFXCOM_CONNECTION_ERROR', message, 'rfxcom:transceiver', { port }));
+      // Rien à pousser — ne pas bloquer la découverte HA pour un transceiver indisponible.
+      clearTimeout(safetyTimeout);
+      this.resolveProtocolsPushGate?.();
     }
 
     this.emitStatus();
@@ -185,8 +223,12 @@ export class RfxComService implements IRfxComService {
         // arrière-plan) — la publication échouait donc silencieusement dans ce cas
         // (HaMqttIntegrationService.getBridgeOrWarn), expliquant pourquoi "envoi des devices vers
         // HA au démarrage" n'était pas fiable malgré un code qui semblait pourtant le faire.
+        // Attend en plus protocolsPushGate (2026-08-03) : publishInitialDiscoveries() envoie une
+        // rafale de commandes OFF réelles vers les récepteurs sans état connu
+        // (publishReceiverStateAtStartup) — sur la même liaison série que le push des protocoles
+        // activés, qui doit passer en premier (voir le commentaire sur protocolsPushGate).
         if (event.connected) {
-          this.publishInitialDiscoveries();
+          this.protocolsPushGate.then(() => this.publishInitialDiscoveries());
         }
         this.emitStatus();
       }
@@ -786,18 +828,21 @@ export class RfxComService implements IRfxComService {
    * ignoré ici, jamais utilisé pour modifier notre liste — seule updateEnabledHardwareProtocols()
    * (déclenchée par l'utilisateur) modifie enabledHardwareProtocols.
    */
-  private pushEnabledHardwareProtocols(): void {
+  /** Retourne toujours une Promise résolue (jamais rejetée, même en cas d'échec — déjà loggué/émis
+   *  en erreur ici) : permet à l'appelant automatique (start(), voir protocolsPushGate) d'attendre
+   *  que la tentative soit terminée, sans avoir à gérer un rejet. */
+  private pushEnabledHardwareProtocols(): Promise<void> {
     const hardware = this.transceiver.getHardwareStatus();
     if (!hardware) {
       this.logger.warn('RfxComService', 'Pas de statut matériel reçu, push des protocoles matériel ignoré.');
-      return;
+      return Promise.resolve();
     }
 
     const names = this.config.enabledHardwareProtocols.length > 0
       ? this.config.enabledHardwareProtocols
       : hardware.availableProtocols;
 
-    this.transceiver.pushEnabledProtocols(names).catch((error) => {
+    return this.transceiver.pushEnabledProtocols(names).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error('RfxComService', `Échec du push des protocoles matériel: ${message}`);
       this.eventBus.emitGeneric('rfxcom:error',
