@@ -1,21 +1,95 @@
+# =============================================================================
+# ws-ha — socle + applications métier.
+#
+# Avant le premier démarrage (et après toute modification du code) :
+#   HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm build
+# Puis :
+#   docker compose up -d
+#
+# Voir Dockerfile pour le détail de l'architecture (pourquoi le code applicatif
+# est monté depuis l'hôte plutôt que copié dans l'image).
+# =============================================================================
+
 services:
+  # Service principal — exécute le socle + toutes les applications actives.
   app:
     build: .
-    container_name: ha-app-base
+    image: ws-ha:latest
+    container_name: ws-ha
     restart: unless-stopped
+
+    # Home Assistant et le broker MQTT tournent en localhost sur cette même machine
+    # (data/core/config.yaml : ha.ws.host / ha.mqtt.host) — le mode réseau hôte les
+    # rend joignables tels quels, sans toucher à la configuration existante ni
+    # dupliquer MQTT/HA dans des conteneurs séparés. `ports:` est sans effet avec ce
+    # mode et volontairement omis — voir le Dockerfile (EXPOSE) pour la liste des
+    # ports réellement utilisés (8080 core, 49161 AREXX, 11434 ia).
+    #
+    # ⚠️ Port 11434 (ia, émulation Ollama pour l'intégration HA — voir
+    # fonctionnelles-ia_specs) : un vrai serveur Ollama tourne déjà sur ce port sur
+    # cette machine (`ollama serve`, hors Docker) — en mode réseau hôte, les deux ne
+    # peuvent pas coexister sur le même port. Changer `ollamaHttpPort` dans
+    # data/ia/config.yaml (ex: 11435) avant de démarrer ce service, sans quoi `ia`
+    # échouera à démarrer (port déjà utilisé).
+    network_mode: host
+
+    # Nécessaire pour que RFXCOM accède dynamiquement à /dev/ttyUSBx quel que soit
+    # son numéro (voir le volume /dev ci-dessous — PortDetector, voir
+    # fonctionnelles-rfxcom_specs §8.2, résout un lien stable /dev/serial/by-id vers
+    # le device réel, qui peut changer de numéro d'un redémarrage/rebranchement à
+    # l'autre). Alternative plus restrictive si le port ne change jamais sur cette
+    # machine : remplacer `privileged`/le volume /dev par
+    #   devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]
+    #   group_add: ["dialout"]
+    # — au prix de devoir éditer ce fichier à chaque changement de numérotation.
+    privileged: true
+
+    # Exécuté en tant qu'utilisateur hôte (pas root) : tout ce que le service écrit
+    # sur les volumes montés (data/, logs/, node_modules/dist si rebuild à chaud)
+    # reste possédé par l'utilisateur hôte plutôt que par root — évite les soucis de
+    # permissions pour la suite du développement local hors conteneur. `dialout`
+    # nécessaire pour l'accès au port série sur un hôte où /dev/ttyUSBx n'est pas
+    # world-writable (mode 660 propriétaire root:dialout, cas le plus courant).
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    group_add:
+      - dialout
+
     environment:
-      - NODE_ENV=production
       - TZ=Europe/Paris
-    ports:
-      - "8080:8080"
+
     volumes:
+      # Racine partagée : core étend ../../tsconfig.json pour son propre build.
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      # Code applicatif monté depuis l'hôte, PAS copié dans l'image — voir Dockerfile
+      # pour les deux raisons (activation/désactivation par renameSync — doit rester
+      # sur le même système de fichiers que applications_désactivées/ ci-dessous —,
+      # et absence de build fiable à la racine du projet).
+      - ./applications:/app/applications
+      - ./applications_désactivées:/app/applications_désactivées
+      # Données/config persistantes (un sous-répertoire par application, voir
+      # techniques-socle-ha-mqtt_specs §7) et logs.
       - ./data:/app/data
       - ./logs:/app/logs
-      - ./applications_desactivees:/app/applications_desactivees
-    networks:
-      - ha_network
+      # RFXCOM — voir le commentaire `privileged` ci-dessus.
+      - /dev:/dev
 
-networks:
-  ha_network:
-    external: true
-    name: ha_network
+  # Construit toutes les applications (core + apps métier), dans l'ordre requis —
+  # voir docker/build-apps.sh. Ne démarre jamais via `docker compose up` (profil
+  # dédié, jamais actif par défaut) :
+  #   HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm build
+  # À relancer après toute modification du code, avant de (re)démarrer `app`.
+  build:
+    build: .
+    image: ws-ha:latest
+    profiles: ["build"]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    # `NODE_ENV=production` (défini dans le Dockerfile, pertinent pour l'exécution) ferait
+    # sauter l'installation des devDependencies par `npm install` — `typescript` (donc
+    # `tsc`) ne serait alors jamais installé. Neutralisé ici, uniquement pour ce service.
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      - ./applications:/app/applications
+      - ./docker:/app/docker:ro
+    entrypoint: ["/app/docker/build-apps.sh"]

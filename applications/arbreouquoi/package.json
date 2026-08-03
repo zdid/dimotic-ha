@@ -9,7 +9,9 @@
     "watch": "tsc -w",
     "dev:local": "CONFIG_PATH=../../../data/core/config.yaml tsx watch src/index.ts"
   },
-  "dependencies": {},
+  "dependencies": {
+    "zod": "^3.22.4"
+  },
   "devDependencies": {
     "typescript": "^5.0.0"
   },

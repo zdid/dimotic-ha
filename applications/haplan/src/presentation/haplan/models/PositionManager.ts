@@ -3,7 +3,7 @@ import { HAObject } from './objects/HAObject';
 export class PositionManager {
   private positionsByFloorplan: Map<string, Map<string, {x: number, y: number}>> = new Map();
   private currentFloorplanId: string = 'default';
-  private debounceTimer: NodeJS.Timeout | null = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private saveCallback: (floorplanId: string, positions: any[]) => void;
 
   constructor(saveCallback: (floorplanId: string, positions: any[]) => void, currentFloorplanId: string = 'default') {

@@ -1,8 +1,46 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.20  
+**Version :** 4.21  
 **Date :** 3 Août 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.21** : **Réécriture complète de la §11 "Docker"** — le `Dockerfile`/`compose.yaml` décrits
+> jusqu'ici dataient de l'architecture pré-restructuration (racine `pnpm`/`src/` unique), déjà
+> qualifiée d'obsolète par `CLAUDE.md` mais jamais corrigée dans ce document. Nouveau design,
+> **construit et testé en conditions réelles** (build complet des 9 applications dans un
+> conteneur, sur cette machine) :
+> - **Le code applicatif n'est PAS copié dans l'image** — `applications/` et
+>   `applications_désactivées/` sont montés depuis l'hôte. Deux raisons impératives : (1)
+>   `ApplicationManager.disable()`/`enable()` déplacent un dossier applicatif ENTRE ces deux
+>   répertoires via `fs.renameSync`, qui échoue (`EXDEV`) entre deux systèmes de fichiers
+>   différents — les deux doivent donc rester sur le même point de montage ; (2) absence de build
+>   fiable à la racine du projet (`CLAUDE.md`) — chaque application se construit individuellement.
+>   L'image ne fournit donc qu'un socle d'exécution Node.js 20 + outils de compilation natifs
+>   (bindings `serialport`/`rfxcom`), réutilisé à la fois pour construire (service `build`, ponctuel)
+>   et pour exécuter (service `app`).
+> - **`network_mode: host`** — le broker MQTT et Home Assistant tournent en `localhost` sur la
+>   machine cible dans le déploiement réel de ce projet ; un réseau Docker isolé les rendrait
+>   injoignables sans modifier `data/core/config.yaml`. Conséquence : `ports:` n'a plus d'usage
+>   (documenté informativement via `EXPOSE` dans le Dockerfile) — **collision possible** sur le
+>   port par défaut de `ia` (11434, identique au port standard d'un vrai serveur Ollama) si l'un
+>   tourne déjà sur l'hôte cible.
+> - **`privileged: true` + volume `/dev:/dev`** pour RFXCOM — la détection automatique du port
+>   série (`PortDetector`, `fonctionnelles-rfxcom_specs` §8.2) résout un lien stable
+>   `/dev/serial/by-id` vers un `/dev/ttyUSBx` dont le numéro peut changer ; un mappage de device
+>   unique et figé (`devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]`) réintroduirait exactement la
+>   fragilité que ce mécanisme a été conçu pour éliminer. Alternative plus restrictive documentée
+>   en commentaire dans `compose.yaml` pour qui préfère un mappage figé.
+> - **Exécution en utilisateur hôte** (`user: "${HOST_UID}:${HOST_GID}"`, `group_add: dialout`)
+>   plutôt qu'en root — évite que tout ce qui est écrit sur les volumes montés (`data/`, `logs/`,
+>   `node_modules`/`dist` si reconstruction) devienne root-owned côté hôte.
+> - **Deux bugs latents réels découverts en isolant le build dans un conteneur** (invisibles sur
+>   l'hôte car masqués par un ancien `node_modules` racine, vestige de l'architecture
+>   pré-restructuration, jamais nettoyé) : `arbreouquoi` et `nommage` utilisaient `zod` sans le
+>   déclarer dans leur propre `package.json` — corrigé (ajout de la dépendance). Deux fichiers
+>   TypeScript **navigateur** de HAPLAN (`FloorPlan.ts`, `PositionManager.ts`) utilisaient le type
+>   `NodeJS.Timeout` (uniquement résoluble avec `@types/node`, jamais censé être disponible côté
+>   navigateur) — corrigé en `ReturnType<typeof setTimeout>`, indépendant de l'environnement
+>   d'exécution.
 
 > **v4.20** : **Correction d'un crash total du process (§8.5.2)** — `MqttTransport.publish()`/
 > `subscribe()` levaient une exception **synchrone** quand le client MQTT était temporairement
@@ -1787,57 +1825,101 @@ Il est le **seul point de contact** entre EventBus et Socket.io.
 
 ## 11. Docker
 
-### 11.1 `Dockerfile`
+**Fichiers de référence** (racine du projet) — ce document en explique le *pourquoi*, les
+fichiers eux-mêmes (abondamment commentés) font foi pour le détail exact ; ne pas dupliquer leur
+contenu ici pour éviter tout nouveau décrochage documentaire :
+- `Dockerfile` — image unique (Node 20 + outils de compilation natifs), sans code applicatif.
+- `compose.yaml` — deux services, `app` (exécution) et `build` (construction, profil dédié).
+- `docker/build-apps.sh` — construit les 9 applications (core + 8 apps métier) dans l'ordre requis.
+- `.dockerignore` — réduit le contexte envoyé au démon Docker (n'affecte pas le contenu de l'image).
 
-```dockerfile
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-RUN npm install -g pnpm && pnpm install --frozen-lockfile
-COPY tsconfig.json ./
-COPY src/ ./src/
-COPY src/presentation/ui/ ./ui/
-RUN pnpm build
+### 11.1 Principe : le code applicatif n'est pas dans l'image
 
-FROM node:20-alpine AS runtime
-WORKDIR /app
-ENV NODE_ENV=production
-COPY package.json pnpm-lock.yaml ./
-RUN npm install -g pnpm && pnpm install --frozen-lockfile --prod
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/ui   ./ui
-RUN mkdir -p /app/data /app/logs
+Contrairement à un Dockerfile classique, l'image ne `COPY` aucun code source ni build —
+`applications/` et `applications_désactivées/` sont **montés depuis l'hôte** (volumes). Deux
+raisons impératives, propres à ce projet :
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD wget -qO- http://localhost:8080/health || exit 1
+1. **Activer/désactiver une application déplace son dossier** entre `applications/` et
+   `applications_désactivées/` (`fs.renameSync`, `ApplicationManager.ts`) — un `rename()` POSIX
+   échoue (`EXDEV`) entre deux systèmes de fichiers différents. Si le code était figé dans l'image
+   et seul `applications_désactivées/` monté depuis l'hôte, ce mécanisme casserait silencieusement
+   à la première tentative de bascule depuis l'UI. Les deux répertoires doivent donc rester sur le
+   **même** point de montage.
+2. **Il n'existe pas de build fiable à la racine du projet** (voir en tête de ce document) — chaque
+   application (core comprise) a son propre `package.json`/`tsconfig.json`/`dist`. L'image sert
+   donc uniquement de socle d'exécution Node.js 20 (base Debian `bookworm-slim`, pas Alpine —
+   `serialport`/`rfxcom` embarquent des bindings natifs dont les prebuilds musl ne sont pas garantis
+   sur toutes les architectures, notamment ARM) + `python3`/`make`/`g++` en filet de sécurité si
+   aucun prebuild n'est trouvé pour la plateforme cible.
 
-CMD ["node", "dist/index.js"]
+Ce même socle sert à la fois à **construire** (service `build`, ponctuel — voir §11.2) et à
+**exécuter** (service `app` — voir §11.3).
+
+### 11.2 Construction — service `build`
+
+```bash
+HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm build
 ```
 
-### 11.2 `compose.yaml`
+N'existe que dans un **profil Docker Compose dédié** (`profiles: ["build"]`) — ne démarre jamais
+via `docker compose up`. Exécute `docker/build-apps.sh`, qui construit `core` en premier
+(**impératif** : chaque application métier référence, dans son propre
+`src/presentation/tsconfig.ui.json`, le fichier de déclarations compilé de core —
+`.../core/dist/presentation/ui/js/ts/services/SocketService.d.ts`, voir §4.2.1 — sans core déjà
+construit, `npm run build:ui` de n'importe quelle application métier échoue), puis les 8
+applications métier dans un ordre indifférent entre elles.
 
-```yaml
-services:
-  app:
-    build: .
-    container_name: ha-app-nom        # Adapter par application
-    restart: unless-stopped           # Obligatoire — permet le redémarrage après config:save
-    environment:
-      - NODE_ENV=production
-      - TZ=Europe/Paris
-    ports:
-      - "8080:8080"                   # Port UI — adapter par application
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-    networks:
-      - ha_network
+`HOST_UID`/`HOST_GID` (pas `UID`/`GID` — variables en lecture seule du shell `bash`) font tourner
+ce service sous l'utilisateur hôte plutôt que `root`, pour que tout ce qui est écrit sur les
+volumes montés (`node_modules`, `dist`) reste possédé par l'utilisateur plutôt que par `root`.
+`NODE_ENV` y est explicitement forcé à `development` (contrairement au service `app`) : la valeur
+`production` définie dans le `Dockerfile` ferait sauter l'installation des `devDependencies` par
+`npm install`, donc `typescript` (et sa commande `tsc`), utilisés pour la construction elle-même.
 
-networks:
-  ha_network:
-    external: true
-    name: ha_network
+**Vérifié en conditions réelles** (03/08/2026) : construction complète des 9 applications dans un
+conteneur sur la machine de développement — a révélé et corrigé deux bugs latents jusqu'ici
+invisibles côté hôte (masqués par un ancien `node_modules` racine, vestige de l'architecture
+pré-restructuration, jamais nettoyé — la résolution de module Node remonte l'arborescence des
+répertoires jusqu'à le trouver, masquant une dépendance manquante) : `arbreouquoi` et `nommage`
+utilisaient `zod` sans le déclarer dans leur propre `package.json` (corrigé) ; deux fichiers
+TypeScript **navigateur** de HAPLAN (`FloorPlan.ts`, `PositionManager.ts`) utilisaient le type
+`NodeJS.Timeout` — jamais censé être résoluble côté navigateur, un contexte sans `@types/node` par
+conception (`tsconfig.ui.json` : `lib: ["ES2020","DOM"]`) — corrigé en
+`ReturnType<typeof setTimeout>`, indépendant de l'environnement d'exécution.
+
+### 11.3 Exécution — service `app`
+
+```bash
+docker compose up -d
 ```
+
+Points clés du `compose.yaml` :
+
+- **`network_mode: host`** — le broker MQTT et Home Assistant tournent en `localhost` sur la
+  machine cible (voir `data/core/config.yaml` : `ha.ws.host`/`ha.mqtt.host`) ; un réseau Docker
+  isolé (pont) les rendrait injoignables sans modifier cette configuration. Conséquence directe :
+  `ports:` est sans effet avec ce mode et volontairement omis — les ports réellement utilisés sont
+  documentés à titre informatif via `EXPOSE` dans le `Dockerfile` (8080 core — fixe ; 49161 AREXX,
+  11434 ia — tous deux configurables, `data/{arexx,ia}/config.yaml`).
+  **⚠️ Collision possible** : le port par défaut de `ia` (11434, choisi pour imiter le protocole
+  Ollama — voir `fonctionnelles-ia_specs`) est celui d'un **vrai** serveur Ollama. En mode réseau
+  hôte, les deux ne peuvent pas coexister sur la même machine sans reconfigurer l'un des deux
+  (`ollamaHttpPort` côté `ia`, ou le port du vrai Ollama).
+- **`privileged: true` + volume `/dev:/dev`** — nécessaire pour que RFXCOM accède dynamiquement à
+  `/dev/ttyUSBx`, quel que soit son numéro (voir `fonctionnelles-rfxcom_specs` §8.2 : `PortDetector`
+  résout un lien stable `/dev/serial/by-id` vers le device réel, dont le numéro peut changer d'un
+  redémarrage/rebranchement à l'autre). Un mappage de device unique et figé
+  (`devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]`) réintroduirait exactement la fragilité que ce
+  mécanisme a été conçu pour éliminer — alternative documentée en commentaire dans `compose.yaml`
+  pour qui préfère un mappage figé (et accepte de le réajuster manuellement si le port change).
+- **`user: "${HOST_UID:-1000}:${HOST_GID:-1000}"` + `group_add: [dialout]`** — même rationale que
+  le service `build` (fichiers écrits sur `data/`/`logs/` restent possédés par l'utilisateur hôte),
+  `dialout` nécessaire sur un hôte où `/dev/ttyUSBx` n'est pas world-writable (mode `660`
+  propriétaire `root:dialout`, cas le plus courant — sans effet si déjà `666`, comme observé sur la
+  machine de développement).
+- **Volumes** : `tsconfig.json` (racine partagée, core l'étend pour son propre build — voir
+  §4.2.1), `applications/` + `applications_désactivées/` (voir §11.1), `data/` + `logs/`
+  (persistance, un sous-répertoire par application — voir §7), `/dev` (voir ci-dessus).
 
 ---
 
@@ -1965,6 +2047,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.21** | 03/08/2026 | Claude | **Réécriture complète de la §11 "Docker"** (demande utilisateur) — l'ancien contenu décrivait l'architecture pré-restructuration (pnpm, racine unique), déjà obsolète. Nouveau design construit et testé en conditions réelles (build complet des 9 applications dans un conteneur) : code applicatif monté depuis l'hôte plutôt que copié dans l'image (rename() inter-filesystèmes pour l'activation/désactivation d'application, absence de build racine fiable), `network_mode: host` (MQTT/HA en localhost sur la machine cible), `privileged`+volume `/dev` pour RFXCOM (préserve la robustesse de `PortDetector` face à la renumérotation des ports série), exécution en utilisateur hôte plutôt que root. Deux bugs latents réels découverts et corrigés en isolant le build (`arbreouquoi`/`nommage` : dépendance `zod` manquante ; HAPLAN : `NodeJS.Timeout` invalide côté navigateur). |
 | **4.20** | 03/08/2026 | Claude | **Correction d'un crash total du process (§8.5.2)** : `MqttTransport.publish()`/`subscribe()` levaient une exception synchrone sur déconnexion transitoire, remontant sans aucun `try/catch` jusqu'à une exception non capturée au niveau du process Node entier — n'importe quel module d'intégration publiant pendant une micro-coupure MQTT pouvait faire planter toute l'application. Corrigé par une file d'attente courte (publications : 200 messages max, 30s d'expiration, rejouées à la reconnexion) et un réabonnement automatique à chaque reconnexion (abonnements : mémorisés et réappliqués, corrige au passage une perte silencieuse et définitive des commandes HA→app après coupure, découverte en implémentant ce correctif — chaque reconnexion recrée un client MQTT entièrement nouveau qui ne conserve nativement aucun abonnement). Vérifié : build propre, suite de tests inchangée (mêmes 12 échecs préexistants sans rapport, aucune régression). |
 | **4.19** | 03/08/2026 | Claude | **Rattrapage de dérive code/specs**, aucun changement de comportement — cinq mécanismes déjà en production non documentés : dédoublonnage des écouteurs `SocketBridge` par application (§5.4.2), énumération à jour des routes REST exceptionnelles avec ajout de `HaAutomationBackupService` (§5.7, nouvelle), `ModuleContainer`/`Sidebar` (§6.1/6.2, verrou de chargement, cache d'affichage, navigation réelle pour les pages dédiées), mécanisme réel des attributs de taxonomie en topic MQTT dédié remplaçant deux tentatives antérieures non fonctionnelles + retrait de découverte + distinction `state_value_template`/`value_template` (§8.5.4), repli sur texte brut à la réception d'une commande MQTT non-JSON (§8.5.2). |
 | **4.18** | 30/07/2026 | Claude | **`AreaEnsureService` — création active des areas HA (§8.5.4)**, à la demande de l'utilisateur, suite à la découverte que `device.suggested_area` (v4.17) n'est jamais fiable : vérifié en conditions réelles (suppression + redécouverte complète d'une entité, puis redémarrage complet de HA) que HA ne l'applique qu'à la toute première création, jamais de façon garantie. Nouveau `AreaEnsureService` (`applications/core/src/ha/sync/`) : crée l'area via l'API WebSocket de HA (`config/area_registry/create`) avant de publier la découverte, avec dédoublonnage insensible à la casse contre `HaStructureRegistry` (nouveau `getAllAreas()`), nom capitalisé, cache local mis à jour immédiatement après création (évite les doublons entre demandes concurrentes pour le même lieu), et attente de l'événement `ha:ready` (pas seulement l'authentification WS — le chargement du référentiel est un chaînage asynchrone séparé, deux races distinctes constatées et corrigées en conditions réelles). Interception dans `IntegrationBridge.subscribeModuleEvents()`, sur les deux chemins de découverte (normal et passthrough NOMMAGE) — **aucun changement dans RFXCOM/EVOO7/AREXX/NOMMAGE**, qui alimentaient déjà `suggested_area`. Optionnel (Mode A seulement), best-effort (timeout ~8s, jamais bloquant). Vérifié sur une installation HA neuve (registre et broker MQTT réinitialisés) : 86 devices sur 96 assignés automatiquement à la bonne area, dont 24 areas créées sans aucun échec. |

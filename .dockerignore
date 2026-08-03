@@ -1,0 +1,12 @@
+# L'image ne copie aucun code applicatif (voir Dockerfile) — ce fichier réduit
+# uniquement le contexte envoyé au démon Docker au moment du build (accélère
+# `docker build`/`docker compose build`), il n'affecte pas le contenu de
+# l'image elle-même.
+.git/
+node_modules/
+dist/
+data/
+logs/
+backups/
+specs/archives/
+*.log
