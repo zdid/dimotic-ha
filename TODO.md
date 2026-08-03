@@ -388,6 +388,12 @@
 - **Statut** : Non traité — noté pendant la conception, pas encore implémenté
 - **Priorité** : Moyenne (fait partie du chantier trigger d'état en cours de conception)
 
+### 🟡 IA : tenir une liste des modifications apportées au contexte de déploiement
+- **Constat (2026-08-03)**, en ajoutant `triggered_entity_id` à `DeployContext`/`DeployRequest` (voir le trigger `state_change` ci-dessus) : le contexte envoyé à Mistral au moment du déploiement (`declenchement: {trigger_name, phrase_originale, macros, entites, heure, jour, date, ...}`, `DeployResponder.ts`) évolue au fil des besoins sans qu'aucun endroit ne liste ce qui a été ajouté et pourquoi — seul le diff du code en garde la trace. C'est le même symptôme que le décalage specs/code repéré aujourd'hui, mais à l'échelle d'un seul mécanisme.
+- **À faire** : tenir une liste à jour des champs du contexte de déploiement (nom, depuis quand, à quoi il sert, quel type de déclencheur le renseigne) — dans cette entrée TODO en attendant mieux, à terme dans `fonctionnelles-ia_specs`. Champs connus à ce jour : `trigger_name`/`phrase_originale`/`triggered_at`/`macros`/`entites`/`heure`/`jour`/`date` (v1.0, tous triggers) ; `triggered_entity_id` (2026-08-03, uniquement pour un déclenchement `state_change` — voir `fonctionnelles-planificateur_specs` §6/§7).
+- **Statut** : Non traité — liste à démarrer
+- **Priorité** : Basse (confort de suivi, rien de cassé sans elle)
+
 ---
 
 ## Notes techniques
