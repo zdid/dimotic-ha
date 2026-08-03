@@ -1,7 +1,7 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.4
-**Date :** 24 Juillet 2026
+**Version :** 1.5
+**Date :** 3 Août 2026
 **Statut :** Document de référence pour l'application `applications/ia`
 
 > Conforme à `techniques-socle-ha-mqtt_specs` (architecture 5 couches, EventBus),
@@ -108,8 +108,9 @@ les règles y sont ajoutées ; sinon un message `system` dédié est créé.
 Le fichier est **rechargé à chaud** (surveillance du fichier) plutôt que lu une seule fois au
 démarrage — permet d'itérer sur son contenu sans redémarrer le service. Le contenu exact du prompt
 (résolution du QUOI/OÙ par défaut, classification des requêtes, format JSON attendu, règles de
-déploiement à l'exécution) est un sujet à part entière, non couvert par cette spec, qui évolue
-indépendamment de l'architecture technique décrite ici.
+déploiement à l'exécution — y compris, depuis le 03/08/2026, la description du déclencheur réactif
+`state_change`, voir `fonctionnelles-planificateur_specs` §3.2) est un sujet à part entière, non
+couvert par cette spec, qui évolue indépendamment de l'architecture technique décrite ici.
 
 ## 6. Routage multi-IA
 
@@ -201,6 +202,11 @@ Si `planificateur` répond, sa confirmation textuelle est renvoyée à HA à la 
 `planificateur` ne répond pas dans le délai (absent, indisponible), l'échange bascule en **mode
 dégradé** : le texte brut produit par Mistral est relayé tel quel à HA, sans routage.
 
+Le champ `trigger` d'une planification (`type`) admet, depuis le 03/08/2026, une valeur
+supplémentaire `state_change` en plus des sept types temporels déjà couverts — voir
+`fonctionnelles-planificateur_specs` §3.2. Cet ajout ne change rien à la structure décrite ici : un
+`trigger` reste un sous-champ d'un nœud `planification`, jamais un `type` de premier niveau.
+
 **Important** : le nœud `{"type":"action", "order":..., ...}` documenté dans le schéma JSON de
 `fonctionnelles-planificateur_specs` §2 n'est **jamais** une réponse de premier niveau — il n'existe
 que comme sous-nœud à l'intérieur d'une macro, d'une planification, d'une séquence, ou d'une
@@ -211,13 +217,18 @@ exécution déployée (y compris une exécution immédiate issue d'un appel d'ou
 
 Principe central du système (voir `fonctionnelles-planificateur_specs` §6 pour le détail côté
 appelant) : une planification enregistrée n'est **jamais exécutée depuis une version pré-compilée**.
-Trois situations distinctes y aboutissent, convergeant vers le même mécanisme et le même point
+Quatre situations distinctes y aboutissent, convergeant vers le même mécanisme et le même point
 d'exécution unique (`planificateur`) :
 
-- un déclencheur programmé arrive à échéance,
+- un déclencheur temporel programmé arrive à échéance,
+- **une entité HA change d'état de la façon surveillée par un trigger `state_change`** (depuis le
+  03/08/2026 — voir `fonctionnelles-planificateur_specs` §3.2/§6) — le contexte de déploiement
+  envoyé à `ia` pour cette réinterprétation est alors enrichi d'un champ `triggered_entity_id`,
+  l'entité réellement à l'origine de ce déclenchement précis, pour que Mistral sache cibler
+  correctement une action sans lieu explicite ("éteins-la"),
 - une macro connue est prononcée directement dans la conversation,
 - **ou** un outil `executer_action` (§7/§8) est résolu, traité comme une planification immédiate et
-  non répétitive (voir `fonctionnelles-planificateur_specs` §3, §6).
+  non répétitive (voir `fonctionnelles-planificateur_specs` §3.1, §6).
 
 `ia` expose la capacité de réinterprétation uniquement en interne (EventBus, jamais en HTTP) : c'est
 toujours `planificateur` qui initie cet échange pour les déclenchements programmés/macros, `ia` ne
@@ -260,11 +271,21 @@ titre de journal — pas d'onglet de configuration avancée en v1 au-delà de §
   multi-process) — un seul fichier local, une seule application qui le lit.
 - Le port HTTP d'émulation Ollama est un serveur distinct du port web du socle — même application,
   deux serveurs HTTP actifs simultanément.
+- **Ambiguïté récurrent/one-shot non résolue pour un trigger `state_change`** (depuis le
+  03/08/2026) : une phrase du type "quand X, fais Y" ne précise pas si la règle doit se redéclencher
+  à chaque occurrence future de l'événement ou ne s'appliquer qu'une seule fois — contrairement aux
+  déclencheurs temporels, où le type (`delay` vs `recurrence`) découle naturellement de la
+  formulation. `ia` ne pose actuellement aucune question de clarification : la règle produite est
+  systématiquement traitée comme récurrente par `planificateur` (voir
+  `fonctionnelles-planificateur_specs` §3.2, §12). Un mécanisme de clarification (nouvelle catégorie
+  de réponse, ou repli avec confirmation implicite) reste à concevoir séparément.
 
 ## 15. Historique
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.5 | 03/08/2026 | Claude | **Prise en compte du déclencheur réactif `state_change`** (`fonctionnelles-planificateur_specs` v1.5) : §10 étendue à quatre situations de déclenchement (ajout du changement d'état d'entité), mention du nouveau champ de contexte `triggered_entity_id` enrichissant la réinterprétation pour ce cas. §9 précise que `trigger.type` admet cette nouvelle valeur sans changer la structure du JSON échangé. §5 mentionne que `regles_mistral.txt` couvre désormais ce déclencheur. Nouvelle limitation connue (§14) : ambiguïté récurrent/one-shot de "quand X, fais Y" non résolue, traité récurrent par défaut, sans clarification demandée à l'utilisateur. |
+| 1.4 | 24/07/2026 | Claude | (Voir version archivée — pas de changement de contenu identifié entre 1.3 et 1.4 au moment de cette révision, seule la date d'en-tête diffère.) |
 | 1.3 | 23/07/2026 | Claude | **Révision architecturale majeure**, issue d'une session de conception approfondie avec l'utilisateur : (1) nouvelle §6 "Routage multi-IA" — le concept "VoiceRouter" existait déjà comme document de conception séparé (`voice-router-spec.md`, jamais implémenté), intégré ici. (2) `ia` gagne un accès HA en lecture (`requiredHaWs: true`, était `false`) pour résoudre localement les outils de lecture. (3) Nouvelles §7/§8 : `ia` déclare lui-même un jeu d'outils fixe à Mistral (pas de délégation aux outils natifs de HA comme le disait la v1.2) et exécute une vraie boucle d'appel d'outils (résultats réinjectés, Mistral rappelé), pas un simple relais passif. (4) L'action immédiate, un appel d'outil résolu, devient une planification immédiate non répétitive traitée par le point d'exécution unique de `planificateur` — troisième voie vers le même mécanisme que le minuteur et la macro directe. (5) Nouveaux événements EventBus `ia:tool:execute`/`:reply`. Sections renumérotées en conséquence, toutes les références croisées internes et vers `fonctionnelles-planificateur_specs` corrigées. |
 | 1.2 | 23/07/2026 | Claude | Nouvelle §4 "Difficultés protocolaires connues" : balises markdown autour du JSON, fragmentation des `tool_calls` en streaming, réconciliation des deux formats de requête Ollama, signal interne à ne pas laisser fuiter vers HA, en-tête anti-buffering, forme d'erreur Ollama en cas d'échec Mistral. |
 | 1.1 | 23/07/2026 | Claude | Clarification : l'action immédiate ne produit jamais de JSON structuré — ne transite jamais par `planificateur` (précision alors correcte, la mécanique exacte a été révisée en v1.3 ci-dessus). |
