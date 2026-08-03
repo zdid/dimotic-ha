@@ -51,16 +51,19 @@ export class HaMqttIntegrationService {
       return;
     }
 
-    const transport = new MqttTransport({
-      host: broker.host,
-      port: broker.port,
-      clientId: `${moduleName}-${bridgeInstance}`,
-      username: broker.username ?? '',
-      password: broker.password ?? '',
-      keepalive: broker.keepalive ?? 60,
-      reconnectDelay: broker.reconnectDelay ?? 5,
-      willTopic: getBridgeStatusTopic(moduleName, bridgeInstance),
-    });
+    const transport = new MqttTransport(
+      {
+        host: broker.host,
+        port: broker.port,
+        clientId: `${moduleName}-${bridgeInstance}`,
+        username: broker.username ?? '',
+        password: broker.password ?? '',
+        keepalive: broker.keepalive ?? 60,
+        reconnectDelay: broker.reconnectDelay ?? 5,
+        willTopic: getBridgeStatusTopic(moduleName, bridgeInstance),
+      },
+      this.logger
+    );
 
     transport.onConnect(() => {
       this.logger.info('ha:mqtt', `Bridge connecté: ${key}`);

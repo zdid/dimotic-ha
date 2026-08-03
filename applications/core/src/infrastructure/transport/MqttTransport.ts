@@ -1,4 +1,5 @@
 import * as mqtt from 'mqtt';
+import type { Logger } from '../logger/index';
 
 // =============================================================================
 // Types
@@ -31,6 +32,17 @@ export interface MqttMessage {
 }
 
 /**
+ * Publication mise en attente pendant une déconnexion transitoire (voir §"File d'attente courte").
+ */
+interface QueuedPublish {
+  topic: string;
+  payload: string | Buffer;
+  qos: 0 | 1;
+  retain: boolean;
+  queuedAt: number;
+}
+
+/**
  * Callback pour les messages entrants
  */
 type MessageCallback = (message: MqttMessage) => void;
@@ -60,9 +72,18 @@ const LWT_PAYLOAD_OFFLINE = 'offline';
 const LWT_PAYLOAD_ONLINE = 'online';
 
 /**
+ * Durée de vie maximale d'une publication en attente (déconnexion transitoire) avant
+ * abandon silencieux (avec avertissement journalisé) — "file d'attente courte", pas une
+ * garantie de livraison longue durée : au-delà, un message d'état est considéré périmé.
+ */
+const PENDING_PUBLISH_MAX_AGE_MS = 30000; // 30 secondes
+/** Borne la mémoire en cas de rafale pendant une coupure prolongée : le plus ancien est abandonné au-delà. */
+const PENDING_PUBLISH_MAX_SIZE = 200;
+
+/**
  * Client de transport MQTT bas niveau.
  * Gère la connexion, la publication/souscription, et la reconnexion automatique.
- * 
+ *
  * NE PAS utiliser directement pour la logique métier :
  * voir les modules d'intégration dans la couche HA.
  */
@@ -78,16 +99,37 @@ export class MqttTransport {
   private disconnectCallbacks: DisconnectCallback[] = [];
   private errorCallbacks: ErrorCallback[] = [];
 
+  /**
+   * Publications tentées pendant une déconnexion — rejouées à la reconnexion (voir
+   * `flushPendingPublishes`), au lieu de faire lever `publish()` (ancien comportement :
+   * une exception synchrone ici remontait jusqu'au callback `'message'` de la bibliothèque
+   * `mqtt`, donc jusqu'à une exception non capturée au niveau du process Node entier —
+   * voir TODO.md "MqttTransport.publish() lève une exception synchrone...").
+   */
+  private pendingPublishes: QueuedPublish[] = [];
+
+  /**
+   * Abonnements actifs, réappliqués à chaque reconnexion — `scheduleReconnect()` crée un
+   * tout nouveau client `mqtt.MqttClient` à chaque tentative (pas une reconnexion interne
+   * de la bibliothèque sur le même client), donc aucun abonnement ne survit naturellement
+   * à une reconnexion sans ce mécanisme explicite.
+   */
+  private activeSubscriptions: Map<string, 0 | 1> = new Map();
+
   private readonly config: MqttTransportConfig;
+  private readonly logger?: Logger;
 
   /**
    * @param config - Configuration pour la connexion MQTT
+   * @param logger - Optionnel : journalise les publications/abonnements mis en attente et
+   *   leur résolution à la reconnexion. Sans logger, ces événements restent silencieux.
    */
-  constructor(config: MqttTransportConfig) {
+  constructor(config: MqttTransportConfig, logger?: Logger) {
     this.config = {
       clean: true,
       ...config,
     };
+    this.logger = logger;
   }
 
   // ===========================================================================
@@ -110,20 +152,28 @@ export class MqttTransport {
    */
   disconnect(): void {
     this.clearReconnectTimeout();
-    
+
     if (this.client) {
       // Publier le LWT offline avant de se déconnecter
       this.publishLwt(LWT_PAYLOAD_OFFLINE, true);
       this.client.end();
       this.client = null;
     }
-    
+
     this.isConnected = false;
     this.reconnectAttempts = 0;
+    // Déconnexion volontaire : les messages en attente n'ont plus de destinataire prévu.
+    this.pendingPublishes = [];
   }
 
   /**
-   * Publie un message sur un topic MQTT
+   * Publie un message sur un topic MQTT.
+   *
+   * Si le client est temporairement déconnecté, le message est mis en attente (file courte,
+   * voir `PENDING_PUBLISH_MAX_AGE_MS`/`PENDING_PUBLISH_MAX_SIZE`) et rejoué automatiquement à
+   * la reconnexion, plutôt que de lever une exception (voir le commentaire sur
+   * `pendingPublishes`) — une coupure MQTT transitoire est un événement normal en pub/sub,
+   * pas une erreur de programmation.
    * @param topic - Topic MQTT
    * @param payload - Payload à publier (string ou Buffer)
    * @param qos - Niveau de QoS (0 ou 1 uniquement)
@@ -131,20 +181,29 @@ export class MqttTransport {
    */
   publish(topic: string, payload: string | Buffer, qos: 0 | 1 = 0, retain: boolean = false): void {
     if (!this.client || !this.isConnected) {
-      throw new Error('Cannot publish: MQTT client is not connected');
+      this.enqueuePendingPublish({ topic, payload, qos, retain, queuedAt: Date.now() });
+      return;
     }
 
     this.client.publish(topic, payload, { qos, retain });
   }
 
   /**
-   * S'abonne à un topic MQTT
+   * S'abonne à un topic MQTT.
+   *
+   * L'abonnement est mémorisé (`activeSubscriptions`) et réappliqué à chaque reconnexion,
+   * qu'il ait pu être envoyé immédiatement ou non — voir le commentaire sur
+   * `activeSubscriptions`. Ne lève plus si le client est temporairement déconnecté (même
+   * raison que `publish`) : l'abonnement sera simplement effectif dès la reconnexion.
    * @param topic - Topic MQTT
    * @param qos - Niveau de QoS (0 ou 1 uniquement)
    */
   subscribe(topic: string, qos: 0 | 1 = 0): void {
+    this.activeSubscriptions.set(topic, qos);
+
     if (!this.client || !this.isConnected) {
-      throw new Error('Cannot subscribe: MQTT client is not connected');
+      this.logger?.warn('ha:mqtt:transport', `Client MQTT déconnecté — abonnement à "${topic}" appliqué dès la reconnexion`);
+      return;
     }
 
     this.client.subscribe(topic, { qos });
@@ -155,6 +214,8 @@ export class MqttTransport {
    * @param topic - Topic MQTT
    */
   unsubscribe(topic: string): void {
+    this.activeSubscriptions.delete(topic);
+
     if (!this.client || !this.isConnected) {
       return; // Ignorer si non connecté
     }
@@ -243,6 +304,11 @@ export class MqttTransport {
 
     // Publier le LWT online
     this.publishLwt(LWT_PAYLOAD_ONLINE, true);
+
+    // Réappliquer les abonnements actifs et rejouer les publications en attente —
+    // voir les commentaires sur `activeSubscriptions`/`pendingPublishes`.
+    this.resubscribeAll();
+    this.flushPendingPublishes();
 
     // Notifier les callbacks
     this.notifyConnect();
@@ -360,6 +426,76 @@ export class MqttTransport {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
     }
+  }
+
+  // ===========================================================================
+  // Méthodes privées - File d'attente courte (publications) et réabonnement
+  // ===========================================================================
+
+  /**
+   * Met une publication en attente pendant une déconnexion transitoire, en bornant la
+   * mémoire (`PENDING_PUBLISH_MAX_SIZE`) : au-delà, la plus ancienne est abandonnée pour
+   * faire de la place à la nouvelle plutôt que de rejeter cette dernière — les messages les
+   * plus récents (état courant) valent mieux que les plus anciens (déjà périmés).
+   */
+  private enqueuePendingPublish(item: QueuedPublish): void {
+    if (this.pendingPublishes.length >= PENDING_PUBLISH_MAX_SIZE) {
+      const dropped = this.pendingPublishes.shift();
+      this.logger?.warn(
+        'ha:mqtt:transport',
+        `File d'attente pleine (${PENDING_PUBLISH_MAX_SIZE}) — message le plus ancien abandonné (topic: ${dropped?.topic})`
+      );
+    }
+
+    this.pendingPublishes.push(item);
+    this.logger?.warn(
+      'ha:mqtt:transport',
+      `Client MQTT déconnecté — publication mise en attente (topic: ${item.topic}, ${this.pendingPublishes.length} en attente)`
+    );
+  }
+
+  /**
+   * Rejoue les publications en attente à la reconnexion. Les messages plus vieux que
+   * `PENDING_PUBLISH_MAX_AGE_MS` sont abandonnés (avertissement journalisé) plutôt que
+   * republiés — passé ce délai, un message d'état est considéré périmé, republier une
+   * valeur potentiellement obsolète serait pire que de ne rien publier.
+   */
+  private flushPendingPublishes(): void {
+    if (this.pendingPublishes.length === 0 || !this.client) return;
+
+    const toReplay = this.pendingPublishes;
+    this.pendingPublishes = [];
+    const now = Date.now();
+    let sent = 0;
+    let expired = 0;
+
+    for (const item of toReplay) {
+      if (now - item.queuedAt > PENDING_PUBLISH_MAX_AGE_MS) {
+        expired++;
+        continue;
+      }
+      this.client.publish(item.topic, item.payload, { qos: item.qos, retain: item.retain });
+      sent++;
+    }
+
+    this.logger?.info(
+      'ha:mqtt:transport',
+      `Reconnexion — ${sent} publication(s) en attente rejouée(s), ${expired} abandonnée(s) (délai de ${PENDING_PUBLISH_MAX_AGE_MS / 1000}s dépassé)`
+    );
+  }
+
+  /**
+   * Réapplique tous les abonnements actifs à la reconnexion — voir le commentaire sur
+   * `activeSubscriptions` (chaque reconnexion recrée un client MQTT entièrement nouveau).
+   */
+  private resubscribeAll(): void {
+    if (this.activeSubscriptions.size === 0 || !this.client) return;
+
+    for (const [topic, qos] of this.activeSubscriptions) {
+      this.client.subscribe(topic, { qos });
+    }
+
+    this.logger?.info('ha:mqtt:transport', `Reconnexion — ${this.activeSubscriptions.size} abonnement(s) réappliqué(s)`);
   }
 
   // ===========================================================================

@@ -1,8 +1,24 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.19  
+**Version :** 4.20  
 **Date :** 3 Août 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.20** : **Correction d'un crash total du process (§8.5.2)** — `MqttTransport.publish()`/
+> `subscribe()` levaient une exception **synchrone** quand le client MQTT était temporairement
+> déconnecté (`Cannot publish: MQTT client is not connected`). Cette exception remontait, sans
+> aucun `try/catch` à aucun niveau de la pile (`IntegrationBridge` → `EventBus.emitGeneric` →
+> listener), jusqu'au callback `'message'` de la bibliothèque `mqtt`, devenant une **exception non
+> capturée au niveau du process Node entier** — un crash total (toutes les applications, pas
+> seulement celle à l'origine), déclenchable par une simple instabilité réseau normale (broker qui
+> "flappe" quelques millisecondes). Corrigé par une **file d'attente courte** côté `MqttTransport` :
+> une publication tentée hors connexion est mise en attente (30s max, 200 messages max) et rejouée
+> automatiquement à la reconnexion plutôt que de lever ; un abonnement tenté hors connexion est
+> mémorisé et réappliqué à chaque reconnexion (corrige au passage un défaut latent distinct
+> découvert en implémentant ce correctif : chaque reconnexion recrée un client `mqtt.MqttClient`
+> entièrement nouveau, qui ne conserve nativement aucun abonnement précédent — sans ce mécanisme,
+> les commandes HA→app cessaient silencieusement de fonctionner après la moindre coupure MQTT).
+> Aucune méthode de `MqttTransport` ne lève plus pour une raison de connexion.
 
 > **v4.19** : **Rattrapage de dérive code/specs** (session du 03/08/2026), aucun changement de
 > comportement — cinq mécanismes déjà en production depuis plusieurs jours à semaines n'avaient
@@ -1404,6 +1420,26 @@ class HaMqttIntegrationService {
   correspondant si l'entité essentielle fournie par le module a `commandEnabled: true`. Un module
   métier n'a donc **jamais** besoin d'appeler explicitement `subscribeCommandsFor` pour une entité
   déjà publiée via la découverte normale — l'abonnement est couplé 1:1 à la publication.
+- **⭐ v4.20 — File d'attente courte sur déconnexion transitoire, aucune méthode ne lève plus.**
+  `MqttTransport.publish(topic, payload, qos, retain)` : si le client est déconnecté au moment de
+  l'appel, le message est mis en attente (`pendingPublishes`, FIFO borné à **200 messages**, chacun
+  expirant après **30 secondes**) au lieu de lever. À la reconnexion (`handleConnect`), la file est
+  rejouée dans l'ordre ; tout message plus vieux que 30s est abandonné (avertissement journalisé)
+  plutôt que republié — passé ce délai, une valeur d'état est considérée périmée. Au-delà de 200
+  messages en attente (coupure prolongée + rafale), le plus ancien est abandonné pour faire de la
+  place au plus récent.
+  `MqttTransport.subscribe(topic, qos)` : mémorise l'abonnement (`activeSubscriptions`) et
+  l'applique immédiatement si connecté, sinon au prochain `handleConnect()` — **et à chaque
+  reconnexion suivante**, pas seulement la première : `scheduleReconnect()` recrée un client
+  `mqtt.MqttClient` entièrement nouveau à chaque tentative (pas une reconnexion interne de la
+  bibliothèque sur le même client), donc aucun abonnement ne survit nativement à une reconnexion
+  sans ce mécanisme explicite — corrige un défaut latent distinct (perte silencieuse et
+  définitive de toute réception de commande HA→app après la moindre coupure MQTT, découvert en
+  implémentant ce correctif, jamais documenté ni rapporté avant). `MqttTransport` accepte
+  désormais un `Logger` optionnel en second paramètre de construction (`ha:mqtt:transport`),
+  utilisé pour journaliser les mises en attente/réémissions/réabonnements — silencieux sans lui.
+  Constructeur unique existant (`HaMqttIntegrationService.connectBridge`) mis à jour en
+  conséquence.
 - **⭐ v4.19 — Repli sur texte brut à la réception d'une commande** : `parseIncomingCommand()`
   tente `JSON.parse(payload)` en premier ; en cas d'échec, retombe sur `{state: rawString}` plutôt
   que de rejeter le message. **HA n'envoie pas systématiquement du JSON** sur un `command_topic` —
@@ -1929,6 +1965,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.20** | 03/08/2026 | Claude | **Correction d'un crash total du process (§8.5.2)** : `MqttTransport.publish()`/`subscribe()` levaient une exception synchrone sur déconnexion transitoire, remontant sans aucun `try/catch` jusqu'à une exception non capturée au niveau du process Node entier — n'importe quel module d'intégration publiant pendant une micro-coupure MQTT pouvait faire planter toute l'application. Corrigé par une file d'attente courte (publications : 200 messages max, 30s d'expiration, rejouées à la reconnexion) et un réabonnement automatique à chaque reconnexion (abonnements : mémorisés et réappliqués, corrige au passage une perte silencieuse et définitive des commandes HA→app après coupure, découverte en implémentant ce correctif — chaque reconnexion recrée un client MQTT entièrement nouveau qui ne conserve nativement aucun abonnement). Vérifié : build propre, suite de tests inchangée (mêmes 12 échecs préexistants sans rapport, aucune régression). |
 | **4.19** | 03/08/2026 | Claude | **Rattrapage de dérive code/specs**, aucun changement de comportement — cinq mécanismes déjà en production non documentés : dédoublonnage des écouteurs `SocketBridge` par application (§5.4.2), énumération à jour des routes REST exceptionnelles avec ajout de `HaAutomationBackupService` (§5.7, nouvelle), `ModuleContainer`/`Sidebar` (§6.1/6.2, verrou de chargement, cache d'affichage, navigation réelle pour les pages dédiées), mécanisme réel des attributs de taxonomie en topic MQTT dédié remplaçant deux tentatives antérieures non fonctionnelles + retrait de découverte + distinction `state_value_template`/`value_template` (§8.5.4), repli sur texte brut à la réception d'une commande MQTT non-JSON (§8.5.2). |
 | **4.18** | 30/07/2026 | Claude | **`AreaEnsureService` — création active des areas HA (§8.5.4)**, à la demande de l'utilisateur, suite à la découverte que `device.suggested_area` (v4.17) n'est jamais fiable : vérifié en conditions réelles (suppression + redécouverte complète d'une entité, puis redémarrage complet de HA) que HA ne l'applique qu'à la toute première création, jamais de façon garantie. Nouveau `AreaEnsureService` (`applications/core/src/ha/sync/`) : crée l'area via l'API WebSocket de HA (`config/area_registry/create`) avant de publier la découverte, avec dédoublonnage insensible à la casse contre `HaStructureRegistry` (nouveau `getAllAreas()`), nom capitalisé, cache local mis à jour immédiatement après création (évite les doublons entre demandes concurrentes pour le même lieu), et attente de l'événement `ha:ready` (pas seulement l'authentification WS — le chargement du référentiel est un chaînage asynchrone séparé, deux races distinctes constatées et corrigées en conditions réelles). Interception dans `IntegrationBridge.subscribeModuleEvents()`, sur les deux chemins de découverte (normal et passthrough NOMMAGE) — **aucun changement dans RFXCOM/EVOO7/AREXX/NOMMAGE**, qui alimentaient déjà `suggested_area`. Optionnel (Mode A seulement), best-effort (timeout ~8s, jamais bloquant). Vérifié sur une installation HA neuve (registre et broker MQTT réinitialisés) : 86 devices sur 96 assignés automatiquement à la bonne area, dont 24 areas créées sans aucun échec. |
 | **4.17** | 30/07/2026 | Claude | **Ajout de `device.suggested_area` en découverte (§8.5.4)**, à la demande de l'utilisateur ("il faut l'alimenter avec le lieu de taxonomie, pas le lieu précis, dans tous les programmes qui envoient des discovery"). Renomme/remplace un ancien champ `area_id` déclaré dans `HaMqttDevice` (`ha-mqtt.ts`) mais jamais alimenté nulle part et de toute façon inexploitable par HA (pas la bonne clé pour la découverte MQTT — `suggested_area` est la seule reconnue, effet limité à l'assignation automatique de l'entité à sa création). Alimenté dans les 4 applications qui envoient des messages de découverte : RFXCOM (devices bruts, récepteurs light/switch/cover, scènes), EVOO7 (device partagé, recalculé par entité), AREXX (capteurs), NOMMAGE (passthrough, n'altère que si un bloc `device` existe déjà dans le message relayé). Vérifié en conditions réelles sur le broker de test : 94/96 messages de découverte portent `suggested_area` avec la bonne valeur (lieu, pas lieu précis) ; les 2 exceptions correspondent à des données EVOO7 dont la taxonomie n'a simplement pas encore été saisie par l'utilisateur (comportement attendu, `suggested_area` omis plutôt qu'une valeur incorrecte). |
