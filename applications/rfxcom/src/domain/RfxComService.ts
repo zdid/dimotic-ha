@@ -379,18 +379,20 @@ export class RfxComService implements IRfxComService {
   /**
    * Republie la dernière valeur connue (persistée) d'un device brut (sensor ET binary_sensor) au
    * démarrage/reconnexion, sans attendre une nouvelle réception RF433. Si cette valeur date de
-   * plus de 30 minutes (ou est absente), publie `"unknown"` plutôt qu'une valeur potentiellement
-   * obsolète/trompeuse.
+   * plus de 30 minutes (ou est absente), ne publie rien plutôt qu'un état "unknown" factice —
+   * l'entité reste dans l'état "unknown" natif de HA (silence radio, discovery+attributs déjà
+   * publiés) jusqu'à la prochaine réception RF433 réelle.
    */
   private publishDeviceStateAtStartup(device: RfxComDeviceInfo): void {
-    const deviceId = buildStateDeviceId(device.protocole, device.subType, device.sensorId, device.unitCode);
     const ageMs = device.lastSeen ? Date.now() - new Date(device.lastSeen).getTime() : Infinity;
     const isFresh = device.lastValue !== undefined && ageMs <= RfxComService.LAST_VALUE_MAX_AGE_MS;
+    if (!isFresh) return;
 
+    const deviceId = buildStateDeviceId(device.protocole, device.subType, device.sensorId, device.unitCode);
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.config.bridgeInstance,
       deviceId,
-      state: { state: isFresh ? (device.lastValue as string | number) : 'unknown' }
+      state: { state: device.lastValue as string | number }
     });
   }
 

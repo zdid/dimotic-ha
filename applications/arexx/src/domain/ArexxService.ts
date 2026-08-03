@@ -162,16 +162,18 @@ export class ArexxService implements IArexxService {
   /**
    * Republie la dernière valeur connue (persistée, `SensorRegistry`) au démarrage/reconnexion,
    * sans attendre une nouvelle lecture. Si cette valeur date de plus de 30 minutes (ou est
-   * absente), publie `"unknown"` plutôt qu'une valeur potentiellement obsolète/trompeuse.
+   * absente), ne publie rien plutôt qu'un état "unknown" factice — l'entité reste dans l'état
+   * "unknown" natif de HA (discovery+attributs déjà publiés) jusqu'à la prochaine lecture réelle.
    */
   private publishSensorStateAtStartup(sensor: ArexxSensorInfo): void {
     const ageMs = sensor.lastSeen ? Date.now() - new Date(sensor.lastSeen).getTime() : Infinity;
     const isFresh = sensor.lastValue !== undefined && ageMs <= ArexxService.LAST_VALUE_MAX_AGE_MS;
+    if (!isFresh) return;
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.config.bridgeInstance,
       deviceId: sensor.uniqueId,
-      state: { state: isFresh ? (sensor.lastValue as number) : 'unknown' }
+      state: { state: sensor.lastValue as number }
     });
   }
 
