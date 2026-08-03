@@ -12,6 +12,7 @@ import type { SocketBridge } from '../../application/SocketBridge';
 import type { EventBus } from '../../application/EventBus';
 import type { ApplicationModule } from '../../types/config';
 import { AuthService } from '../../infrastructure/auth/AuthService';
+import type { HaAutomationBackupService } from '../../ha/automations/HaAutomationBackupService';
 
 /**
  * Crée et configure le serveur Express + Socket.io
@@ -30,6 +31,10 @@ import { AuthService } from '../../infrastructure/auth/AuthService';
  *   interne actuel. Quand active, un middleware de garde — le tout premier enregistré, avant
  *   même `configureMiddleware()` — protège toutes les routes sauf `/health` et `/auth/*`. Voir
  *   `AuthService` pour le détail du flux OAuth2 et de la signature du cookie de session.
+ * - **Troisième exception volontaire** (2026-08-03, demande explicite de l'utilisateur) :
+ *   `POST /api/ha/automations/backup` et `/reload` — pensées pour être appelées depuis l'extérieur
+ *   (script, cron, HA lui-même) sans navigateur connecté en Socket.io ; la réponse HTTP porte donc
+ *   le résultat réel plutôt qu'un accusé de réception. Voir `HaAutomationBackupService`.
  */
 export class PresentationServer {
   private app: Express;
@@ -41,6 +46,7 @@ export class PresentationServer {
   private port: number;
   private projectRoot: string;
   private authService?: AuthService;
+  private automationBackupService?: HaAutomationBackupService;
 
   /**
    * Crée un nouveau serveur de présentation
@@ -301,6 +307,37 @@ export class PresentationServer {
       });
     });
 
+    // Sauvegarde/rechargement des automatisations HA — troisième exception volontaire à "tout par
+    // Socket.io" (voir commentaire de tête de cette classe) : pensées pour être appelées depuis
+    // l'extérieur (script, cron, HA lui-même via rest_command) sans navigateur connecté en
+    // Socket.io pour recevoir un résultat asynchrone — la réponse HTTP porte donc directement le
+    // résultat réel. Voir HaAutomationBackupService pour le détail.
+    this.app.post('/api/ha/automations/backup', async (req: Request, res: Response) => {
+      if (!this.automationBackupService) {
+        res.status(503).json({ error: 'Service Unavailable', message: 'Sauvegarde des automatisations indisponible (HA WebSocket non configuré)' });
+        return;
+      }
+      const result = await this.automationBackupService.backup();
+      res.status(result.success ? 200 : 500).json(result);
+    });
+
+    this.app.post('/api/ha/automations/reload', async (req: Request, res: Response) => {
+      if (!this.automationBackupService) {
+        res.status(503).json({ error: 'Service Unavailable', message: 'Rechargement des automatisations indisponible (HA WebSocket non configuré)' });
+        return;
+      }
+      const result = await this.automationBackupService.reload();
+      res.status(result.success ? 200 : 500).json(result);
+    });
+
+    this.app.get('/api/ha/automations/backups', (req: Request, res: Response) => {
+      if (!this.automationBackupService) {
+        res.status(503).json({ error: 'Service Unavailable', message: 'Sauvegarde des automatisations indisponible (HA WebSocket non configuré)' });
+        return;
+      }
+      res.status(200).json({ backups: this.automationBackupService.listBackups() });
+    });
+
     // Route racine - Redirige vers index.html pour une SPA
     // Exception : si cette instance ne fait tourner qu'une seule application métier (hors core)
     // ET que celle-ci est classée `audience: 'end-user'` (ex: HAPLAN sur une instance dédiée à
@@ -389,6 +426,16 @@ export class PresentationServer {
       this.modules = modules;
     });
     this.logger.info('PresentationServer', 'EventBus attaché');
+  }
+
+  /**
+   * Attache le service de sauvegarde/rechargement des automatisations HA — nécessaire pour les
+   * routes POST /api/ha/automations/backup et /reload. Optionnel : n'existe que si le WebSocket HA
+   * (Mode A) est configuré, voir Bootstrap::initializeHaComponents().
+   */
+  attachAutomationBackupService(service: HaAutomationBackupService): void {
+    this.automationBackupService = service;
+    this.logger.info('PresentationServer', 'Service de sauvegarde des automatisations attaché');
   }
 
   /**

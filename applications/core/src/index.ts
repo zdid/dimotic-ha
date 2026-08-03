@@ -63,6 +63,7 @@ import { AuthService } from './infrastructure/auth/AuthService';
 import type { HaWsClient } from './ha/sync/HaWsClient';
 import type { HaStructureRegistry } from './ha/sync/HaStructureRegistry';
 import type { IntegrationBridge } from './ha/integration/IntegrationBridge';
+import type { HaAutomationBackupService } from './ha/automations/HaAutomationBackupService';
 
 // =============================================================================
 // Bootstrap de l'application
@@ -89,6 +90,7 @@ class ApplicationBootstrap {
   private haWsClient?: HaWsClient;
   private haStructureRegistry?: HaStructureRegistry;
   private integrationBridge?: IntegrationBridge;
+  private haAutomationBackupService?: HaAutomationBackupService;
 
   /**
    * Initialise toutes les dépendances
@@ -234,6 +236,20 @@ class ApplicationBootstrap {
           this.logger
         );
         this.integrationBridge.attachAreaEnsureService(areaEnsureService);
+      }
+
+      // Sauvegarde/rechargement des automatisations HA (routes REST /api/ha/automations/*, voir
+      // HaAutomationBackupService) : même garde que AreaEnsureService, nécessite le WS (Mode A).
+      if (this.haWsClient && this.haStructureRegistry && this.presentationServer) {
+        const automationBackupModule = await import('./ha/automations/HaAutomationBackupService');
+        this.haAutomationBackupService = new automationBackupModule.HaAutomationBackupService(
+          this.haWsClient,
+          this.haStructureRegistry,
+          config.ha!.ws!, // this.haWsClient n'existe que si config.ha.ws était défini (voir plus haut)
+          this.logger,
+          process.env.PROJECT_ROOT as string
+        );
+        this.presentationServer.attachAutomationBackupService(this.haAutomationBackupService);
       }
     } catch (error) {
       this.logger?.warn('Bootstrap', `Échec de l'initialisation d'IntegrationBridge: ${error}`);
