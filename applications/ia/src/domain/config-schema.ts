@@ -23,8 +23,13 @@ export const iaConfigSchema = z.object({
 
   ollamaHttpPort: z.number().int().positive().default(11434),
 
-  // Chemin relatif à la racine de l'application (applications/ia/), voir rules.ts
-  rulesFile: z.string().min(1).default('rules/regles_mistral.txt'),
+  // Chemin relatif à la racine de l'application (applications/ia/), sauf s'il est absolu — voir
+  // IaService.resolveRulesPath()/ensureRulesFileSeeded(). Par défaut sous data/ia/ (pas
+  // applications/ia/rules/, qui reste le modèle intégré utilisé pour amorcer ce fichier s'il
+  // n'existe pas encore) : data/ est le seul répertoire monté/persistant en déploiement Docker
+  // (voir techniques-socle-ha-mqtt_specs §11) — un fichier sous applications/ n'y serait pas
+  // éditable sans reconstruire l'image.
+  rulesFile: z.string().min(1).default('../../data/ia/regles_mistral.txt'),
 
   // Délais d'attente pour les échanges de corrélation avec planificateur
   commandTimeoutMs: z.number().int().positive().default(2000),
@@ -44,7 +49,7 @@ export const DEFAULT_IA_CONFIG: IaConfig = {
     'mistral-large': 'mistral-large-latest'
   },
   ollamaHttpPort: 11434,
-  rulesFile: 'rules/regles_mistral.txt',
+  rulesFile: '../../data/ia/regles_mistral.txt',
   commandTimeoutMs: 2000,
   toolExecuteTimeoutMs: 10000
 };

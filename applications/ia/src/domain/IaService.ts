@@ -11,6 +11,7 @@
  * (specs §4) évite qu'un proxy intermédiaire bufferise une seconde fois par-dessus.
  */
 
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Response } from 'express';
 import type { IEventBus, Logger, IAppConfigProvider, HaStructureRegistry, HaWsClient } from '../../../core/src/exports';
@@ -68,7 +69,24 @@ export class IaService implements IIaService {
 
   private resolveRulesPath(): string {
     const appRoot = path.join(process.env.PROJECT_ROOT || process.cwd(), 'applications', 'ia');
-    return path.isAbsolute(this.config.rulesFile) ? this.config.rulesFile : path.join(appRoot, this.config.rulesFile);
+    const resolved = path.isAbsolute(this.config.rulesFile) ? this.config.rulesFile : path.join(appRoot, this.config.rulesFile);
+    // Modèle intégré (toujours présent, fait partie du code applicatif) — sert uniquement
+    // d'amorce si le fichier réellement utilisé (par défaut sous data/ia/, voir config-schema.ts)
+    // n'existe pas encore, ex: premier démarrage sur une machine neuve (déploiement Docker,
+    // data/ vide). N'écrase jamais un fichier déjà présent à l'emplacement cible.
+    this.ensureRulesFileSeeded(resolved, path.join(appRoot, 'rules', 'regles_mistral.txt'));
+    return resolved;
+  }
+
+  private ensureRulesFileSeeded(targetPath: string, templatePath: string): void {
+    if (targetPath === templatePath || fs.existsSync(targetPath) || !fs.existsSync(templatePath)) return;
+    try {
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.copyFileSync(templatePath, targetPath);
+      this.logger.info('IaService', `Fichier de règles absent — amorcé depuis le modèle intégré vers ${targetPath}`);
+    } catch (error) {
+      this.logger.error('IaService', `Échec de la copie du modèle de règles vers ${targetPath}: ${error}`);
+    }
   }
 
   async start(): Promise<void> {
