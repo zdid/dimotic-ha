@@ -258,19 +258,32 @@ export class AppService {
       }
 
       for (const dir of dirs) {
-        // Vérifier si le répertoire contient src/domain/index.ts ou dist/domain/index.js
+        // Vérifier si le répertoire contient dist/domain/index.js ou src/domain/index.ts
+        //
+        // ⚠️ `dist/domain/index.js` (production, code compilé) DOIT être vérifié en premier.
+        // Ce processus lui-même tourne soit sous `tsx` (dev — `npm run dev`/`dev:local`, qui
+        // enregistre un loader TypeScript pour TOUT le processus, y compris les modules chargés
+        // dynamiquement plus bas), soit sous `node` pur (production — `node dist/index.js`,
+        // aucun loader TS). Donner la priorité à `src/domain/index.ts` (ordre inversé jusqu'ici)
+        // fonctionnait donc par accident sous `tsx`, mais échouait systématiquement en
+        // production dès que `src/` existait (systématiquement vrai, le code source restant
+        // toujours présent) — `import()`/`require()` d'un fichier `.ts` brut sous `node` pur
+        // échoue avec une erreur de syntaxe (`Unexpected token`/`Unexpected identifier`), quel
+        // que soit l'état du `dist` réellement construit. Bug resté invisible tant que le projet
+        // n'avait jamais tourné en mode production réel — découvert en testant le déploiement
+        // Docker (03/08/2026), qui exécute `node applications/core/dist/index.js` sans `tsx`.
+        const distDomainIndexJs = path.join(appsDir, dir.name, 'dist', 'domain', 'index.js');
         const srcDomainIndexTs = path.join(appsDir, dir.name, 'src', 'domain', 'index.ts');
         const srcDomainIndexJs = path.join(appsDir, dir.name, 'src', 'domain', 'index.js');
-        const distDomainIndexJs = path.join(appsDir, dir.name, 'dist', 'domain', 'index.js');
-        
+
         let domainIndexPath: string | null = null;
-        
-        if (existsSync(srcDomainIndexTs)) {
+
+        if (existsSync(distDomainIndexJs)) {
+          domainIndexPath = distDomainIndexJs;
+        } else if (existsSync(srcDomainIndexTs)) {
           domainIndexPath = srcDomainIndexTs;
         } else if (existsSync(srcDomainIndexJs)) {
           domainIndexPath = srcDomainIndexJs;
-        } else if (existsSync(distDomainIndexJs)) {
-          domainIndexPath = distDomainIndexJs;
         }
         
         if (!domainIndexPath) {
@@ -279,23 +292,28 @@ export class AppService {
         }
         
         try {
-          // Convertir en URL pour l'import dynamique
-          const moduleUrl = pathToFileURL(domainIndexPath).href;
-          
-          // Essayer d'importer avec import() d'abord
-          let module;
-          try {
+          // ⚠️ `require()` direct pour un `.js` compilé (toujours CommonJS dans ce projet —
+          // aucune application n'a `"type": "module"`), `import()` uniquement pour le `.ts`
+          // source (dev sous `tsx`, dont le loader transpile à la volée pour `import()`).
+          //
+          // Historique : tenter `import()` d'abord puis retomber sur `require()` en cas
+          // d'échec — comme le faisait ce bloc jusqu'ici — semble anodin mais NE L'EST PAS
+          // pour un fichier CommonJS : Node délègue la résolution d'un `import()` de CJS à
+          // son propre chargeur `require` en interne. Un premier `import()` en échec sur ce
+          // même chemin, suivi d'un `require()` de repli qui réussit (exactement ce qui se
+          // produit ici, `detectModules()` tournant avant `loadApplicationModule()` sur le
+          // même fichier), laisse le résolveur de modules de Node dans un état incohérent
+          // pour un `import()` ULTÉRIEUR du même chemin ailleurs dans le process — provoquant
+          // un deuxième échec ("Cannot find module") sur un fichier pourtant bien présent et
+          // par ailleurs chargeable. Découvert en testant le déploiement Docker (03/08/2026,
+          // premier vrai test en mode production `node` pur, jamais exercé auparavant — voir
+          // aussi le correctif de priorité dist/src juste au-dessus).
+          let module: Record<string, unknown>;
+          if (domainIndexPath.endsWith('.ts')) {
+            const moduleUrl = pathToFileURL(domainIndexPath).href;
             module = await import(moduleUrl);
-          } catch (importError) {
-            // Si l'import ESM échoue, essayer avec require pour CommonJS
-            const requirePath = path.resolve(domainIndexPath);
-            try {
-              module = require(requirePath);
-            } catch (requireError) {
-              const importMsg = importError instanceof Error ? importError.message : String(importError);
-              const requireMsg = requireError instanceof Error ? requireError.message : String(requireError);
-              throw new Error(`Impossible de charger le module ${dir.name}: ${importMsg} | ${requireMsg} | path=${domainIndexPath} | requirePath=${requirePath}`);
-            }
+          } else {
+            module = require(path.resolve(domainIndexPath));
           }
 
           // Chercher une constante *APP
@@ -688,26 +706,29 @@ export class AppService {
       const appsDir = path.join(projectRoot, 'applications');
       
       let modulePath: string | undefined;
-      
-      // Essayer applications/{moduleId}/src/domain/index.ts (développement)
-      const srcModulePath = path.join(appsDir, moduleId, 'src', 'domain', 'index.ts');
-      if (existsSync(srcModulePath)) {
-        modulePath = srcModulePath;
+
+      // Essayer applications/{moduleId}/dist/domain/index.js (production) EN PREMIER —
+      // voir le commentaire détaillé dans detectModules() ci-dessus pour la raison impérative
+      // de cet ordre (un `src/domain/index.ts` prioritaire échoue systématiquement sous `node`
+      // pur, hors `tsx`).
+      const distModulePath = path.join(appsDir, moduleId, 'dist', 'domain', 'index.js');
+      if (existsSync(distModulePath)) {
+        modulePath = distModulePath;
       }
-      
-      // Essayer applications/{moduleId}/src/domain/index.js (développement compilé)
+
+      // Essayer applications/{moduleId}/src/domain/index.ts (développement, sous tsx)
+      if (!modulePath) {
+        const srcModulePath = path.join(appsDir, moduleId, 'src', 'domain', 'index.ts');
+        if (existsSync(srcModulePath)) {
+          modulePath = srcModulePath;
+        }
+      }
+
+      // Essayer applications/{moduleId}/src/domain/index.js (cas résiduel)
       if (!modulePath) {
         const srcModuleJsPath = path.join(appsDir, moduleId, 'src', 'domain', 'index.js');
         if (existsSync(srcModuleJsPath)) {
           modulePath = srcModuleJsPath;
-        }
-      }
-      
-      // Essayer applications/{moduleId}/dist/domain/index.js (production)
-      if (!modulePath) {
-        const distModulePath = path.join(appsDir, moduleId, 'dist', 'domain', 'index.js');
-        if (existsSync(distModulePath)) {
-          modulePath = distModulePath;
         }
       }
       
@@ -717,11 +738,16 @@ export class AppService {
       }
       
       // Convertir en URL pour l'import dynamique
-      let moduleUrl = pathToFileURL(modulePath).href;
-      
-      // Charger le module
-      const module = await import(moduleUrl);
-      return module as Record<string, unknown>;
+      // `require()` direct pour le `.js` compilé (CommonJS), `import()` uniquement pour le
+      // `.ts` source (dev sous tsx) — voir le commentaire détaillé dans detectModules().
+      let module: Record<string, unknown>;
+      if (modulePath.endsWith('.ts')) {
+        const moduleUrl = pathToFileURL(modulePath).href;
+        module = await import(moduleUrl);
+      } else {
+        module = require(path.resolve(modulePath));
+      }
+      return module;
     } catch (error) {
       this.logger.error('AppService', `Échec du chargement du module ${moduleId}: ${error}`);
       return undefined;

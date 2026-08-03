@@ -54,4 +54,14 @@ EXPOSE 8080 49161 11434
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "applications/core/dist/index.js"]
+# ⚠️ Exécution via `tsx` (TypeScript direct), PAS `node applications/core/dist/index.js` — voir
+# TODO.md "AppService : le chargement dynamique des modules en production suppose un
+# dist/domain/index.js à plat, faux pour 7 apps sur 8". En production réelle (`node` pur, sans
+# loader TypeScript), `AppService` échoue à charger 7 des 8 applications métier (leur module
+# compilé n'atterrit pas au chemin attendu, cause structurelle non corrigée à ce jour). `tsx`
+# reproduit exactement le mode qui a servi à tout le développement/tests de ce projet jusqu'ici
+# (`npm run dev`/`dev:local`) — y compris le chemin de chargement dynamique `.ts`, déjà éprouvé.
+# `tsx` est une devDependency de core, jamais prunée par `docker/build-apps.sh`. `build:ui` (assets
+# navigateur, servis tels quels par Express) reste nécessaire et inchangé — seul le côté serveur
+# tourne interprété plutôt que précompilé. À revenir sur du JS compilé une fois la cause corrigée.
+CMD ["applications/core/node_modules/.bin/tsx", "applications/core/src/index.ts"]

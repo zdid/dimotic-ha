@@ -1,5 +1,6 @@
 # =============================================================================
-# ws-ha — socle + applications métier.
+# Dimotic-HA (dépôt git ws-ha, à renommer plus tard) — socle + applications métier.
+# Image publiée sur Docker Hub : zdid2/dimotic-ha (amd64 + arm64, RPi 3/4/5 en 64 bits).
 #
 # Avant le premier démarrage (et après toute modification du code) :
 #   HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm build
@@ -14,8 +15,8 @@ services:
   # Service principal — exécute le socle + toutes les applications actives.
   app:
     build: .
-    image: ws-ha:latest
-    container_name: ws-ha
+    image: dimotic-ha:latest
+    container_name: dimotic-ha
     restart: unless-stopped
 
     # Home Assistant et le broker MQTT tournent en localhost sur cette même machine
@@ -80,7 +81,7 @@ services:
   # À relancer après toute modification du code, avant de (re)démarrer `app`.
   build:
     build: .
-    image: ws-ha:latest
+    image: dimotic-ha:latest
     profiles: ["build"]
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     # `NODE_ENV=production` (défini dans le Dockerfile, pertinent pour l'exécution) ferait
