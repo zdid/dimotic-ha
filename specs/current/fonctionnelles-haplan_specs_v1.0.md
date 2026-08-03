@@ -1,0 +1,644 @@
+# Spécifications Fonctionnelles - Module HAPLAN
+
+*Version 1.0 - 3 Août 2026*
+*Première spécification formelle de l'application HAPLAN, opérationnelle depuis fin juillet 2026
+mais jusqu'ici sans documentation dédiée — écrite a posteriori à partir d'une lecture exhaustive du
+code réel.*
+
+---
+
+## 📌 Table des Matières
+1. [Introduction](#1-introduction)
+2. [Architecture Générale](#2-architecture-générale)
+3. [Backend — `HaplanService`](#3-backend--haplanservice)
+4. [Persistance des Plans et Positions](#4-persistance-des-plans-et-positions)
+5. [Upload de Plan (exception REST)](#5-upload-de-plan-exception-rest)
+6. [Arbre de Taxonomie pour le Sélecteur d'Entités](#6-arbre-de-taxonomie-pour-le-sélecteur-dentités)
+7. [Accès Externe et Page Dédiée](#7-accès-externe-et-page-dédiée)
+8. [Frontend — Bootstrap et Composants](#8-frontend--bootstrap-et-composants)
+9. [Modèle d'Objets HA (icônes du plan)](#9-modèle-dobjets-ha-icônes-du-plan)
+10. [Fenêtres Contextuelles (popups de contrôle)](#10-fenêtres-contextuelles-popups-de-contrôle)
+11. [Nom d'Entité Dérivé de la Taxonomie](#11-nom-dentité-dérivé-de-la-taxonomie)
+12. [Menu Escamotable et Contrôles Flottants](#12-menu-escamotable-et-contrôles-flottants)
+13. [Socket.io](#13-socketio)
+14. [Configuration](#14-configuration)
+15. [Limites, Bugs Connus et Code Mort](#15-limites-bugs-connus-et-code-mort)
+16. [Arborescence des Programmes](#16-arborescence-des-programmes)
+17. [Annexes](#17-annexes)
+
+---
+
+## 1. Introduction
+
+### 1.1 Objectif
+
+`applications/haplan` est une interface tactile à base de plans de maison : l'utilisateur place des
+icônes d'entités Home Assistant **déjà existantes** sur des images de plans uploadées, les
+positionne par glisser-déposer, et clique dessus pour ouvrir une fenêtre de contrôle. C'est un
+**portage** d'un projet standalone antérieur, `haplanserver` (github.com/zdid/haplanserver),
+adapté au socle EventBus/Socket.io/MQTT/WS de ce projet — pas une conception ex nihilo.
+
+**Principe fondamental (explicite dans l'en-tête du code)** : HAPLAN **ne publie aucune découverte
+MQTT** — contrairement à RFXCOM/EVOO7/AREXX/NOMMAGE, ce n'est pas une intégration matérielle.
+`HaStructureRegistry` (Mode A) fournit l'instantané initial et l'arbre de taxonomie, `HaWsClient`
+fournit l'état en direct et le canal de commande.
+
+### 1.2 Public visé et positionnement
+
+`audience: 'end-user'` — HAPLAN est pensée pour un **usage quotidien par tous**, contrairement aux
+autres applications (`audience: 'configuration'`), et est la **seule catégorie candidate à une
+exposition externe** (voir §7). Elle a sa propre page dédiée réelle (`dashboard.html`), pas une
+intégration SPA dans le Shadow DOM du core comme les tableaux de bord habituels.
+
+### 1.3 Historique de développement
+
+4 commits seulement à ce jour :
+1. Application initiale — plans avec icônes tactiles, pilotage HA existant.
+2. Correction d'une boucle de messages au déplacement d'un objet sur le plan.
+3. Menu escamotable + nom d'entité issu de la taxonomie QUOI/OÙ.
+4. Amélioration du contraste des lumières éteintes sur le plan.
+
+Plusieurs commentaires du code font référence à un plan de portage en "Phase 1 / Phase 2 / Phase
+3" — les trois phases sont aujourd'hui implémentées, mais certains commentaires n'ont pas été mis
+à jour en conséquence (voir §15).
+
+---
+
+## 2. Architecture Générale
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    COUCHE PRÉSENTATION                    │
+│   Page dédiée réelle (dashboard.html), pas de SPA          │
+├─────────────────────────────────────────────────────────────────┤
+│                    COUCHE APPLICATION                     │
+│   AppService · EventBus · SocketBridge                    │
+├─────────────────────────────────────────────────────────────────┤
+│                     COUCHE MÉTIER                         │
+│   HaplanService — pas de découverte MQTT                   │
+├─────────────────────────────────────────────────────────────────┤
+│                       COUCHE HA (Mode A uniquement)         │
+│   HaStructureRegistry (instantané initial) · HaWsClient      │
+│   (état en direct + commandes)                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Manifeste** (`HAPLAN_APP`, `src/domain/index.ts`) : `id: 'haplan'`, `type: 'standalone'`,
+`audience: 'end-user'`, `configurable: true`, **`requiredMqtt: false`**, **`requiredHaWs: true`**,
+`configSection: 'haplan'`. Contrairement à toutes les autres applications métier de ce projet,
+HAPLAN a besoin de Mode A (WebSocket HA) et **pas** de MQTT.
+
+**Formulaire générique** : `HAPLAN_UI_METADATA.fields = []` — délibérément vide (commentaire du
+code : *"rien à paramétrer via le formulaire générique (juste `enabled`), la page dédiée
+(dashboard) est le vrai point d'entrée"*).
+
+**Factories** : `createHaplanService(eventBus, logger, configProvider, haStructureRegistry,
+haWsClient)` — 5 paramètres, `haStructureRegistry`/`haWsClient` potentiellement `undefined` si
+`ha.ws_enable: false` (le service démarre quand même, dégradé — voir §3).
+
+---
+
+## 3. Backend — `HaplanService`
+
+### 3.1 Séquence de démarrage (`start()`)
+
+1. `configFileManager.load()` — charge le YAML des plans.
+2. `recomputeTrackedEntityIds()` — reconstruit l'ensemble des `entity_id` référencés par au moins
+   une position sur au moins un plan.
+3. `setupSocketEventListeners()` (client→serveur) + `registerSocketEvents()` (annonce au
+   `SocketBridge`, voir §13).
+4. Abonnement interne à `haplan:internal:floorplan:create` — signal émis uniquement par la route
+   REST d'upload (§5), **volontairement absent** de la liste des événements Socket.io exposés au
+   client (aucun client ne peut le déclencher directement).
+5. Si `haWsClient` existe : `haWsClient.onStateChanged(entity => handleHaStateChanged(entity))`.
+   Sinon : avertissement *"HaWsClient indisponible (ha.ws_enable=false ?)"* — le service démarre
+   quand même, mais aucune commande ni aucun état en direct ne sera jamais disponible.
+6. `emitStatus()` + `emitTaxonomyTree()`.
+
+`stop()` se contente de journaliser — **aucun nettoyage réel** (voir §15, limitation projet-wide
+sur la désactivation d'application).
+
+### 3.2 Entités suivies (`trackedEntityIds`)
+
+Ensemble de tous les `entity_id` référencés par au moins une position, sur au moins un plan —
+recalculé au chargement, après une mise à jour de positions, et après la suppression d'un plan.
+Sert de **garde-fou de sécurité** pour les commandes (§3.4) : seule une entité déjà placée sur un
+plan peut recevoir une commande envoyée par un client.
+
+### 3.3 État en direct et instantané initial
+
+- **Instantané initial** (`emitEntitiesStateBulk`) : lit `haStructureRegistry.getAllEntities()`
+  (déjà peuplé par `AppService` au démarrage — pas de requête HA redondante), filtre sur les
+  entités suivies, émet `haplan:entities:state:bulk`. Déclenché uniquement à la demande de la
+  liste des plans et après une mise à jour de positions (pour qu'une entité tout juste ajoutée
+  reçoive immédiatement son état).
+- **État en direct** (`handleHaStateChanged`) : filtre le flux `onStateChanged` de `HaWsClient` sur
+  `trackedEntityIds` (pas le firehose HA complet), réémet `haplan:entity:state`.
+
+### 3.4 Exécution de commande
+
+`handleEntityCommand({entity_id, domain, service, serviceData?})` :
+1. Sans `haWsClient` disponible → erreur `HAPLAN_HA_UNAVAILABLE`.
+2. **Défense en profondeur** : l'entité doit appartenir à `trackedEntityIds`, sinon
+   `HAPLAN_UNKNOWN_ENTITY` — *"jamais une commande arbitraire vers une entité HA quelconque envoyée
+   par un client malveillant"* (commentaire du code).
+3. `haWsClient.sendCommand(domain, service, {entity_id}, serviceData)` — appel WebSocket direct
+   (`call_service`), pas de MQTT.
+4. Échec → `HAPLAN_COMMAND_FAILED`.
+
+### 3.5 Codes d'erreur
+
+`HaplanErrorCode` : `HAPLAN_HA_UNAVAILABLE` | `HAPLAN_UNKNOWN_ENTITY` | `HAPLAN_COMMAND_FAILED` |
+`HAPLAN_SAVE_FAILED` (`applications/core/src/types/errors.ts`).
+
+---
+
+## 4. Persistance des Plans et Positions
+
+### 4.1 Fichier `data/haplan/config-haplan-floorplans-v1.0.yaml`
+
+Schéma (`floorplans-config-schema.ts`) :
+```yaml
+floorplans:
+  <floorplanId>:                  # clé = identifiant du plan, NON assaini (voir §15)
+    filename: <nom de fichier image, assaini>
+    positions:
+      - entity_id: <string>
+        x: <number|null>          # normalisé 0-1, null tant que non placé
+        y: <number|null>
+```
+
+Même forme que le fichier d'origine de haplanserver (`client-floorplans.json`, conservé à titre de
+référence/import sous `data/haplan/client-floorplans.json`, format légèrement différent).
+
+`ConfigFileManager` : mêmes garanties que les autres applications (copie `.bak` avant écriture,
+écriture atomique tmp→rename, fichier manquant → créé vide, erreur de validation Zod au chargement
+→ démarrage avec une config vide sans toucher au fichier fautif).
+
+### 4.2 Positions — toujours la liste complète, jamais un delta
+
+**Point d'entrée unique** pour ajouter, déplacer ou retirer une icône : l'événement Socket.io
+`haplan:floorplan:positions:update`, qui porte systématiquement la **liste complète** des
+positions du plan concerné — jamais une modification incrémentale. Le serveur :
+1. Conserve les positions précédentes en mémoire.
+2. Remplace `floorplan.positions` par la nouvelle liste, sauvegarde.
+3. **En cas d'échec d'écriture** : restauration en mémoire des positions précédentes,
+   `HAPLAN_SAVE_FAILED`, réémission de la liste (le client recolle sur l'état serveur réel).
+4. En cas de succès : `recomputeTrackedEntityIds()` + rediffusion de la liste des plans + de
+   l'instantané d'état.
+
+**Aucun équivalent serveur au `PositionManager` côté client** (§8) — la position n'est qu'un champ
+du fichier de configuration du plan, remplacé en bloc à chaque sauvegarde.
+
+### 4.3 Création d'un plan (upload, voir §5)
+
+- Rejet si l'identifiant existe déjà.
+- Extension déterminée depuis le MIME type (`image/png`→`.png`, `image/jpeg`→`.jpg`,
+  `image/webp`→`.webp` — doit rester synchronisé avec la liste blanche du filtre `multer`).
+- Le **nom de fichier** est assaini (`[^a-zA-Z0-9-_]` → `_`, repli sur `'plan'` si vide) —
+  **mais la clé de la map (`floorplanId`) ne l'est pas** (voir limitation §15).
+- Écriture de l'image, puis du YAML ; **si la sauvegarde YAML échoue, l'image déjà écrite est
+  supprimée** (pas d'orphelin).
+
+### 4.4 Suppression d'un plan
+
+Retrait de l'entrée + sauvegarde ; en cas d'échec, l'entrée est **restaurée** en mémoire et
+`HAPLAN_SAVE_FAILED` est renvoyé. Puis suppression du fichier image (best-effort, avertissement
+seul en cas d'échec). Recalcule `trackedEntityIds` et rediffuse la liste des plans.
+
+---
+
+## 5. Upload de Plan (exception REST)
+
+HAPLAN est la **deuxième exception volontaire** au principe "tout Socket.io" du socle (voir
+`techniques-socle-ha-mqtt_specs` §5.7) — un upload de fichier binaire (image) est mal adapté à
+Socket.io.
+
+- **Fichiers statiques** : `/data/haplan/images/*` servi directement par Express — établit la
+  convention `/data/{app}/...` pour du contenu écrit par l'utilisateur, distincte de
+  `/applications/{appId}/...` qui ne sert que du code.
+- **Route** : `POST /api/haplan/floorplans/upload` — `multer` en mémoire, limite **10 Mo**, liste
+  blanche de types MIME (`image/png`, `image/jpeg`, `image/webp`).
+  - Erreur de filtre/multer → **415**.
+  - `file`/`floorplanId` manquant → **400**.
+  - EventBus indisponible → **503**.
+  - Sinon : émission de `haplan:internal:floorplan:create` (interne, jamais exposé aux clients
+    Socket.io) et **réponse 200 `{success:true}` — un simple accusé de réception**. Le résultat
+    réel (plan créé, ou `HAPLAN_SAVE_FAILED`) arrive **de façon asynchrone via Socket.io**, pas
+    dans cette réponse HTTP.
+
+---
+
+## 6. Arbre de Taxonomie pour le Sélecteur d'Entités
+
+### 6.1 Principe
+
+`taxonomy-tree.ts::buildEntityPickerTree()` — la hiérarchie OÙ **ne vient pas** des areas HA
+(structure plate, sans parent/enfant côté HA) mais de l'attribut `attributs_taxonomie`, déjà porté
+par chaque entité publiée par les intégrations MQTT de ce projet (RFXCOM/EVOO7/AREXX/NOMMAGE).
+Même source que `ArbreouquoiService::extractOuPathFromEntity`, mais **simplifiée à un seul niveau
+OÙ** (le lieu le plus précis disponible) plutôt que la hiérarchie à 4 niveaux — pour reconstruire
+exactement la forme attendue par le composant `EntitySelector` porté tel quel de haplanserver
+(`{id, name, devices: [{id, name, entities: {}}]}` — **OÙ joue le rôle "Pièce", QUOI joue le rôle
+"Appareil"**, aucun changement client nécessaire).
+
+### 6.2 Résolution par entité
+
+- `areaId` = `slug_precis || slug_lieu || slug_pere || slug_grand_pere || '__non_classe__'`
+- `areaName` = `lieu_precis || lieu_principal || lieu_pere || lieu_grand_pere || 'Non classé'`
+- `quoiId` = `slug_quoi || '__autre__'`, `quoiName` = `quoi || 'Autre'`
+
+Résultat trié alphabétiquement par nom d'area. Émis (`emitTaxonomyTree`) sur **toutes** les
+entités du référentiel (pas seulement celles déjà placées), au démarrage et sur demande.
+
+---
+
+## 7. Accès Externe et Page Dédiée
+
+### 7.1 Routage réel (pas SPA)
+
+`menu.entry.path = '/applications/haplan/presentation/haplan/dashboard.html'` — chemin de fichier
+réel, pas la convention SPA `presentation/index.html`. `Sidebar.ts` (core) route tout
+`entry.path` commençant par `/applications/` vers une **vraie navigation**
+(`window.location.href = path`) plutôt que l'embarquement Shadow DOM habituel — mécanisme
+générique documenté dans `techniques-socle-ha-mqtt_specs` §6.2, HAPLAN étant le cas d'usage
+explicitement cité dans le commentaire du code source (`Sidebar.ts`).
+
+### 7.2 Redirection racine pour instance mono-application
+
+`GET /` teste d'abord si l'instance ne fait tourner qu'**un seul** module (hors `core`) et que ce
+module a `audience: 'end-user'` — si oui, redirige directement vers son `menu.entry.path`. Sans
+effet sur le déploiement actuel (toutes les applications tournent ensemble) ; prévu pour une future
+instance dédiée exposée en externe, avec HAPLAN comme cas d'usage nommé explicitement dans les
+commentaires du code.
+
+### 7.3 Relation avec la porte OAuth2
+
+**Aucune interaction spéciale.** HAPLAN ne contient aucun code lié à l'authentification — elle
+hérite exactement de la même protection que toute autre route quand la porte OAuth2 est activée
+(`web.auth.enabled`, voir `techniques-socle-ha-mqtt_specs` §5.6). Sa seule relation, indirecte, est
+que `audience: 'end-user'` en fait la cible naturelle d'une instance externe dédiée, et qu'elle
+sert d'exemple dans les commentaires de configuration de l'authentification
+(`client_id: https://haplan.example.com/`).
+
+---
+
+## 8. Frontend — Bootstrap et Composants
+
+### 8.1 Page (`dashboard.html`)
+
+Structure : `.haplan-app` (colonne plein écran) contenant `.haplan-header` (menu escamotable, voir
+§12) et `.haplan-body` (`position: relative`, contenant les contrôles flottants, le conteneur de
+plan `#floorplan-container`, et le bandeau flottant de focus d'entité, voir §11). Deux panneaux
+latéraux (`display:none` → `.active`) : sélecteur d'entité et formulaire de nouveau plan.
+
+Dépendances : thème du core (`/styles/main.css`), Font Awesome 6.0.0 (CDN — dépendance héritée du
+composant d'objets porté tel quel), sa propre copie du client Socket.io (page de navigation
+complète, même pattern que les pages dédiées RFXCOM/EVOO7).
+
+### 8.2 `dashboard-app.ts` — orchestration
+
+- **File de sérialisation `showFloorplan()`** : corrige un bug réel (commit dédié) — deux appels
+  concurrents à `showFloorplan()` (ex: relecture de la liste persistante des plans à la
+  reconnexion Socket.io, pendant qu'un ajout d'entité en déclenche un autre) écrasaient le DOM
+  fraîchement construit l'un de l'autre (`cleanup()` fait `innerHTML = ''`). Corrigé en chaînant
+  chaque appel sur le précédent via une `Promise` de file d'attente.
+- `EntitySelector` construit une fois, callback → ajout de l'entité sélectionnée au centre du plan
+  (`{x:0.5, y:0.5}`).
+- Réabonnement à la liste des plans : sélectionne le plan courant, **se rabat sur le premier plan
+  disponible si le plan courant a été supprimé entre-temps**.
+- Bascule mode édition, panneau sélecteur d'entité, panneau nouveau plan, bouton suppression de
+  plan (confirmation native), indicateur de connexion (rafraîchi toutes les 3s).
+
+### 8.3 `DataService` (côté navigateur)
+
+Garde délibérément le même nom de classe et la même surface publique que celui de haplanserver
+(pour que tous les fichiers "portés tels quels" compilent sans modification) — l'implémentation
+interne utilise Socket.io (via le `SocketService` du core) au lieu du WebSocket brut d'origine.
+Singleton accessible via `getDataService()`.
+
+Caches internes : états par entité, plans, images préchargées, plan courant. Écoute
+`haplan:floorplans:list` (reconstruit la map, sélectionne le premier plan si aucun courant,
+précharge les images), `haplan:entities:state:bulk`, `haplan:entity:state`, `haplan:error`
+(**console uniquement, jamais remonté à l'UI** — voir §15), `haplan:taxonomy:tree`.
+
+Méthodes notables : `sendCommand()` (fire-and-forget, aucun accusé de réception attendu du
+serveur), `uploadFloorplan()` (upload REST, §5), `deleteFloorplan()`,
+`updatePositionsForFloorplan()` (toujours la liste complète, §4.2), `getTaxonomyDisplayName()`
+(voir §11). `getEntity()`/`getAreaNameOfEntity()` restent des **stubs partiels** (voir §15).
+
+### 8.4 `FloorPlanContainer` — orchestrateur par plan
+
+Un `PositionManager` (client, §8.5), un `FloorPlan` (rendu image + surface de glisser-déposer,
+§8.6) et un `ObjectManager` (registre des objets, création/mise à jour) par instance de plan
+affiché.
+
+`enableEditMode()`/`disableEditMode()` : la sortie du mode édition force une sauvegarde immédiate
+des positions en attente (contourne le debounce, voir §8.5) avant de désactiver le glisser-déposer.
+
+### 8.5 `PositionManager` (client) — debounce local
+
+Stocke les positions par plan en mémoire, avec un **debounce de 5 secondes** avant sauvegarde
+serveur (`updatePosition`/`scheduleSave`) — `forceSave()` court-circuite ce délai (utilisé en
+sortie de mode édition). Aucun équivalent serveur — la persistance réelle est entièrement gérée
+par `HaplanService` (§4.2), qui reçoit systématiquement la liste complète.
+
+### 8.6 `FloorPlan` — surface image et glisser-déposer
+
+- Le plan est **toujours entièrement contenu** dans son conteneur (mise à l'échelle
+  `min(widthRatio, heightRatio)`) — **pas de zoom ni de pan**.
+- Positions normalisées 0-1, appliquées en `left/top` pourcentage + `translate(-50%,-50%)` par
+  rapport au conteneur de glisser-déposer — c'est ce qui les rend indépendantes du
+  redimensionnement.
+- **Icône de corbeille** : positionnée par défaut en haut à droite (`{x:0.95, y:0.05}`), également
+  déplaçable en mode édition — sa position est persistée via le **même mécanisme que les entités**,
+  sous un pseudo-`entity_id` `'__trash_icon__'` (voir limitation §15).
+- Bordure du conteneur de glisser-déposer : `1px solid #CCCCCC` normalement,
+  `3px solid #4CAF50` (+ contour vert pointillé) en mode édition.
+- Redimensionnement sur `resize` de la fenêtre (debounce 200ms) et sur appel explicite
+  (`recalculateDimensions()`, déclenché par le menu escamotable, §12).
+
+### 8.7 Glisser-déposer (`DragAndDropConstrained`)
+
+Deux modes de contrainte : `'full'` (l'élément entier reste dans le conteneur) et `'center'`
+(seul le centre doit rester dans le conteneur — utilisé par toutes les entités et la corbeille,
+cohérent avec le `translate(-50%,-50%)`). **Événements souris uniquement — pas d'événements
+tactiles**, malgré la présentation de l'application comme "tactile" (voir limitation §15).
+
+### 8.8 `EntitySelector` — sélecteur en cascade
+
+Trois listes déroulantes en cascade (Pièce → Appareil → Entité, terminologie héritée du portage),
+filtrant les entités déjà placées sur le plan courant et les entités `diagnostic.`/`config.`
+(entity_category techniques).
+
+---
+
+## 9. Modèle d'Objets HA (icônes du plan)
+
+### 9.1 Hiérarchie
+
+```
+HAObject (abstrait)
+└── BaseEntity (abstrait — rendu visuel, interaction)
+    ├── EnhancedSwitchObject
+    │   ├── EnhancedLightObject → MinimalLightObject
+    │   ├── EnhancedCoverObject → EnhancedBlindObject
+    │   ├── EnhancedVMCObject
+    │   ├── EnhancedWaterHeaterObject
+    │   └── EnhancedRadiatorObject
+    ├── EnhancedThermostatObject
+    ├── EnhancedTemperatureSensor
+    ├── EnhancedHumiditySensor
+    └── EnhancedGenericSensor
+```
+
+`HAObject` : glisser-déposer (délai d'attente 2s pour trouver le conteneur DOM, jusqu'à 10
+tentatives via `requestAnimationFrame` pour trouver le nœud DOM lui-même), détection de dépose sur
+la corbeille, envoi de commande (silencieusement abandonnée si non connecté — voir §15).
+
+`BaseEntity` : style visuel (`icon`/`card`/`gauge`/`slider`/`minimal`), palette de couleurs par
+type, gestion du clic — **en mode édition, tout clic est ignoré** (pas de fenêtre contextuelle) ;
+**les capteurs (`sensor.*`) n'ouvrent jamais de fenêtre**, quel que soit le mode.
+
+### 9.2 Détermination du type d'objet (`UnifiedObjectFactory`)
+
+Résolution par préfixe de domaine (`light.`→lumière, `switch.`→interrupteur, `sensor.`→capteur
+température/humidité/générique selon des mots-clés dans l'id, `cover.`→volet/store,
+`climate.`→thermostat ; tout le reste → lumière par défaut). Pour les domaines `light` et `switch`,
+un second niveau de détection (`SwitchTypeDetector`) peut **reclasser** l'objet en VMC/chauffe-eau/
+radiateur selon des mots-clés dans l'`entity_id` ou les attributs — voir limitation §15
+(reclassement erroné possible d'une lumière).
+
+### 9.3 Rendu et actions par type
+
+| Type | Icône | Actions envoyées |
+|---|---|---|
+| Lumière (`EnhancedLightObject`) | ampoule, dorée quand allumée | `light.turn_on`/`turn_off` (le variateur de la fenêtre contextuelle ne fonctionne pas réellement, voir §15) |
+| Interrupteur (`EnhancedSwitchObject`/`MinimalLightObject`) | bascule ON/OFF | `switch.turn_on`/`turn_off` |
+| Volet/Store (`EnhancedCoverObject`/`EnhancedBlindObject`) | fenêtre | `cover.open_cover`/`close_cover`/`stop_cover` |
+| VMC/Chauffe-eau/Radiateur | icône dédiée par type | `switch.*` |
+| Thermostat (`EnhancedThermostatObject`) | thermomètre coloré selon la consigne | `climate.set_temperature`/`set_hvac_mode` |
+| Capteurs (température/humidité/générique) | valeur affichée seule | aucune (lecture seule, pas de fenêtre) |
+
+---
+
+## 10. Fenêtres Contextuelles (popups de contrôle)
+
+Gestionnaire singleton `ContextWindowManager` : positionnement à côté de l'icône cliquée
+(bascule à gauche/au-dessus si débordement), overlay semi-transparent, fermeture par clic
+extérieur ou touche Échap.
+
+5 fenêtres concrètes :
+
+| Fenêtre | Utilisée pour | Contenu |
+|---|---|---|
+| `LightWindow` | Lumières | Boutons Éteindre/Allumer + curseur de luminosité (non fonctionnel, §15) |
+| `SwitchWindow` | Interrupteur générique | Bouton bascule unique, fermeture automatique 500ms après action |
+| `SwitchContextWindow` | VMC/chauffe-eau/radiateur | Statut + boutons Éteindre/Allumer |
+| `ThermostatWindow` | Thermostats | Température actuelle, consigne ±1°C, champ numérique, rafraîchie en direct si ouverte |
+| `GenericWindow` | Volets/stores (les capteurs n'y accèdent jamais) | Liste des valeurs affichées — souvent vide en pratique, voir §15 |
+
+Le titre de **toutes** les fenêtres provient du même mécanisme : voir §11.
+
+---
+
+## 11. Nom d'Entité Dérivé de la Taxonomie
+
+`DataService.getTaxonomyDisplayName(entity_id)` — lit `attributs_taxonomie` depuis le cache d'état
+côté client (déjà présent dans le payload d'état transmis par le serveur) :
+```
+quoi + lieu_precis + lieu_principal (déduplication : lieu_principal omis si identique à lieu_precis)
+```
+Chaque partie capitalisée, jointe par un espace. **Repli** sur le `friendly_name` HA (ou
+l'`entity_id`) si aucune taxonomie n'est publiée pour cette entité. Fonctionne uniquement pour les
+entités déjà présentes sur un plan (dépend du cache d'état côté client, pas de l'arbre de
+taxonomie serveur du §6, qui est un mécanisme distinct).
+
+**Deux consommateurs :**
+1. **Titre des 5 fenêtres contextuelles** (`getFormattedWindowTitle`, §10).
+2. **Bandeau flottant de focus d'entité** — émis au **survol** ET au **clic** (pas seulement au
+   clic), via un événement DOM `ha-object-focus`. C'est le **seul retour visuel disponible en mode
+   édition**, puisque le clic n'y ouvre volontairement aucune fenêtre. Affiché en bas de l'écran,
+   disparaît après 3 secondes (réinitialisé à chaque nouvel événement).
+
+---
+
+## 12. Menu Escamotable et Contrôles Flottants
+
+- `.haplan-header` : `display: none` par défaut, `display: flex` (classe `.open`) quand ouvert —
+  **repousse le plan vers le bas** en s'ouvrant (flux normal, pas un overlay), puisqu'il fait
+  partie de la colonne flexible verticale de `.haplan-app`.
+- `.haplan-floating-controls` : **toujours visibles**, superposés au plan (position absolue,
+  au-dessus du header ouvert ou fermé) — flèche de retour (`← `, lien simple vers `/`) et bouton
+  hamburger (☰ / ✕ selon l'état).
+- **Recalcul de dimensions obligatoire à l'ouverture/fermeture** : le changement de hauteur de
+  `.haplan-body` doit déclencher un nouveau calcul de l'échelle et du repositionnement de toutes
+  les icônes (`recalculateDimensions()` → `FloorPlan.forceResize()`), sans quoi le plan resterait
+  à l'ancienne échelle avec des icônes mal positionnées.
+
+---
+
+## 13. Socket.io
+
+**Server → Client** (persistants : `haplan:status`, `haplan:floorplans:list`,
+`haplan:taxonomy:tree` — **`haplan:entities:state:bulk` est délibérément non persistant**, un
+événement persistant n'a qu'une seule valeur rejouée par nom, incompatible avec un état par
+entité) :
+```typescript
+'haplan:status'                  // HaplanStatus
+'haplan:floorplans:list'         // { floorplans: Record<id, {filename, positions[]}> }
+'haplan:taxonomy:tree'           // { areas: EntityPickerAreaNode[] }
+'haplan:entities:state:bulk'     // { states: [{entity_id, state, attributes}] }
+'haplan:entity:state'            // { entity_id, state, attributes }
+'haplan:error'                   // AppError
+```
+
+**Client → Server :**
+```typescript
+'haplan:status:get'
+'haplan:floorplans:list:get'
+'haplan:taxonomy:tree:get'
+'haplan:entity:command'                    // { entity_id, domain, service, serviceData? }
+'haplan:floorplan:positions:update'        // { floorplanId, positions: [...] } — liste complète, voir §4.2
+'haplan:floorplan:delete'                  // { floorplanId }
+```
+
+> Événement interne, jamais exposé côté client : `haplan:internal:floorplan:create` (déclenché
+> uniquement par la route REST d'upload, §5).
+
+---
+
+## 14. Configuration
+
+### 14.1 `data/haplan/config.yaml` — champs réels
+
+Seulement **deux champs** (`config-schema.ts`) :
+
+| Champ | Type | Défaut |
+|---|---|---|
+| `enabled` | boolean | `true` |
+| `floorplansConfigFile` | string | `config-haplan-floorplans-v1.0.yaml` |
+
+> ⚠️ Aucun fichier `data/haplan/config.yaml` n'existe par défaut — HAPLAN tourne entièrement sur
+> ses valeurs Zod par défaut tant qu'aucune sauvegarde n'a eu lieu (mais rappel : le formulaire
+> générique n'expose de toute façon aucun champ, voir §2).
+
+---
+
+## 15. Limites, Bugs Connus et Code Mort
+
+### 15.1 Stubs et documentation périmée
+
+| Élément | État réel |
+|---|---|
+| `DataService.getEntity()` | Ne retourne jamais que `{name}` — `area_name`/`device_name` toujours absents malgré le type déclaré |
+| `DataService.getAreaNameOfEntity()` | **Toujours `''`**, code mort (plus aucun appelant depuis l'introduction du §11) |
+| Commentaires "upload/suppression = stubs, Phase 3 différée" | **Faux** — les deux sont pleinement implémentés (§5, §4.4) |
+| `README.md`/`ENTITY_LIBRARY_DOCUMENTATION.md` (dans `models/objects/`) | Documentation **d'origine de haplanserver**, jamais mise à jour — décrit un rendu "Card"/"Gauge" qui ne correspond plus au rendu icône/valeur actuel |
+
+### 15.2 Code mort
+
+`FloorplanSelector.ts` (grille de vignettes, aucun importeur), `EnhancedObjectFactory.ts` (ancienne
+fabrique, supplantée par `UnifiedObjectFactory`), `FloorPlan.calculateScale()`,
+`FloorPlanContainer.updatePreferences()` (opère sur un canvas jamais assigné),
+`FloorPlanContainer.changeFloorplan()`, de larges portions de `styles.css` (ancien système de
+menu, dialogue de renommage de plan, classes d'objets historiques jamais émises par le code
+actuel).
+
+### 15.3 Bugs fonctionnels identifiés en lisant le code
+
+| # | Bug | Conséquence |
+|---|---|---|
+| 1 | Curseur de luminosité de `LightWindow` inopérant | `EnhancedLightObject` ne stocke jamais la valeur affichée (toujours lue à 0) et l'action `set_brightness` ne fait qu'une mutation locale — **aucune commande `light.turn_on {brightness}` n'est jamais envoyée à HA** |
+| 2 | Libellés de statut des interrupteurs génériques et SwitchContextWindow toujours faux | Aucune classe d'objet n'alimente jamais `displayValue('status')` — bouton en permanence "Allumer", statut en permanence "OFF" |
+| 3 | Sélecteurs CSS de statut désaccordés du DOM réellement rendu | `EnhancedSwitchObject`/`EnhancedRadiatorObject` : la div de statut est créée sans la classe que `updateDisplay()` recherche ensuite — mise à jour visuelle sans effet |
+| 4 | `EnhancedBlindObject.getIconForState()` lit le mauvais indicateur | Utilise `isOn` (hérité de la branche interrupteur) au lieu de `isOpen` (mis à jour par la branche volet) |
+| 5 | Une lumière peut être reclassée en VMC/chauffe-eau/radiateur | `SwitchTypeDetector` s'exécute aussi pour le domaine `light` — une lumière dont l'`entity_id` contient `fan`/`ventilation`/`chauffage`/`ballon`... émettra à tort des commandes `switch.*` au lieu de `light.*` |
+| 6 | Écouteurs `change` dupliqués sur le sélecteur de plan | Réattaché à chaque réception de `haplan:floorplans:list` (donc après chaque sauvegarde/création/suppression/reconnexion) sans jamais retirer le précédent — un seul changement utilisateur finit par déclencher plusieurs affichages en cascade |
+| 7 | Suppression par glisser-déposer sur la corbeille laisse l'objet enregistré côté client | Le nœud DOM et la position sont retirés, mais pas l'entrée dans le registre interne du gestionnaire d'objets — l'entité reste comptée comme "déjà placée" par le sélecteur |
+| 8 | `__trash_icon__` fuit dans le modèle de données persisté | La position de la corbeille est enregistrée côté serveur sous un pseudo-`entity_id`, comptée dans `entitiesCount` et dans `trackedEntityIds` — filtrée côté client au chargement, mais pas côté serveur |
+| 9 | Position de la corbeille jamais restaurée | Toujours recréée à sa position par défaut au chargement, bien que persistée (voir #8) — la valeur enregistrée n'est jamais relue |
+| 10 | `haplan:error` invisible pour l'utilisateur | Uniquement journalisé en console navigateur — aucune commande échouée, sauvegarde échouée ou entité inconnue n'est jamais signalée visuellement (seule exception : une `alert()` native sur échec HTTP d'upload) |
+| 11 | Commandes silencieusement abandonnées hors connexion | `sendCommand()` vérifie `isConnected()` et abandonne avec un simple avertissement journalisé si non connecté |
+| 12 | `HaplanStatus` jamais rafraîchi après le démarrage | Compteurs (`floorplansCount`/`entitiesCount`) figés jusqu'au prochain redémarrage ou une demande explicite jamais faite par le tableau de bord ; `haWsConnected` reflète la présence de l'objet `HaWsClient`, pas son état de connexion réel |
+| 13 | Aucun support tactile | Glisser-déposer basé uniquement sur les événements souris — sur un appareil tactile, le déplacement d'icône en mode édition ne fonctionne pas, malgré la présentation de l'application comme "tactile" |
+| 14 | Aucun zoom/pan | Le plan est toujours entièrement contenu dans le conteneur |
+| 15 | Identifiants de plan non assainis comme clé de map | Seul le nom de fichier est assaini — deux identifiants distincts peuvent produire le même nom de fichier assaini et s'écraser silencieusement ; pas de renommage possible |
+| 16 | Aucune protection contre l'édition concurrente | La liste de positions est toujours remplacée en bloc ; deux navigateurs éditant le même plan simultanément s'écrasent l'un l'autre (dernier écrit gagne, fenêtre de 5s de debounce) |
+
+### 15.4 Autres constats
+
+- `stop()` du service ne désabonne rien (écouteur `onStateChanged`, écouteurs EventBus) — même
+  limitation projet-wide que RFXCOM/AREXX/EVOO7 sur la désactivation d'application (voir
+  `TODO.md`).
+- Aucun test automatisé n'existe pour cette application.
+- Journalisation de débogage significative dans les chemins de rendu/glisser-déposer (traces à
+  chaque mouvement de souris, chaque mise à jour d'état), y compris des branches de débogage codées
+  en dur pour une entité spécifique de l'installation de référence.
+- Plusieurs contournements de timing DOM plutôt qu'un vrai cycle de vie (attente active/répétée
+  pour trouver un nœud DOM, doubles `requestAnimationFrame`, `setTimeout` de re-vérification de
+  visibilité) — fonctionnels mais fragiles en cas de changement de structure du DOM.
+
+---
+
+## 16. Arborescence des Programmes
+
+```
+applications/haplan/
+├── package.json, tsconfig.json
+└── src/
+    ├── domain/
+    │   ├── HaplanService.ts
+    │   ├── config-schema.ts, floorplans-config-schema.ts, types.ts, socket-events.ts, index.ts
+    │   ├── taxonomy-tree.ts
+    │   └── yaml/ConfigFileManager.ts
+    └── presentation/
+        ├── tsconfig.ui.json
+        └── haplan/
+            ├── dashboard.html, dashboard-app.ts, styles.css
+            ├── services/DataService.ts
+            ├── components/
+            │   ├── FloorPlanContainer.ts, EntitySelector.ts
+            │   └── FloorplanSelector.ts        # code mort, voir §15.2
+            ├── services/ObjectManager.ts
+            ├── models/
+            │   ├── FloorPlan.ts, PositionManager.ts
+            │   └── objects/
+            │       ├── HAObject.ts, BaseEntity.ts
+            │       ├── EnhancedSwitchObject.ts, EnhancedLightObject.ts, MinimalLightObject.ts
+            │       ├── EnhancedCoverObject.ts, EnhancedBlindObject.ts
+            │       ├── EnhancedVMCObject.ts, EnhancedWaterHeaterObject.ts, EnhancedRadiatorObject.ts
+            │       ├── EnhancedThermostatObject.ts
+            │       ├── EnhancedTemperatureSensor.ts, EnhancedHumiditySensor.ts, EnhancedGenericSensor.ts
+            │       ├── UnifiedObjectFactory.ts, EnhancedObjectFactory.ts (code mort), utils/SwitchTypeDetector.ts
+            │       └── windows/
+            │           ├── ContextWindow.ts, ContextWindowManager.ts
+            │           └── LightWindow.ts, SwitchWindow.ts, SwitchContextWindow.ts, ThermostatWindow.ts, GenericWindow.ts
+            └── ui/draganddropconstrained.ts
+```
+
+Données runtime : `data/haplan/config-haplan-floorplans-v1.0.yaml`, `data/haplan/images/`,
+`data/haplan/client-floorplans.json` (import legacy, format haplanserver d'origine).
+
+---
+
+## 17. Annexes
+
+### 17.1 Références
+- [Spécification de Nommage **OBLIGATOIRE**](spec-nommage-v1.0.md) ⭐
+- [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.19.md) ⭐ (§5.7 exceptions REST, §6.2 routage `Sidebar`)
+- Projet d'origine : [haplanserver](https://github.com/zdid/haplanserver)
+
+### 17.2 Glossaire
+| Terme | Définition |
+|-------|------------|
+| Plan (floorplan) | Image uploadée servant de fond, avec ses positions d'entités associées |
+| Position | Coordonnées normalisées 0-1 d'une entité sur un plan donné |
+| Mode édition | État permettant de glisser-déposer les icônes ; désactive l'ouverture des fenêtres contextuelles au clic |
+| Entité suivie (`trackedEntityIds`) | `entity_id` référencé par au moins une position sur au moins un plan — seules ces entités peuvent recevoir une commande |
+| `attributs_taxonomie` | Attribut HA publié par les intégrations MQTT du projet, source à la fois de l'arbre de sélection (§6) et du nom d'entité affiché (§11) |
+
+### 17.3 Historique
+| Version | Date | Auteur | Changements |
+|---------|------|--------|------------|
+| 1.0 | 2026-08-03 | Claude | Première spécification formelle, écrite a posteriori (application opérationnelle depuis fin juillet 2026 sans documentation dédiée). Couvre l'architecture, le backend (`HaplanService`), la persistance des plans/positions, l'upload (exception REST), l'arbre de taxonomie, l'accès externe/page dédiée, le frontend (bootstrap, `FloorPlan`, glisser-déposer), le modèle d'objets HA, les fenêtres contextuelles, le nom d'entité dérivé de la taxonomie, le menu escamotable, Socket.io, la configuration, et une liste consolidée de bugs fonctionnels et de code mort identifiés en lisant le code réel. |
