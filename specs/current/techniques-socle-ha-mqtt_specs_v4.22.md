@@ -1,8 +1,36 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.21  
+**Version :** 4.22  
 **Date :** 3 Août 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.22** : **Deuxième réécriture de la §11 "Docker"**, quelques heures après la première (v4.21)
+> — la toute première conception (code applicatif monté depuis l'hôte) obligeait à `git clone` le
+> dépôt sur chaque machine cible avant de pouvoir démarrer le conteneur, à l'encontre même de
+> l'intérêt de publier une image sur Docker Hub (question directe de l'utilisateur : *"pourquoi les
+> applications seraient déplacer en externe du docker pourquoi pas en interne ?"*). Nouvelle
+> conception, **autosuffisante** (`docker pull` + `docker compose up`, aucun clone git) :
+> - Le code applicatif (core + 8 apps métier) est désormais **construit pendant le build de
+>   l'image** (`docker/build-apps.sh` appelé depuis le `Dockerfile`) — plus de service `build`
+>   séparé, plus de montage du code depuis l'hôte.
+> - **Piège réel découvert en vérifiant ce nouveau design**, qui a nécessité un second correctif
+>   dans la même session : `fs.renameSync()` (activation/désactivation d'application) échoue avec
+>   `EXDEV` dès que le code applicatif vit uniquement dans les couches de l'image Docker
+>   (`overlay2` refuse de renommer un répertoire encore uniquement présent dans une couche
+>   inférieure, même en lecture seule — vérifié aussi bien pour deux répertoires venant de deux
+>   instructions `RUN`/`COPY` différentes que pour deux répertoires créés dans la **même**
+>   instruction `RUN`). Vérifié également que **deux bind-mounts hôte séparés** (même disque
+>   physique) échouent pour la même raison — chaque `volumes:` déclaré ouvre son propre `st_dev`
+>   côté noyau, indépendamment du support physique sous-jacent. La seule configuration qui
+>   fonctionne, vérifiée empiriquement à chaque étape : un **volume Docker nommé unique** couvrant
+>   tout `/app`, peuplé automatiquement par Docker avec le contenu de l'image au premier
+>   démarrage — `data/`/`logs/` restent bind-mountés depuis l'hôte **par-dessus** ce volume nommé
+>   (montage plus spécifique sur un sous-chemin, qui masque le contenu du volume à cet endroit —
+>   sans risque, rien dans le code ne déplace de fichier entre `data/`/`applications/`).
+> - Image publiée sur Docker Hub : `zdid2/dimotic-ha:latest`/`:0.1.0`, multi-architecture
+>   (`linux/amd64` + `linux/arm64` — Raspberry Pi 3/4/5 en OS 64 bits), construite via
+>   `docker buildx` avec émulation QEMU pour la jambe `arm64`.
+> Voir aussi `TODO.md` pour le détail complet de cette investigation (deux entrées liées).
 
 > **v4.21** : **Réécriture complète de la §11 "Docker"** — le `Dockerfile`/`compose.yaml` décrits
 > jusqu'ici dataient de l'architecture pré-restructuration (racine `pnpm`/`src/` unique), déjà
@@ -1828,70 +1856,74 @@ Il est le **seul point de contact** entre EventBus et Socket.io.
 **Fichiers de référence** (racine du projet) — ce document en explique le *pourquoi*, les
 fichiers eux-mêmes (abondamment commentés) font foi pour le détail exact ; ne pas dupliquer leur
 contenu ici pour éviter tout nouveau décrochage documentaire :
-- `Dockerfile` — image unique (Node 20 + outils de compilation natifs), sans code applicatif.
-- `compose.yaml` — deux services, `app` (exécution) et `build` (construction, profil dédié).
-- `docker/build-apps.sh` — construit les 9 applications (core + 8 apps métier) dans l'ordre requis.
+- `Dockerfile` — build multi-étapes (Node 20 + outils de compilation natifs → image finale),
+  construit l'application complète pendant `docker build`.
+- `compose.yaml` — un seul service, `app` ; déclare le volume nommé obligatoire (voir §11.2).
+- `docker/build-apps.sh` — construit les 9 applications (core + 8 apps métier) dans l'ordre requis,
+  appelé depuis le `Dockerfile` (plus un service séparé).
 - `.dockerignore` — réduit le contexte envoyé au démon Docker (n'affecte pas le contenu de l'image).
 
-### 11.1 Principe : le code applicatif n'est pas dans l'image
+Image publiée sur Docker Hub : `zdid2/dimotic-ha` (`:latest`, `:0.1.0`), multi-architecture
+(`linux/amd64` + `linux/arm64` — couvre Raspberry Pi 3/4/5 en OS 64 bits).
 
-Contrairement à un Dockerfile classique, l'image ne `COPY` aucun code source ni build —
-`applications/` et `applications_désactivées/` sont **montés depuis l'hôte** (volumes). Deux
-raisons impératives, propres à ce projet :
-
-1. **Activer/désactiver une application déplace son dossier** entre `applications/` et
-   `applications_désactivées/` (`fs.renameSync`, `ApplicationManager.ts`) — un `rename()` POSIX
-   échoue (`EXDEV`) entre deux systèmes de fichiers différents. Si le code était figé dans l'image
-   et seul `applications_désactivées/` monté depuis l'hôte, ce mécanisme casserait silencieusement
-   à la première tentative de bascule depuis l'UI. Les deux répertoires doivent donc rester sur le
-   **même** point de montage.
-2. **Il n'existe pas de build fiable à la racine du projet** (voir en tête de ce document) — chaque
-   application (core comprise) a son propre `package.json`/`tsconfig.json`/`dist`. L'image sert
-   donc uniquement de socle d'exécution Node.js 20 (base Debian `bookworm-slim`, pas Alpine —
-   `serialport`/`rfxcom` embarquent des bindings natifs dont les prebuilds musl ne sont pas garantis
-   sur toutes les architectures, notamment ARM) + `python3`/`make`/`g++` en filet de sécurité si
-   aucun prebuild n'est trouvé pour la plateforme cible.
-
-Ce même socle sert à la fois à **construire** (service `build`, ponctuel — voir §11.2) et à
-**exécuter** (service `app` — voir §11.3).
-
-### 11.2 Construction — service `build`
-
-```bash
-HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm build
-```
-
-N'existe que dans un **profil Docker Compose dédié** (`profiles: ["build"]`) — ne démarre jamais
-via `docker compose up`. Exécute `docker/build-apps.sh`, qui construit `core` en premier
-(**impératif** : chaque application métier référence, dans son propre
-`src/presentation/tsconfig.ui.json`, le fichier de déclarations compilé de core —
-`.../core/dist/presentation/ui/js/ts/services/SocketService.d.ts`, voir §4.2.1 — sans core déjà
-construit, `npm run build:ui` de n'importe quelle application métier échoue), puis les 8
-applications métier dans un ordre indifférent entre elles.
-
-`HOST_UID`/`HOST_GID` (pas `UID`/`GID` — variables en lecture seule du shell `bash`) font tourner
-ce service sous l'utilisateur hôte plutôt que `root`, pour que tout ce qui est écrit sur les
-volumes montés (`node_modules`, `dist`) reste possédé par l'utilisateur plutôt que par `root`.
-`NODE_ENV` y est explicitement forcé à `development` (contrairement au service `app`) : la valeur
-`production` définie dans le `Dockerfile` ferait sauter l'installation des `devDependencies` par
-`npm install`, donc `typescript` (et sa commande `tsc`), utilisés pour la construction elle-même.
-
-**Vérifié en conditions réelles** (03/08/2026) : construction complète des 9 applications dans un
-conteneur sur la machine de développement — a révélé et corrigé deux bugs latents jusqu'ici
-invisibles côté hôte (masqués par un ancien `node_modules` racine, vestige de l'architecture
-pré-restructuration, jamais nettoyé — la résolution de module Node remonte l'arborescence des
-répertoires jusqu'à le trouver, masquant une dépendance manquante) : `arbreouquoi` et `nommage`
-utilisaient `zod` sans le déclarer dans leur propre `package.json` (corrigé) ; deux fichiers
-TypeScript **navigateur** de HAPLAN (`FloorPlan.ts`, `PositionManager.ts`) utilisaient le type
-`NodeJS.Timeout` — jamais censé être résoluble côté navigateur, un contexte sans `@types/node` par
-conception (`tsconfig.ui.json` : `lib: ["ES2020","DOM"]`) — corrigé en
-`ReturnType<typeof setTimeout>`, indépendant de l'environnement d'exécution.
-
-### 11.3 Exécution — service `app`
+### 11.1 Principe : image autosuffisante, code construit pendant le build
 
 ```bash
 docker compose up -d
 ```
+
+suffit — **aucun `git clone` requis sur la machine cible**. Le `Dockerfile` construit
+l'intégralité de l'application (core + 8 apps métier, dans cet ordre — core en premier est
+impératif : chaque application métier référence, dans son propre
+`src/presentation/tsconfig.ui.json`, le fichier de déclarations compilé de core —
+`.../core/dist/presentation/ui/js/ts/services/SocketService.d.ts`, voir §4.2.1 — sans core déjà
+construit, `npm run build:ui` de n'importe quelle application métier échoue) via
+`docker/build-apps.sh`, puis copie le résultat dans l'image finale. Base Debian `bookworm-slim`
+(pas Alpine) : `serialport`/`rfxcom` embarquent des bindings natifs dont les prebuilds musl ne sont
+pas garantis sur toutes les architectures — prebuilds glibc confirmés disponibles pour
+`linux/amd64` et `linux/arm64`. `python3`/`make`/`g++` uniquement dans l'étape de build (filet de
+sécurité si aucun prebuild n'est trouvé), absents de l'image finale.
+
+Exécution via `tsx` (`applications/core/node_modules/.bin/tsx applications/core/src/index.ts`),
+**pas** `node dist/index.js` compilé — voir `TODO.md` *"AppService : le chargement dynamique des
+modules en production suppose un `dist/domain/index.js` à plat, faux pour 7 apps sur 8"* (cause de
+fond non corrigée à ce jour, contournement délibéré et vérifié en conditions réelles).
+
+### 11.2 ⚠️ Le volume nommé n'est pas une option — `EXDEV` sinon
+
+**Constat empirique impératif** (03/08/2026) : `fs.renameSync()` (mécanisme d'activation/
+désactivation d'application, `ApplicationManager.ts`, entre `applications/` et
+`applications_désactivées/`) échoue avec `EXDEV` dans **tous** les cas testés où les deux
+répertoires ne partagent pas exactement le même point de montage :
+- Code baked-in directement dans les couches de l'image (`COPY`/`RUN` au build) — `overlay2`
+  refuse de renommer un répertoire encore uniquement présent dans une couche inférieure, même en
+  lecture seule, **y compris quand les deux répertoires proviennent de la même instruction
+  `RUN`** (donc pas un problème de limite entre couches différentes, un problème de couche
+  inférieure vs couche supérieure inscriptible tout court).
+- Deux bind-mounts hôte **séparés**, même quand les deux répertoires hôte sont sur le même disque
+  physique — chaque entrée `volumes:` ouvre son propre point de montage, donc son propre `st_dev`
+  du point de vue du noyau, indépendamment du support physique réel sous-jacent.
+
+**Seule configuration vérifiée fonctionnelle** : un **volume Docker nommé unique** couvrant tout
+`/app` (`app-code:/app` dans `compose.yaml`). Docker le peuple automatiquement avec le contenu de
+l'image au **premier** démarrage (comportement standard : un volume nommé vide, monté sur un
+chemin qui a du contenu côté image, est initialisé avec ce contenu) — ce qui préserve le principe
+du §11.1 (aucun clone git nécessaire) tout en donnant au renommage un vrai système de fichiers
+unique pour fonctionner normalement.
+
+`data/`/`logs/` restent bind-montés depuis l'hôte **par-dessus** ce volume nommé (montage plus
+spécifique sur un sous-chemin de `/app`, qui masque le contenu du volume nommé à cet endroit
+précis — comportement Docker standard pour des montages imbriqués) : sans risque vis-à-vis du
+point ci-dessus, puisque rien dans le code ne déplace jamais de fichier entre `data/`/`logs/` et
+`applications/` — et ça garde ces fichiers directement éditables depuis l'hôte, sans `docker exec`.
+
+**⚠️ Conséquence** : une bascule d'application faite depuis l'UI ne survit qu'aux redémarrages du
+**même** conteneur (`docker restart`/`compose restart`, qui conservent le volume) — une
+suppression du volume, ou un déploiement d'une nouvelle version d'image sur un volume neuf,
+repart de l'état livré par cette image. Jugé correct : une nouvelle version doit primer sur un état
+antérieur potentiellement incohérent avec elle, plutôt que l'inverse.
+
+### 11.3 Exécution — service `app`
 
 Points clés du `compose.yaml` :
 
@@ -1912,14 +1944,15 @@ Points clés du `compose.yaml` :
   (`devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]`) réintroduirait exactement la fragilité que ce
   mécanisme a été conçu pour éliminer — alternative documentée en commentaire dans `compose.yaml`
   pour qui préfère un mappage figé (et accepte de le réajuster manuellement si le port change).
-- **`user: "${HOST_UID:-1000}:${HOST_GID:-1000}"` + `group_add: [dialout]`** — même rationale que
-  le service `build` (fichiers écrits sur `data/`/`logs/` restent possédés par l'utilisateur hôte),
-  `dialout` nécessaire sur un hôte où `/dev/ttyUSBx` n'est pas world-writable (mode `660`
-  propriétaire `root:dialout`, cas le plus courant — sans effet si déjà `666`, comme observé sur la
-  machine de développement).
-- **Volumes** : `tsconfig.json` (racine partagée, core l'étend pour son propre build — voir
-  §4.2.1), `applications/` + `applications_désactivées/` (voir §11.1), `data/` + `logs/`
-  (persistance, un sous-répertoire par application — voir §7), `/dev` (voir ci-dessus).
+- **Utilisateur `node` intégré à l'image officielle (uid/gid 1000)**, pas `root` — coïncide avec le
+  premier utilisateur par défaut de Raspberry Pi OS et de la plupart des distributions Linux
+  mono-utilisateur, donc `data/`/`logs/` restent possédés par l'utilisateur attendu côté hôte sans
+  configuration supplémentaire dans le cas courant (ajustable via `user:` en commentaire dans
+  `compose.yaml` si l'hôte utilise un autre uid). `group_add: [dialout]` nécessaire sur un hôte où
+  `/dev/ttyUSBx` n'est pas world-writable (mode `660` propriétaire `root:dialout`, cas le plus
+  courant — sans effet si déjà `666`, comme observé sur la machine de développement).
+- **Volumes** : `app-code` (nommé, voir §11.2), `data/` + `logs/` (bind-mounts hôte, persistance —
+  un sous-répertoire par application, voir §7), `/dev` (voir ci-dessus).
 
 ---
 
@@ -2047,6 +2080,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.22** | 03/08/2026 | Claude | **Deuxième réécriture de la §11 "Docker"**, quelques heures après la v4.21 — la conception "code monté depuis l'hôte" obligeait à `git clone` sur chaque machine cible (question utilisateur : "pourquoi en externe, pourquoi pas en interne ?"). Nouvelle conception autosuffisante : le code est construit pendant `docker build` (plus de service `build` séparé). Piège réel découvert en vérifiant ce design, documenté en détail (§11.2) : `fs.renameSync()` (activation/désactivation d'application) échoue avec `EXDEV` dès que le code applicatif vit uniquement dans les couches de l'image (`overlay2`) OU sur deux bind-mounts hôte séparés (même disque physique) — seul un volume Docker nommé unique couvrant tout `/app`, peuplé automatiquement au premier démarrage, fonctionne. Image republiée sur Docker Hub avec ce correctif. Ancienne version v4.21 archivée. |
 | **4.21** | 03/08/2026 | Claude | **Réécriture complète de la §11 "Docker"** (demande utilisateur) — l'ancien contenu décrivait l'architecture pré-restructuration (pnpm, racine unique), déjà obsolète. Nouveau design construit et testé en conditions réelles (build complet des 9 applications dans un conteneur) : code applicatif monté depuis l'hôte plutôt que copié dans l'image (rename() inter-filesystèmes pour l'activation/désactivation d'application, absence de build racine fiable), `network_mode: host` (MQTT/HA en localhost sur la machine cible), `privileged`+volume `/dev` pour RFXCOM (préserve la robustesse de `PortDetector` face à la renumérotation des ports série), exécution en utilisateur hôte plutôt que root. Deux bugs latents réels découverts et corrigés en isolant le build (`arbreouquoi`/`nommage` : dépendance `zod` manquante ; HAPLAN : `NodeJS.Timeout` invalide côté navigateur). |
 | **4.20** | 03/08/2026 | Claude | **Correction d'un crash total du process (§8.5.2)** : `MqttTransport.publish()`/`subscribe()` levaient une exception synchrone sur déconnexion transitoire, remontant sans aucun `try/catch` jusqu'à une exception non capturée au niveau du process Node entier — n'importe quel module d'intégration publiant pendant une micro-coupure MQTT pouvait faire planter toute l'application. Corrigé par une file d'attente courte (publications : 200 messages max, 30s d'expiration, rejouées à la reconnexion) et un réabonnement automatique à chaque reconnexion (abonnements : mémorisés et réappliqués, corrige au passage une perte silencieuse et définitive des commandes HA→app après coupure, découverte en implémentant ce correctif — chaque reconnexion recrée un client MQTT entièrement nouveau qui ne conserve nativement aucun abonnement). Vérifié : build propre, suite de tests inchangée (mêmes 12 échecs préexistants sans rapport, aucune régression). |
 | **4.19** | 03/08/2026 | Claude | **Rattrapage de dérive code/specs**, aucun changement de comportement — cinq mécanismes déjà en production non documentés : dédoublonnage des écouteurs `SocketBridge` par application (§5.4.2), énumération à jour des routes REST exceptionnelles avec ajout de `HaAutomationBackupService` (§5.7, nouvelle), `ModuleContainer`/`Sidebar` (§6.1/6.2, verrou de chargement, cache d'affichage, navigation réelle pour les pages dédiées), mécanisme réel des attributs de taxonomie en topic MQTT dédié remplaçant deux tentatives antérieures non fonctionnelles + retrait de découverte + distinction `state_value_template`/`value_template` (§8.5.4), repli sur texte brut à la réception d'une commande MQTT non-JSON (§8.5.2). |

@@ -2,17 +2,28 @@
 # Dimotic-HA (dépôt git ws-ha, à renommer plus tard) — socle + applications métier.
 # Image publiée sur Docker Hub : zdid2/dimotic-ha (amd64 + arm64, RPi 3/4/5 en 64 bits).
 #
-# Avant le premier démarrage (et après toute modification du code) :
-#   HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm build
-# Puis :
-#   docker compose up -d
+# Autosuffisant : `docker compose up -d` suffit — le code applicatif est construit
+# pendant le build de l'image (voir Dockerfile), pas monté depuis l'hôte. Aucun
+# clone git ni étape de build séparée n'est nécessaire sur la machine cible.
 #
-# Voir Dockerfile pour le détail de l'architecture (pourquoi le code applicatif
-# est monté depuis l'hôte plutôt que copié dans l'image).
+# ⚠️ Le volume nommé `app-code` (et non un bind-mount hôte, ni le contenu figé de
+# l'image seule) est OBLIGATOIRE pour `/app` en entier — pas une préférence de
+# style. Constaté empiriquement (03/08/2026) : `fs.renameSync()` entre
+# `applications/` et `applications_désactivées/` (mécanisme d'activation/
+# désactivation d'application, `ApplicationManager.ts`) échoue avec `EXDEV` dans
+# TOUS les cas où les deux répertoires ne sont pas sur le MÊME point de montage
+# unique — y compris pour du contenu baked-in dans les couches de l'image
+# (overlay2 refuse de renommer un répertoire encore uniquement présent dans une
+# couche inférieure, même en lecture seule) et y compris pour DEUX bind-mounts
+# hôte séparés pointant vers deux dossiers du même disque physique (chaque
+# `volumes:` déclaré ouvre son propre mount, donc son propre `st_dev`, quel que
+# soit le support physique sous-jacent). Un unique volume nommé monté sur `/app`
+# entier est la seule configuration testée qui fonctionne, ET reste
+# autosuffisante (Docker le peuple automatiquement depuis l'image au premier
+# démarrage, aucun clone git nécessaire).
 # =============================================================================
 
 services:
-  # Service principal — exécute le socle + toutes les applications actives.
   app:
     build: .
     image: dimotic-ha:latest
@@ -27,11 +38,10 @@ services:
     # ports réellement utilisés (8080 core, 49161 AREXX, 11434 ia).
     #
     # ⚠️ Port 11434 (ia, émulation Ollama pour l'intégration HA — voir
-    # fonctionnelles-ia_specs) : un vrai serveur Ollama tourne déjà sur ce port sur
-    # cette machine (`ollama serve`, hors Docker) — en mode réseau hôte, les deux ne
-    # peuvent pas coexister sur le même port. Changer `ollamaHttpPort` dans
-    # data/ia/config.yaml (ex: 11435) avant de démarrer ce service, sans quoi `ia`
-    # échouera à démarrer (port déjà utilisé).
+    # fonctionnelles-ia_specs) : si un vrai serveur Ollama tourne déjà sur cette
+    # machine, les deux ne peuvent pas coexister sur le même port en mode réseau
+    # hôte. Changer `ollamaHttpPort` dans data/ia/config.yaml (ex: 11435) le cas
+    # échéant, sans quoi `ia` échouera à démarrer (port déjà utilisé).
     network_mode: host
 
     # Nécessaire pour que RFXCOM accède dynamiquement à /dev/ttyUSBx quel que soit
@@ -45,13 +55,22 @@ services:
     # — au prix de devoir éditer ce fichier à chaque changement de numérotation.
     privileged: true
 
-    # Exécuté en tant qu'utilisateur hôte (pas root) : tout ce que le service écrit
-    # sur les volumes montés (data/, logs/, node_modules/dist si rebuild à chaud)
-    # reste possédé par l'utilisateur hôte plutôt que par root — évite les soucis de
-    # permissions pour la suite du développement local hors conteneur. `dialout`
-    # nécessaire pour l'accès au port série sur un hôte où /dev/ttyUSBx n'est pas
-    # world-writable (mode 660 propriétaire root:dialout, cas le plus courant).
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    # L'image tourne avec l'utilisateur intégré `node` (uid/gid 1000, voir
+    # Dockerfile) — coïncide avec le premier utilisateur par défaut de Raspberry Pi
+    # OS et de la plupart des distributions Linux mono-utilisateur, donc les
+    # fichiers écrits sur data/ et logs/ (volumes hôte) restent possédés par
+    # l'utilisateur attendu sans configuration supplémentaire dans le cas courant.
+    # Si l'hôte utilise un uid/gid différent pour son utilisateur principal,
+    # décommenter et ajuster la ligne suivante (nécessite aussi d'adapter le
+    # `chown` du Dockerfile pour que le code applicatif baked-in reste modifiable
+    # par ce même utilisateur — l'activation/désactivation d'application, qui
+    # déplace des dossiers, écrirait sinon dans un répertoire appartenant à un
+    # autre uid) :
+    #   user: "1000:1000"
+    #
+    # `dialout` nécessaire pour l'accès au port série sur un hôte où /dev/ttyUSBx
+    # n'est pas world-writable (mode 660 propriétaire root:dialout, cas le plus
+    # courant).
     group_add:
       - dialout
 
@@ -59,38 +78,21 @@ services:
       - TZ=Europe/Paris
 
     volumes:
-      # Racine partagée : core étend ../../tsconfig.json pour son propre build.
-      - ./tsconfig.json:/app/tsconfig.json:ro
-      # Code applicatif monté depuis l'hôte, PAS copié dans l'image — voir Dockerfile
-      # pour les deux raisons (activation/désactivation par renameSync — doit rester
-      # sur le même système de fichiers que applications_désactivées/ ci-dessous —,
-      # et absence de build fiable à la racine du projet).
-      - ./applications:/app/applications
-      - ./applications_désactivées:/app/applications_désactivées
+      # Volume nommé unique pour tout `/app` — obligatoire, voir le commentaire
+      # d'en-tête de ce fichier. Peuplé automatiquement depuis l'image au premier
+      # démarrage (code applicatif, `applications_désactivées/` vide, `data/`/
+      # `logs/` vides — ces deux derniers immédiatement masqués par les
+      # bind-mounts hôte ci-dessous, plus spécifiques).
+      - app-code:/app
       # Données/config persistantes (un sous-répertoire par application, voir
-      # techniques-socle-ha-mqtt_specs §7) et logs.
+      # techniques-socle-ha-mqtt_specs §7) et logs — bind-mounts hôte pour rester
+      # directement consultables/éditables sans passer par `docker exec`. Sans
+      # risque vis-à-vis du point ci-dessus : rien dans le code ne déplace de
+      # fichier entre `data/`/`logs/` et `applications/`.
       - ./data:/app/data
       - ./logs:/app/logs
       # RFXCOM — voir le commentaire `privileged` ci-dessus.
       - /dev:/dev
 
-  # Construit toutes les applications (core + apps métier), dans l'ordre requis —
-  # voir docker/build-apps.sh. Ne démarre jamais via `docker compose up` (profil
-  # dédié, jamais actif par défaut) :
-  #   HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose run --rm build
-  # À relancer après toute modification du code, avant de (re)démarrer `app`.
-  build:
-    build: .
-    image: dimotic-ha:latest
-    profiles: ["build"]
-    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
-    # `NODE_ENV=production` (défini dans le Dockerfile, pertinent pour l'exécution) ferait
-    # sauter l'installation des devDependencies par `npm install` — `typescript` (donc
-    # `tsc`) ne serait alors jamais installé. Neutralisé ici, uniquement pour ce service.
-    environment:
-      - NODE_ENV=development
-    volumes:
-      - ./tsconfig.json:/app/tsconfig.json:ro
-      - ./applications:/app/applications
-      - ./docker:/app/docker:ro
-    entrypoint: ["/app/docker/build-apps.sh"]
+volumes:
+  app-code:
