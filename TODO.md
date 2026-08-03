@@ -369,18 +369,13 @@
 - **Statut** : Inventaire reconstitué et sauvegardé — pas encore croisé avec HA, pas encore réinjecté dans la config RFXCOM
 - **Priorité** : Moyenne (pas de RFXCOM fonctionnel tant que non terminé, mais pas bloquant pour le reste)
 
-### 🟡 EVOO7 : entité `climate` composite (plusieurs données combinées) — non commencé
-- **Demande utilisateur (2026-07-26)**, en marge de l'ajout de `binary_sensor` (type HA forcé par donnée, voir juste au-dessus/ci-après) : élargir aussi au type `climate`.
-- **Différence fondamentale avec `binary_sensor`** : `binary_sensor` reste un simple override sur UNE donnée déjà existante (une donnée = une entité). `climate` en HA a besoin de plusieurs topics liés (température courante, consigne cible, mode/action) qui correspondent en réalité à **plusieurs données EVOO7 distinctes** — impossible de le traiter comme un simple champ "type forcé" sur une donnée isolée. Nécessite une nouvelle notion d'entité composite regroupant explicitement plusieurs `evoo7_donnees` sous une seule entité HA `climate`.
-- **Données pressenties par l'utilisateur pour la composition** : `temp_amb` (température courante), `consigne_normal` (consigne cible), `etat_fonctionnement` (mode/état), éventuellement `temp_ext` (température extérieure, probablement en attribut plutôt qu'un champ climate standard).
-- **Points à trancher avant de coder** (non discutés en détail avec l'utilisateur) :
-  - Où et comment déclarer ce regroupement (nouvelle section de config à part de `evoo7_donnees`, ou champs de référence croisée sur les données elles-mêmes) ?
-  - `consigne_normal` a un `topicCommand`/format de commande dédié pour écrire la consigne — le mécanisme de commande `climate` (`temperature_command_topic`) doit réutiliser ce chemin existant plutôt qu'en créer un nouveau.
-  - `etat_fonctionnement` pilote-t-il `mode` (hvac_mode, ex: heat/off) ou `action` (hvac_action, ex: heating/idle) côté HA — ce sont deux concepts différents dans le schéma climate MQTT de HA, à clarifier selon les valeurs réelles observées sur EVOO7 (voir la note dans `classification.ts` sur la fiabilité douteuse des codes EVOO7 documentés vs valeurs réelles sur le fil).
-  - Faut-il aussi intégrer `consigne_eco` (mode éco) dans le même climate (ex: comme un des `modes` disponibles), ou le laisser en entité séparée ?
-- **À faire** : concevoir précisément le mapping avec l'utilisateur (voir points ci-dessus) avant d'implémenter — pas de code écrit pour ce point.
-- **Statut** : Non commencé — conception à finaliser avec l'utilisateur
-- **Priorité** : Moyenne (amélioration de confort d'usage HA, rien de cassé sans elle)
+### 🟢 EVOO7 : entité `climate` composite (plusieurs données combinées) — Corrigé (entrée stale mise à jour)
+- **Demande utilisateur (2026-07-26)**, en marge de l'ajout de `binary_sensor` (type HA forcé par donnée) : élargir aussi au type `climate`.
+- **Constat (2026-08-03)**, en recherchant l'état réel du code pour le rattrapage des specs EVOO7 : cette entrée était restée "Non commencé" alors que la fonctionnalité est **entièrement implémentée** depuis un moment — mise à jour jamais faite après le travail réel.
+- **Implémenté** : `Evoo7ThermostatConfig` (`{enabled, allowCooling}`) sur `Evoo7DonneesConfig.thermostat` ; 7 données dépendantes (`temp_amb`, `consigne_normal`, `etat_fonctionnement`, `etat_circulateur_pc`, `etat_circulateur_radiateur`, `etat_eco`, `temp_ext`, plus que les 3-5 pressenties à l'origine) ; un seul `command_topic` partagé pour température/mode/preset, discriminé par un champ `field` dans le `command_template` (contrainte du socle : une entité = un seul topic de commande) ; `hvac_action` calculé côté serveur à partir des deux circulateurs ; `temp_ext` publiée en attribut plutôt qu'en champ climate standard, conformément à ce qui était pressenti. UI : carte "Thermostat" dans l'onglet Données, socket `evoo7:thermostat:save`.
+- **Détail complet** : voir `fonctionnelles-evoo7_specs_v1.2.md` §9 (nouvelle section, ajoutée dans le même rattrapage que cette correction TODO).
+- **Statut** : Corrigé (déjà implémenté, non documenté ni mis à jour ici jusqu'au 2026-08-03)
+- **Priorité** : Était Moyenne — résolu
 
 ### 🟡 IA : ambiguïté récurrent/one-shot sur les déclencheurs d'état ("quand X, fais Y")
 - **Constat (2026-08-03)**, en concevant le nouveau trigger `state_change` (planificateur, voir conception en cours "quand la lumière du salon s'allume, éteins la cuisine") : une phrase du type "quand [événement X], [action Y]" ne précise pas si la règle doit se redéclencher à chaque occurrence future de X (recurring, ex: une minuterie) ou ne s'appliquer qu'une seule fois (one-shot, ex: "quand la lumière du salon s'allume ce soir, préviens-moi"). Contrairement aux déclencheurs temporels existants, où le type (`delay` vs `recurrence`) découle naturellement de la formulation ("dans 5 minutes" vs "tous les jours à 8h"), rien dans "quand X, Y" ne permet à Mistral de trancher de façon fiable.

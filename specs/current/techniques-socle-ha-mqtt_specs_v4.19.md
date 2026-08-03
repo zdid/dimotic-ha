@@ -1,8 +1,39 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.18  
-**Date :** 30 Juillet 2026  
+**Version :** 4.19  
+**Date :** 3 Août 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.19** : **Rattrapage de dérive code/specs** (session du 03/08/2026), aucun changement de
+> comportement — cinq mécanismes déjà en production depuis plusieurs jours à semaines n'avaient
+> jamais été documentés ici :
+> - **§5.4.1** : `SocketBridge.registerAppSocketEvents()` désenregistre désormais les écouteurs
+>   précédemment posés pour un `appId` donné avant d'en poser de nouveaux
+>   (`appSocketEventListeners: Map<appId, Array<{eventName, listener}>>`) — corrige un défaut
+>   systémique où un module enregistrant ses événements deux fois (ex: détection éager par
+>   `AppService` **et** son propre `Service.start()`) doublait silencieusement chaque diffusion
+>   serveur→client pour ce module.
+> - **§5.7 (nouvelle)** : énumération à jour des routes REST — les "exceptions volontaires" au
+>   principe tout-Socket.io (§5.1) n'avaient jamais été listées en un seul endroit malgré une
+>   référence croisée déjà présente en §5.6 (upload HAPLAN, jamais détaillé jusqu'ici) ; ajoute la
+>   **troisième exception**, `HaAutomationBackupService` (sauvegarde/rechargement des
+>   automatisations HA, 3 nouvelles routes) — nécessaire car pensée pour être appelée hors d'un
+>   navigateur connecté (cron, scripts, HA lui-même via `rest_command`).
+> - **§8.5.4** : mécanisme réel des attributs de taxonomie — **topic MQTT dédié**
+>   (`json_attributes_topic`, publié uniquement à la (re)découverte), pas les tentatives
+>   antérieures (clé `extra` de la découverte, puis `HaMqttStateMessage.attributes` à chaque état)
+>   déjà documentées comme "Corrigé" dans `TODO.md` mais jamais répercutées ici. Ajoute aussi la
+>   distinction `state_value_template` (composant `light`) vs `value_template` (autres
+>   composants), et le mécanisme de **retrait de découverte** (`unpublishDiscovery`, payload vide
+>   retenu) — présent dans le code depuis fin juillet, absent de ce document jusqu'ici.
+> - **§8.5.2** : `parseIncomingCommand()` retombe sur `{state: rawString}` quand `JSON.parse`
+>   échoue — HA envoie par défaut du texte brut (`"ON"`/`"OFF"`), pas du JSON, pour les schémas
+>   `light`/`switch` par défaut (sans `command_template` configuré côté HA).
+> - **§6** : `ModuleContainer` (verrou `moduleLoading` par module, cache `displayedModule` évitant
+>   de rejouer les scripts d'un module déjà affiché) et `Sidebar` (navigation réelle, pas
+>   SPA-embarquée, pour les apps dont `menu.entry.path` commence par `/applications/`) —
+>   mécanismes déjà en production, jamais documentés dans ce socle bien qu'affectant toutes les
+>   applications dérivées.
 
 > **v4.18** : **`AreaEnsureService` (§8.5.4)** — `device.suggested_area` s'étant révélé non fiable
 > (HA ne l'applique qu'à la toute première création, jamais garanti même sur redécouverte propre,
@@ -562,6 +593,23 @@ this.eventBus.emit('app:socket-events:registered', {
 - ✅ Robustesse aux reconnexions
 - ✅ Simplification du code client
 
+#### 5.4.2 ⭐ Dédoublonnage des écouteurs par application (v4.19)
+
+**Problème corrigé** : `SocketBridge.registerAppSocketEvents()` ajoutait un nouvel écouteur
+EventBus pour chaque événement déclaré par une application à **chaque appel**, sans jamais retirer
+ceux d'un appel précédent pour le même `appId`. Si une application déclenchait cet enregistrement
+plus d'une fois (cas systémique : `AppService.detectModules()` fait un enregistrement précoce/
+éager au démarrage, et le `Service.start()` de l'application elle-même peut en refaire un second),
+chaque événement serveur→client de cette application était diffusé **en double** à chaque
+occurrence — un bug silencieux (pas d'erreur, juste un événement Socket.io reçu deux fois côté
+client), potentiellement la cause de plusieurs symptômes "ça se déclenche deux fois" observés sur
+diverses applications.
+
+**Correctif** : `appSocketEventListeners: Map<appId, Array<{eventName, listener}>>` — avant de
+poser de nouveaux écouteurs pour un `appId`, tous les écouteurs précédemment enregistrés pour ce
+même `appId` sont retirés (`eventBus.off(eventName, listener)`). Un ré-enregistrement légitime
+(config rechargée, reconnexion) ne peut donc plus jamais accumuler de doublons.
+
 ### 5.5 Flux de sauvegarde de la configuration
 
 ```
@@ -769,7 +817,7 @@ piloter HA — seule la réussite de l'échange fait foi de l'authentification.
 fichiers statiques), protège toutes les routes sauf `/health` et `/auth/*`. **Socket.io est
 gardé séparément** (`io.use()` sur le handshake, vérifiant le même cookie de session) — la seule
 protection REST ne suffirait pas, Socket.io étant le canal principal de toutes les applications
-(§5.1), pas seulement les routes REST exceptionnelles (§5.5 upload HAPLAN). Les cookies
+(§5.1), pas seulement les routes REST exceptionnelles (§5.7). Les cookies
 voyagent automatiquement avec la connexion Socket.io (même origine) : aucune modification côté
 client d'aucune application n'est nécessaire, la porte est entièrement transparente une fois la
 session établie.
@@ -784,6 +832,29 @@ sinon, plutôt qu'un mode dégradé silencieux).
 > intégré dans `PresentationServer` (routes `/auth/*` + middleware de garde) et `SocketBridge`
 > (`io.use()`).
 
+### 5.7 ⭐ Exceptions au tout-Socket.io (routes REST) — nouveau v4.19
+
+Le principe "Socket.io est l'unique canal" (§5.1) admet un petit nombre d'exceptions
+**délibérées**, documentées ici en un seul endroit (jusqu'ici dispersées ou absentes) :
+
+| # | Route(s) | Raison de l'exception |
+|---|---|---|
+| 1 | `/health` | Healthcheck Docker — doit répondre sans dépendre d'une connexion Socket.io établie |
+| 2 | `/auth/*` (§5.6) | Portail OAuth2 HA — flux de redirection navigateur classique, incompatible avec Socket.io par nature |
+| 3 | Upload de plan HAPLAN (`POST /api/haplan/floorplans/upload`) | Upload de fichier binaire (image de plan) — `multipart/form-data`, mal adapté à Socket.io |
+| 4 | `POST /api/ha/automations/backup`, `POST /api/ha/automations/reload`, `GET /api/ha/automations/backups` | **Nouveau (03/08/2026)** — `HaAutomationBackupService` (core). Pensées pour être appelées **hors d'un navigateur connecté** (tâche planifiée/cron, script, ou HA lui-même via `rest_command`) : la réponse HTTP doit porter le résultat réel de façon synchrone, sans dépendre d'un client Socket.io déjà ouvert pour recevoir un événement de retour. |
+
+**Détail de l'exception #4** : `HaAutomationBackupService.backup()` énumère les entités
+`automation.*` déjà en mémoire (`HaStructureRegistry`, Mode A), récupère la configuration complète
+de chacune via l'API REST **de HA** (`GET {ha_base_url}/api/config/automation/config/{id}`,
+jeton longue durée déjà utilisé pour le WebSocket — aucun équivalent WebSocket n'existe pour cette
+lecture), écrit un fichier JSON horodaté dans `data/core/automations-backups/` (10 dernières
+conservées). `reload()` appelle simplement le service HA `automation.reload` via
+`HaWsClient.sendCommand` (Mode A, WebSocket — action, contrairement à la lecture ci-dessus). Ces
+routes ne fonctionnent donc que si Mode A (`ha.ws_enable`) est actif ; sinon, `core` ne construit
+pas `HaAutomationBackupService` (même garde que les autres services optionnels de Mode A, ex:
+`AreaEnsureService`).
+
 ---
 
 ## 6. Couche Présentation
@@ -794,7 +865,36 @@ sinon, plutôt qu'un mode dégradé silencieux).
 - TypeScript ES2020+ et Web Components natifs comme base ; Alpine.js autorisé en complément, sous réserve de respecter strictement `alpinejs-implementation_specs_v1.0.md` (cycle de vie, chargement, Shadow DOM)
 - Autres frameworks UI tiers (React, Vue, Angular, etc.) — non retenus
 - Toute la réactivité passe par des Custom Elements et des événements DOM natifs (nativement, ou via les directives Alpine sur ces mêmes Custom Elements)
-- Communication exclusivement via Socket.io (sauf `/health`)
+- Communication exclusivement via Socket.io (sauf les exceptions listées en §5.7)
+
+### 6.1 ⭐ `ModuleContainer` — chargement et cache des dashboards embarqués (nouveau v4.19)
+
+La plupart des dashboards d'application (`audience` par défaut) sont injectés dans un Shadow DOM
+partagé par `ModuleContainer.ts` (`applications/core/src/presentation/ui/ts/components/`), pas
+chargés comme une vraie page — voir §4.3 pour la distinction avec les pages dédiées. Deux
+mécanismes, en production depuis un moment mais jamais documentés ici :
+
+- **`moduleLoading: Partial<Record<moduleId, Promise<void>>>`** — verrou empêchant deux
+  chargements concurrents du même module (ex: double clic, ou événement d'activation redéclenché) :
+  un second appel pendant qu'un chargement est déjà en vol réutilise la même Promise plutôt que de
+  relancer un `fetch()`/`innerHTML` concurrent.
+- **`displayedModule`** — évite de ré-exécuter les scripts d'un module déjà affiché (le HTML est
+  mis en cache après le premier chargement) : afficher à nouveau le module **actuellement montré**
+  ne rejoue pas ses `<script>` (qui redéfiniraient des Custom Elements déjà enregistrés — invalide
+  côté navigateur), seul un changement effectif de module recharge/réexécute.
+
+### 6.2 ⭐ `Sidebar` — routage réel pour les applications à page dédiée (nouveau v4.19)
+
+`Sidebar.ts::renderModules()` distingue désormais deux comportements de clic selon la forme de
+`menu.entry.path` (déclaré par chaque application, voir `guide-nouvelle-application_specs`) :
+
+- **`menu.entry.path` commence par `/applications/...`** (page dédiée réelle, ex: `HAPLAN`,
+  `evoo7`/`config.html`, `rfxcom`/`config.html`) → **navigation réelle**
+  (`window.location.href = path`), quittant la SPA du core. C'était déjà le comportement de
+  `renderAppParamsSubmenu()` pour les sous-menus de paramètres ; `renderModules()` applique
+  désormais la même règle pour l'entrée de menu principale de l'application.
+- **Tout autre chemin** (convention SPA, `presentation/index.html` implicite) → embarquement dans
+  le Shadow DOM via `ModuleContainer` (§6.1), comme avant.
 
 ---
 
@@ -1304,6 +1404,13 @@ class HaMqttIntegrationService {
   correspondant si l'entité essentielle fournie par le module a `commandEnabled: true`. Un module
   métier n'a donc **jamais** besoin d'appeler explicitement `subscribeCommandsFor` pour une entité
   déjà publiée via la découverte normale — l'abonnement est couplé 1:1 à la publication.
+- **⭐ v4.19 — Repli sur texte brut à la réception d'une commande** : `parseIncomingCommand()`
+  tente `JSON.parse(payload)` en premier ; en cas d'échec, retombe sur `{state: rawString}` plutôt
+  que de rejeter le message. **HA n'envoie pas systématiquement du JSON** sur un `command_topic` —
+  les schémas MQTT par défaut de `light`/`switch` envoient la chaîne brute `"ON"`/`"OFF"` tant
+  qu'aucun `command_template` n'est configuré côté découverte. Sans ce repli, toute commande
+  provenant d'un composant resté au schéma par défaut était silencieusement perdue (échec du
+  `JSON.parse`, jamais remontée en erreur faute de schéma attendu clair).
 
 #### 8.5.3 Structure des modules d'intégration
 
@@ -1382,6 +1489,41 @@ Deux familles de topics coexistent, avec des rôles distincts :
   reçu leur area automatiquement (les 10 restants : 9 devices HA natifs sans rapport, 1 device
   EVOO7 partagé bloqué par le même effet "figé à la première création" — sa toute première
   entité découverte n'avait pas de lieu de taxonomie saisi).
+- **⭐ v4.19 — Attributs de taxonomie : topic MQTT dédié, remplace deux approches jamais
+  fonctionnelles.** `attributs_taxonomie` a connu trois conceptions successives, seule la
+  troisième fonctionne réellement (vérifié en conditions réelles sur une instance HA) :
+  1. *(abandonnée)* Clé `extra` du message de découverte (`buildDiscoveryPayload`) — HA valide
+     ce message contre un schéma strict par plateforme et **ignore silencieusement** toute clé non
+     reconnue. Jamais visible dans les attributs réels d'aucune entité.
+  2. *(abandonnée)* Portée par `HaMqttStateMessage.attributes`, republiée à **chaque** changement
+     d'état — fonctionnait, mais republier une taxonomie statique à chaque état est un gaspillage
+     inutile de bande passante MQTT.
+  3. **Actuel** : topic MQTT dédié, publié **uniquement à la (re)découverte**, jamais à chaque
+     état — `getAttributesTopic(component, objectId)` (`ha-mqtt.ts`) →
+     `homeassistant/{component}/{objectId}/attributs`. Référencé dans le message de découverte via
+     les deux clés standard HA `json_attributes_topic` + `json_attributes_template:
+     '{{ value_json | tojson }}'`. `EssentialEntityData.attributsTaxonomie` (fourni par le module
+     métier) déclenche `publishAttributesFor()` (`HaMqttIntegrationService`), qui publie
+     `{"attributs_taxonomie": {...10 champs...}}` sur ce topic, **retain true**. Absent (pas de
+     `json_attributes_topic` du tout) pour les entités sans équivalent HA à ce mécanisme, ex: les
+     scènes RFXCOM (`device_automation`, un déclencheur n'a pas d'attributs au sens HA classique).
+- **⭐ v4.19 — `state_value_template` vs `value_template`.** Le composant `light` (schéma MQTT
+  "basic" implicite en découverte) attend la clé de discovery **`state_value_template`** pour
+  extraire son état depuis le JSON reçu sur `state_topic` — les autres composants
+  (`switch`/`cover`/`sensor`/`binary_sensor`) attendent **`value_template`**. Vérifié contre une
+  instance HA réelle (une entité `light` ignorait silencieusement son état tant que la mauvaise
+  clé était utilisée). Chaque module métier doit choisir la bonne clé selon le composant publié —
+  ce n'est **pas** une clé unifiée comme le laissaient supposer les exemples génériques
+  précédents de ce document.
+- **⭐ v4.19 — Retrait de découverte (`unpublishDiscovery`)** : pour faire disparaître une entité
+  déjà publiée (désélection, suppression), `discovery.ts::unpublishDiscovery()` republie une
+  **chaîne vide** (pas `{}`, une chaîne réellement vide), **retenue**, sur le même topic de
+  découverte (`homeassistant/{component}/{object_id}/config`) — convention MQTT Discovery standard
+  de HA pour faire supprimer une entité. Déclenché par le module métier via l'événement EventBus
+  `integration:{module}:discovery:remove`, câblé dans `IntegrationBridge.subscribeModuleEvents()`
+  symétriquement à `integration:{module}:discovery`. Le module métier doit capturer le `component`/
+  `objectId` de l'entité **avant** toute mutation/suppression de son état interne — cette
+  information peut ne plus être disponible une fois l'entité retirée de son registre interne.
 
 **Exemple de message de découverte (généré par le socle, données essentielles fournies par le module) :**
 ```json
@@ -1423,6 +1565,7 @@ Deux familles de topics coexistent, avec des rôles distincts :
 
 **Modules → HaMqttIntegrationService :**
 - `integration:{module}:discovery` → Découverte d'une entité à publier vers HA (données essentielles uniquement)
+- `integration:{module}:discovery:remove` → ⭐ v4.19 — Retrait d'une découverte déjà publiée (voir §8.5.4)
 - `integration:{module}:state` → Changement d'état à publier vers HA
 - `integration:{module}:passthrough:discovery` → Passthrough découverte, réécriture de préfixe (⭐ v4.9, voir §8.5.6)
 - `integration:{module}:passthrough:publish` → Passthrough complet, aucune transformation (⭐ v4.9, voir §8.5.6)
@@ -1786,6 +1929,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.19** | 03/08/2026 | Claude | **Rattrapage de dérive code/specs**, aucun changement de comportement — cinq mécanismes déjà en production non documentés : dédoublonnage des écouteurs `SocketBridge` par application (§5.4.2), énumération à jour des routes REST exceptionnelles avec ajout de `HaAutomationBackupService` (§5.7, nouvelle), `ModuleContainer`/`Sidebar` (§6.1/6.2, verrou de chargement, cache d'affichage, navigation réelle pour les pages dédiées), mécanisme réel des attributs de taxonomie en topic MQTT dédié remplaçant deux tentatives antérieures non fonctionnelles + retrait de découverte + distinction `state_value_template`/`value_template` (§8.5.4), repli sur texte brut à la réception d'une commande MQTT non-JSON (§8.5.2). |
 | **4.18** | 30/07/2026 | Claude | **`AreaEnsureService` — création active des areas HA (§8.5.4)**, à la demande de l'utilisateur, suite à la découverte que `device.suggested_area` (v4.17) n'est jamais fiable : vérifié en conditions réelles (suppression + redécouverte complète d'une entité, puis redémarrage complet de HA) que HA ne l'applique qu'à la toute première création, jamais de façon garantie. Nouveau `AreaEnsureService` (`applications/core/src/ha/sync/`) : crée l'area via l'API WebSocket de HA (`config/area_registry/create`) avant de publier la découverte, avec dédoublonnage insensible à la casse contre `HaStructureRegistry` (nouveau `getAllAreas()`), nom capitalisé, cache local mis à jour immédiatement après création (évite les doublons entre demandes concurrentes pour le même lieu), et attente de l'événement `ha:ready` (pas seulement l'authentification WS — le chargement du référentiel est un chaînage asynchrone séparé, deux races distinctes constatées et corrigées en conditions réelles). Interception dans `IntegrationBridge.subscribeModuleEvents()`, sur les deux chemins de découverte (normal et passthrough NOMMAGE) — **aucun changement dans RFXCOM/EVOO7/AREXX/NOMMAGE**, qui alimentaient déjà `suggested_area`. Optionnel (Mode A seulement), best-effort (timeout ~8s, jamais bloquant). Vérifié sur une installation HA neuve (registre et broker MQTT réinitialisés) : 86 devices sur 96 assignés automatiquement à la bonne area, dont 24 areas créées sans aucun échec. |
 | **4.17** | 30/07/2026 | Claude | **Ajout de `device.suggested_area` en découverte (§8.5.4)**, à la demande de l'utilisateur ("il faut l'alimenter avec le lieu de taxonomie, pas le lieu précis, dans tous les programmes qui envoient des discovery"). Renomme/remplace un ancien champ `area_id` déclaré dans `HaMqttDevice` (`ha-mqtt.ts`) mais jamais alimenté nulle part et de toute façon inexploitable par HA (pas la bonne clé pour la découverte MQTT — `suggested_area` est la seule reconnue, effet limité à l'assignation automatique de l'entité à sa création). Alimenté dans les 4 applications qui envoient des messages de découverte : RFXCOM (devices bruts, récepteurs light/switch/cover, scènes), EVOO7 (device partagé, recalculé par entité), AREXX (capteurs), NOMMAGE (passthrough, n'altère que si un bloc `device` existe déjà dans le message relayé). Vérifié en conditions réelles sur le broker de test : 94/96 messages de découverte portent `suggested_area` avec la bonne valeur (lieu, pas lieu précis) ; les 2 exceptions correspondent à des données EVOO7 dont la taxonomie n'a simplement pas encore été saisie par l'utilisateur (comportement attendu, `suggested_area` omis plutôt qu'une valeur incorrecte). |
 | **4.16** | 29/07/2026 | Claude | **Correction du format des topics état/commande/LWT (§8.5.4)** : ces topics ne doivent pas commencer par un `/` (un slash initial crée un premier niveau de topic MQTT vide, non-standard) — erreur présente depuis la définition initiale du format (v4.8) et repérée par l'utilisateur en examinant directement les messages retenus sur le broker d'une nouvelle installation HA en cours de test. Corrigé à la source unique (4 fonctions de `ha-mqtt.ts`) ; le topic de découverte (`homeassistant/...`) n'était pas affecté. Anciens topics retenus explicitement effacés du broker de test après coup pour éviter des entités dupliquées côté HA. |
