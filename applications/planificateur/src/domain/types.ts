@@ -55,7 +55,7 @@ export interface MacroDefinition {
 }
 
 export interface Trigger {
-  type: string; // 'delay' | 'time' | 'date' | 'recurrence' | 'recurrence_complex' | 'window' | 'duration'
+  type: string; // 'delay' | 'time' | 'date' | 'recurrence' | 'recurrence_complex' | 'window' | 'duration' | 'state_change'
   seconds?: number;
   seconds_min?: number;
   seconds_max?: number;
@@ -70,6 +70,15 @@ export interface Trigger {
   from?: string;
   to?: string;
   description?: string;
+  // Déclencheur 'state_change' — entity_id (entité précise) ou domain (règle par défaut sur tout
+  // un domaine, ex: "light") : au moins l'un des deux, entity_id prioritaire sur domain quand les
+  // deux pourraient s'appliquer à la même entité (voir StateWatcher). `to_state` nommé
+  // différemment de `to` ci-dessus (déjà pris par le trigger 'window', autre sémantique) pour
+  // éviter toute confusion, bien qu'aucune collision de schéma ne soit possible (les deux sont de
+  // simples chaînes optionnelles).
+  entity_id?: string;
+  domain?: string;
+  to_state?: string;
 }
 
 export interface PlanificationDefinition {
@@ -79,6 +88,15 @@ export interface PlanificationDefinition {
   phrase_originale: string;
   trigger: Trigger;
   action: DomoticNode;
+  // Reprise après coupure (voir SchedulerRuntime/StateWatcher) — jamais renseignés par ia/Mistral,
+  // uniquement gérés par planificateur lui-même.
+  next_fire_at?: string;           // ISO8601 — triggers temporels, un seul minuteur par plan
+  pending?: Record<string, string>; // entity_id → ISO8601 — triggers state_change, un compte à
+                                     // rebours indépendant par entité (une règle par défaut sur
+                                     // tout un domaine en gère plusieurs en parallèle)
+  missed?: boolean;                 // déclenchement manqué au-delà de la fenêtre de rattrapage,
+                                     // effacé au prochain déclenchement réussi (triggers temporels
+                                     // uniquement pour l'instant, voir plan)
 }
 
 export interface GestionNode {
@@ -148,4 +166,8 @@ export interface DeployContext {
   macros: MacroDefinition[];
   entities_snapshot: unknown[];
   timestamp: string;
+  // Renseigné uniquement pour un déclenchement state_change — l'entité réellement à l'origine de
+  // CE déclenchement précis, pour qu'une action sans lieu explicite ("éteins-la") sache quoi
+  // cibler, en particulier pour une règle par défaut sur tout un domaine (voir StateWatcher).
+  triggered_entity_id?: string;
 }

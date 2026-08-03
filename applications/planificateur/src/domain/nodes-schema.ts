@@ -101,7 +101,10 @@ export const triggerSchema = z.object({
   pattern: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
-  description: z.string().optional()
+  description: z.string().optional(),
+  entity_id: z.string().optional(),
+  domain: z.string().optional(),
+  to_state: z.string().optional()
 });
 
 export const planificationDefinitionSchema: z.ZodType<PlanificationDefinition> = z.lazy(() =>
@@ -111,7 +114,10 @@ export const planificationDefinitionSchema: z.ZodType<PlanificationDefinition> =
     active: z.boolean(),
     phrase_originale: z.string().min(1),
     trigger: triggerSchema,
-    action: domoticNodeSchema
+    action: domoticNodeSchema,
+    next_fire_at: z.string().optional(),
+    pending: z.record(z.string()).optional(),
+    missed: z.boolean().optional()
   })
 );
 

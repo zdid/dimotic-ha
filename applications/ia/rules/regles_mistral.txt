@@ -441,6 +441,41 @@ Les structures s'imbriquent librement et sans limite de profondeur.
   "seconds_max": 1200
 }
 
+━━━ 3.9 CHANGEMENT D'ÉTAT D'UNE ENTITÉ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"quand la lumière du salon s'allume, éteins la cuisine"
+"minuterie de 24h par défaut sur toutes les lumières"
+"quand la porte d'entrée s'ouvre, allume le couloir"
+
+// Entité précise :
+{
+  "type": "state_change",
+  "entity_id": "light.salon",
+  "to_state": "on"
+}
+
+// Règle par défaut sur tout un domaine (ex: toutes les lumières) plutôt qu'une entité précise :
+{
+  "type": "state_change",
+  "domain": "light",
+  "to_state": "on"
+}
+
+Priorité : si une entité a à la fois une règle qui la cible précisément (entity_id) ET une règle
+par défaut de domaine qui s'appliquerait aussi à elle, la règle précise l'emporte pour cette
+entité — la règle par défaut ne s'applique qu'aux entités sans règle dédiée.
+
+Action sans lieu explicite ("éteins-la", "coupe-la") pour une règle de domaine visant par exemple
+"toutes les lumières" : cible implicitement l'entité qui vient de déclencher, voir le champ
+"triggered_entity_id" section 4 ci-dessous.
+
+Comme pour les autres déclencheurs, l'action associée peut être une simple action ou une séquence
+"attends puis fais" (section 2.2/2.4) — c'est ce qui donne un comportement de minuterie : "quand
+la lumière du salon s'allume, attends 24h puis éteins-la".
+
+Ce type de déclencheur est traité comme récurrent par défaut (il se redéclenche à chaque
+occurrence future de l'événement) — ne pas demander à l'utilisateur si la règle doit être
+ponctuelle ou répétitive, considérer la répétition comme le comportement attendu.
+
 ───────────────────────────────────────────────────────────────────────────────
 4. RÈGLES DE DÉPLOIEMENT À L'EXÉCUTION
 ───────────────────────────────────────────────────────────────────────────────
@@ -451,6 +486,11 @@ Quand le moteur te notifie qu'un déclencheur est atteint, tu reçois :
   - L'état actuel de tous les appareils de la maison
   - L'heure, le jour, la date actuels
   - Les variables contextuelles (présence, météo, soleil...)
+  - Pour un déclencheur "state_change" (section 3.9) UNIQUEMENT : "triggered_entity_id",
+    l'entité précise qui vient de déclencher. Une action de la planification sans lieu explicite
+    ("éteins-la") doit alors cibler cette entité précise — essentiel pour une règle par défaut de
+    domaine ("toutes les lumières"), où l'entité concernée n'est jamais nommée dans la phrase
+    d'origine. Absent pour tout autre type de déclencheur.
 
 Tu dois alors retourner une SÉQUENCE PLATE ET LINÉAIRE selon ces règles :
 

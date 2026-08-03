@@ -382,6 +382,12 @@
 - **Statut** : Non commencé — conception à finaliser avec l'utilisateur
 - **Priorité** : Moyenne (amélioration de confort d'usage HA, rien de cassé sans elle)
 
+### 🟡 IA : ambiguïté récurrent/one-shot sur les déclencheurs d'état ("quand X, fais Y")
+- **Constat (2026-08-03)**, en concevant le nouveau trigger `state_change` (planificateur, voir conception en cours "quand la lumière du salon s'allume, éteins la cuisine") : une phrase du type "quand [événement X], [action Y]" ne précise pas si la règle doit se redéclencher à chaque occurrence future de X (recurring, ex: une minuterie) ou ne s'appliquer qu'une seule fois (one-shot, ex: "quand la lumière du salon s'allume ce soir, préviens-moi"). Contrairement aux déclencheurs temporels existants, où le type (`delay` vs `recurrence`) découle naturellement de la formulation ("dans 5 minutes" vs "tous les jours à 8h"), rien dans "quand X, Y" ne permet à Mistral de trancher de façon fiable.
+- **À faire** : `ia` devra probablement détecter ce cas et poser une question de clarification à l'utilisateur (répétitif ou ponctuel ?) plutôt que de deviner — reste à définir précisément le mécanisme (nouvelle catégorie de réponse "clarification requise", ou repli sur un défaut avec confirmation implicite). Non tranché, à traiter pendant l'implémentation du trigger `state_change`.
+- **Statut** : Non traité — noté pendant la conception, pas encore implémenté
+- **Priorité** : Moyenne (fait partie du chantier trigger d'état en cours de conception)
+
 ---
 
 ## Notes techniques

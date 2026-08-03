@@ -102,6 +102,10 @@ export interface DeployRequest {
   macros: unknown[];
   entities_snapshot: unknown[];
   timestamp: string;
+  // Renseigné uniquement pour un déclenchement state_change (planificateur) — l'entité réellement
+  // à l'origine de ce déclenchement précis, pour qu'une action sans lieu explicite ("éteins-la")
+  // sache quoi cibler (voir applications/planificateur/src/domain/types.ts::DeployContext).
+  triggered_entity_id?: string;
 }
 
 export interface DeployReply extends CorrelatedReponse {

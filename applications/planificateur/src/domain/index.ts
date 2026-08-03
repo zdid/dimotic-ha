@@ -44,7 +44,8 @@ export const PLANIFICATEUR_UI_METADATA: ModuleUiMetadata = {
       fields: [
         { name: 'macrosFile', label: 'Fichier des macros', type: 'string', default: 'planificateur-macros-v1.0.yaml' },
         { name: 'planificationsFile', label: 'Fichier des planifications', type: 'string', default: 'planificateur-planifications-v1.0.yaml' },
-        { name: 'deployTimeoutMs', label: 'Délai d\'attente de réinterprétation (ms)', type: 'number', default: 15000 }
+        { name: 'deployTimeoutMs', label: 'Délai d\'attente de réinterprétation (ms)', type: 'number', default: 15000 },
+        { name: 'catchUpWindowSeconds', label: 'Fenêtre de rattrapage après coupure (s)', type: 'number', default: 300 }
       ]
     }
   ]

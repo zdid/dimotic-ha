@@ -19,6 +19,7 @@ import { planificateurConfigSchema, type PlanificateurConfig } from './config-sc
 import { macrosConfigSchema, planificationsConfigSchema, DEFAULT_MACROS_CONFIG, DEFAULT_PLANIFICATIONS_CONFIG, type MacrosConfigFile, type PlanificationsConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { SchedulerRuntime } from './scheduler-runtime';
+import { StateWatcher } from './state-watcher';
 import { ExecutionEngine } from './execution';
 import { CommandHandler } from './handler';
 import type { DomoticNode, ExecuterActionParams } from './types';
@@ -34,6 +35,7 @@ export class PlanificateurService implements IPlanificateurService {
   private readonly macrosManager: ConfigFileManager<MacrosConfigFile>;
   private readonly planificationsManager: ConfigFileManager<PlanificationsConfigFile>;
   private readonly schedulerRuntime: SchedulerRuntime;
+  private readonly stateWatcher?: StateWatcher;
   private readonly executionEngine: ExecutionEngine;
   private readonly handler: CommandHandler;
   private readonly haCommandService?: HaCommandService;
@@ -71,9 +73,29 @@ export class PlanificateurService implements IPlanificateurService {
       this.logger.warn('PlanificateurService', 'HaWsClient indisponible — exécution directe désactivée (ha.ws_enable=false ?), seul le repli conversation.process aurait pu être tenté, également indisponible.');
     }
 
-    this.schedulerRuntime = new SchedulerRuntime(this.logger, (plan) => {
-      this.handler.handleTriggerFired(plan).catch((e) => this.logger.error('PlanificateurService', `Erreur de déploiement pour "${plan.name}": ${e}`));
-    });
+    this.schedulerRuntime = new SchedulerRuntime(
+      this.logger,
+      (plan) => {
+        this.handler.handleTriggerFired(plan).catch((e) => this.logger.error('PlanificateurService', `Erreur de déploiement pour "${plan.name}": ${e}`));
+      },
+      () => this.handler.persistPlanifications()
+    );
+
+    // Triggers state_change — nécessite le WebSocket HA (Mode A), même garde que haCommandService.
+    // Sans lui, les planifications state_change restent inertes (dégradation cohérente avec le
+    // reste de l'app quand ha.ws_enable=false).
+    this.stateWatcher = this.haWsClient
+      ? new StateWatcher(
+          this.haWsClient,
+          this.logger,
+          (plan, entityId, signal) => this.handler.handleTriggerFired(plan, entityId, signal),
+          () => this.handler.persistPlanifications()
+        )
+      : undefined;
+
+    if (!this.stateWatcher) {
+      this.logger.warn('PlanificateurService', 'HaWsClient indisponible — triggers state_change désactivés (ha.ws_enable=false ?).');
+    }
 
     this.executionEngine = new ExecutionEngine(
       this.eventBus,
@@ -89,7 +111,9 @@ export class PlanificateurService implements IPlanificateurService {
       this.macrosManager,
       this.planificationsManager,
       this.schedulerRuntime,
-      this.executionEngine
+      this.executionEngine,
+      this.config.catchUpWindowSeconds,
+      this.stateWatcher
     );
   }
 
@@ -97,6 +121,7 @@ export class PlanificateurService implements IPlanificateurService {
     this.logger.info('PlanificateurService', 'Démarrage du service planificateur...');
 
     this.handler.load();
+    this.stateWatcher?.start(this.handler.listPlanifications());
     this.wireEventBus();
     this.setupSocketEventListeners();
     this.emitStatus();

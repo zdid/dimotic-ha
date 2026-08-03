@@ -11,23 +11,41 @@ import type { PlanificationDefinition } from './types';
 import { triggerToMs, isRecurring } from './scheduler';
 
 export type FireCallback = (plan: PlanificationDefinition) => void;
+/** Appelé chaque fois qu'un nouveau next_fire_at est calculé (programmation initiale ET réarmement
+ *  d'un trigger récurrent) — au appelant de le persister (voir CommandHandler.persistPlanifications). */
+export type ScheduledCallback = (plan: PlanificationDefinition) => void;
 
 export class SchedulerRuntime {
   private readonly timers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly logger: Logger,
-    private readonly onFire: FireCallback
+    private readonly onFire: FireCallback,
+    private readonly onScheduled?: ScheduledCallback
   ) {}
 
+  /** Programmation normale — délai recalculé depuis maintenant (`triggerToMs`). */
   schedule(plan: PlanificationDefinition): void {
-    this.unschedule(plan.name);
-
     const ms = triggerToMs(plan.trigger, this.logger);
     if (ms === null) {
       this.logger.warn('SchedulerRuntime', `Déclencheur non supporté pour "${plan.name}": ${plan.trigger.type}`);
       return;
     }
+    this.arm(plan, ms);
+  }
+
+  /**
+   * Reprise après (re)démarrage — programme sur le délai RESTANT déjà connu (`deltaMs`), au lieu
+   * de recalculer un délai complet depuis maintenant comme le ferait schedule(). C'est ce qui
+   * évite qu'un `delay`/`duration` en cours reparte intégralement à zéro à chaque redémarrage
+   * (voir CommandHandler.load()).
+   */
+  resume(plan: PlanificationDefinition, deltaMs: number): void {
+    this.arm(plan, deltaMs);
+  }
+
+  private arm(plan: PlanificationDefinition, ms: number): void {
+    this.unschedule(plan.name);
 
     const recurring = isRecurring(plan.trigger);
 
@@ -40,6 +58,8 @@ export class SchedulerRuntime {
         if (next !== null) {
           const t = setTimeout(fire, next);
           this.timers.set(plan.name, t);
+          plan.next_fire_at = new Date(Date.now() + next).toISOString();
+          this.onScheduled?.(plan);
           this.logger.info('SchedulerRuntime', `Prochain déclenchement "${plan.name}" dans ${Math.round(next / 1000)}s`);
         }
       } else {
@@ -49,6 +69,8 @@ export class SchedulerRuntime {
 
     const timer = setTimeout(fire, ms);
     this.timers.set(plan.name, timer);
+    plan.next_fire_at = new Date(Date.now() + ms).toISOString();
+    this.onScheduled?.(plan);
     this.logger.info('SchedulerRuntime', `"${plan.name}" programmée dans ${Math.round(ms / 1000)}s (${plan.trigger.type})`);
   }
 

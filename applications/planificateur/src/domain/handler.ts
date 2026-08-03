@@ -18,6 +18,7 @@ import type {
 import type { ConfigFileManager } from './yaml/ConfigFileManager';
 import type { MacrosConfigFile, PlanificationsConfigFile } from './storage-schema';
 import type { SchedulerRuntime } from './scheduler-runtime';
+import type { StateWatcher } from './state-watcher';
 import type { ExecutionEngine } from './execution';
 
 export class CommandHandler {
@@ -29,10 +30,34 @@ export class CommandHandler {
     private readonly macrosManager: ConfigFileManager<MacrosConfigFile>,
     private readonly planificationsManager: ConfigFileManager<PlanificationsConfigFile>,
     private readonly schedulerRuntime: SchedulerRuntime,
-    private readonly executionEngine: ExecutionEngine
+    private readonly executionEngine: ExecutionEngine,
+    private readonly catchUpWindowSeconds: number,
+    private readonly stateWatcher?: StateWatcher
   ) {
     this.macros = {};
     this.planifications = {};
+  }
+
+  /** Arme une planification active selon le type de son trigger — SchedulerRuntime (temporel) ou
+   *  StateWatcher (state_change, purement réactif : pas de minuteur à poser, juste s'assurer que
+   *  StateWatcher voit la liste à jour des planifications actives). */
+  private armIfActive(plan: PlanificationDefinition): void {
+    if (!plan.active) return;
+    if (plan.trigger.type === 'state_change') {
+      this.stateWatcher?.setPlans(this.listPlanifications());
+    } else {
+      this.resumeOrSchedule(plan);
+    }
+  }
+
+  /** Symétrique de armIfActive — désarme quel que soit le runtime concerné. */
+  private disarm(plan: PlanificationDefinition): void {
+    if (plan.trigger.type === 'state_change') {
+      this.stateWatcher?.unschedule(plan.name);
+      this.stateWatcher?.setPlans(this.listPlanifications());
+    } else {
+      this.schedulerRuntime.unschedule(plan.name);
+    }
   }
 
   /** Charge le contenu des fichiers YAML et reprogramme les planifications actives. */
@@ -41,9 +66,42 @@ export class CommandHandler {
     this.planifications = this.planificationsManager.load().planifications;
 
     for (const plan of Object.values(this.planifications)) {
-      if (plan.active) this.schedulerRuntime.schedule(plan);
+      // Les triggers state_change sont repris séparément par StateWatcher (voir
+      // PlanificateurService), pas par SchedulerRuntime.
+      if (plan.active && plan.trigger.type !== 'state_change') this.resumeOrSchedule(plan);
     }
     this.logger.info('CommandHandler', `Chargé: ${Object.keys(this.macros).length} macro(s), ${Object.keys(this.planifications).length} planification(s) (${this.schedulerRuntime.listScheduled().length} active(s))`);
+  }
+
+  /**
+   * Reprise après (re)démarrage d'un trigger temporel (specs — voir conception state_change) :
+   * si `next_fire_at` est déjà connu, reprend sur le délai restant plutôt que de recalculer un
+   * délai complet depuis maintenant (évite qu'un `delay`/`duration` en cours reparte de zéro).
+   * Si l'heure cible est déjà passée, rattrape immédiatement si dans la fenêtre configurée,
+   * sinon abandonne visiblement (log + `missed`, voir handleTriggerFired pour l'effacement).
+   */
+  private resumeOrSchedule(plan: PlanificationDefinition): void {
+    if (!plan.next_fire_at) {
+      this.schedulerRuntime.schedule(plan);
+      return;
+    }
+
+    const deltaMs = new Date(plan.next_fire_at).getTime() - Date.now();
+    if (deltaMs > 0) {
+      this.schedulerRuntime.resume(plan, deltaMs);
+      return;
+    }
+
+    const overdueMs = -deltaMs;
+    if (overdueMs <= this.catchUpWindowSeconds * 1000) {
+      this.logger.info('CommandHandler', `"${plan.name}" en retard de ${Math.round(overdueMs / 1000)}s (dans la fenêtre de rattrapage) — déclenchement immédiat`);
+      this.handleTriggerFired(plan).catch((e) => this.logger.error('CommandHandler', `Erreur de rattrapage pour "${plan.name}": ${e}`));
+      this.schedulerRuntime.schedule(plan);
+    } else {
+      this.logger.warn('CommandHandler', `"${plan.name}" manquée (en retard de ${Math.round(overdueMs / 1000)}s, au-delà de la fenêtre de rattrapage de ${this.catchUpWindowSeconds}s) — abandonnée`);
+      plan.missed = true;
+      this.persistPlanifications();
+    }
   }
 
   listMacros(): MacroDefinition[] {
@@ -76,7 +134,7 @@ export class CommandHandler {
           const plan = payload as PlanificationDefinition & { correlation_id: string };
           this.planifications[plan.name] = plan;
           this.persistPlanifications();
-          if (plan.active) this.schedulerRuntime.schedule(plan);
+          this.armIfActive(plan);
           return ok(corr, `Planification "${plan.name}" enregistrée et ${plan.active ? 'activée' : 'désactivée'}.`);
         }
 
@@ -122,9 +180,19 @@ export class CommandHandler {
     }
   }
 
-  /** Déploiement déclenché par un minuteur (specs §6, premier cas) — voir PlanificateurService. */
-  async handleTriggerFired(plan: PlanificationDefinition): Promise<void> {
-    await this.executionEngine.deployAndExecute(plan.name, plan.phrase_originale, this.listMacros());
+  /**
+   * Déploiement déclenché par un minuteur (specs §6, premier cas) — voir PlanificateurService.
+   * `triggeredEntityId`/`signal` : uniquement renseignés pour un déclenchement `state_change`
+   * (StateWatcher) — voir execution.ts::deployAndExecute.
+   */
+  async handleTriggerFired(plan: PlanificationDefinition, triggeredEntityId?: string, signal?: AbortSignal): Promise<void> {
+    const result = await this.executionEngine.deployAndExecute(plan.name, plan.phrase_originale, this.listMacros(), triggeredEntityId, signal);
+    // Une exécution RÉUSSIE efface l'indicateur "manqué" laissé par un rattrapage abandonné
+    // précédent (demande utilisateur : disparaît à la prochaine exécution, s'il y en a une).
+    if (result.success && plan.missed) {
+      plan.missed = false;
+      this.persistPlanifications();
+    }
   }
 
   /** Déploiement déclenché par une macro dite directement (specs §6, deuxième cas). */
@@ -160,7 +228,7 @@ export class CommandHandler {
         if (!plan) return err(corr, `"${g.name}" introuvable.`);
         plan.active = true;
         this.persistPlanifications();
-        this.schedulerRuntime.schedule(plan);
+        this.armIfActive(plan);
         return ok(corr, `Planification "${g.name}" activée.`);
       }
 
@@ -171,7 +239,7 @@ export class CommandHandler {
         if (!plan) return err(corr, `"${g.name}" introuvable.`);
         plan.active = false;
         this.persistPlanifications();
-        this.schedulerRuntime.unschedule(g.name);
+        this.disarm(plan);
         return ok(corr, `Planification "${g.name}" désactivée.`);
       }
 
@@ -184,8 +252,9 @@ export class CommandHandler {
           return ok(corr, `Macro "${g.name}" supprimée.`);
         }
         if (g.cible === 'planification') {
-          if (!this.planifications[g.name]) return err(corr, `Planification "${g.name}" introuvable.`);
-          this.schedulerRuntime.unschedule(g.name);
+          const plan = this.planifications[g.name];
+          if (!plan) return err(corr, `Planification "${g.name}" introuvable.`);
+          this.disarm(plan);
           delete this.planifications[g.name];
           this.persistPlanifications();
           return ok(corr, `Planification "${g.name}" supprimée.`);
@@ -198,12 +267,10 @@ export class CommandHandler {
         if (g.cible !== 'planification') return err(corr, `Modification non supportée pour: ${g.cible}`);
         const plan = this.planifications[g.name];
         if (!plan || !g.modifications) return err(corr, `"${g.name}" introuvable ou modifications manquantes.`);
+        this.disarm(plan);
         Object.assign(plan, g.modifications);
         this.persistPlanifications();
-        if (plan.active) {
-          this.schedulerRuntime.unschedule(g.name);
-          this.schedulerRuntime.schedule(plan);
-        }
+        this.armIfActive(plan);
         return ok(corr, `Planification "${g.name}" modifiée.`);
       }
 
@@ -217,7 +284,7 @@ export class CommandHandler {
     if (!result.success) this.logger.error('CommandHandler', `Échec de sauvegarde des macros: ${result.error}`);
   }
 
-  private persistPlanifications(): void {
+  persistPlanifications(): void {
     const result = this.planificationsManager.save({ planifications: this.planifications });
     if (!result.success) this.logger.error('CommandHandler', `Échec de sauvegarde des planifications: ${result.error}`);
   }

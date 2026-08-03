@@ -64,9 +64,21 @@ export class ExecutionEngine {
    * Déclenche la boucle de déploiement complète : contexte → réinterprétation → exécution.
    * Retourne un résultat explicite (jamais d'échec avalé en silence) — l'appelant (handler.ts)
    * s'en sert pour ne confirmer un succès à `ia`/Mistral que si l'exécution a réellement eu lieu.
+   *
+   * `signal` optionnel (StateWatcher, triggers state_change) : permet d'annuler une exécution en
+   * cours — typiquement une attente (`WaitNode`) avant l'action finale — quand la même entité
+   * redéclenche entre-temps (comportement "minuterie" : on repart de zéro, pas d'empilement).
+   * Aucun effet sur les triggers temporels (SchedulerRuntime n'en passe jamais).
    */
-  async deployAndExecute(triggerName: string, phraseOriginale: string, macros: MacroDefinition[]): Promise<{ success: boolean; message: string }> {
+  async deployAndExecute(
+    triggerName: string,
+    phraseOriginale: string,
+    macros: MacroDefinition[],
+    triggeredEntityId?: string,
+    signal?: AbortSignal
+  ): Promise<{ success: boolean; message: string }> {
     const context = this.buildDeployContext(triggerName, phraseOriginale, macros);
+    if (triggeredEntityId) context.triggered_entity_id = triggeredEntityId;
 
     let reply: DeployReply;
     try {
@@ -77,27 +89,41 @@ export class ExecutionEngine {
       return { success: false, message };
     }
 
+    if (signal?.aborted) {
+      return { success: false, message: `Déploiement "${triggerName}" annulé (redéclenché entre-temps).` };
+    }
+
     if (!reply.success || !reply.steps) {
       const message = `Déploiement "${triggerName}" refusé par ia: ${reply.message}`;
       this.logger.warn('ExecutionEngine', message);
       return { success: false, message };
     }
 
-    await this.executeSteps(reply.steps);
+    try {
+      await this.executeSteps(reply.steps, signal);
+    } catch (error) {
+      if (error instanceof AbortedExecutionError) {
+        return { success: false, message: `Déploiement "${triggerName}" annulé (redéclenché entre-temps).` };
+      }
+      throw error;
+    }
     return { success: true, message: `${reply.steps.length} étape(s) exécutée(s).` };
   }
 
-  async executeSteps(steps: ExecutionStep[]): Promise<void> {
+  async executeSteps(steps: ExecutionStep[], signal?: AbortSignal): Promise<void> {
     for (const step of steps.sort((a, b) => a.step - b.step)) {
+      if (signal?.aborted) throw new AbortedExecutionError();
+
       if (step.delay_before_seconds > 0) {
-        await sleep(step.delay_before_seconds * 1000);
+        await sleep(step.delay_before_seconds * 1000, signal);
       }
 
       if (step.type === 'wait') {
-        if (step.seconds) await sleep(step.seconds * 1000);
+        if (step.seconds) await sleep(step.seconds * 1000, signal);
         continue;
       }
 
+      if (signal?.aborted) throw new AbortedExecutionError();
       await this.executeAction(step);
     }
   }
@@ -137,6 +163,16 @@ export class ExecutionEngine {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Distingue une exécution annulée (redéclenchement "minuterie") d'une vraie erreur — voir deployAndExecute. */
+export class AbortedExecutionError extends Error {}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new AbortedExecutionError()); return; }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new AbortedExecutionError());
+    }, { once: true });
+  });
 }

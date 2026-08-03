@@ -53,7 +53,10 @@ export class DeployResponder {
             entites: req.entities_snapshot,
             heure: now.toTimeString().slice(0, 5),
             jour: now.toLocaleDateString('fr-FR', { weekday: 'long' }),
-            date: now.toISOString().slice(0, 10)
+            date: now.toISOString().slice(0, 10),
+            // Uniquement pour un déclencheur state_change (section 3.9) — l'entité réellement à
+            // l'origine de CE déclenchement précis, absent pour tout autre type de déclencheur.
+            ...(req.triggered_entity_id ? { triggered_entity_id: req.triggered_entity_id } : {})
           }
         })
     };
