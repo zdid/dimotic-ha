@@ -53,9 +53,17 @@ describe('ConfigLoader', () => {
     expect(result.logging.level).toBe('info');
   });
 
-  it('should throw on missing file', () => {
-    const loader = new ConfigLoader('/nonexistent/path/config.yaml');
-    expect(() => loader.load()).toThrow(/not found/);
+  it('should create the file with defaults and load it, rather than throwing, when missing', () => {
+    // Comportement volontaire (voir loader.ts::createDefaultConfigFile) : un fichier absent n'est
+    // pas fatal, contrairement à un YAML invalide/une validation échouée — nécessaire pour un
+    // premier démarrage sur une machine neuve (ex: déploiement Docker, data/ vide) sans planter.
+    expect(fs.existsSync(configPath)).toBe(false);
+    const loader = new ConfigLoader(configPath);
+    const result = loader.load();
+    expect(fs.existsSync(configPath)).toBe(true);
+    expect(result.web.port).toBe(8080);
+    expect(result.ha.ws_enable).toBe(false);
+    expect(result.ha.mqtt_enable).toBe(false);
   });
 
   it('should throw on invalid YAML', () => {

@@ -82,13 +82,18 @@ export class ConfigLoader {
   }
 
   /**
-   * Charge et valide la configuration.
+   * Charge et valide la configuration. Un fichier manquant n'est PAS une erreur fatale : il est
+   * créé avec les valeurs par défaut (`DEFAULT_CONFIG`), comme le fait déjà tout autre
+   * `ConfigFileManager` du projet (RFXCOM/AREXX/HAPLAN/EVOO7) pour son propre fichier — sans quoi
+   * un premier démarrage sur une machine neuve (ex: déploiement Docker, `data/` vide) plante
+   * immédiatement plutôt que d'afficher une UI vierge à configurer (comportement pourtant déjà
+   * documenté ailleurs : "l'UI reste accessible même si HA n'est pas configuré", `PresentationServer`).
    * @returns AppConfig typé avec valeurs par défaut
-   * @throws Error si fichier manquant, YAML invalide ou validation échouée
+   * @throws Error si YAML invalide ou validation échouée (pas si le fichier est simplement absent)
    */
   load(): AppConfig {
     if (!fs.existsSync(this.configPath)) {
-      throw new Error(`Configuration file not found at: ${this.configPath}`);
+      this.createDefaultConfigFile();
     }
 
     const fileContent = fs.readFileSync(this.configPath, 'utf-8');
@@ -102,6 +107,7 @@ export class ConfigLoader {
     }
 
     const configWithDefaults = deepMerge(DEFAULT_CONFIG, parsedConfig as Partial<AppConfig>);
+    this.omitDisabledHaSections(configWithDefaults);
 
     if (this.appDataRoot) {
       this.mergeAppSections(configWithDefaults as Record<string, unknown>);
@@ -118,6 +124,44 @@ export class ConfigLoader {
       }
       throw new Error(`Configuration validation error: ${error}`);
     }
+  }
+
+  /**
+   * `ha.ws`/`ha.mqtt` sont `.optional()` dans le schéma (voir schema.ts), mais `DEFAULT_CONFIG`
+   * peuple `ws` avec un objet complet (host/token vides) pour que le *merge* de defaults
+   * fonctionne correctement sur une config partielle (ex: `ha.ws.port` fourni sans `host`/`token`
+   * — voir "should apply defaults for minimal config"). Conséquence : sur une config fraîche où
+   * l'utilisateur n'a jamais rien saisi, `ws.host`/`ws.token` vides restent quand même validés
+   * (`min(1)`), même si `ws_enable: false` — la connexion WS n'a pourtant aucune importance tant
+   * qu'elle est désactivée.
+   *
+   * Retire `ws`/`mqtt` juste avant validation **uniquement** quand leur flag `_enable`
+   * correspondant est `false` ET que la section n'a jamais été réellement renseignée (tous ses
+   * champs obligatoires encore vides) — jamais si l'utilisateur a de vraies données en attente
+   * (désactivé temporairement mais prêt à être réactivé) : dans ce cas la validation stricte reste
+   * utile pour signaler une saisie partielle/invalide, comme avant ce correctif.
+   */
+  private omitDisabledHaSections(config: Record<string, unknown>): void {
+    const ha = config.ha as Record<string, unknown> | undefined;
+    if (!ha) return;
+    if (ha.ws_enable !== true && this.isUnconfigured(ha.ws, ['host', 'token'])) delete ha.ws;
+    if (ha.mqtt_enable !== true && this.isUnconfigured(ha.mqtt, ['host', 'client_id'])) delete ha.mqtt;
+  }
+
+  /** Vrai si `section` est absente, ou si tous les champs listés y sont vides/falsy. */
+  private isUnconfigured(section: unknown, requiredStringFields: string[]): boolean {
+    if (!section || typeof section !== 'object') return true;
+    return requiredStringFields.every((field) => !(section as Record<string, unknown>)[field]);
+  }
+
+  /**
+   * Crée `configPath` avec `DEFAULT_CONFIG` — appelé uniquement quand le fichier n'existe pas
+   * encore. `ha.ws_enable`/`ha.mqtt_enable` restent à `false` par défaut, donc ce fichier fraîchement
+   * créé ne tente aucune connexion tant que l'utilisateur n'a pas renseigné HA/MQTT via l'UI.
+   */
+  private createDefaultConfigFile(): void {
+    fs.mkdirSync(path.dirname(this.configPath), { recursive: true });
+    fs.writeFileSync(this.configPath, yaml.dump(DEFAULT_CONFIG, { indent: 2, sortKeys: false }), 'utf-8');
   }
 
   /**
