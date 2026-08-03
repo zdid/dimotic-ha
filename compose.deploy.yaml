@@ -1,0 +1,75 @@
+# =============================================================================
+# Dimotic-HA — fichier de DÉPLOIEMENT, à copier seul sur la machine cible
+# (Raspberry Pi 3/4/5 en OS 64 bits, ou toute machine linux/amd64 ou linux/arm64).
+#
+# Différence avec compose.yaml (celui-ci reste réservé à CETTE machine, pour
+# construire/tester/publier une nouvelle version) : pas de `build:` — l'image
+# est UNIQUEMENT tirée depuis Docker Hub (zdid2/dimotic-ha), aucun code source
+# ni Dockerfile requis sur la machine cible.
+#
+# Utilisation sur la machine cible :
+#   1. Copier ce seul fichier (ex: scp compose.deploy.yaml pi@monrpi:~/dimotic-ha/compose.yaml)
+#   2. Créer à côté deux dossiers vides : data/ et logs/ — rien à pré-remplir, un
+#      data/core/config.yaml absent/vide est géré avec des valeurs par défaut
+#      (applications/core/src/infrastructure/config/loader.ts) sans faire planter
+#      le démarrage.
+#   3. docker compose pull && docker compose up -d
+#   4. Ouvrir l'UI (http://<IP du Pi>:8080) → Paramètres Techniques → Web Services,
+#      y saisir la connexion MQTT et HA WebSocket DE CETTE machine (probablement
+#      différente de celle de la machine de développement) — la sauvegarde écrit
+#      elle-même data/core/config.yaml, pas besoin de l'éditer à la main.
+#
+# Voir compose.yaml (machine de développement) pour l'explication détaillée de
+# chaque réglage (network_mode: host, privileged + volume /dev pour RFXCOM, volume
+# nommé obligatoire pour /app — voir techniques-socle-ha-mqtt_specs §11) : ce
+# fichier reprend exactement la même configuration de service, seule la source de
+# l'image change.
+# =============================================================================
+
+services:
+  app:
+    image: zdid2/dimotic-ha:latest
+    container_name: dimotic-ha
+    restart: unless-stopped
+
+    # Home Assistant et le broker MQTT doivent être joignables en localhost sur
+    # CETTE machine (data/core/config.yaml : ha.ws.host / ha.mqtt.host) — sinon
+    # remplacer network_mode: host par une configuration réseau adaptée et pointer
+    # ha.ws.host/ha.mqtt.host vers la bonne adresse.
+    #
+    # ⚠️ Port 11434 (ia, émulation Ollama) : si un vrai serveur Ollama tourne déjà
+    # sur cette machine, changer ollamaHttpPort dans data/ia/config.yaml (ex: 11435).
+    network_mode: host
+
+    # Nécessaire pour que RFXCOM accède dynamiquement à /dev/ttyUSBx quel que soit
+    # son numéro (détection automatique du port, voir fonctionnelles-rfxcom_specs
+    # §8.2). Alternative plus restrictive si le port ne change jamais :
+    #   devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]
+    #   group_add: ["dialout"]
+    privileged: true
+
+    # L'image tourne avec l'utilisateur intégré `node` (uid/gid 1000) — coïncide
+    # avec le premier utilisateur par défaut de Raspberry Pi OS. Si l'utilisateur
+    # principal de cette machine a un autre uid/gid, ajuster :
+    #   user: "1000:1000"
+    group_add:
+      - dialout
+
+    environment:
+      - TZ=Europe/Paris
+
+    volumes:
+      # Volume nommé unique pour tout /app — OBLIGATOIRE (voir compose.yaml pour
+      # le détail de pourquoi : fs.renameSync entre applications/ et
+      # applications_désactivées/ échoue avec EXDEV sinon). Peuplé automatiquement
+      # depuis l'image au premier démarrage.
+      - app-code:/app
+      # Données/config persistantes et logs — à créer vides avant le premier
+      # démarrage (voir étape 2/3 ci-dessus), directement éditables depuis l'hôte.
+      - ./data:/app/data
+      - ./logs:/app/logs
+      # RFXCOM — voir le commentaire `privileged` ci-dessus.
+      - /dev:/dev
+
+volumes:
+  app-code:
