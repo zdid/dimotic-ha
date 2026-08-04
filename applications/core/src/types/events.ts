@@ -201,9 +201,18 @@ export type SocketClient = {
 // ÉVÉNEMENTS SOCKET.IO DU SOCLE (pour extension)
 // ============================================================================
 
-/** Événements Socket.io du socle (à étendre par les applications) */
+/**
+ * Événements Socket.io du socle Server → Client (à étendre par les applications).
+ *
+ * Ne contient QUE les événements Server → Client : c'est cet objet, et lui seul, qui est
+ * transmis à SocketBridge.registerAppSocketEvents('core', ...) — qui câble un socket.on(...)
+ * client→serveur pour CHAQUE entrée reçue (SocketBridge.setupDynamicAppHandlers()). Les
+ * événements Client → Server du socle (SOCLE_CLIENT_EVENTS ci-dessous) sont déjà câblés en dur
+ * dans SocketBridge.setupSocketIOHandlers() ; les mélanger ici créait un double socket.on(...)
+ * pour chacun (config:get/save, logs:get, ha:structure:get, ha:command:send,
+ * app:modules:config:get/save), donc un traitement métier en double à chaque requête client.
+ */
 export const SOCLE_SOCKET_EVENTS = {
-  // Server → Client
   APP_STATUS: 'app:status',
   APP_LOG: 'app:log',
   HA_ENTITY_UPDATED: 'ha:entity:updated',
@@ -216,8 +225,14 @@ export const SOCLE_SOCKET_EVENTS = {
   MQTT_DISCONNECTED: 'mqtt:disconnected',
   MODULES_LIST: 'app:modules:list',
   MODULES_CONFIG: 'app:modules:config',
-  
-  // Client → Server
+} as const;
+
+/**
+ * Événements Socket.io du socle Client → Server — déjà câblés en dur dans
+ * SocketBridge.setupSocketIOHandlers(). Gardés ici à titre de référence/typage uniquement :
+ * ne JAMAIS les passer à registerAppSocketEvents('core', ...), voir commentaire ci-dessus.
+ */
+export const SOCLE_CLIENT_EVENTS = {
   CONFIG_GET: 'config:get',
   CONFIG_SAVE: 'config:save',
   CONFIG_VALIDATE: 'config:validate',
@@ -230,3 +245,4 @@ export const SOCLE_SOCKET_EVENTS = {
 
 // Type pour les événements socle
 export type SocleSocketEvents = typeof SOCLE_SOCKET_EVENTS;
+export type SocleClientEvents = typeof SOCLE_CLIENT_EVENTS;
