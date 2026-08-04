@@ -188,6 +188,26 @@ export class NommageService implements INommageService {
     this.eventBus.on('nommage:config:save', (data: unknown) => {
       this.saveConfig(data as Partial<NommageConfig>);
     });
+
+    // Nommage n'a pas d'UI de configuration dédiée : les paramètres (sources MQTT, etc.) sont
+    // édités via le formulaire générique "Paramètres du Module" du core, qui sauvegarde par
+    // ConfigService.saveModuleConfig() (AppService.handleModuleConfigSave) — un chemin qui
+    // écrit directement sur disque sans jamais émettre 'nommage:config:save' (TODO.md : ce
+    // dernier n'est déclenché par aucune UI réelle). Sans ce listener, les connexions MQTT en
+    // cours continuaient de tourner avec les anciens paramètres jusqu'au redémarrage complet de
+    // l'application — le fichier était à jour, mais pas les clients mqtt.js déjà connectés.
+    this.eventBus.on('app:module:config:saved', (data: unknown) => {
+      const result = data as { moduleId: string; success: boolean };
+      if (result.moduleId !== 'nommage' || !result.success) return;
+
+      this.logger.info('NommageService',
+        'Configuration sauvegardée via le formulaire générique — reconnexion des sources MQTT...');
+
+      this.reloadConfigAndReconnectMqtt().catch((error) => {
+        this.logger.error('NommageService',
+          `Erreur lors de la reconnexion après sauvegarde: ${error}`);
+      });
+    });
   }
 
   // ==========================================================================
@@ -530,18 +550,27 @@ export class NommageService implements INommageService {
     return this.config.sources.flatMap((source) => source.mqtt.discoveryTopics);
   }
 
+  /**
+   * Recharge la config depuis le provider (fichier déjà écrit par l'appelant) et reconfigure
+   * toutes les connexions MQTT (déconnexion + reconnexion de toutes les sources) avec les
+   * nouveaux paramètres. Factorisé hors de saveConfig() pour être aussi utilisable quand le
+   * fichier a été écrit ailleurs (voir listener 'app:module:config:saved' ci-dessous).
+   */
+  private async reloadConfigAndReconnectMqtt(): Promise<void> {
+    this.config = this.loadConfig();
+    this.discoveryTopics = this.aggregateDiscoveryTopics();
+
+    await this.mqttService.disconnect();
+    await this.mqttService.connect();
+    this.mqttConnected = this.mqttService.isConnected();
+
+    this.logger.info('NommageService', 'Configuration rechargée, connexions MQTT reconfigurées avec les nouveaux paramètres');
+  }
+
   private async saveConfig(partialConfig: Partial<NommageConfig>): Promise<void> {
     try {
       await this.configProvider.savePartialConfig(partialConfig as NommageConfig);
-      this.config = this.loadConfig();
-      this.discoveryTopics = this.aggregateDiscoveryTopics();
-
-      // Reconfigurer toutes les connexions MQTT (déconnexion + reconnexion de toutes les sources)
-      await this.mqttService.disconnect();
-      await this.mqttService.connect();
-      this.mqttConnected = this.mqttService.isConnected();
-
-      this.logger.info('NommageService', 'Configuration sauvegardée et appliquée');
+      await this.reloadConfigAndReconnectMqtt();
 
       this.eventBus.emit('nommage:config:saved', {
         success: true,
