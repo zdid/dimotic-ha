@@ -78,6 +78,26 @@ describe('ConfigLoader', () => {
     const loader = new ConfigLoader(configPath);
     expect(() => loader.load()).toThrow();
   });
+
+  it('should treat a null field (hand-edited YAML, e.g. "token:" left blank) as unset, not as a type error', () => {
+    // Un YAML `token:` sans valeur est parsé en `null` (pas ""), ex: config.yaml pré-rempli à la
+    // main avant le premier démarrage. deepMerge doit retomber sur le défaut ('') plutôt que de
+    // laisser passer `null` jusqu'à Zod (qui rejetterait avec "Expected string, received null" au
+    // lieu du message "required" habituel) — voir loader.ts::deepMerge.
+    const withNullToken = { ha: { ws_enable: true, ws: { host: '192.168.1.50', token: null } } };
+    fs.writeFileSync(configPath, yaml.dump(withNullToken));
+    const loader = new ConfigLoader(configPath);
+    expect(() => loader.load()).toThrow(/Long-Lived Access Token is required/);
+  });
+
+  it('should treat an entirely-null, disabled ws section as unconfigured and boot successfully', () => {
+    const allNull = { ha: { ws_enable: false, ws: { host: null, token: null } } };
+    fs.writeFileSync(configPath, yaml.dump(allNull));
+    const loader = new ConfigLoader(configPath);
+    const result = loader.load();
+    expect(result.ha.ws_enable).toBe(false);
+    expect(result.ha.ws).toBeUndefined();
+  });
 });
 
 describe('ConfigWriter', () => {

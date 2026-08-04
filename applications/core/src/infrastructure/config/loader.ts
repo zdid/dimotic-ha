@@ -36,12 +36,20 @@ const DEFAULT_CONFIG: AppConfig = {
 };
 
 /**
- * Deep merge : fusionne les valeurs par défaut avec la config fournie
+ * Deep merge : fusionne les valeurs par défaut avec la config fournie.
+ * `null` est traité comme "non fourni" au même titre que `undefined` : aucun champ du schéma
+ * n'accepte `null` (schema.ts), donc un YAML édité à la main avec une clé laissée vide
+ * (`token:` sans valeur → `null` en YAML, pas `""`) doit retomber sur la valeur par défaut, pas
+ * écraser silencieusement celle-ci avec `null` — bug réel constaté en production : le fichier
+ * réécrit par l'UI ne peut pas produire ce cas (ConfigWriter.save() valide avant écriture), mais
+ * un config.yaml pré-rempli à la main avant le premier démarrage le peut, et provoquait un crash
+ * ("Expected string, received null") en boucle au démarrage plutôt que le message habituel
+ * "required" ou le repli sur "section non configurée".
  */
 function deepMerge<T>(defaults: T, input: Partial<T>): T {
   const result = { ...defaults };
   for (const key in input) {
-    if (Object.prototype.hasOwnProperty.call(input, key) && input[key] !== undefined) {
+    if (Object.prototype.hasOwnProperty.call(input, key) && input[key] !== undefined && input[key] !== null) {
       if (input[key] && typeof input[key] === 'object' && typeof result[key] === 'object' && !Array.isArray(input[key])) {
         result[key] = deepMerge(result[key] as any, input[key] as any);
       } else {
