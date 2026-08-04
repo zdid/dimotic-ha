@@ -1,5 +1,5 @@
 {
-  "name": "ha-mqtt-socle",
+  "name": "dimotic-ha-core",
   "version": "1.0.0",
   "description": "Socle technique commun pour les applications HA/MQTT",
   "main": "dist/index.js",
