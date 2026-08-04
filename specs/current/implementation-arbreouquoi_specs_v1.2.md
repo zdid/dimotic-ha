@@ -1,11 +1,14 @@
 # Spécifications d'Implémentation — Application ARBREOUQUOI
 
-**Version :** 1.1  
-**Date :** 24 Juillet 2026  
-**Auteur :** Mistral Vibe  
+**Version :** 1.2  
+**Date :** 4 Août 2026  
+**Auteur :** Mistral Vibe / Claude  
 **Statut :** En développement  
 **Type :** Application standalone  
 **Dépend de :** techniques-socle-ha-mqtt_specs_v4.12.md, guide-nouvelle-application_specs_v1.6.md, nommage_specs_v1.0.md  
+
+> **v1.2** : Correction de la référence `ws-ha` → `dimotic-ha` (§9.2, projet renommé le
+> 04/08/2026), sans changement fonctionnel.
 
 ---
 
@@ -850,7 +853,7 @@ this.configService.savePartialConfig({
 
 ```bash
 # Depuis la racine du projet
-cd /chemin/vers/ws-ha
+cd /chemin/vers/dimotic-ha
 
 # Installer les dépendances (si nécessaire)
 pnpm install

@@ -596,7 +596,18 @@ Ces événements sont émis par toutes les applications sans exception.
 |---|---|---|
 | `config:get` | `void` | Demande la config actuelle |
 | `config:save` | `AppConfig` | Soumet une nouvelle configuration |
+| `config:validate` | `AppConfig` | Valide sans sauvegarder |
 | `logs:get` | `{ lines: number }` | Demande les N dernières lignes de log |
+| `ha:structure:get` | `void` | Demande le référentiel HA structuré |
+| `ha:command:send` | `HaCommand` | Envoie une commande à Home Assistant |
+| `app:modules:config:get` | `{ moduleId: string }` | Demande la config d'un module |
+| `app:modules:config:save` | `{ moduleId: string, config: unknown }` | Sauvegarde la config d'un module (formulaire générique) |
+
+⚠️ Ces événements sont câblés **en dur** dans `SocketBridge.setupSocketIOHandlers()` — ils vivent
+dans la constante `SOCLE_CLIENT_EVENTS` (`types/events.ts`), distincte de `SOCLE_SOCKET_EVENTS`
+(§5.2, serveur→client uniquement). **Ne jamais** fusionner les deux ni transmettre
+`SOCLE_CLIENT_EVENTS` à `registerAppSocketEvents('core', ...)` — voir §5.4.3 pour l'incident que ça
+a causé.
 
 ### 5.4 Événements Socket.io — Extension par application
 
@@ -691,6 +702,30 @@ diverses applications.
 poser de nouveaux écouteurs pour un `appId`, tous les écouteurs précédemment enregistrés pour ce
 même `appId` sont retirés (`eventBus.off(eventName, listener)`). Un ré-enregistrement légitime
 (config rechargée, reconnexion) ne peut donc plus jamais accumuler de doublons.
+
+#### 5.4.3 ⭐ Double-traitement des événements client→serveur du socle (v4.23)
+
+**Problème corrigé** : `AppService.registerCoreSocketEvents()` enregistrait `appId: 'core'` avec
+l'objet `SOCLE_SOCKET_EVENTS` **complet** — qui, avant ce correctif, mélangeait événements
+serveur→client (§5.2) et client→serveur (§5.3) dans une seule constante. Or
+`SocketBridge.setupDynamicAppHandlers()` câble un `socket.on(eventName, ...)` pour **chaque**
+événement de **chaque** application enregistrée (mécanisme générique pensé pour les événements
+propres à une application, ex: `rfxcom:scene:execute`). Les 8 événements client→serveur du socle
+(`config:get/save/validate`, `logs:get`, `ha:structure:get`, `ha:command:send`,
+`app:modules:config:get/save`) étaient donc câblés **une seconde fois** en plus des handlers déjà
+codés en dur dans `SocketBridge.setupSocketIOHandlers()` — chaque requête client sur l'un de ces
+événements déclenchait deux fois le traitement métier correspondant (repéré via une reconnexion
+MQTT en double sur Nommage lors de la sauvegarde de sa config par le formulaire générique, mais
+touchant potentiellement tous les 8, y compris `ha:command:send` — commandes envoyées à Home
+Assistant).
+
+**Correctif** : `SOCLE_SOCKET_EVENTS` (§5.2) et `SOCLE_CLIENT_EVENTS` (§5.3, nouveau) sont
+désormais deux constantes distinctes dans `types/events.ts`, sur le même modèle que
+`NOMMAGE_SOCKET_EVENTS`/`NOMMAGE_CLIENT_EVENTS`. `registerCoreSocketEvents()` ne référence plus que
+`SOCLE_SOCKET_EVENTS` (serveur→client) — `SOCLE_CLIENT_EVENTS` n'est **jamais** transmis à
+`registerAppSocketEvents()`, ces événements restant exclusivement gérés par les handlers codés en
+dur. Vérifié en direct : un script reproduisant une sauvegarde de config Nommage puis un
+`logs:get` isolé ne déclenche plus qu'un seul traitement chacun (contre deux avant correctif).
 
 ### 5.5 Flux de sauvegarde de la configuration
 
@@ -1134,6 +1169,20 @@ class MyService {
   }
 }
 ```
+
+### 7.5 ⭐ Fusion des valeurs `null` — piège YAML (v4.23)
+
+**Problème corrigé** : `deepMerge` (`loader.ts`) laissait une valeur YAML explicitement `null`
+(ex: `token:` laissé vide en éditant `config.yaml` à la main — YAML parse ça en `null`, pas en
+`""`) écraser silencieusement la valeur par défaut au lieu d'être traitée comme "non fournie".
+Zod rejetait ensuite ce `null` avec une erreur de type confuse (`Expected string, received null`)
+plutôt que le message habituel "Token requis" — au démarrage, dans un conteneur Docker, ce crash
+provoquait une boucle de redémarrage (`restart: unless-stopped`) sans message d'erreur exploitable
+sans consulter les logs.
+
+**Correctif** : `deepMerge` traite désormais `null` comme `undefined` (repli sur la valeur par
+défaut), la validation Zod retrouvant son message d'erreur normal en cas de champ réellement
+manquant.
 
 ---
 
@@ -1846,8 +1895,21 @@ Il est le **seul point de contact** entre EventBus et Socket.io.
 
 | Code | Signification |
 |---|---|
-| `0` | Arrêt propre (normal ou après sauvegarde config) |
-| `1` | Erreur fatale au démarrage |
+| `0` | Arrêt propre (normal, après sauvegarde config, ou redémarrage manuel — voir §10.4) |
+| `1` | Erreur fatale au démarrage, ou exception non capturée (`uncaughtException`) |
+
+### 10.4 ⭐ Redémarrage manuel (v4.23)
+
+Bouton "🔄 Redémarrer l'application" dans Paramètres Techniques → Journalisation (avec
+confirmation avant déclenchement) — utile après un changement de configuration qui nécessite un
+redémarrage complet plutôt qu'une simple reconnexion à chaud (voir §5.5).
+
+**Flux** : clic UI → `socket.emit('app:restart')` → `SocketBridge` traduit en
+`eventBus.emit('app:restart:requested')` → `AppService.handleRestartRequested()` → log de la
+raison ("redémarrage manuel") → `RestartManager` déclenche `bootstrap.stop()` puis `process.exit(0)`
+après un court délai (~1,5s, le temps que le résultat `app:restart:result` parte vers le client
+avant la coupure de connexion) — Docker relance immédiatement le conteneur (`restart:
+unless-stopped`), sans intervention manuelle sur la machine cible.
 
 ---
 
@@ -1863,8 +1925,13 @@ contenu ici pour éviter tout nouveau décrochage documentaire :
   appelé depuis le `Dockerfile` (plus un service séparé).
 - `.dockerignore` — réduit le contexte envoyé au démon Docker (n'affecte pas le contenu de l'image).
 
-Image publiée sur Docker Hub : `zdid2/dimotic-ha` (`:latest`, `:0.1.0`), multi-architecture
-(`linux/amd64` + `linux/arm64` — couvre Raspberry Pi 3/4/5 en OS 64 bits).
+Image publiée sur Docker Hub : `zdid2/dimotic-ha` (`:latest` + un tag `X.Y.Z` incrémenté
+manuellement à chaque publication, ex: `:0.1.3` — sans lien avec le `version` de `package.json`,
+resté à `1.0.0`), multi-architecture (`linux/amd64` + `linux/arm64` — couvre Raspberry Pi 3/4/5 en
+OS 64 bits). Publication via
+`docker buildx build --platform linux/amd64,linux/arm64 -t zdid2/dimotic-ha:latest -t
+zdid2/dimotic-ha:X.Y.Z --push .` (builder `dimotic-builder`, créé une fois via `docker buildx
+create`).
 
 ### 11.1 Principe : image autosuffisante, code construit pendant le build
 
@@ -1953,6 +2020,32 @@ Points clés du `compose.yaml` :
   courant — sans effet si déjà `666`, comme observé sur la machine de développement).
 - **Volumes** : `app-code` (nommé, voir §11.2), `data/` + `logs/` (bind-mounts hôte, persistance —
   un sous-répertoire par application, voir §7), `/dev` (voir ci-dessus).
+
+### 11.4 ⭐ `compose.deploy.yaml` — déploiement sur machine cible (v4.23)
+
+Fichier distinct de `compose.yaml` (celui-ci reste réservé à la machine de développement, pour
+construire/publier une nouvelle image — il contient `build: .`). `compose.deploy.yaml` reprend
+exactement la même configuration de service (réseau, volumes, `privileged`, voir §11.3) mais
+**sans** `build:` — l'image est tirée uniquement depuis Docker Hub, aucun code source ni
+`Dockerfile` requis sur la machine cible.
+
+**Utilisation sur la machine cible** (Raspberry Pi 3/4/5 OS 64 bits, ou toute machine
+linux/amd64|arm64) :
+1. Copier ce seul fichier (ex: `scp compose.deploy.yaml pi@cible:~/dimotic-ha/compose.yaml`).
+2. Créer à côté deux dossiers vides : `data/` et `logs/` — rien à pré-remplir, un
+   `data/core/config.yaml` absent/vide est géré avec des valeurs par défaut sans faire planter le
+   démarrage (`applications/core/src/infrastructure/config/loader.ts`).
+3. `docker compose pull && docker compose up -d`.
+4. Ouvrir l'UI (`http://<IP>:8080`) → Paramètres Techniques → Web Services, y saisir la connexion
+   MQTT et HA WebSocket **de cette machine** (probablement différente de celle de développement) —
+   la sauvegarde écrit elle-même `data/core/config.yaml`, pas besoin de l'éditer à la main.
+
+⚠️ **Fiabilité du support de stockage** : le volume nommé `app-code` (§11.2) et l'exécution continue
+de Docker sollicitent l'écriture disque en continu — une carte SD sur Raspberry Pi peut s'user et
+provoquer des erreurs `ENOENT`/I/O aléatoires (constaté en conditions réelles, 04/08/2026 —
+symptôme : `tsx` incapable de créer son dossier IPC dans `/tmp`, alors que rien dans ce projet ne
+touche `/tmp`). Un stockage USB (clé ou SSD) est préférable à une carte SD pour un déploiement de
+longue durée sur Raspberry Pi.
 
 ---
 
@@ -2080,6 +2173,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.23** | 04/08/2026 | Claude | **Rattrapage de dérive code/specs** (session de vérification demandée par l'utilisateur, ~24h après la v4.22) — cinq ajouts distincts constatés dans le code sans trace dans les specs : (1) **§5.3/§5.4.3** — `SOCLE_SOCKET_EVENTS` scindé en deux constantes (serveur→client / client→serveur, `SOCLE_CLIENT_EVENTS` nouveau) après découverte d'un bug de double-traitement des 8 événements client→serveur du socle (`config:get/save/validate`, `logs:get`, `ha:structure:get`, `ha:command:send`, `app:modules:config:get/save`), repéré via une reconnexion MQTT en double sur Nommage. (2) **§10.3/§10.4** — bouton de redémarrage manuel (Paramètres Techniques → Journalisation). (3) **§11** — numéro de version de l'image Docker Hub corrigé (`:0.1.0`→schéma `X.Y.Z` réel, `:0.1.3` au moment de cette version), commande `docker buildx` documentée. (4) **§11.4** — `compose.deploy.yaml` (fichier de déploiement autonome pour machine cible, créé le 03/08 après la v4.22), avec un avertissement sur la fiabilité des cartes SD suite à un incident réel constaté le jour même sur un déploiement Pi4. (5) **§7.5** — correctif d'un crash au démarrage sur champ YAML `null` (`deepMerge`/`loader.ts`). Aucun de ces cinq points n'avait de changelog ni de mise à jour de spec au moment de son commit — voir aussi les correctifs correspondants sur `fonctionnelles-nommage_specs`/`implementation-nommage_specs` (v1.4) pour le détail du bug Nommage, et le renommage `ws-ha`→`dimotic-ha` corrigé dans 4 autres specs qui référençaient encore l'ancien nom. |
 | **4.22** | 03/08/2026 | Claude | **Deuxième réécriture de la §11 "Docker"**, quelques heures après la v4.21 — la conception "code monté depuis l'hôte" obligeait à `git clone` sur chaque machine cible (question utilisateur : "pourquoi en externe, pourquoi pas en interne ?"). Nouvelle conception autosuffisante : le code est construit pendant `docker build` (plus de service `build` séparé). Piège réel découvert en vérifiant ce design, documenté en détail (§11.2) : `fs.renameSync()` (activation/désactivation d'application) échoue avec `EXDEV` dès que le code applicatif vit uniquement dans les couches de l'image (`overlay2`) OU sur deux bind-mounts hôte séparés (même disque physique) — seul un volume Docker nommé unique couvrant tout `/app`, peuplé automatiquement au premier démarrage, fonctionne. Image republiée sur Docker Hub avec ce correctif. Ancienne version v4.21 archivée. |
 | **4.21** | 03/08/2026 | Claude | **Réécriture complète de la §11 "Docker"** (demande utilisateur) — l'ancien contenu décrivait l'architecture pré-restructuration (pnpm, racine unique), déjà obsolète. Nouveau design construit et testé en conditions réelles (build complet des 9 applications dans un conteneur) : code applicatif monté depuis l'hôte plutôt que copié dans l'image (rename() inter-filesystèmes pour l'activation/désactivation d'application, absence de build racine fiable), `network_mode: host` (MQTT/HA en localhost sur la machine cible), `privileged`+volume `/dev` pour RFXCOM (préserve la robustesse de `PortDetector` face à la renumérotation des ports série), exécution en utilisateur hôte plutôt que root. Deux bugs latents réels découverts et corrigés en isolant le build (`arbreouquoi`/`nommage` : dépendance `zod` manquante ; HAPLAN : `NodeJS.Timeout` invalide côté navigateur). |
 | **4.20** | 03/08/2026 | Claude | **Correction d'un crash total du process (§8.5.2)** : `MqttTransport.publish()`/`subscribe()` levaient une exception synchrone sur déconnexion transitoire, remontant sans aucun `try/catch` jusqu'à une exception non capturée au niveau du process Node entier — n'importe quel module d'intégration publiant pendant une micro-coupure MQTT pouvait faire planter toute l'application. Corrigé par une file d'attente courte (publications : 200 messages max, 30s d'expiration, rejouées à la reconnexion) et un réabonnement automatique à chaque reconnexion (abonnements : mémorisés et réappliqués, corrige au passage une perte silencieuse et définitive des commandes HA→app après coupure, découverte en implémentant ce correctif — chaque reconnexion recrée un client MQTT entièrement nouveau qui ne conserve nativement aucun abonnement). Vérifié : build propre, suite de tests inchangée (mêmes 12 échecs préexistants sans rapport, aucune régression). |

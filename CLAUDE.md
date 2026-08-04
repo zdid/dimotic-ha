@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Règles distillées de `PROMPT.md` et `PROMPT_PROJET.md` (v1.2, 19/07/2026), les documents de règles du projet écrits pour tout assistant IA travaillant ici. **Ces deux fichiers restent la référence complète** (procédures détaillées, templates de sauvegarde, table de correspondance specs↔application) — en cas de divergence avec ce CLAUDE.md, ce sont eux qui font foi ; mets ce fichier à jour en conséquence si tu les modifies.
+Règles distillées de `PROMPT.md` et `PROMPT_PROJET.md` (voir l'en-tête de chaque fichier pour sa version courante — référence volontairement sans numéro de version ici, pour ne pas se périmer à chaque mise à jour de l'un des deux, cf. `PROMPT_PROJET.md` §3), les documents de règles du projet écrits pour tout assistant IA travaillant ici. **Ces deux fichiers restent la référence complète** (procédures détaillées, templates de sauvegarde, table de correspondance specs↔application) — en cas de divergence avec ce CLAUDE.md, ce sont eux qui font foi ; mets ce fichier à jour en conséquence si tu les modifies.
 
 ## Le projet
 

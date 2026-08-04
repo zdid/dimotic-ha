@@ -1,5 +1,8 @@
 # Spécifications Fonctionnelles - Module AREXX
 
+*Version 1.1 - 4 Août 2026*
+*v1.1 : correction de la référence `ws-ha` → `dimotic-ha` (§5.1, projet renommé le 04/08/2026),
+sans changement fonctionnel.*
 *Version 1.0 - 3 Août 2026*
 *Première spécification formelle de l'application AREXX, opérationnelle depuis le 23/07/2026 mais
 jusqu'ici sans documentation dédiée — écrite a posteriori à partir d'une lecture exhaustive du code
@@ -190,7 +193,7 @@ bibliothèque série Node.
 | `rulefile.txt` | Configuration passée en argument — cible **codée en dur** `localhost:49161` |
 | `51-rf_usb.rules` | Règle udev à installer (`/lib/udev/rules.d`), `idVendor==0451`, `idProduct==3211` |
 | `device.xml` | Table des types de mesure AREXX (1=Température, 3=Humidité relative, 5=CO2, 7=Tension, 9=Temps...) |
-| `rf.service` | Unité systemd de référence (déploiement standalone d'origine, non utilisée par ws-ha) |
+| `rf.service` | Unité systemd de référence (déploiement standalone d'origine, non utilisée par dimotic-ha) |
 
 ### 5.2 Cycle de vie
 

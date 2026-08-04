@@ -1,8 +1,8 @@
 # PROMPT PROJET - Règles de Développement
 
-**Version : 1.3**
-**Date : 21 Juillet 2026**
-**Dernière mise à jour : Correction des références obsolètes vers les specs suite au nettoyage Alpine.js et à l'audit de nommage du 21/07/2026, PUIS passage de toutes les mentions de specs à un format sans numéro de version (ex: `techniques-socle-ha-mqtt_specs` au lieu de `techniques-socle-ha-mqtt_specs_v4.7.md`) dans les tableaux §11 et la structure recommandée, pour éviter que ce document se périme à chaque nouvelle version de spec. Ajout de la référence à `inter-app-communication_specs`. Précision sur la convention de nommage à deux niveaux effectivement en usage.**
+**Version : 1.4**
+**Date : 4 Août 2026**
+**Dernière mise à jour : Table §11 "Pour Applications Spécifiques" désynchronisée depuis sa création — ne citait ni NOMMAGE, ni ARBREOUQUOI, ni IA, ni PLANIFICATEUR, ni AREXX, ni HAPLAN alors que ces 6 applications ont chacune au moins une spec fonctionnelle dédiée dans `specs/current/` (certaines depuis fin juillet). Corrigé en ajoutant les 6 lignes manquantes, sans toucher au reste du document. Ancienne version v1.3 archivée dans `specs/archives/PROMPT_PROJET_v1.3-20260804.md`.**
 
 ## 📚 Table des Matières
 1. [Règles Fondamentales](#-règles-fondamentales)
@@ -362,6 +362,12 @@ projet/
 | **Intégration MQTT** (RFXCOM, Zigbee2MQTT, etc.) | `integrationbridge-mqtt-auto_specs` | Applications intégrant du matériel via MQTT |
 | **Application RFXCOM** | `fonctionnelles-rfxcom_specs` + `recepteurs-emetteurs-rfxcom_specs` + `classification-rfxcom_specs` + `implementation-rfxcom_specs` | **Maintenance et développement** spécifique RFXCOM |
 | **Application EVOO7** | `fonctionnelles-evoo7_specs` | **Maintenance et développement** spécifique EVOO7 (régulateur de chauffage/PAC VR Electronique) |
+| **Application NOMMAGE** | `fonctionnelles-nommage_specs` + `implementation-nommage_specs` | **Maintenance et développement** spécifique NOMMAGE (au-delà des conventions de nommage génériques déjà couvertes par `nommage_specs` §Pour TOUTE Nouvelle Application) |
+| **Application ARBREOUQUOI** | `fonctionnelles-arbreouquoi_specs` + `implementation-arbreouquoi_specs` | **Maintenance et développement** spécifique ARBREOUQUOI |
+| **Application IA** | `fonctionnelles-ia_specs` | **Maintenance et développement** spécifique IA (émulation Ollama, routage multi-IA, appel d'outils) — à lire avec `fonctionnelles-planificateur_specs` |
+| **Application PLANIFICATEUR** | `fonctionnelles-planificateur_specs` | **Maintenance et développement** spécifique PLANIFICATEUR (macros/planifications, déclencheurs, résolution vers un service HA) — à lire avec `fonctionnelles-ia_specs` |
+| **Application AREXX** | `fonctionnelles-arexx_specs` | **Maintenance et développement** spécifique AREXX (capteurs température/humidité BS1000/BS500) |
+| **Application HAPLAN** | `fonctionnelles-haplan_specs` | **Maintenance et développement** spécifique HAPLAN (plans de maison tactiles, pilotage d'entités HA) |
 | **UI Avancée** | `presentation_specs` | Applications avec interface complexe |
 | **Gestion d'erreurs fine** | `erreurs_specs` | Applications nécessitant une gestion d'erreur spécifique |
 | **Patterns Architecturaux** | `architectural-patterns_specs` | Pour comprendre les patterns MQTT/WS globaux |

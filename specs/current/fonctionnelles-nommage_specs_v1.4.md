@@ -1,10 +1,15 @@
 # Spécifications Fonctionnelles - Application NOMMAGE
 
-**Version :** 1.3  
-**Date :** 24 Juillet 2026  
+**Version :** 1.4  
+**Date :** 4 Août 2026  
 **Auteur :** Mistral Vibe / Claude  
 **Statut :** Document de référence pour l'application NOMMAGE  
 **Document parent :** [PROMPT_PROJET.md](../PROMPT_PROJET.md)
+
+> **v1.4** : **Application à chaud d'une sauvegarde de configuration** (§7.4, nouveau) — la
+> sauvegarde via le formulaire générique "Paramètres du Module" (seule UI de configuration de
+> NOMMAGE) ne reconnectait pas les sources MQTT avec les nouveaux paramètres, contrairement à ce
+> qu'un utilisateur attendrait ; corrigé (vérifié en direct sur demande explicite).
 
 > **v1.2** : Le code ne traitait en réalité que la **première entrée** de `couples`/`sources`
 > malgré la description v1.1 — corrigé (§3.1). **Tableau de bord enrichi** (§3.5) : affichage du
@@ -616,6 +621,20 @@ Toute configuration est **validée avec Zod** avant application.
 - `sources[].mqtt.clientId` : string non vide, unique entre toutes les sources
 - `logging.level` : 'debug' | 'info' | 'warn' | 'error'
 
+### 7.4 ⭐ Application à chaud d'une sauvegarde de configuration (v1.4)
+
+NOMMAGE n'a pas de page de configuration dédiée (§7.2 : accès via le formulaire générique "Paramètres
+du Module" du core, pas un `config.html` propre). Jusqu'à cette version, une sauvegarde via ce
+formulaire persistait bien la nouvelle configuration sur disque, mais **les connexions MQTT en
+cours continuaient de tourner avec les anciens paramètres** jusqu'au redémarrage complet de
+l'application — seul le fichier était à jour, pas le service en cours d'exécution (constaté en
+vérifiant en direct sur demande explicite de l'utilisateur).
+
+**Corrigé** : la sauvegarde via le formulaire générique déclenche désormais la même reconnexion à
+chaud des sources MQTT qu'une sauvegarde via un chemin dédié — toutes les sources sont
+déconnectées puis reconnectées avec la configuration rechargée. Voir `implementation-nommage_specs`
+§(à préciser côté implémentation) pour le détail technique (événement écouté, méthode déclenchée).
+
 ---
 
 ## 8. Gestion des Erreurs
@@ -798,6 +817,8 @@ Toute configuration est **validée avec Zod** avant application.
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **1.4** | 04/08/2026 | Claude | **Application à chaud d'une sauvegarde de configuration** (§7.4, nouveau) — la sauvegarde via le formulaire générique "Paramètres du Module" ne reconnectait pas les sources MQTT avec les nouveaux paramètres ; corrigé, vérifié en direct. Ancienne version v1.3 archivée. |
+| **1.3** | 24/07/2026 | Claude | *(Historique non détaillé dans ce tableau au moment de la rédaction — voir `specs/archives/fonctionnelles-nommage_specs_v1.3.md` pour le contenu complet de cette version.)* |
 | **1.2** | 21/07/2026 | Claude | **Correction** : le code ne traitait en réalité que `couples[0]`/la première source malgré la description v1.1 — corrigé (§3.1, `NommageMqttIntegrationService` gère désormais une `Map<sourceId, MqttClient>`). **Tableau de bord enrichi** (§3.5, §4.4) : statut par connexion (nom + connecté/déconnecté) et entrées traitées par jour sur 5 jours glissants (`NommageStatus.sources[]`/`.dailyCounts[]`). Correction des chemins statiques des pages (`presentation/` fait partie de l'URL). |
 | **1.1** | 21/07/2026 | Claude | Sources MQTT multiples traitées simultanément (`sources[]` remplace `mqtt`), transmission via Passthrough MQTT du socle (remplace `nommage:transmit:to-core`), cas d'usage Zigbee2MQTT résolu, clarification §6.2 : NOMMAGE ne dépend que de `ha.mqtt_enable` (jamais `ha.ws_enable`), le référentiel HA n'est jamais mis à jour depuis MQTT |
 | **1.0** | 19/07/2026 | Mistral Vibe | Version initiale : Parsing QUOI/OÙ, transmission au core |

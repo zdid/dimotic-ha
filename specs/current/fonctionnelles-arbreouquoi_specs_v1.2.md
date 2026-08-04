@@ -1,10 +1,13 @@
 # Spécifications Fonctionnelles — Application ARBREOUQUOI
 
-**Version :** 1.1  
-**Date :** 24 Juillet 2026  
-**Auteur :** Mistral Vibe  
+**Version :** 1.2  
+**Date :** 4 Août 2026  
+**Auteur :** Mistral Vibe / Claude  
 **Statut :** En développement  
 **Type :** Application standalone  
+
+> **v1.2** : Correction de la référence `ws-ha` → `dimotic-ha` (§1.1, projet renommé le 04/08/2026),
+> sans changement fonctionnel.
 
 ---
 
@@ -26,7 +29,7 @@
 
 ### 1.1 Contexte
 
-L'application **ARBREOUQUOI** (Arbre Ou Quoi) s'intègre dans l'écosystème **ws-ha** qui fournit un socle technique pour les applications Home Assistant. Le socle maintient déjà un **référentiel structuré** des entités Home Assistant organisé selon la hiérarchie :
+L'application **ARBREOUQUOI** (Arbre Ou Quoi) s'intègre dans l'écosystème **dimotic-ha** (anciennement `ws-ha`, renommé le 04/08/2026) qui fournit un socle technique pour les applications Home Assistant. Le socle maintient déjà un **référentiel structuré** des entités Home Assistant organisé selon la hiérarchie :
 
 ```
 Area (Lieu/Pièce) → QUOI (Type fonctionnel) → Entités

@@ -2,6 +2,14 @@
 
 ## Problèmes prioritaires
 
+### 🟢 Crash au démarrage (crash-loop) sur un champ YAML laissé vide — Corrigé
+- **Entrée ajoutée rétroactivement (04/08/2026)** : ce correctif a été commité (`8e4217d`, 04/08/2026 16:06) sans jamais être journalisé ici ni dans les specs — seul le message de commit git en gardait la trace, repéré lors d'une session de vérification des specs.
+- **Problème** : `deepMerge` (`applications/core/src/infrastructure/config/loader.ts`) laissait une valeur YAML explicitement `null` (ex: `token:` laissé vide en éditant `config.yaml` à la main avant le premier démarrage — YAML parse ça en `null`, pas en `""`) écraser silencieusement la valeur par défaut au lieu d'être traitée comme "non fournie". Zod rejetait ensuite ce `null` avec une erreur de type confuse (`Expected string, received null`) plutôt que le message habituel "Token requis" — dans un conteneur Docker (`restart: unless-stopped`), ce crash provoquait une boucle de redémarrage silencieuse, sans message d'erreur exploitable sans consulter les logs.
+- **Corrigé (04/08/2026)** : `deepMerge` traite désormais `null` comme `undefined` (repli sur la valeur par défaut) — aucun champ du schéma n'accepte `null`. Deux tests de régression ajoutés : un champ isolé à `null` retombe sur le défaut (et échoue proprement à la validation), une section `ws` entièrement à `null` désactivée démarre normalement.
+- **Documenté dans les specs** : `techniques-socle-ha-mqtt_specs_v4.23.md` §7.5.
+- **Statut** : Corrigé (2026-08-04)
+- **Priorité** : Était Haute (crash-loop) — résolu
+
 ### 🟢 Chaque dashboard ouvrait sa propre connexion Socket.io au lieu de réutiliser celle du core — Corrigé
 - **Demande utilisateur (2026-07-24)**, explicitement "très prioritaire" : n'utiliser qu'une seule connexion Socket.io ; sinon expliquer pourquoi ce n'est pas possible.
 - **Constat** : le core initialise une connexion unique et l'expose sur `window.app.socketService` (`applications/core/src/presentation/ui/ts/app.ts`). Mais **7 dashboards**, injectés dans le **même** `window`/Shadow DOM via `ModuleContainer` (pas une navigation réelle) — `arbreouquoi`, `nommage`, `evoo7`, `ia`, `arexx`, `rfxcom`, `planificateur` (`presentation/ts/app.ts` de chacun) — créaient chacun leur propre `new SocketService(); socket.connect()`, un pattern copié-collé sans raison technique. C'est directement ce qui alimentait le bug `ModuleContainer` ci-dessous : chaque exécution du script ouvrait une nouvelle connexion, qui déclenchait un nouveau rejeu des événements persistants côté serveur (`app:modules:list` etc., "rejoués à chaque connexion" — commentaire de `ModuleManager.ts:60-64`), pouvant redéclencher une nouvelle exécution.

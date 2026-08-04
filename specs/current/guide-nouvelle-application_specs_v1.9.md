@@ -1,9 +1,12 @@
 # Guide Rapide — Création d'une Nouvelle Application
 
-**Version :** 1.8  
-**Date :** 24 Juillet 2026  
+**Version :** 1.9  
+**Date :** 4 Août 2026  
 **Statut :** Document pratique pour les développeurs  
 **Public cible :** Développeurs créant une nouvelle application sans modifier le socle  
+
+> **NOUVEAU v1.9 :** Correction de la référence `ws-ha` → `dimotic-ha` (§3.1, projet renommé le
+> 04/08/2026), sans changement fonctionnel.
 
 > **⚠️ IMPORTANT :** Ce guide suppose que vous avez lu et compris :
 > - [techniques-socle-ha-mqtt_specs_v4.14.md](techniques-socle-ha-mqtt_specs_v4.14.md) (architecture 5 couches, EventBus, cycle de vie, nouvelle arborescence applications/, §4.2.1 exports.ts vs ui-exports.ts)
@@ -104,7 +107,7 @@ applications/
 ### 3.1 Créer le répertoire de l'application
 
 ```bash
-cd /chemin/vers/ws-ha
+cd /chemin/vers/dimotic-ha
 mkdir -p applications/{nom-app}/domain
 mkdir -p applications/{nom-app}/presentation/styles
 mkdir -p applications/{nom-app}/presentation/ts

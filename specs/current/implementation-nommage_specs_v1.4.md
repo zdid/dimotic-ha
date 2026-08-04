@@ -1,10 +1,14 @@
 # Spécifications d'Implémentation - Application NOMMAGE
 
-**Version :** 1.3  
-**Date :** 24 Juillet 2026  
+**Version :** 1.4  
+**Date :** 4 Août 2026  
 **Auteur :** Mistral Vibe / Claude  
 **Statut :** Document technique pour les développeurs  
-**Document parent :** [fonctionnelles-nommage_specs_v1.2.md](./fonctionnelles-nommage_specs_v1.2.md)
+**Document parent :** [fonctionnelles-nommage_specs_v1.4.md](./fonctionnelles-nommage_specs_v1.4.md)
+
+> **v1.4** : **Reconnexion MQTT sur sauvegarde via le formulaire générique** (§4.2.2, nouveau) —
+> `app:module:config:saved` écouté en plus de `nommage:config:save` (jamais déclenché par une UI
+> réelle). Correction de la référence `ws-ha` → `dimotic-ha` (§7.1, projet renommé le 04/08/2026).
 
 > **v1.1** : `NommageMqttIntegrationService` gère désormais **N connexions MQTT simultanées** (une
 > par source, §4.1) au lieu d'une seule. La transmission vers HA passe par le **Passthrough MQTT**
@@ -395,7 +399,10 @@ private emitPassthroughDiscovery(discoveryMessage: DiscoveryMessage, parsed: Par
 - `nommage:mqtt:status` → Mise à jour du statut MQTT
 - `nommage:status:get` → Demande de statut depuis l'UI
 - `nommage:taxonomy:get` → Demande de structure taxonomique
-- `nommage:config:save` → Sauvegarde de la configuration
+- `nommage:config:save` → Sauvegarde de la configuration (chemin historique, jamais déclenché par
+  une UI réelle — voir §4.2.2)
+- `app:module:config:saved` → ⭐ v1.4, voir §4.2.2 — chemin réellement emprunté par le formulaire
+  générique "Paramètres du Module" du core
 
 **Événements EventBus émis :**
 - `nommage:discovery:parsed` → Message parsé avec succès (statut détaillé, voir §4.2.1)
@@ -436,6 +443,39 @@ private getDailyCountsLastDays(): DailyCount[] {
 
 > ⚠️ Comme `parsedMessagesCount` et `taxonomyStructures`, ces compteurs sont **en mémoire** : ils
 > repartent à zéro à chaque redémarrage de l'application (pas de persistance sur disque).
+
+### 4.2.2 ⭐ Reconnexion MQTT sur sauvegarde via le formulaire générique (v1.4)
+
+**Constat** : NOMMAGE n'a pas de page de configuration dédiée (`config.html`/`config-app.ts`) — il
+utilise le formulaire générique "Paramètres du Module" du core (§4.4). Ce formulaire sauvegarde via
+`app:modules:config:save` → `AppService.handleModuleConfigSave()` → `ConfigService.saveModuleConfig()`,
+qui **valide et écrit sur disque uniquement** — rien n'émettait jamais `nommage:config:save`, le
+seul événement historiquement écouté par `saveConfig()` pour déclencher la reconnexion MQTT (§4.2,
+liste des événements écoutés). Résultat : les connexions MQTT en cours continuaient de tourner avec
+les anciens paramètres jusqu'au redémarrage complet de l'application.
+
+**Correctif** : nouveau listener sur `app:module:config:saved` (déjà émis par
+`AppService.handleModuleConfigSave`, jusque-là jamais consommé par NOMMAGE) — filtre sur
+`moduleId === 'nommage' && success`, puis appelle `reloadConfigAndReconnectMqtt()`, une méthode
+factorisée hors de `saveConfig()` (recharge la config depuis le provider, recalcule
+`discoveryTopics`, déconnecte/reconnecte `mqttService`) — réutilisée par les deux chemins
+(`nommage:config:save` historique et `app:module:config:saved` réel).
+
+```typescript
+this.eventBus.on('app:module:config:saved', (data: unknown) => {
+  const result = data as { moduleId: string; success: boolean };
+  if (result.moduleId !== 'nommage' || !result.success) return;
+  this.reloadConfigAndReconnectMqtt().catch((error) => {
+    this.logger.error('NommageService', `Erreur lors de la reconnexion après sauvegarde: ${error}`);
+  });
+});
+```
+
+**Piège apparenté découvert en vérifiant ce correctif en direct, sans rapport avec NOMMAGE
+lui-même** : `AppService.registerCoreSocketEvents()` enregistrait ses événements client→serveur
+(dont `app:modules:config:save`) en double auprès de `SocketBridge` — chaque sauvegarde déclenchait
+donc deux fois cette reconnexion. Corrigé au niveau du socle, voir `techniques-socle-ha-mqtt_specs`
+§5.4.3.
 
 ### 4.3 Déclaration du Module
 
@@ -788,7 +828,7 @@ logging:
 
 ```bash
 # Vérifier la compilation TypeScript
-cd /chemin/vers/ws-ha
+cd /chemin/vers/dimotic-ha
 npm run build
 
 # Vérifier les erreurs TypeScript
@@ -920,6 +960,8 @@ mosquitto_sub -h localhost -t "$SYS/broker/subscriptions" -v
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **1.4** | 04/08/2026 | Claude | **Reconnexion MQTT sur sauvegarde via le formulaire générique** (§4.2.2) — `app:module:config:saved` écouté en plus de `nommage:config:save`. Correction `ws-ha`→`dimotic-ha` (§7.1). Ancienne version v1.3 archivée. |
+| **1.3** | 24/07/2026 | Claude | *(Historique non détaillé dans ce tableau au moment de la rédaction — voir `specs/archives/implementation-nommage_specs_v1.3.md` pour le contenu complet de cette version.)* |
 | **1.2** | 21/07/2026 | Claude | **Correction** : le code v1.1 ne connectait/traitait en réalité que `couples[0]` malgré le texte — `NommageMqttIntegrationService` gère désormais réellement une `Map<sourceId, MqttClient>` (§4.1). Exemples de code §4.2/§5.3 réalignés sur le Passthrough MQTT réel (`bridgeInstance` obligatoire, absent à tort en v1.1). **Nouveau** : statut par connexion et entrées traitées par jour sur 5 jours glissants (§4.2.1, `NommageStatus.sources[]`/`.dailyCounts[]`). |
 | **1.1** | 21/07/2026 | Claude | `NommageMqttIntegrationService` gère N connexions simultanées (une par source), transmission via Passthrough MQTT du socle (remplace `nommage:transmit:to-core`), correction : le référentiel HA n'est jamais mis à jour depuis MQTT, NOMMAGE ne dépend que de `ha.mqtt_enable` |
 | **1.0** | 19/07/2026 | Mistral Vibe | Version initiale : Implémentation complète selon specs |
