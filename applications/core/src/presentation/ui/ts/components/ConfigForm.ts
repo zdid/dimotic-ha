@@ -227,6 +227,24 @@ const createTemplate = (): HTMLTemplateElement => {
         cursor: not-allowed;
       }
 
+      .btn-secondary {
+        background-color: #e67e22;
+        color: white;
+      }
+
+      .btn-secondary:hover {
+        background-color: #d35400;
+      }
+
+      .btn-secondary:disabled {
+        background-color: #bdc3c7;
+        cursor: not-allowed;
+      }
+
+      .section-actions-danger {
+        border-top-style: dashed;
+      }
+
       .save-feedback {
         display: inline-block;
         margin-left: 12px;
@@ -260,6 +278,10 @@ export class ConfigForm extends HTMLElement {
   // quel à chaque render(), quelle qu'en soit la cause.
   private saveResult: { success: boolean; message: string } | null = null;
   private saveResultTimeout: number | undefined;
+  // Même raisonnement que saveResult ci-dessus (état du composant, pas un x-data Alpine local)
+  // pour survivre à un éventuel render() déclenché entre la demande et la réponse serveur.
+  private restartResult: { success: boolean; message: string } | null = null;
+  private restartResultTimeout: number | undefined;
   // Chemins de champ modifiés localement depuis la dernière sauvegarde réussie (sections
   // statiques uniquement — les modules ne re-render jamais sur config:updated, voir plus bas).
   // Sans ce suivi, un config:current reçu pendant que l'utilisateur édite un champ pas encore
@@ -356,6 +378,22 @@ export class ConfigForm extends HTMLElement {
         this.render();
       }, 4000);
     });
+
+    // Résultat de la demande de redémarrage manuel (bouton section Journalisation) — le process
+    // serveur va s'arrêter juste après (voir RestartManager), donc ce message n'a le temps de
+    // s'afficher que brièvement avant la déconnexion Socket.io ; on l'affiche quand même pour
+    // confirmer que la demande a bien été reçue avant la coupure.
+    window.addEventListener('app-restart-result', ((e: CustomEvent) => {
+      this.restartResult = e.detail.success
+        ? { success: true, message: 'Redémarrage en cours...' }
+        : { success: false, message: e.detail.error || 'Échec de la demande de redémarrage' };
+      this.render();
+      if (this.restartResultTimeout !== undefined) window.clearTimeout(this.restartResultTimeout);
+      this.restartResultTimeout = window.setTimeout(() => {
+        this.restartResult = null;
+        this.render();
+      }, 4000);
+    }) as EventListener);
 
     // Écouter les validations
     window.addEventListener('config:validation:updated', (e: CustomEvent) => {
@@ -480,6 +518,7 @@ export class ConfigForm extends HTMLElement {
         </div>
       </div>
       ${this.buildSaveButton()}
+      ${section.id === 'logging' ? this.buildRestartButton() : ''}
     `;
   }
   
@@ -603,6 +642,26 @@ export class ConfigForm extends HTMLElement {
           @click="saving = true; window.app.configManager.saveConfig()"
         >
           <span x-text="saving ? 'Sauvegarde en cours...' : 'Sauvegarder'"></span>
+        </button>
+        ${feedbackHtml}
+      </div>
+    `;
+  }
+
+  private buildRestartButton(): string {
+    const feedbackHtml = this.restartResult
+      ? `<span class="save-feedback${this.restartResult.success ? '' : ' save-feedback-error'}">${this.escapeHtml(this.restartResult.message)}</span>`
+      : '';
+    return `
+      <div class="section-actions section-actions-danger" x-data="{ restarting: false }">
+        <button
+          type="button"
+          id="restart-application-button"
+          class="btn btn-secondary"
+          :disabled="restarting"
+          @click="restarting = true; window.app.configManager.restartApplication(); setTimeout(() => restarting = false, 4000)"
+        >
+          <span x-text="restarting ? 'Redémarrage en cours...' : '🔄 Redémarrer l\\'application'"></span>
         </button>
         ${feedbackHtml}
       </div>

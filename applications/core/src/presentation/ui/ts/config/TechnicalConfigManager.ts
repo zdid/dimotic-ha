@@ -154,6 +154,13 @@ export class TechnicalConfigManager {
       this.saveInProgress = false;
       window.dispatchEvent(new CustomEvent('config-save-result', { detail: result }));
     });
+
+    // Résultat de la demande de redémarrage manuel — l'arrêt réel du process suit de peu
+    // (voir RestartManager côté serveur), la déconnexion Socket.io qui s'ensuit est déjà
+    // gérée par les écouteurs 'disconnect' existants.
+    this.socket.on('app:restart:result', (result: { success: boolean; error?: string }) => {
+      window.dispatchEvent(new CustomEvent('app-restart-result', { detail: result }));
+    });
     
     // Connexion HA
     this.socket.on('ha:connected', () => {
@@ -231,6 +238,18 @@ export class TechnicalConfigManager {
     // voir setupSocketListeners) — plus de setTimeout optimiste ici.
   }
   
+  /**
+   * Demande le redémarrage manuel de l'application (bouton "Redémarrer l'application").
+   * Redémarrage seulement : sous Docker `restart: unless-stopped`, un arrêt persistant
+   * nécessiterait une action externe (docker stop), pas quelque chose que ce bouton peut faire.
+   */
+  restartApplication(): void {
+    if (confirm('Voulez-vous vraiment redémarrer l\'application ? Toutes les connexions en cours seront brièvement interrompues.')) {
+      this.socket.emit('app:restart');
+      window.dispatchEvent(new CustomEvent('app-restart-requested'));
+    }
+  }
+
   /**
    * Récupère la valeur d'un champ de configuration
    */

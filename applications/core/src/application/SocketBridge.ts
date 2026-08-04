@@ -219,6 +219,12 @@ export class SocketBridge {
       this.logger.info('SocketBridge', `EventBus → Socket.io: app:applications:disable:result pour ${data.appId}`);
       this.broadcast('app:applications:disable:result', data);
     });
+
+    // Résultat de la demande de redémarrage manuel
+    this.eventBus.on('app:restart:result', (data: { success: boolean; error?: string }) => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: app:restart:result');
+      this.broadcast('app:restart:result', data);
+    });
   }
 
   /**
@@ -321,6 +327,13 @@ export class SocketBridge {
       socket.on('app:applications:disable', (data: { appId: string }) => {
         this.logger.info('SocketBridge', `Socket.io → EventBus: app:applications:disable de ${socket.id}, appId: ${data.appId}`);
         this.eventBus.emit('app:applications:disable', data);
+      });
+
+      // Handler pour la demande de redémarrage manuel (Paramètres Techniques)
+      // @ts-ignore
+      socket.on('app:restart', () => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: app:restart de ${socket.id}`);
+        this.eventBus.emit('app:restart:requested', undefined as void);
       });
 
       // Gestion de la déconnexion

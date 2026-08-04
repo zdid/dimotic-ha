@@ -143,6 +143,9 @@ export class AppService {
     this.eventBus.on('app:applications:enable', (data: { appId: string }) => this.handleApplicationEnable(data));
     this.eventBus.on('app:applications:disable', (data: { appId: string }) => this.handleApplicationDisable(data));
 
+    // Redémarrage manuel demandé depuis l'UI (Paramètres Techniques > Journalisation)
+    this.eventBus.on('app:restart:requested', () => this.handleRestartRequested());
+
     // Écouter les changements de configuration des modules
     // Note: Le redémarrage automatique a été désactivé comme demandé
     // this.eventBus.onGeneric('app:module:config:saved', (data: { moduleId: string; success: boolean }) => {
@@ -535,6 +538,18 @@ export class AppService {
       success: result.success,
       error: result.error,
     });
+  }
+
+  /**
+   * Gère une demande de redémarrage manuel de l'application, déclenchée depuis l'UI
+   * (bouton "Redémarrer l'application" dans Paramètres Techniques > Journalisation).
+   * Redémarrage seulement (pas d'arrêt persistant) : sous `restart: unless-stopped`,
+   * Docker relance immédiatement le conteneur après un process.exit(0) — voir RestartManager.
+   */
+  private handleRestartRequested(): void {
+    this.logger.warn('AppService', 'Redémarrage manuel de l\'application demandé depuis l\'interface');
+    this.eventBus.emit('app:restart:result', { success: true });
+    this.restartManager.scheduleRestart(1500, 'Redémarrage manuel demandé depuis Paramètres Techniques');
   }
 
   // ===========================================================================

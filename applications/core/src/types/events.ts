@@ -74,6 +74,9 @@ export interface ServerToClientEvents {
   'app:applications:list:result': (data: { activated: string[]; disabled: string[] }) => void;
   'app:applications:enable:result': (data: { appId: string; success: boolean; error?: string }) => void;
   'app:applications:disable:result': (data: { appId: string; success: boolean; error?: string }) => void;
+
+  // Redémarrage manuel de l'application (Paramètres Techniques)
+  'app:restart:result': (data: { success: boolean; error?: string }) => void;
 }
 
 // ------ Événements Client → Server ------
@@ -108,6 +111,9 @@ export interface ClientToServerEvents {
   'app:applications:list': () => void;
   'app:applications:enable': (data: { appId: string }) => void;
   'app:applications:disable': (data: { appId: string }) => void;
+
+  // Redémarrage manuel de l'application (Paramètres Techniques)
+  'app:restart': () => void;
 }
 
 // ============================================================================
@@ -158,6 +164,10 @@ export interface AppEvents {
   'app:applications:enable:result': { appId: string; success: boolean; error?: string };
   'app:applications:disable': { appId: string };
   'app:applications:disable:result': { appId: string; success: boolean; error?: string };
+
+  // Redémarrage manuel de l'application (Paramètres Techniques)
+  'app:restart:requested': void;
+  'app:restart:result': { success: boolean; error?: string };
 
   // ------ Extension libre par les applications ------
   // Les applications dérivées peuvent ajouter leurs propres événements
