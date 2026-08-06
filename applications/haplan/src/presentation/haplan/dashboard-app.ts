@@ -169,6 +169,57 @@ function setupEntityFocusLabel(): void {
   }) as EventListener);
 }
 
+/** Flèches épaisses de navigation entre plans (circulaire) — voir dashboard.html. Ordre basé sur
+ *  Object.keys(dataService.getAllFloorplans()), le même ordre que le sélecteur du menu replié. */
+function navigateFloorplan(direction: 1 | -1): void {
+  const ids = Object.keys(dataService.getAllFloorplans());
+  if (ids.length === 0) return;
+  const currentId = dataService.getCurrentFloorplanId();
+  const currentIndex = ids.indexOf(currentId);
+  const nextIndex = (currentIndex + direction + ids.length) % ids.length;
+  showFloorplan(ids[nextIndex]);
+}
+
+function setupFloorplanArrows(): void {
+  const prevBtn = document.getElementById('btn-floorplan-prev') as HTMLButtonElement | null;
+  const nextBtn = document.getElementById('btn-floorplan-next') as HTMLButtonElement | null;
+  prevBtn?.addEventListener('click', () => navigateFloorplan(-1));
+  nextBtn?.addEventListener('click', () => navigateFloorplan(1));
+}
+
+/** Curseur de taille des icônes/textes du plan, branché sur --plan-scale (voir styles.css, toutes
+ *  les règles scalables en dépendent déjà via calc(Npx * var(--plan-scale, 1))). Mémorisé par
+ *  écran (localStorage) plutôt que via le formulaire générique de paramètres : le menu HAPLAN
+ *  route directement vers ce dashboard (voir Sidebar.ts, menuPath commençant par '/applications/'),
+ *  donc ce formulaire générique n'est de toute façon jamais atteint pour cette app. */
+const PLAN_SCALE_STORAGE_KEY = 'haplan:plan-scale';
+
+function applyPlanScale(scale: number): void {
+  document.documentElement.style.setProperty('--plan-scale', String(scale));
+}
+
+function setupPlanScaleControl(): void {
+  const toggleBtn = document.getElementById('btn-toggle-scale') as HTMLButtonElement | null;
+  const panel = document.getElementById('haplan-scale-panel');
+  const range = document.getElementById('haplan-scale-range') as HTMLInputElement | null;
+  const valueLabel = document.getElementById('haplan-scale-value');
+  if (!toggleBtn || !panel || !range || !valueLabel) return;
+
+  const stored = parseFloat(localStorage.getItem(PLAN_SCALE_STORAGE_KEY) || '1');
+  const initial = Number.isFinite(stored) ? stored : 1;
+  range.value = String(initial);
+  valueLabel.textContent = `${Math.round(initial * 100)}%`;
+  applyPlanScale(initial);
+
+  toggleBtn.addEventListener('click', () => panel.classList.toggle('active'));
+  range.addEventListener('input', () => {
+    const scale = parseFloat(range.value);
+    valueLabel.textContent = `${Math.round(scale * 100)}%`;
+    applyPlanScale(scale);
+    localStorage.setItem(PLAN_SCALE_STORAGE_KEY, String(scale));
+  });
+}
+
 function setupDeleteFloorplanButton(): void {
   const btn = document.getElementById('btn-delete-floorplan') as HTMLButtonElement | null;
   if (!btn) return;
@@ -208,5 +259,7 @@ setupEntityPickerToggle();
 setupNewFloorplanPanel();
 setupDeleteFloorplanButton();
 setupMenuToggle();
+setupFloorplanArrows();
+setupPlanScaleControl();
 setupEntityFocusLabel();
 setInterval(updateConnectionStatus, 3000);

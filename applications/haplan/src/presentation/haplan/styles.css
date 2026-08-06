@@ -365,7 +365,7 @@ body {
 /* Style pour les objets draggables */
 .ha-object {
     cursor: move;
-    font-size: calc(12px * var(--plan-scale, 1));
+    font-size: calc(21px * var(--plan-scale, 1));
     font-weight: normal;
     transition: transform 0.1s ease;
 }
@@ -395,7 +395,7 @@ body {
     overflow: hidden;
     transition: all 0.2s ease;
     font-family: 'Arial', sans-serif;
-    font-size: 12px;
+    font-size: calc(12px * var(--plan-scale, 1));
     font-weight: normal;
     display: flex;
     flex-direction: column;
@@ -412,8 +412,8 @@ body {
 
 /* Styles pour les différents types visuels */
 .base-entity.icon-style {
-    width: 60px;
-    height: 60px;
+    width: calc(56px * var(--plan-scale, 1));
+    height: calc(56px * var(--plan-scale, 1));
     padding: 2px;
 }
 
@@ -435,7 +435,7 @@ body {
 
 /* Éléments communs */
 .entity-title {
-    font-size: calc(12px * var(--plan-scale, 1));
+    font-size: calc(21px * var(--plan-scale, 1));
     font-weight: normal;
     color: var(--entity-text-color);
     text-align: center;
@@ -453,16 +453,22 @@ body {
     margin: 4px 0;
 }
 
-.entity-icon small {
-    font-size: 16px;
+/* Bug corrigé (06/08/2026) : ces sélecteurs avaient un espace (combinateur descendant), qui ne
+   matchait jamais rien puisque BaseEntity.createIcon() pose "small"/"medium"/"large" comme
+   deuxième classe sur le MÊME élément (class="entity-icon medium") — la taille ne s'appliquait
+   donc jamais, l'icône retombait sur la taille par défaut de Font Awesome. Tailles revues
+   (ajustées à la baisse le même jour après retour utilisateur "énorme") + branchées sur
+   --plan-scale comme le reste, piloté par le curseur de dashboard-app.ts::setupPlanScaleControl(). */
+.entity-icon.small {
+    font-size: calc(16px * var(--plan-scale, 1));
 }
 
-.entity-icon medium {
-    font-size: 24px;
+.entity-icon.medium {
+    font-size: calc(20px * var(--plan-scale, 1));
 }
 
-.entity-icon large {
-    font-size: 32px;
+.entity-icon.large {
+    font-size: calc(26px * var(--plan-scale, 1));
 }
 
 .entity-icon i {
@@ -474,15 +480,15 @@ body {
     position: absolute;
     top: 4px;
     right: 4px;
-    width: 16px;
-    height: 16px;
+    width: calc(14px * var(--plan-scale, 1));
+    height: calc(14px * var(--plan-scale, 1));
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
 .status-indicator i {
-    font-size: 12px;
+    font-size: calc(11px * var(--plan-scale, 1));
 }
 
 .values-container {
@@ -499,7 +505,7 @@ body {
     border: 1px solid #e0e0e0;
     border-radius: 12px;
     padding: 2px 6px;
-    font-size: calc(12px * var(--plan-scale, 1));
+    font-size: calc(28px * var(--plan-scale, 1));
     display: flex;
     align-items: center;
     gap: 2px;
@@ -517,7 +523,7 @@ body {
 
 .value-badge .badge-unit {
     color: #999;
-    font-size: calc(8px * var(--plan-scale, 1));
+    font-size: calc(19px * var(--plan-scale, 1));
 }
 
 .entity-button {
@@ -525,8 +531,8 @@ body {
     color: white;
     border: none;
     border-radius: 50%;
-    width: calc(24px * var(--plan-scale, 1));
-    height: calc(24px * var(--plan-scale, 1));
+    width: calc(38px * var(--plan-scale, 1));
+    height: calc(38px * var(--plan-scale, 1));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -541,23 +547,23 @@ body {
 }
 
 .entity-button i {
-    font-size: calc(12px * var(--plan-scale, 1));
+    font-size: calc(21px * var(--plan-scale, 1));
 }
 
 .sensor-value-display {
-    font-size: calc(12px * var(--plan-scale, 1));
+    font-size: calc(21px * var(--plan-scale, 1));
 }
 
 .thermostat-temp-display {
-    font-size: calc(12px * var(--plan-scale, 1));
+    font-size: calc(21px * var(--plan-scale, 1));
 }
 
 .thermostat-target-temp {
-    font-size: calc(12px * var(--plan-scale, 1));
+    font-size: calc(21px * var(--plan-scale, 1));
 }
 
 .thermostat-current-temp {
-    font-size: calc(12px * var(--plan-scale, 1));
+    font-size: calc(21px * var(--plan-scale, 1));
 }
 
 .entity-slider {
@@ -612,13 +618,13 @@ body {
 }
 
 .temperature-display .temp-value {
-    font-size: calc(20px * var(--plan-scale, 1));
+    font-size: calc(28px * var(--plan-scale, 1));
     font-weight: bold;
     color: var(--entity-primary-color);
 }
 
 .temperature-display .temp-unit {
-    font-size: calc(12px * var(--plan-scale, 1));
+    font-size: calc(18px * var(--plan-scale, 1));
     color: var(--entity-text-color);
     margin-left: 2px;
 }

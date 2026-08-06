@@ -14,10 +14,11 @@ export class EnhancedWaterHeaterObject extends EnhancedSwitchObject {
     dataService?: DataService  // ✅ CHANGER
   ) {
     super(entity_id, position, dimensions, dataService);  // ✅ CHANGER
-    // Couleurs spécifiques pour les ballons d'eau chaude
+    // Pas de libellé ON/OFF (demande utilisateur 06/08/2026) — l'état se lit uniquement à la
+    // couleur de l'icône : bleu éteint / orange allumé.
     this.setColorScheme({
-      primary: '#2196F3', // Bleu
-      secondary: '#64B5F6',
+      primary: '#FF9800', // Orange (allumé)
+      secondary: '#2196F3', // Bleu (éteint)
       background: 'transparent',
       text: '#FFFFFF'
     });
@@ -28,27 +29,17 @@ export class EnhancedWaterHeaterObject extends EnhancedSwitchObject {
     container.style.display = 'flex';
     container.style.alignItems = 'center';
     container.style.justifyContent = 'center';
-    container.style.gap = '8px';
 
     // Créer l'icône spécifique
     const icon = this.createIcon(this.getIconForState(), 'medium');
-    
+
     // Forcer la couleur de l'icône
     const iconElement = icon.querySelector('i');
     if (iconElement) {
-      iconElement.style.color = this.isOn ? this.colorScheme.primary : '#999999';
+      iconElement.style.color = this.isOn ? this.colorScheme.primary : this.colorScheme.secondary;
     }
 
-    // Créer l'affichage de l'état
-    const statusDisplay = this.createStyledElement('div', 'water-heater-status-display');
-    statusDisplay.textContent = this.isOn ? 'ON' : 'OFF';
-    statusDisplay.style.fontSize = '16px';
-    statusDisplay.style.fontWeight = 'bold';
-    statusDisplay.style.color = this.isOn ? this.colorScheme.primary : '#999999';
-
-    // Assembler les éléments
     container.appendChild(icon);
-    container.appendChild(statusDisplay);
 
     // Ajouter un gestionnaire de clic
     container.addEventListener('click', (e) => {
@@ -69,15 +60,10 @@ export class EnhancedWaterHeaterObject extends EnhancedSwitchObject {
 
   updateDisplay(): void {
     if (!this.element) return;
-    
+
     const icon = this.element.querySelector('i') as HTMLElement;  // ✅ AJOUTER cast
     if (icon) {
-      icon.style.color = this.isOn ? this.colorScheme.primary : '#999999';
-    }
-    
-    const statusDisplay = this.element.querySelector('.water-heater-status-display') as HTMLElement;  // ✅ AJOUTER cast
-    if (statusDisplay) {
-      statusDisplay.style.color = this.isOn ? this.colorScheme.primary : '#999999';
+      icon.style.color = this.isOn ? this.colorScheme.primary : this.colorScheme.secondary;
     }
   }
 }

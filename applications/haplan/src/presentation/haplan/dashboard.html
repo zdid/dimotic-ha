@@ -60,6 +60,31 @@
       opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
     }
     .haplan-entity-label.visible { opacity: 1; }
+    /* Flèches épaisses de navigation entre plans (circulaire — voir setupFloorplanArrows() dans
+       dashboard-app.ts), en remplacement pratique du sélecteur caché dans le menu replié. */
+    .haplan-nav-arrow {
+      position: absolute; top: 0; bottom: 0; width: 64px; z-index: 55;
+      display: flex; align-items: center; justify-content: center;
+      background: transparent; border: none; color: var(--color-text);
+      font-size: 3em; line-height: 1; cursor: pointer; opacity: 0.35;
+      transition: opacity 0.15s ease, background 0.15s ease;
+    }
+    .haplan-nav-arrow:hover { opacity: 0.9; background: rgba(0,0,0,0.15); }
+    .haplan-nav-arrow--prev { left: 0; }
+    .haplan-nav-arrow--next { right: 0; }
+    /* Réglage de la taille des icônes/textes du plan (--plan-scale, voir styles.css et
+       setupPlanScaleControl() dans dashboard-app.ts) — mémorisé par écran (localStorage), pas
+       par utilisateur : un plan mural fixe garde le réglage qui lui convient. */
+    .haplan-scale-panel {
+      display: none; align-items: center; gap: 10px;
+      position: absolute; top: 56px; left: 12px; z-index: 60;
+      background: var(--color-surface); border: 1px solid var(--color-primary);
+      border-radius: var(--radius); padding: 8px 14px;
+    }
+    .haplan-scale-panel.active { display: flex; }
+    .haplan-scale-panel span {
+      font-size: 0.85em; color: var(--color-text); min-width: 3em; text-align: right;
+    }
     #entity-picker-panel {
       display: none; position: fixed; top: 0; right: 0; width: 340px; max-height: 100vh;
       overflow-y: auto; background: var(--color-surface); border-left: 1px solid var(--color-primary);
@@ -98,7 +123,14 @@
       <div class="haplan-floating-controls">
         <a href="/" class="haplan-icon-btn" title="Retour" aria-label="Retour">←</a>
         <button type="button" id="btn-toggle-menu" class="haplan-icon-btn" title="Menu" aria-label="Menu">☰</button>
+        <button type="button" id="btn-toggle-scale" class="haplan-icon-btn" title="Taille icônes/textes" aria-label="Taille icônes/textes">🔍</button>
       </div>
+      <div class="haplan-scale-panel" id="haplan-scale-panel">
+        <input type="range" id="haplan-scale-range" min="0.6" max="1.2" step="0.1" value="1">
+        <span id="haplan-scale-value">100%</span>
+      </div>
+      <button type="button" id="btn-floorplan-prev" class="haplan-nav-arrow haplan-nav-arrow--prev" title="Plan précédent" aria-label="Plan précédent">‹</button>
+      <button type="button" id="btn-floorplan-next" class="haplan-nav-arrow haplan-nav-arrow--next" title="Plan suivant" aria-label="Plan suivant">›</button>
       <div id="floorplan-container" class="floorplan-drag-container"></div>
       <div id="haplan-entity-label" class="haplan-entity-label"></div>
     </div>
