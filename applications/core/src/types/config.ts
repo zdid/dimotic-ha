@@ -307,12 +307,38 @@ export const loggingSchema = z.object({
 });
 
 // Schéma HA complet
+//
+// ws/mqtt sont volontairement assouplis ici (.partial()) : le client (TechnicalConfigManager,
+// presentation/ui) envoie TOUJOURS les deux sous-objets complets sur `config:save`, même quand
+// une seule section a été éditée (l'autre reste à ses valeurs par défaut, ex: mqtt.host: '').
+// Avec haWsSchema/mqttSchema strictes directement ici, la validation Zod échouait alors sur la
+// section non éditée et non activée (ex: sauvegarder uniquement HA WebSocket échouait sur
+// "MQTT host is required", mqtt_enable pourtant resté à false) — bug réel constaté le 06/08/2026.
+// La vraie exigence (host/token non vides) n'est appliquée que si la section correspondante est
+// activée, via superRefine ci-dessous.
 export const haConfigSchema = z.object({
   ws_enable: z.boolean().default(false),
   mqtt_enable: z.boolean().default(false),
-  ws: haWsSchema.optional(),
-  mqtt: mqttSchema.optional(),
+  ws: haWsSchema.partial().optional(),
+  mqtt: mqttSchema.partial().optional(),
   structure: haStructureSchema,
+}).superRefine((data, ctx) => {
+  if (data.ws_enable) {
+    const result = haWsSchema.safeParse(data.ws ?? {});
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        ctx.addIssue({ ...issue, path: ['ws', ...issue.path] });
+      }
+    }
+  }
+  if (data.mqtt_enable) {
+    const result = mqttSchema.safeParse(data.mqtt ?? {});
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        ctx.addIssue({ ...issue, path: ['mqtt', ...issue.path] });
+      }
+    }
+  }
 });
 
 // Schéma technique complet (sans les sections métier spécifiques)
