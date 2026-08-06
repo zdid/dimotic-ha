@@ -158,15 +158,15 @@ export class HaStructureRegistry {
         device?.area_id
       );
 
-      // Classer l'entité
-      const quoiIds = this.classifier.classify(structuredEntity);
-      structuredEntity.quoi_ids = quoiIds;
-
-      // Ajouter les références complètes à device et area
+      // Ajouter les références complètes à device et area — AVANT classify() ci-dessous : le
+      // classifieur (TaxonomyHaClassifier, taxonomie virtuelle) lit entity.area?.name/
+      // entity.device?.name pour dériver lieu_principal/lieu_precis, voir §9.3 du bug corrigé
+      // le 06/08/2026 (lieu_principal affichait le slug d'area brut "chambre_de_jo" plutôt que
+      // "Chambre de Jo", lieu_precis toujours absent).
       if (device) {
         structuredEntity.device = device;
       }
-      
+
       // Résoudre l'area : priorité à entity.area_id, sinon device.area_id
       let area: HaArea | undefined;
       if (entityRegistryEntry?.area_id) {
@@ -174,13 +174,17 @@ export class HaStructureRegistry {
       } else if (device?.area_id) {
         area = this.areas.get(device.area_id);
       }
-      
+
       if (area) {
         structuredEntity.area = area;
       } else if (this.unassigned) {
         // Si pas d'area trouvée mais includeUnassigned activé, assigner à unassigned
         structuredEntity.area = this.unassigned;
       }
+
+      // Classer l'entité
+      const quoiIds = this.classifier.classify(structuredEntity);
+      structuredEntity.quoi_ids = quoiIds;
 
       // Stocker l'entité
       this.entityMap.set(structuredEntity.entity_id, structuredEntity);

@@ -98,15 +98,18 @@ export class TaxonomyHaClassifier implements IHaClassifier {
 
     if (!entity.attributes?.attributs_taxonomie) {
       // Pas de zone HA assignée : "maison" plutôt que null — une entité reste rattachée à un
-      // lieu par défaut plutôt que de sortir de toute hiérarchie OÙ.
-      const lieu = entity.area_id || DEFAULT_LIEU;
+      // lieu par défaut plutôt que de sortir de toute hiérarchie OÙ. Nom d'affichage de l'area
+      // (entity.area?.name, ex: "Chambre de Jo") plutôt que son area_id brut (ex: "chambre_de_jo")
+      // quand disponible — corrige un titre affichant le slug non mis en forme (06/08/2026).
+      const lieu = entity.area?.name || entity.area_id || DEFAULT_LIEU;
+      const lieuPrecis = this.deriveLieuPrecis(entity);
       const virtualTaxonomy: AttributsTaxonomie = {
         quoi: fallback.label,
         slug_quoi: fallback.quoi_id,
         lieu_principal: lieu,
-        slug_lieu: lieu,
-        lieu_precis: null,
-        slug_precis: null,
+        slug_lieu: entity.area_id || lieu,
+        lieu_precis: lieuPrecis,
+        slug_precis: lieuPrecis,
         lieu_pere: null,
         slug_pere: null,
         lieu_grand_pere: null,
@@ -130,6 +133,32 @@ export class TaxonomyHaClassifier implements IHaClassifier {
     if (!this.catalog.has(quoiId)) {
       this.catalog.set(quoiId, { quoi_id: quoiId, label });
     }
+  }
+
+  /**
+   * Dérive un qualificatif de précision (lieu_precis) à partir du nom du device HA — ex: pour
+   * une entité "has_entity_name" (norme récente HA/MQTT), `friendly_name` est calculé par HA
+   * comme `{device.name} {nom propre de l'entité}` (ex: "-chevets" + " " + "L2" = "-chevets L2",
+   * observé en direct sur une entité Zigbee2MQTT le 06/08/2026 — device.name lui-même hérité
+   * d'un renommage en masse antérieur, d'où le tiret de tête à nettoyer). On reconstitue ce
+   * qualificatif en nettoyant device.name plutôt qu'en le lisant du registre HA (non transmis
+   * jusqu'ici par HaStructuredEntity) — repli sur `null` si le schéma ne correspond pas
+   * (entité sans device, ou friendly_name qui ne commence pas par device.name).
+   */
+  private deriveLieuPrecis(entity: HaStructuredEntity): string | null {
+    const deviceName = entity.device?.name?.trim();
+    if (!deviceName) return null;
+
+    const cleanedDeviceName = deviceName.replace(/^[-_\s]+/, '').trim();
+    if (!cleanedDeviceName) return null;
+
+    const friendlyName = entity.friendly_name?.trim();
+    if (friendlyName && friendlyName.startsWith(deviceName)) {
+      const remainder = friendlyName.slice(deviceName.length).trim();
+      if (remainder) return `${cleanedDeviceName} ${remainder}`;
+    }
+
+    return cleanedDeviceName;
   }
 
   private resolveFallback(entity: HaStructuredEntity): QuoiFallback | undefined {
