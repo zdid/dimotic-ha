@@ -2,8 +2,8 @@
 /**
  * Liste les appareils zigbee2mqtt connus (lecture seule — ne modifie rien).
  *
- * Se connecte au broker MQTT configuré dans data/config.yaml (section nommage.sources.zigbee.mqtt,
- * même broker que celui utilisé par l'app Nommage) et lit le topic retained
+ * Se connecte au broker MQTT configuré dans data/nommage/config.yaml (première source de
+ * sources[], même broker que celui utilisé par l'app Nommage) et lit le topic retained
  * <baseTopic>/bridge/devices publié par zigbee2mqtt.
  *
  * Usage : node scripts/list-zigbee-devices.js [baseTopic]
@@ -18,12 +18,16 @@ const mqtt = require('mqtt');
 
 const baseTopic = process.argv[2] || 'zigbee2mqtt';
 
-const configPath = path.join(process.env.PROJECT_ROOT || path.join(__dirname, '..', '..', '..'), 'data', 'config.yaml');
+// Depuis la restructuration data/ (v4.14, 24/07/2026), la config de Nommage est isolée dans son
+// propre fichier (objet nu, plus de clé d'enveloppe "nommage"). L'id de la source zigbee a aussi
+// été renommé depuis ('zigbee' -> le hostname réel du broker) — on ne filtre plus par id, ce
+// fichier ne contenant de toute façon qu'une seule source, dédiée à zigbee2mqtt.
+const configPath = path.join(process.env.PROJECT_ROOT || path.join(__dirname, '..', '..', '..'), 'data', 'nommage', 'config.yaml');
 const config = yaml.load(fs.readFileSync(configPath, 'utf8'));
 
-const zigbeeSource = (config.nommage?.sources || []).find((s) => s.id === 'zigbee');
+const zigbeeSource = (config.sources || [])[0];
 if (!zigbeeSource) {
-  console.error('Aucune source "zigbee" trouvée dans nommage.sources (data/config.yaml).');
+  console.error('Aucune source trouvée dans sources[] (data/nommage/config.yaml).');
   process.exit(1);
 }
 

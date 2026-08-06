@@ -10,6 +10,12 @@
  *  - Affiche un compte-rendu final (succès/échec par appareil).
  *
  * Usage : node scripts/rename-zigbee-devices.js [baseTopic]
+ *
+ * Exécuté avec succès le 06/08/2026 contre le zigbee2mqtt restauré sur ha2 (34/34 renommages —
+ * 'cuisine--lave vaisselle-ancien' retiré de la liste, ce device n'existait plus). Un nouveau
+ * lancement sans modifier RENAMES est un no-op sûr : plus aucun "from" ne correspond à un
+ * appareil réel, le script refusera tout (voir Sécurité ci-dessus) plutôt que de renommer deux
+ * fois. Garder ce fichier comme trace de la convention appliquée plutôt que le supprimer.
  */
 
 const fs = require('node:fs');
@@ -34,7 +40,6 @@ const RENAMES = [
   ['couloir--escalier-détecteur', 'détecteur---escalier--couloir--1er étage'],
   ['cuisine--four', 'four---cuisine--cuisine--rez de chaussée'],
   ['cuisine--lave vaisselle', 'lave vaisselle---cuisine--cuisine--rez de chaussée'],
-  ['cuisine--lave vaisselle-ancien', 'lave vaisselle ancien---cuisine--cuisine--rez de chaussée'],
   ['cuisine--lumière plan de travail', 'lumière---plan de travail--cuisine--rez de chaussée'],
   ['cuisine--lumière vitrine', 'lumière---vitrine--cuisine--rez de chaussée'],
   ['cuisine--plaques', 'plaques---cuisine--cuisine--rez de chaussée'],
@@ -59,11 +64,15 @@ const RENAMES = [
   ['toilettes du haut--plafonnier', 'lumière---plafonnier--toilettes du haut--1er étage']
 ];
 
-const configPath = path.join(process.env.PROJECT_ROOT || path.join(__dirname, '..', '..', '..'), 'data', 'config.yaml');
+// Depuis la restructuration data/ (v4.14, 24/07/2026), la config de Nommage est isolée dans son
+// propre fichier (objet nu, plus de clé d'enveloppe "nommage"). L'id de la source zigbee a aussi
+// été renommé depuis ('zigbee' -> le hostname réel du broker) — on ne filtre plus par id, ce
+// fichier ne contenant de toute façon qu'une seule source, dédiée à zigbee2mqtt.
+const configPath = path.join(process.env.PROJECT_ROOT || path.join(__dirname, '..', '..', '..'), 'data', 'nommage', 'config.yaml');
 const config = yaml.load(fs.readFileSync(configPath, 'utf8'));
-const zigbeeSource = (config.nommage?.sources || []).find((s) => s.id === 'zigbee');
+const zigbeeSource = (config.sources || [])[0];
 if (!zigbeeSource) {
-  console.error('Aucune source "zigbee" trouvée dans nommage.sources (data/config.yaml).');
+  console.error('Aucune source trouvée dans sources[] (data/nommage/config.yaml).');
   process.exit(1);
 }
 const mqttConfig = zigbeeSource.mqtt;
