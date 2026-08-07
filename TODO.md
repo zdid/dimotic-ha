@@ -2,6 +2,15 @@
 
 ## Problèmes prioritaires
 
+### 🟢 Voyant MQTT sur le tableau de bord + Uptime figé à "0s" — Corrigé
+- **Demande utilisateur (07/08/2026)** : un voyant "MQTT connecté" équivalent au voyant "Web-Services" (HA WebSocket) existant, sur l'écran principal HA/MQTT.
+- **Constat en creusant** : `mqtt:connected`/`mqtt:disconnected` étaient déjà déclarés dans `SOCLE_SOCKET_EVENTS` (`types/events.ts`) mais **jamais émis nulle part** — infrastructure morte, même symptôme que `--plan-scale` dans HAPLAN plus tôt cette session. `HaMqttIntegrationService` suit déjà les connexions/déconnexions **par bridge** (un par application métier), sans statut agrégé unique.
+- **Fait** : `IntegrationBridge.updateAggregateMqttStatus()` dérive un statut agrégé (au moins un bridge connecté) à partir des transitions déjà suivies par bridge, et émet `mqtt:connected`/`mqtt:disconnected` sur transition uniquement. Nouveau store Alpine `mqtt` (`vendor/alpine.js`, même mécanisme que `ws`), nouveau voyant dans `Sidebar.ts`.
+- **Deuxième bug découvert en vérifiant en direct** : l'Uptime restait figé à "0s" — signalé par l'utilisateur au même moment (*"quant au uptime, il ne sert a rien car il reste à 0"*). Cause : `app:started` (émis une seule fois au démarrage réel dans `index.ts`) n'était **jamais relayé à Socket.io**, absent de `SOCLE_SOCKET_EVENTS`/`persistentCoreEvents` — le handler client (`TechnicalConfigManager.ts`) n'avait donc jamais pu s'exécuter, de toute l'histoire du projet. Ajouté aux deux listes ; le payload utilise désormais `data.timestamp` (heure réelle de démarrage envoyée par le serveur) plutôt que `Date.now()` (heure de réception), l'événement étant maintenant persistant et donc rejouable bien après le démarrage réel à un client qui se connecte plus tard.
+- **Vérifié en direct** après redémarrage complet du process de développement (le hot-reload de `tsx watch` ne suffisait pas à réinitialiser proprement les listeners Socket.io existants) : les deux voyants passent au vert, l'uptime s'incrémente en continu (48s → 1m 2s constaté).
+- **Statut** : Corrigé (2026-08-07)
+- **Priorité** : Moyenne (confort de diagnostic, rien de cassé fonctionnellement sans ces deux indicateurs)
+
 ### 🟢 Activation/désactivation d'application : remplacement du déplacement de fichier par la config — Fait
 - **Contexte (07/08/2026)**, question utilisateur en creusant le piège du volume `stack_app-code` (voir entrée Docker ci-dessous) : *"pourquoi ne garde-t-il pas une trace de la version... si au lieu de déplacer, était géré dans le fichier config une liste des applications disable, l'activation ne se ferait plus simplement par la présence dans un répertoire mais par la présence dans un répertoire et par l'absence dans la liste ?"*
 - **Constat** : `ApplicationManager.ts` déplaçait physiquement `applications/{app}/` ↔ `applications_désactivées/{app}/` via `fs.renameSync()` — **seule** raison documentée (`Dockerfile`) d'exiger un volume Docker nommé dédié pour `/app` (overlay2 renvoie `EXDEV` sans lui).
