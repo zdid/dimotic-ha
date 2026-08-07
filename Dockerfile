@@ -10,18 +10,19 @@
 # depuis l'hôte et obligeait donc à cloner le dépôt à côté de l'image sur chaque
 # machine cible, à l'encontre même de l'intérêt de publier sur Docker Hub.
 #
-# ⚠️ Le mécanisme d'activation/désactivation d'application (`fs.renameSync`
-# entre `applications/` et `applications_désactivées/`, `ApplicationManager.ts`)
-# NE fonctionne PAS avec le seul contenu de cette image (vérifié empiriquement,
-# 03/08/2026) : overlay2 refuse de renommer un répertoire encore uniquement
-# présent dans une couche d'image (même en lecture seule), avec une erreur
-# `EXDEV` — quelle que soit la façon dont les couches sont organisées. Un volume
-# NOMMÉ unique couvrant tout `/app` (voir compose.yaml, service `app`) est donc
-# OBLIGATOIRE à l'exécution, pas une option — Docker le peuple automatiquement
-# avec le contenu de cette image au premier démarrage (aucun clone git
-# nécessaire malgré tout), et un vrai volume (pas des couches d'image) permet au
-# renommage de fonctionner normalement, comme sur n'importe quel système de
-# fichiers unique.
+# Pas de volume nommé sur /app (retiré le 07/08/2026) : jusqu'ici un volume Docker nommé
+# dédié était OBLIGATOIRE, l'activation/désactivation d'application (`fs.renameSync` entre
+# `applications/` et `applications_désactivées/`, `ApplicationManager.ts`) échouant avec
+# `EXDEV` sous overlay2 sans lui (constaté empiriquement le 03/08/2026 — overlay2 refuse de
+# renommer un répertoire encore uniquement présent dans une couche d'image, même en lecture
+# seule). Ce mécanisme ne déplace plus aucun fichier (liste `disabledApps` dans
+# data/core/config.yaml désormais, voir ApplicationManager.ts) — plus aucune opération sous
+# /app ne requiert un système de fichiers unique en écriture persistante à l'exécution, donc
+# plus besoin de volume : /app vit dans les couches de l'image + la couche conteneur éphémère
+# habituelle, comme n'importe quelle image Docker sans état. Conséquence pratique : un simple
+# `docker compose pull && up -d` (ou `--force-recreate`) suffit désormais à appliquer une
+# nouvelle version — plus besoin de recréer explicitement un volume (voir
+# docker/deploy-remote.sh, simplifié en conséquence).
 #
 # Base Debian (glibc) plutôt qu'Alpine (musl) : `serialport`/`rfxcom`
 # (RFXCOM) embarquent des bindings natifs (.node) — prebuilds glibc confirmés
@@ -77,9 +78,7 @@ WORKDIR /app
 COPY --from=builder --chown=node:node /app/tsconfig.json ./tsconfig.json
 COPY --from=builder --chown=node:node /app/applications ./applications
 
-# `applications_désactivées/` (accents intentionnels — nom réel attendu par
-# ApplicationManager.ts) : vide à l'image, peuplé dynamiquement par l'UI.
-RUN mkdir -p "/app/applications_désactivées" /app/data /app/logs \
+RUN mkdir -p /app/data /app/logs \
     && chown -R node:node /app
 
 # Utilisateur intégré à l'image officielle Node (uid/gid 1000) plutôt que root —

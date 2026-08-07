@@ -20,10 +20,9 @@
 #      elle-même data/core/config.yaml, pas besoin de l'éditer à la main.
 #
 # Voir compose.yaml (machine de développement) pour l'explication détaillée de
-# chaque réglage (network_mode: host, privileged + volume /dev pour RFXCOM, volume
-# nommé obligatoire pour /app — voir techniques-socle-ha-mqtt_specs §11) : ce
-# fichier reprend exactement la même configuration de service, seule la source de
-# l'image change.
+# chaque réglage (network_mode: host, privileged + volume /dev pour RFXCOM — voir
+# techniques-socle-ha-mqtt_specs §11) : ce fichier reprend exactement la même
+# configuration de service, seule la source de l'image change.
 # =============================================================================
 
 services:
@@ -59,17 +58,9 @@ services:
       - TZ=Europe/Paris
 
     volumes:
-      # Volume nommé unique pour tout /app — OBLIGATOIRE (voir compose.yaml pour
-      # le détail de pourquoi : fs.renameSync entre applications/ et
-      # applications_désactivées/ échoue avec EXDEV sinon). Peuplé automatiquement
-      # depuis l'image au premier démarrage.
-      - app-code:/app
       # Données/config persistantes et logs — à créer vides avant le premier
       # démarrage (voir étape 2/3 ci-dessus), directement éditables depuis l'hôte.
       - ./data:/app/data
       - ./logs:/app/logs
       # RFXCOM — voir le commentaire `privileged` ci-dessus.
       - /dev:/dev
-
-volumes:
-  app-code:

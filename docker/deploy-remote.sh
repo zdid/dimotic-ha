@@ -2,35 +2,26 @@
 # =============================================================================
 # Déploie la dernière image Docker Hub (zdid2/dimotic-ha) sur une machine cible
 # déjà installée (voir compose.deploy.yaml) — typiquement `ha2`, mais tout hôte
-# suivant la même convention (/docker/dimotic-ha, volume nommé `stack_app-code`)
-# fonctionne via les variables d'environnement ci-dessous.
+# suivant la même convention (/docker/dimotic-ha) fonctionne via les variables
+# d'environnement ci-dessous.
 #
-# ⚠️ Pourquoi ce script existe (pas juste `docker compose pull && up -d`) :
-# `stack_app-code` (volume nommé, `external: true` dans compose.deploy.yaml) n'est
-# peuplé par Docker qu'À SA CRÉATION — une fois rempli, un `docker compose up -d`
-# ultérieur ne le resynchronise JAMAIS avec le contenu d'une nouvelle image, même
-# après un `pull` réussi. Sans ce script, le conteneur change bien d'image mais
-# continue de faire tourner l'ANCIEN code applicatif indéfiniment — piège réel
-# rencontré le 06/08/2026 : deux déploiements successifs strictement sans effet,
-# découvert seulement en comparant le contenu d'un fichier source dans le
-# conteneur à celui du dépôt (voir TODO.md).
-#
-# Le volume est donc explicitement supprimé puis recréé vide avant `up -d`, pour
-# forcer Docker à le repeupler depuis la nouvelle image.
-#
-# ⚠️ L'activation/désactivation des applications (Paramètres Techniques > Gestion
-# des applications) vit depuis le 07/08/2026 dans `data/core/config.yaml`
-# (disabledApps, voir ApplicationManager.ts) — PAS dans le volume `stack_app-code`.
-# `data/` est un bind-mount séparé (`./data:/app/data`), jamais touché par la
-# recréation du volume ci-dessous : aucune sauvegarde/réapplication n'est donc
-# nécessaire ici, contrairement à l'ancien mécanisme (déplacement de dossier dans
-# applications_désactivées/, qui lui vivait dans le volume et ne survivait pas à
-# sa recréation).
+# Depuis le 07/08/2026, plus de volume nommé sur /app (voir Dockerfile/
+# compose.yaml) : /app vit dans les couches de l'image + la couche conteneur
+# éphémère habituelle, `docker compose pull && up -d` suffit donc à appliquer
+# une nouvelle version — Docker recrée automatiquement le conteneur dès qu'il
+# détecte que l'image a changé. Avant cette date, un volume nommé dédié
+# (`stack_app-code`) était obligatoire (activation/désactivation d'application
+# via déplacement physique de dossier, `fs.renameSync`) mais n'était jamais
+# resynchronisé avec une nouvelle image une fois créé — piège réel rencontré le
+# 06/08/2026 (deux déploiements successifs sans effet, voir TODO.md), qui a
+# motivé une première version de ce script (recréation explicite du volume).
+# Ce script reste utile pour : le confort d'un point d'entrée unique, l'attente
+# du healthcheck, et le statut final — mais ne fait plus rien de spécial.
 #
 # Usage : ./docker/deploy-remote.sh
 # Variables d'environnement optionnelles (valeurs par défaut = ha2) :
 #   DEPLOY_HOST, DEPLOY_SSH_USER, DEPLOY_SSH_KEY, DEPLOY_REMOTE_DIR,
-#   DEPLOY_VOLUME_NAME, DEPLOY_CONTAINER_NAME
+#   DEPLOY_CONTAINER_NAME
 #
 # Ne construit ni ne publie aucune image — suppose que `docker buildx build
 # --platform linux/amd64,linux/arm64 -t zdid2/dimotic-ha:latest -t
@@ -43,26 +34,18 @@ HOST="${DEPLOY_HOST:-192.168.1.51}"
 SSH_USER="${DEPLOY_SSH_USER:-claude}"
 SSH_KEY="${DEPLOY_SSH_KEY:-$HOME/.ssh/ha2-claude/id_ed25519}"
 REMOTE_DIR="${DEPLOY_REMOTE_DIR:-/docker/dimotic-ha}"
-VOLUME_NAME="${DEPLOY_VOLUME_NAME:-stack_app-code}"
 CONTAINER_NAME="${DEPLOY_CONTAINER_NAME:-dimotic-ha}"
 
 ssh_cmd() {
   ssh -i "$SSH_KEY" -o ConnectTimeout=10 "${SSH_USER}@${HOST}" "$@"
 }
 
-echo "==> Déploiement sur ${SSH_USER}@${HOST}:${REMOTE_DIR} (volume ${VOLUME_NAME})"
+echo "==> Déploiement sur ${SSH_USER}@${HOST}:${REMOTE_DIR}"
 
-echo "==> 1/4 Pull de la nouvelle image"
+echo "==> 1/2 Pull de la nouvelle image"
 ssh_cmd "cd ${REMOTE_DIR} && sudo docker compose pull"
 
-echo "==> 2/4 Arrêt du conteneur"
-ssh_cmd "cd ${REMOTE_DIR} && sudo docker compose down"
-
-echo "==> 3/4 Recréation du volume ${VOLUME_NAME} (sera repeuplé depuis la nouvelle image)"
-ssh_cmd "sudo docker volume rm ${VOLUME_NAME}" || true
-ssh_cmd "sudo docker volume create ${VOLUME_NAME}"
-
-echo "==> 4/4 Démarrage avec le code neuf"
+echo "==> 2/2 Démarrage avec le code neuf"
 ssh_cmd "cd ${REMOTE_DIR} && sudo docker compose up -d"
 
 echo "    Attente du démarrage..."

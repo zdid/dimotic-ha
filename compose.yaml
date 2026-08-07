@@ -6,21 +6,13 @@
 # pendant le build de l'image (voir Dockerfile), pas monté depuis l'hôte. Aucun
 # clone git ni étape de build séparée n'est nécessaire sur la machine cible.
 #
-# ⚠️ Le volume nommé `app-code` (et non un bind-mount hôte, ni le contenu figé de
-# l'image seule) est OBLIGATOIRE pour `/app` en entier — pas une préférence de
-# style. Constaté empiriquement (03/08/2026) : `fs.renameSync()` entre
-# `applications/` et `applications_désactivées/` (mécanisme d'activation/
-# désactivation d'application, `ApplicationManager.ts`) échoue avec `EXDEV` dans
-# TOUS les cas où les deux répertoires ne sont pas sur le MÊME point de montage
-# unique — y compris pour du contenu baked-in dans les couches de l'image
-# (overlay2 refuse de renommer un répertoire encore uniquement présent dans une
-# couche inférieure, même en lecture seule) et y compris pour DEUX bind-mounts
-# hôte séparés pointant vers deux dossiers du même disque physique (chaque
-# `volumes:` déclaré ouvre son propre mount, donc son propre `st_dev`, quel que
-# soit le support physique sous-jacent). Un unique volume nommé monté sur `/app`
-# entier est la seule configuration testée qui fonctionne, ET reste
-# autosuffisante (Docker le peuple automatiquement depuis l'image au premier
-# démarrage, aucun clone git nécessaire).
+# Pas de volume nommé sur /app (retiré le 07/08/2026, voir Dockerfile pour le
+# détail) : l'activation/désactivation d'application ne déplace plus aucun
+# fichier (liste `disabledApps` dans data/core/config.yaml désormais), donc plus
+# besoin d'un système de fichiers unique en écriture persistante pour /app — les
+# couches de l'image + la couche conteneur éphémère habituelle suffisent, comme
+# pour n'importe quelle image Docker sans état. `docker compose pull && up -d`
+# (ou `--force-recreate`) suffit pour appliquer une nouvelle version.
 # =============================================================================
 
 services:
@@ -61,11 +53,9 @@ services:
     # fichiers écrits sur data/ et logs/ (volumes hôte) restent possédés par
     # l'utilisateur attendu sans configuration supplémentaire dans le cas courant.
     # Si l'hôte utilise un uid/gid différent pour son utilisateur principal,
-    # décommenter et ajuster la ligne suivante (nécessite aussi d'adapter le
-    # `chown` du Dockerfile pour que le code applicatif baked-in reste modifiable
-    # par ce même utilisateur — l'activation/désactivation d'application, qui
-    # déplace des dossiers, écrirait sinon dans un répertoire appartenant à un
-    # autre uid) :
+    # décommenter et ajuster la ligne suivante (nécessaire pour que les fichiers
+    # écrits sur data/ et logs/, bind-montés depuis l'hôte, restent possédés par
+    # cet utilisateur) :
     #   user: "1000:1000"
     #
     # `dialout` nécessaire pour l'accès au port série sur un hôte où /dev/ttyUSBx
@@ -78,21 +68,10 @@ services:
       - TZ=Europe/Paris
 
     volumes:
-      # Volume nommé unique pour tout `/app` — obligatoire, voir le commentaire
-      # d'en-tête de ce fichier. Peuplé automatiquement depuis l'image au premier
-      # démarrage (code applicatif, `applications_désactivées/` vide, `data/`/
-      # `logs/` vides — ces deux derniers immédiatement masqués par les
-      # bind-mounts hôte ci-dessous, plus spécifiques).
-      - app-code:/app
       # Données/config persistantes (un sous-répertoire par application, voir
       # techniques-socle-ha-mqtt_specs §7) et logs — bind-mounts hôte pour rester
-      # directement consultables/éditables sans passer par `docker exec`. Sans
-      # risque vis-à-vis du point ci-dessus : rien dans le code ne déplace de
-      # fichier entre `data/`/`logs/` et `applications/`.
+      # directement consultables/éditables sans passer par `docker exec`.
       - ./data:/app/data
       - ./logs:/app/logs
       # RFXCOM — voir le commentaire `privileged` ci-dessus.
       - /dev:/dev
-
-volumes:
-  app-code:
