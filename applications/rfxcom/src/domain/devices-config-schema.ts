@@ -67,14 +67,22 @@ const baseReceiverFields = {
 
 export const receiverSwitchSchema = z.object({
   type: z.literal('switch'),
-  ...baseReceiverFields
+  ...baseReceiverFields,
+  // Sans ces deux champs, Zod les retire silencieusement au rechargement (clés inconnues
+  // supprimées par défaut) — chaque récepteur repart alors avec un état interne "off" par
+  // défaut, que RfxComService pousse vers le matériel réel : rafale de commandes OFF sur
+  // tous les récepteurs à chaque redémarrage (voir recepteurs-emetteurs-rfxcom_specs §4.3,
+  // constaté en conditions réelles le 07/08/2026 lors du déploiement sur l'OrangePi).
+  lastOn: z.boolean().optional()
 });
 
 export const receiverLightSchema = z.object({
   type: z.literal('light'),
   ...baseReceiverFields,
   isDimmable: z.boolean().default(false),
-  defaultLevel: z.number().min(0).max(100).optional()
+  defaultLevel: z.number().min(0).max(100).optional(),
+  lastOn: z.boolean().optional(),
+  lastLevel: z.number().min(0).max(100).optional()
 });
 
 export const receiverCoverSchema = z.object({
