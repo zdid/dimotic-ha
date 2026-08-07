@@ -218,10 +218,12 @@ export class IntegrationBridge {
    * découverte — jamais bloquant : un échec/dépassement n'empêche jamais la publication.
    */
   private async publishDiscoveryWithArea(moduleName: string, data: DiscoveryRequestEvent): Promise<void> {
-    if (this.areaEnsureService) {
-      const suggestedArea = data.essential.device?.suggested_area;
-      if (suggestedArea) {
-        await this.areaEnsureService.ensureArea(suggestedArea);
+    const suggestedArea = data.essential.device?.suggested_area;
+    if (suggestedArea) {
+      const capitalized = this.capitalizeAreaName(suggestedArea);
+      if (data.essential.device) data.essential.device.suggested_area = capitalized;
+      if (this.areaEnsureService) {
+        await this.areaEnsureService.ensureArea(capitalized);
       }
     }
     this.haMqttService.publishDiscoveryFor(moduleName, data.bridgeInstance, data.component, data.objectId, data.deviceId, data.essential);
@@ -235,14 +237,26 @@ export class IntegrationBridge {
 
   /** Même garantie d'area que publishDiscoveryWithArea, pour le chemin passthrough (NOMMAGE). */
   private async publishDiscoveryPassthroughWithArea(moduleName: string, data: PassthroughDiscoveryRequestEvent): Promise<void> {
-    if (this.areaEnsureService) {
-      const payload = data.payload as { device?: { suggested_area?: string } } | undefined;
-      const suggestedArea = payload?.device?.suggested_area;
-      if (suggestedArea) {
-        await this.areaEnsureService.ensureArea(suggestedArea);
+    const payload = data.payload as { device?: { suggested_area?: string } } | undefined;
+    const suggestedArea = payload?.device?.suggested_area;
+    if (suggestedArea) {
+      const capitalized = this.capitalizeAreaName(suggestedArea);
+      if (payload?.device) payload.device.suggested_area = capitalized;
+      if (this.areaEnsureService) {
+        await this.areaEnsureService.ensureArea(capitalized);
       }
     }
     this.haMqttService.publishDiscoveryPassthrough(moduleName, data.bridgeInstance, data.sourceTopic, data.payload);
+  }
+
+  /** Première lettre en capitale — même règle que AreaEnsureService.capitalize, dupliquée ici
+   * pour que le nom envoyé dans device.suggested_area corresponde à celui de l'area réellement
+   * créée (jusqu'ici seule l'area créée était capitalisée, pas le champ du payload de découverte
+   * lui-même — incohérence visible côté HA, constatée le 07/08/2026). */
+  private capitalizeAreaName(name: string): string {
+    const trimmed = name.trim();
+    if (!trimmed) return trimmed;
+    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
   }
 
   /**
