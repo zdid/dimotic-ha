@@ -127,7 +127,18 @@ export class ConfigService {
     // data/{app}/ ce endpoint ne possède plus que le socle : on ne retient que ha/web/logging,
     // le reste (sections d'app) est ignoré ici, chacune ayant désormais son propre chemin de
     // sauvegarde (savePartialConfig/saveModuleConfig, vers son propre fichier).
-    const socleConfig = { ha: newConfig.ha, web: newConfig.web, logging: newConfig.logging } as AppConfig;
+    //
+    // disabledApps fait exception : il vit dans CE MÊME fichier (pas un fichier par module), mais
+    // le client (formulaire Web-Services) ne le connaît pas et ne l'envoie jamais — repris depuis
+    // this.config (état en mémoire, source de vérité) plutôt que newConfig, sinon toute sauvegarde
+    // de ce formulaire effaçait silencieusement la liste des applications désactivées (bug réel
+    // constaté le 07/08/2026 sur ha2 : RFXCOM réactivé après une simple reconfiguration HA WS).
+    const socleConfig = {
+      ha: newConfig.ha,
+      web: newConfig.web,
+      logging: newConfig.logging,
+      disabledApps: this.config.disabledApps,
+    } as AppConfig;
     const result = this.writer.save(socleConfig);
     console.log('[ConfigService SERVEUR] Résultat sauvegarde:', result);
     return result;
