@@ -6,7 +6,7 @@
  * specs §6).
  */
 
-import type { Logger } from '../../../core/src/exports';
+import type { Logger } from '../../../core/dist/exports';
 import type { PlanificationDefinition } from './types';
 import { triggerToMs, isRecurring } from './scheduler';
 

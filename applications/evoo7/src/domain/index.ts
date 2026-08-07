@@ -13,7 +13,7 @@ import {
   IAppConfigProvider,
   ConfigService,
   AppConfigProvider
-} from '../../../core/src/exports';
+} from '../../../core/dist/exports';
 import { EVOO7_SOCKET_EVENTS, EVOO7_ALL_EVENTS, EVOO7_PERSISTENT_EVENTS } from './socket-events';
 import { Evoo7Service, type IEvoo7Service } from './Evoo7Service';
 import type { Evoo7Config } from './config-schema';

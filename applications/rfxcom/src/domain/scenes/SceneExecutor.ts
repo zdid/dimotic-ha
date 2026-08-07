@@ -10,7 +10,7 @@
  * (RfxComService.applyReceiverCommand), pour rester testable indépendamment du matériel.
  */
 
-import type { Logger } from '../../../../core/src/exports';
+import type { Logger } from '../../../../core/dist/exports';
 import type { ReceiverSceneConfig, SceneExecutionResult } from '../types';
 
 export type ReceiverCommandSender = (

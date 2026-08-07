@@ -13,7 +13,7 @@
  * ce fichier client nécessaire.
  */
 
-import type { HaStructuredEntity } from '../../../core/src/exports';
+import type { HaStructuredEntity } from '../../../core/dist/exports';
 
 interface EntityPickerEntity {
   entity_id: string;

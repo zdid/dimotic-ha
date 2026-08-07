@@ -10,8 +10,8 @@
  */
 
 import * as path from 'node:path';
-import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/src/exports';
-import { createRfxComError, getCommandTopic } from '../../../core/src/exports';
+import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
+import { createRfxComError, getCommandTopic } from '../../../core/dist/exports';
 import { rfxcomConfigSchema, type RfxComConfig } from './config-schema';
 import type { RfxComDevicesConfigFile, ReceiverConfigEntry } from './devices-config-schema';
 import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult } from './types';

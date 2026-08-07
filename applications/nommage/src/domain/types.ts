@@ -3,7 +3,7 @@
  * Gestion des conventions de nommage et taxonomie (QUOI/OÙ)
  */
 
-import type { HaStructuredEntity } from '../../../core/src/exports';
+import type { HaStructuredEntity } from '../../../core/dist/exports';
 
 // ============================================================================
 // Types pour le parsing QUOI/OÙ (basé sur nommage_specs_v1.0.md)

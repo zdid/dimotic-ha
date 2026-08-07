@@ -7,7 +7,7 @@
  * Conforme à recepteurs-emetteurs-rfxcom_specs_v5.1.md §6/§8.2/§8.3.
  */
 
-import type { Logger } from '../../../../core/src/exports';
+import type { Logger } from '../../../../core/dist/exports';
 import type { DeviceManager } from '../devices/DeviceManager';
 import type { AssociatedEmitter, ReceiverConfig } from '../types';
 import type { IReceiverModule } from './BaseReceiver';

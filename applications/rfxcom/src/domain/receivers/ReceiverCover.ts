@@ -12,7 +12,7 @@
  * explicite ou sur la butée 0/100%.
  */
 
-import type { EssentialEntityData, HaMqttStateMessage } from '../../../../core/src/exports';
+import type { EssentialEntityData, HaMqttStateMessage } from '../../../../core/dist/exports';
 import type { EmitterAction, ReceiverCoverConfig } from '../types';
 import type { IReceiverModule, ReceiverCommandResult } from './BaseReceiver';
 import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName } from '../taxonomy';

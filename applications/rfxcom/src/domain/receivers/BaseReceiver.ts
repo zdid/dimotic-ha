@@ -5,7 +5,7 @@
  * §16 (traduction commandes HA→RFXCOM, propre à chaque type + protocole du primaryEmitter).
  */
 
-import type { EssentialEntityData, HaMqttStateMessage } from '../../../../core/src/exports';
+import type { EssentialEntityData, HaMqttStateMessage } from '../../../../core/dist/exports';
 import type { EmitterAction, CommandableReceiverConfig } from '../types';
 
 /** Commande RFXCOM résultant de la traduction d'une commande HA. */

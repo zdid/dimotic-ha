@@ -16,8 +16,8 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import type { IEventBus, Logger, IAppConfigProvider, HaStructureRegistry, HaWsClient, HaRawEntity } from '../../../core/src/exports';
-import { createHaplanError } from '../../../core/src/exports';
+import type { IEventBus, Logger, IAppConfigProvider, HaStructureRegistry, HaWsClient, HaRawEntity } from '../../../core/dist/exports';
+import { createHaplanError } from '../../../core/dist/exports';
 import { haplanConfigSchema, type HaplanConfig } from './config-schema';
 import { DEFAULT_FLOORPLANS_CONFIG, type HaplanFloorplansConfigFile } from './floorplans-config-schema';
 import type { HaplanStatus } from './types';

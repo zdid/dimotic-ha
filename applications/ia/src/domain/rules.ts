@@ -4,7 +4,7 @@
  */
 
 import * as fs from 'node:fs';
-import type { Logger } from '../../../core/src/exports';
+import type { Logger } from '../../../core/dist/exports';
 import type { OllamaMessage } from './types';
 
 export class RulesProvider {

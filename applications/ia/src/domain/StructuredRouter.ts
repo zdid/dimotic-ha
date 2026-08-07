@@ -4,7 +4,7 @@
  * HA par l'appelant, voir IaService).
  */
 
-import type { Logger, IEventBus } from '../../../core/src/exports';
+import type { Logger, IEventBus } from '../../../core/dist/exports';
 import type { CorrelatedReponse } from './types';
 import { CorrelatedRequester } from './correlation';
 

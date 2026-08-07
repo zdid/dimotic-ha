@@ -10,8 +10,8 @@
  */
 
 import * as path from 'node:path';
-import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/src/exports';
-import { createEvoo7Error, getStateTopic, getCommandTopic } from '../../../core/src/exports';
+import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
+import { createEvoo7Error, getStateTopic, getCommandTopic } from '../../../core/dist/exports';
 import { evoo7ConfigSchema, type Evoo7Config } from './config-schema';
 import type { Evoo7DonneesConfigFile } from './donnees-config-schema';
 import type { Evoo7DataDefinition, Evoo7Status, Evoo7ThermostatConfig } from './types';

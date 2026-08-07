@@ -20,7 +20,7 @@
  */
 
 import * as rfxcom from 'rfxcom';
-import type { Logger } from '../../../../core/src/exports';
+import type { Logger } from '../../../../core/dist/exports';
 import type { RfxComRawMessage, RfxComDeviceType } from '../types';
 
 export interface RfxComTransceiverOptions {

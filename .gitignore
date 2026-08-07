@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+*.tsbuildinfo
 
 # Local data and logs (persisted on host)
 data/

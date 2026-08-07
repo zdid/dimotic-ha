@@ -8,7 +8,7 @@
  * Couche : Domaine — pas de dépendance MQTT/EventBus/YAML (RfxComService fait le pont).
  */
 
-import type { Logger } from '../../../../core/src/exports';
+import type { Logger } from '../../../../core/dist/exports';
 import { determineQuoi, getProtocole } from '../classification';
 import type { RfxComDeviceInfo, RfxComDiscoveredDevice, RfxComRawMessage } from '../types';
 

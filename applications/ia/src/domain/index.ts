@@ -17,7 +17,7 @@ import {
   AppConfigProvider,
   HaStructureRegistry,
   HaWsClient
-} from '../../../core/src/exports';
+} from '../../../core/dist/exports';
 import { IA_ALL_EVENTS, IA_PERSISTENT_EVENTS } from './socket-events';
 import { IaService, type IIaService } from './IaService';
 import type { IaConfig } from './config-schema';

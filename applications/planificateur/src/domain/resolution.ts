@@ -14,7 +14,7 @@
  * (execution.ts, HaWsClient.processConversation) prend le relais.
  */
 
-import type { HaStructureRegistry } from '../../../core/src/exports';
+import type { HaStructureRegistry } from '../../../core/dist/exports';
 import type { ResolvedServiceCall } from './types';
 
 // Verbes sans valeur → services génériques HA (routent eux-mêmes vers le domaine réel de

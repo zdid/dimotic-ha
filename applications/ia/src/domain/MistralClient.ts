@@ -4,7 +4,7 @@
  * parsing du flux de réponse est délégué à streaming.ts.
  */
 
-import type { Logger } from '../../../core/src/exports';
+import type { Logger } from '../../../core/dist/exports';
 import type { IaConfig } from './config-schema';
 import type { OllamaMessage } from './types';
 

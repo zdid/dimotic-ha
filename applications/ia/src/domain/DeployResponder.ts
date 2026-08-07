@@ -12,7 +12,7 @@
  * processConversation — comportement correct, pas une erreur d'implémentation ici.
  */
 
-import type { Logger, IEventBus } from '../../../core/src/exports';
+import type { Logger, IEventBus } from '../../../core/dist/exports';
 import type { DeployRequest, DeployReply, ExecutionStep, OllamaMessage } from './types';
 import type { MistralClient } from './MistralClient';
 import type { RulesProvider } from './rules';

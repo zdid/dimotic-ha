@@ -11,7 +11,7 @@
  */
 
 import * as path from 'node:path';
-import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/src/exports';
+import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
 import { arexxConfigSchema, type ArexxConfig } from './config-schema';
 import type { ArexxSensorsConfigFile } from './devices-config-schema';
 import type { ArexxRawReading, ArexxSensorInfo, ArexxStatus } from './types';

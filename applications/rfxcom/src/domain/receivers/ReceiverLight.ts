@@ -6,7 +6,7 @@
  * pourcentage 0-100, converti en brightness HA (0-255) uniquement à la publication d'état.
  */
 
-import type { EssentialEntityData, HaMqttStateMessage } from '../../../../core/src/exports';
+import type { EssentialEntityData, HaMqttStateMessage } from '../../../../core/dist/exports';
 import type { EmitterAction, ReceiverLightConfig } from '../types';
 import type { IReceiverModule, ReceiverCommandResult } from './BaseReceiver';
 import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName } from '../taxonomy';

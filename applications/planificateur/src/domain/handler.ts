@@ -5,7 +5,7 @@
  * réponses via EventBus corrélé au lieu de MQTT.
  */
 
-import type { Logger } from '../../../core/src/exports';
+import type { Logger } from '../../../core/dist/exports';
 import type {
   DomoticNode,
   MacroDefinition,

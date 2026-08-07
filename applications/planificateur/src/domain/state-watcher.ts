@@ -20,7 +20,7 @@
  * scheduler-runtime.ts), pas de fenêtre de rattrapage/`missed` ici en v1 (voir plan).
  */
 
-import type { Logger, HaWsClient, HaRawEntity } from '../../../core/src/exports';
+import type { Logger, HaWsClient, HaRawEntity } from '../../../core/dist/exports';
 import type { PlanificationDefinition } from './types';
 
 export type StateFireCallback = (plan: PlanificationDefinition, entityId: string, signal: AbortSignal) => Promise<void>;

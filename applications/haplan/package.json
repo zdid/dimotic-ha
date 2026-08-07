@@ -4,7 +4,7 @@
   "description": "Plans de maison avec icônes tactiles reliées à Home Assistant (portage de haplanserver)",
   "main": "dist/domain/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -b",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",
     "watch": "tsc -w"
   },

@@ -16,7 +16,7 @@ import {
   AppConfigProvider,
   HaStructureRegistry,
   HaWsClient
-} from '../../../core/src/exports';
+} from '../../../core/dist/exports';
 import { PLANIFICATEUR_ALL_EVENTS, PLANIFICATEUR_PERSISTENT_EVENTS } from './socket-events';
 import { PlanificateurService, type IPlanificateurService } from './PlanificateurService';
 import type { PlanificateurConfig } from './config-schema';

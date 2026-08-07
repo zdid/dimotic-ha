@@ -9,7 +9,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
-    "rootDir": "..",
+    "rootDir": "./src",
     "baseUrl": ".",
     "paths": {
       "home-assistant-js-websocket": ["../core/node_modules/home-assistant-js-websocket/dist/index.d.ts"]
@@ -19,6 +19,7 @@
     "declarationMap": true,
     "sourceMap": true
   },
+  "references": [{ "path": "../core" }],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "src/presentation/ts/**/*", "src/presentation/planificateur/**/*"]
 }

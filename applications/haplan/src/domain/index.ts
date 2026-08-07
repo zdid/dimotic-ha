@@ -17,7 +17,7 @@ import {
   AppConfigProvider,
   HaStructureRegistry,
   HaWsClient
-} from '../../../core/src/exports';
+} from '../../../core/dist/exports';
 import { HAPLAN_SOCKET_EVENTS } from './socket-events';
 import { HaplanService, type IHaplanService } from './HaplanService';
 import type { HaplanConfig } from './config-schema';

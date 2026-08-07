@@ -17,7 +17,7 @@
  *    → Tout passe par EventBus et interfaces injectées
  */
 
-import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/src/exports';
+import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
 import type { INommageMqttIntegrationService } from '../ha/integration/nommage/NommageMqttIntegrationService';
 import { nommageConfigSchema, type NommageConfig } from './config-schema';
 import type {

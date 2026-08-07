@@ -15,7 +15,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import { z } from 'zod';
-import type { Logger } from '../../../../core/src/exports';
+import type { Logger } from '../../../../core/dist/exports';
 import { rfxComDevicesConfigSchema, DEFAULT_DEVICES_CONFIG, type RfxComDevicesConfigFile } from '../devices-config-schema';
 
 export interface SaveResult {

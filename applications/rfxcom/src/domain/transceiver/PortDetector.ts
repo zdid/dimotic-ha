@@ -13,7 +13,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Logger } from '../../../../core/src/exports';
+import type { Logger } from '../../../../core/dist/exports';
 
 const BY_ID_DIR = '/dev/serial/by-id';
 const NAME_PATTERN = /rfxcom|rfxtrx/i;

@@ -16,7 +16,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import { z } from 'zod';
-import type { Logger } from '../../../../core/src/exports';
+import type { Logger } from '../../../../core/dist/exports';
 import { evoo7DonneesConfigSchema, DEFAULT_DONNEES_CONFIG, type Evoo7DonneesConfigFile } from '../donnees-config-schema';
 import { seedFromJsonFile } from '../seed';
 

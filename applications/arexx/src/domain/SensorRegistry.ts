@@ -8,7 +8,7 @@
  * Couche : Domaine — pas de dépendance MQTT/EventBus/YAML (ArexxService fait le pont).
  */
 
-import type { Logger } from '../../../core/src/exports';
+import type { Logger } from '../../../core/dist/exports';
 import type { ArexxDiscoveredSensor, ArexxRawReading, ArexxSensorInfo } from './types';
 
 export class SensorRegistry {

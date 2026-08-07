@@ -13,7 +13,7 @@ import {
   IAppConfigProvider,
   ConfigService,
   AppConfigProvider
-} from '../../../core/src/exports';
+} from '../../../core/dist/exports';
 import { AREXX_SOCKET_EVENTS, AREXX_ALL_EVENTS, AREXX_PERSISTENT_EVENTS } from './socket-events';
 import { ArexxService, type IArexxService } from './ArexxService';
 import type { ArexxConfig } from './config-schema';

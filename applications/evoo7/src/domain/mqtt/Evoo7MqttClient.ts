@@ -9,7 +9,7 @@
  */
 
 import * as mqtt from 'mqtt';
-import type { Logger } from '../../../../core/src/exports';
+import type { Logger } from '../../../../core/dist/exports';
 import type { Evoo7MqttConfig } from '../config-schema';
 
 export type Evoo7MessageCallback = (topic: string, payload: string) => void;

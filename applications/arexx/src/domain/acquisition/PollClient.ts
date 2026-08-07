@@ -12,7 +12,7 @@
  */
 
 import http from 'node:http';
-import type { Logger } from '../../../../core/src/exports';
+import type { Logger } from '../../../../core/dist/exports';
 import type { ArexxConfig } from '../config-schema';
 import type { ArexxRawReading } from '../types';
 

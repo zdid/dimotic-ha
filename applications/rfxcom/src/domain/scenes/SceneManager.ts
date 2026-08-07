@@ -7,7 +7,7 @@
  * recepteurs-emetteurs-rfxcom_specs_v5.1.md §14.3 (fonctionnelles-rfxcom_specs).
  */
 
-import type { Logger } from '../../../../core/src/exports';
+import type { Logger } from '../../../../core/dist/exports';
 import type { ReceiverConfig, ReceiverSceneConfig } from '../types';
 
 export class SceneManager {

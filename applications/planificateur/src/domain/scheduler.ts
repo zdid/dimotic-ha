@@ -7,7 +7,7 @@
  */
 
 import type { Trigger } from './types';
-import type { Logger } from '../../../core/src/exports';
+import type { Logger } from '../../../core/dist/exports';
 
 /** true si `trigger` reprogramme automatiquement une nouvelle occurrence après déclenchement. */
 export function isRecurring(trigger: Trigger): boolean {

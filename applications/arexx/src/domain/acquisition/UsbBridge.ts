@@ -11,7 +11,7 @@
 
 import { type ChildProcessWithoutNullStreams, exec, spawn } from 'node:child_process';
 import * as path from 'node:path';
-import type { Logger } from '../../../../core/src/exports';
+import type { Logger } from '../../../../core/dist/exports';
 import type { ArexxConfig } from '../config-schema';
 
 export class UsbBridge {

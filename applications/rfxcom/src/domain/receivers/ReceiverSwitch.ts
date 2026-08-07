@@ -2,7 +2,7 @@
  * ReceiverSwitch — récepteur logique simple on/off (fonctionnelles-rfxcom_specs_v5.6.md §16.2).
  */
 
-import type { EssentialEntityData, HaMqttStateMessage } from '../../../../core/src/exports';
+import type { EssentialEntityData, HaMqttStateMessage } from '../../../../core/dist/exports';
 import type { EmitterAction, ReceiverSwitchConfig } from '../types';
 import type { IReceiverModule, ReceiverCommandResult } from './BaseReceiver';
 import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName } from '../taxonomy';

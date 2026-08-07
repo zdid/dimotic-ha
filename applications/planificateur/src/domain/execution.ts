@@ -11,7 +11,7 @@
  * HaWsClient.processConversation (verbe non couvert par la table §7).
  */
 
-import type { HaCommandService, HaStructureRegistry, HaWsClient, Logger, IEventBus } from '../../../core/src/exports';
+import type { HaCommandService, HaStructureRegistry, HaWsClient, Logger, IEventBus } from '../../../core/dist/exports';
 import type { DeployContext, ExecutionStep, MacroDefinition } from './types';
 import { resolveAction } from './resolution';
 import { CorrelatedRequester } from './correlation';

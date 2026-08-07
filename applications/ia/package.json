@@ -4,7 +4,7 @@
   "description": "Émulateur de protocole Ollama routant vers Mistral, avec outils domotiques et routage vers planificateur (voir specs/current/fonctionnelles-ia_specs)",
   "main": "dist/domain/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -b",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",
     "watch": "tsc -w"
   },

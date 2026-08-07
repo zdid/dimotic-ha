@@ -13,7 +13,7 @@
  * Rôle : Abstraction MQTT pour les modules de découverte
  */
 
-import type { IEventBus, Logger, IAppConfigProvider } from '../../../../../core/src/exports';
+import type { IEventBus, Logger, IAppConfigProvider } from '../../../../../core/dist/exports';
 import { nommageConfigSchema, type NommageConfig, type NommageSourceConfig } from '../../../domain/config-schema';
 import type { DiscoveryMessage, SourceStatus } from '../../../domain/types';
 import * as mqtt from 'mqtt';

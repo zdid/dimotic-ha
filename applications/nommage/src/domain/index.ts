@@ -19,7 +19,7 @@ import {
   IAppConfigProvider,
   ConfigService,
   AppConfigProvider
-} from '../../../core/src/exports';
+} from '../../../core/dist/exports';
 import { NOMMAGE_SOCKET_EVENTS, NOMMAGE_ALL_EVENTS, NOMMAGE_PERSISTENT_EVENTS } from './socket-events';
 import { NommageService, INommageService } from './NommageService';
 import { NommageMqttIntegrationService, INommageMqttIntegrationService } from '../ha/integration/nommage/NommageMqttIntegrationService';

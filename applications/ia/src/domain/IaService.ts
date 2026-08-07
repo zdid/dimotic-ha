@@ -14,7 +14,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Response } from 'express';
-import type { IEventBus, Logger, IAppConfigProvider, HaStructureRegistry, HaWsClient } from '../../../core/src/exports';
+import type { IEventBus, Logger, IAppConfigProvider, HaStructureRegistry, HaWsClient } from '../../../core/dist/exports';
 import { iaConfigSchema, type IaConfig } from './config-schema';
 import { MistralClient } from './MistralClient';
 import { RulesProvider } from './rules';

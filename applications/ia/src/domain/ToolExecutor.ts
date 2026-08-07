@@ -7,7 +7,7 @@
  *    fonctionnelles-planificateur_specs §6/§7/§8).
  */
 
-import type { HaStructureRegistry, Logger, IEventBus } from '../../../core/src/exports';
+import type { HaStructureRegistry, Logger, IEventBus } from '../../../core/dist/exports';
 import type { MistralToolCall, ExecuterActionParams, CorrelatedReponse } from './types';
 import { CorrelatedRequester } from './correlation';
 

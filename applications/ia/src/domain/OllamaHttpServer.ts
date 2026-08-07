@@ -6,7 +6,7 @@
 
 import express, { type Express, type Request, type Response } from 'express';
 import http from 'node:http';
-import type { Logger } from '../../../core/src/exports';
+import type { Logger } from '../../../core/dist/exports';
 import type { IaConfig } from './config-schema';
 import type { OllamaChatRequestBody } from './types';
 

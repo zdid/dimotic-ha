@@ -13,7 +13,7 @@ import {
   IAppConfigProvider,
   ConfigService,
   AppConfigProvider
-} from '../../../core/src/exports';
+} from '../../../core/dist/exports';
 import { RFXCOM_SOCKET_EVENTS, RFXCOM_ALL_EVENTS, RFXCOM_PERSISTENT_EVENTS } from './socket-events';
 import { RfxComService, type IRfxComService } from './RfxComService';
 import type { RfxComConfig } from './config-schema';

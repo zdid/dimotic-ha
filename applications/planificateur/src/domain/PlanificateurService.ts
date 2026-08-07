@@ -14,7 +14,7 @@ import {
   type IAppConfigProvider,
   type HaStructureRegistry,
   type HaWsClient
-} from '../../../core/src/exports';
+} from '../../../core/dist/exports';
 import { planificateurConfigSchema, type PlanificateurConfig } from './config-schema';
 import { macrosConfigSchema, planificationsConfigSchema, DEFAULT_MACROS_CONFIG, DEFAULT_PLANIFICATIONS_CONFIG, type MacrosConfigFile, type PlanificationsConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';

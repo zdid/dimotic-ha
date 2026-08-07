@@ -4,7 +4,7 @@
   "description": "Intégration AREXX (capteurs BS1000/BS500) pour Home Assistant via MQTT Discovery",
   "main": "dist/domain/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -b",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",
     "watch": "tsc -w"
   },

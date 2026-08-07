@@ -5,7 +5,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { IEventBus } from '../../../core/src/exports';
+import type { IEventBus } from '../../../core/dist/exports';
 
 interface Correlated {
   correlation_id: string;
