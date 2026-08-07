@@ -111,6 +111,10 @@ export interface ClientToServerEvents {
   'app:applications:list': () => void;
   'app:applications:enable': (data: { appId: string }) => void;
   'app:applications:disable': (data: { appId: string }) => void;
+  // Fenêtre de 15s après activation/désactivation (voir ApplicationManager.ts) — déclenche le
+  // redémarrage immédiatement au lieu d'attendre la fin du compte à rebours, si l'utilisateur
+  // quitte l'écran "Gestion des applications" avant.
+  'app:applications:restart-now': () => void;
 
   // Redémarrage manuel de l'application (Paramètres Techniques)
   'app:restart': () => void;
@@ -164,6 +168,7 @@ export interface AppEvents {
   'app:applications:enable:result': { appId: string; success: boolean; error?: string };
   'app:applications:disable': { appId: string };
   'app:applications:disable:result': { appId: string; success: boolean; error?: string };
+  'app:applications:restart-now': void;
 
   // Redémarrage manuel de l'application (Paramètres Techniques)
   'app:restart:requested': void;

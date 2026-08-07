@@ -142,6 +142,7 @@ export class AppService {
     this.eventBus.on('app:applications:list', () => this.handleApplicationsList());
     this.eventBus.on('app:applications:enable', (data: { appId: string }) => this.handleApplicationEnable(data));
     this.eventBus.on('app:applications:disable', (data: { appId: string }) => this.handleApplicationDisable(data));
+    this.eventBus.on('app:applications:restart-now', () => this.applicationManager.restartNowIfPending());
 
     // Redémarrage manuel demandé depuis l'UI (Paramètres Techniques > Journalisation)
     this.eventBus.on('app:restart:requested', () => this.handleRestartRequested());

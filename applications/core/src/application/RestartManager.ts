@@ -26,24 +26,23 @@ export class RestartManager {
   }
 
   /**
-   * Planifie un redémarrage après un délai
+   * Planifie un redémarrage après un délai. Un appel alors qu'un redémarrage est déjà planifié
+   * RÉINITIALISE le délai (annule l'ancien timer, reprogramme un nouveau delayMs complet) plutôt
+   * que d'ignorer l'appel — utilisé par ApplicationManager.enable/disable pour laisser une
+   * fenêtre de 15s glissante permettant d'activer/désactiver plusieurs applications avant qu'un
+   * seul redémarrage ne s'applique à toutes les modifications (demande utilisateur 07/08/2026).
    * @param delayMs - Délai en millisecondes avant le redémarrage (default: 500ms)
    * @param reason - Raison du redémarrage (pour le logging)
    */
   scheduleRestart(delayMs: number = 500, reason: string = 'Configuration saved'): void {
-    // Éviter les planifications multiples
-    if (this.restartScheduled) {
-      this.logger.warn('RestartManager', `Redémarrage déjà planifié : ${reason}`);
-      return;
+    if (this.restartTimeout) {
+      clearTimeout(this.restartTimeout);
+      this.logger.info('RestartManager', `Redémarrage déjà planifié — délai réinitialisé à ${delayMs}ms : ${reason}`);
+    } else {
+      this.logger.info('RestartManager', `Redémarrage planifié dans ${delayMs}ms : ${reason}`);
     }
 
     this.restartScheduled = true;
-    this.logger.info('RestartManager', `Redémarrage planifié dans ${delayMs}ms : ${reason}`);
-
-    // Annuler un timeout précédent si nécessaire
-    if (this.restartTimeout) {
-      clearTimeout(this.restartTimeout);
-    }
 
     // Planifier le nouveau timeout
     this.restartTimeout = setTimeout(() => {

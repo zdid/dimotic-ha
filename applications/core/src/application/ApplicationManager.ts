@@ -8,6 +8,11 @@ import { Logger } from '../infrastructure/logger';
 import type { RestartManager } from './RestartManager';
 import type { ConfigService } from '../infrastructure/config/ConfigService';
 
+/** Fenêtre glissante avant redémarrage après une activation/désactivation — voir
+ *  RestartManager.scheduleRestart() : chaque nouvel appel pendant ce délai le réinitialise à
+ *  15s, laissant le temps d'enchaîner plusieurs changements avant un seul redémarrage. */
+const APPLICATION_TOGGLE_RESTART_DELAY_MS = 15000;
+
 /**
  * ApplicationManager - Gère l'activation et la désactivation dynamique des applications
  *
@@ -198,7 +203,7 @@ export class ApplicationManager {
         return { success: false, error: result.error };
       }
 
-      this.restartManager.scheduleRestart();
+      this.restartManager.scheduleRestart(APPLICATION_TOGGLE_RESTART_DELAY_MS, `Application ${appId} activée`);
       this.logger.info('ApplicationManager', `Application ${appId} activée`);
 
       return { success: true };
@@ -236,7 +241,7 @@ export class ApplicationManager {
         return { success: false, error: result.error };
       }
 
-      this.restartManager.scheduleRestart();
+      this.restartManager.scheduleRestart(APPLICATION_TOGGLE_RESTART_DELAY_MS, `Application ${appId} désactivée`);
       this.logger.info('ApplicationManager', `Application ${appId} désactivée`);
 
       return { success: true };
@@ -245,6 +250,18 @@ export class ApplicationManager {
       this.logger.error('ApplicationManager', `Erreur lors de la désactivation de ${appId}: ${errorMessage}`);
       return { success: false, error: errorMessage };
     }
+  }
+
+  /**
+   * Déclenche immédiatement un redémarrage déjà planifié (fenêtre de 15s en cours) — utilisé
+   * quand l'utilisateur quitte l'écran "Gestion des applications" avant la fin du compte à
+   * rebours : plus la peine d'attendre, il n'ajoutera plus de changement depuis cet écran.
+   * Sans effet si aucun redémarrage n'est actuellement planifié.
+   */
+  restartNowIfPending(): void {
+    if (!this.restartManager.isRestartScheduled()) return;
+    this.logger.info('ApplicationManager', 'Écran "Gestion des applications" quitté avec un redémarrage en attente — déclenché immédiatement');
+    this.restartManager.immediateRestart('Navigation quittée avec redémarrage en attente');
   }
 
   /**

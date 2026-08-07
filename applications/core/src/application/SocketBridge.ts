@@ -329,6 +329,15 @@ export class SocketBridge {
         this.eventBus.emit('app:applications:disable', data);
       });
 
+      // Fenêtre de 15s après activation/désactivation (voir ApplicationManager.ts) —
+      // l'utilisateur a quitté l'écran "Gestion des applications" avant la fin du compte à
+      // rebours : plus la peine d'attendre, déclencher tout de suite.
+      // @ts-ignore
+      socket.on('app:applications:restart-now', () => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: app:applications:restart-now de ${socket.id}`);
+        this.eventBus.emit('app:applications:restart-now', undefined as void);
+      });
+
       // Handler pour la demande de redémarrage manuel (Paramètres Techniques)
       // @ts-ignore
       socket.on('app:restart', () => {

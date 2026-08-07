@@ -189,6 +189,26 @@ const createTemplate = (): HTMLTemplateElement => {
         padding: 0;
         line-height: 1;
       }
+
+      .restart-countdown {
+        display: none;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px;
+        margin-bottom: 15px;
+        border-radius: 4px;
+        background-color: #f39c12;
+        color: #2c3e50;
+        font-weight: 500;
+      }
+
+      .restart-countdown.visible {
+        display: flex;
+      }
+
+      .restart-countdown .countdown-icon {
+        font-size: 1.2rem;
+      }
     </style>
     
     <div class="applications-management">
@@ -199,7 +219,13 @@ const createTemplate = (): HTMLTemplateElement => {
       
       <!-- Alertes -->
       <div id="alert-container"></div>
-      
+
+      <!-- Compte à rebours avant redémarrage (visible après une activation/désactivation) -->
+      <div id="restart-countdown" class="restart-countdown">
+        <span class="countdown-icon">⏱️</span>
+        <span>Redémarrage dans <strong id="restart-countdown-value">15</strong>s — vous pouvez activer/désactiver d'autres applications avant, le décompte repart alors à 15s. Quitter cet écran déclenche le redémarrage immédiatement.</span>
+      </div>
+
       <!-- Applications activées -->
       <div class="app-list-section">
         <h3>✅ Applications activées</h3>
@@ -231,21 +257,65 @@ export class ApplicationsManager extends HTMLElement {
   private applications: { activated: string[]; disabled: string[] } = { activated: [], disabled: [] };
   private loading: boolean = false;
   private error: string | null = null;
-  
+
+  // Compte à rebours avant redémarrage (voir RestartManager.scheduleRestart côté serveur,
+  // réinitialisé à 15s à chaque activation/désactivation) — purement visuel, ne pilote rien :
+  // le serveur gère son propre minuteur indépendamment, ce compteur ne fait que le refléter.
+  private restartCountdownSeconds: number | null = null;
+  private restartCountdownInterval: ReturnType<typeof setInterval> | null = null;
+  private hasPendingRestart: boolean = false;
+  private visibilityObserver: MutationObserver | null = null;
+
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    
+
     const template = createTemplate();
     this.shadowRoot!.appendChild(template.content.cloneNode(true));
   }
-  
+
   connectedCallback() {
     this.setupEventListeners();
     this.loadApplications();
+    this.observeVisibility();
   }
-  
+
+  disconnectedCallback() {
+    this.visibilityObserver?.disconnect();
+    if (this.restartCountdownInterval) clearInterval(this.restartCountdownInterval);
+  }
+
+  /**
+   * Cet élément reste en permanence dans le DOM (Sidebar bascule `display: none`/`block` sur son
+   * conteneur `.content-section` plutôt que de le retirer, voir Sidebar.ts::hideAllContentSections)
+   * — `disconnectedCallback` ne se déclenche donc jamais à la navigation. On observe directement
+   * ce basculement pour détecter "l'utilisateur a quitté cet écran".
+   */
+  private observeVisibility(): void {
+    const section = this.closest('.content-section') as HTMLElement | null;
+    if (!section) return;
+
+    this.visibilityObserver = new MutationObserver(() => {
+      if (section.style.display === 'none' && this.hasPendingRestart) {
+        console.log('[ApplicationsManager] Écran quitté avec un redémarrage en attente — déclenchement immédiat');
+        window.app?.appManager?.restartNow();
+        this.hasPendingRestart = false;
+        this.stopRestartCountdown();
+      }
+    });
+    this.visibilityObserver.observe(section, { attributes: true, attributeFilter: ['style'] });
+  }
+
   private setupEventListeners(): void {
+    // Fenêtre de 15s avant redémarrage — (re)démarre le compte à rebours affiché à chaque
+    // activation/désactivation réussie (la sienne ou celle d'un autre onglet, cet événement
+    // reflète un broadcast serveur reçu par toutes les sessions connectées).
+    window.addEventListener('applications:restart-pending', ((e: Event) => {
+      const customEvent = e as CustomEvent<{ delaySeconds: number }>;
+      this.hasPendingRestart = true;
+      this.startRestartCountdown(customEvent.detail?.delaySeconds ?? 15);
+    }) as EventListener);
+
     // Écouter le chargement des applications
     window.addEventListener('applications:loaded', ((e: Event) => {
       const customEvent = e as CustomEvent;
@@ -380,6 +450,54 @@ export class ApplicationsManager extends HTMLElement {
     }
   }
   
+  /**
+   * (Re)démarre le compte à rebours affiché — un appel alors qu'un compte à rebours est déjà en
+   * cours le réinitialise à `seconds` (même sémantique que RestartManager.scheduleRestart côté
+   * serveur, qu'il ne fait ici que refléter visuellement).
+   */
+  private startRestartCountdown(seconds: number): void {
+    if (this.restartCountdownInterval) clearInterval(this.restartCountdownInterval);
+
+    this.restartCountdownSeconds = seconds;
+    this.renderRestartCountdown();
+
+    this.restartCountdownInterval = setInterval(() => {
+      if (this.restartCountdownSeconds === null) return;
+      this.restartCountdownSeconds -= 1;
+      if (this.restartCountdownSeconds <= 0) {
+        this.stopRestartCountdown();
+        this.showRestartingBanner();
+        return;
+      }
+      this.renderRestartCountdown();
+    }, 1000);
+  }
+
+  private stopRestartCountdown(): void {
+    if (this.restartCountdownInterval) {
+      clearInterval(this.restartCountdownInterval);
+      this.restartCountdownInterval = null;
+    }
+    this.restartCountdownSeconds = null;
+    const el = this.shadowRoot!.getElementById('restart-countdown');
+    el?.classList.remove('visible');
+  }
+
+  private renderRestartCountdown(): void {
+    const el = this.shadowRoot!.getElementById('restart-countdown');
+    const valueEl = this.shadowRoot!.getElementById('restart-countdown-value');
+    if (!el || !valueEl || this.restartCountdownSeconds === null) return;
+    valueEl.textContent = String(this.restartCountdownSeconds);
+    el.classList.add('visible');
+  }
+
+  private showRestartingBanner(): void {
+    const el = this.shadowRoot!.getElementById('restart-countdown');
+    if (!el) return;
+    el.innerHTML = '<span class="countdown-icon">🔄</span><span>Redémarrage en cours...</span>';
+    el.classList.add('visible');
+  }
+
   private showAlert(type: 'info' | 'error', message: string): void {
     const container = this.shadowRoot!.getElementById('alert-container');
     if (!container) return;
