@@ -438,8 +438,8 @@ function renderReceivers(): void {
         <button class="btn btn-danger" data-action="delete-receiver" data-id="${escapeHtml(r.receiverId)}">🗑️</button>
       </div>
       <div class="content-col">
-        <div class="line1"><strong>${escapeHtml(r.receiverId)}</strong> (${escapeHtml(r.type)})</div>
-        <div class="line2">${escapeHtml(r.name)}</div>
+        <div class="line1"><strong>${escapeHtml(r.name)}</strong></div>
+        <div class="line2">${escapeHtml(r.receiverId)} (${escapeHtml(r.type)})</div>
         <div>Émetteur principal : ${escapeHtml(emitterLabel(r.primaryEmitter))}</div>
         <div>Vers HA: <span class="badge ${r.transmitToHa ? 'on' : 'off'}">${r.transmitToHa ? 'oui' : 'non'}</span></div>
         <div>Émetteurs appairés: ${r.emitters.map((e) => `${escapeHtml(emitterLabel(e.emitterId))} (${escapeHtml(e.action)})`).join(', ') || 'aucun'}</div>
