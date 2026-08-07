@@ -24,5 +24,6 @@ ${r?'Expression: "'+r+`"
 // — la contrainte "même balise" ne s'applique qu'à cette déclaration initiale.
 document.addEventListener('alpine:init', () => {
   window.Alpine.store('ws', { connected: false });
+  window.Alpine.store('mqtt', { connected: false });
   window.Alpine.store('modules', { list: [], active: null });
 });

@@ -214,6 +214,7 @@ export type SocketClient = {
  */
 export const SOCLE_SOCKET_EVENTS = {
   APP_STATUS: 'app:status',
+  APP_STARTED: 'app:started',
   APP_LOG: 'app:log',
   HA_ENTITY_UPDATED: 'ha:entity:updated',
   HA_SYNC_READY: 'ha:sync:ready',

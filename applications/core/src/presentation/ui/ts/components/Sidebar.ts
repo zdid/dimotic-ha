@@ -123,6 +123,10 @@ const createTemplate = (): HTMLTemplateElement => {
         font-size: 0.85rem;
         color: #bdc3c7;
       }
+
+      .status-indicator + .status-indicator {
+        margin-top: 6px;
+      }
       
       .status-indicator .status-dot {
         width: 10px;
@@ -341,6 +345,10 @@ const createTemplate = (): HTMLTemplateElement => {
         <div class="status-indicator" id="status-indicator" :class="{ connected: $store.ws.connected }">
           <span class="status-dot"></span>
           <span>Web-Services</span>
+        </div>
+        <div class="status-indicator" id="mqtt-status-indicator" :class="{ connected: $store.mqtt.connected }">
+          <span class="status-dot"></span>
+          <span>MQTT</span>
         </div>
         <div class="uptime">
           Uptime: <span id="uptime">0s</span>

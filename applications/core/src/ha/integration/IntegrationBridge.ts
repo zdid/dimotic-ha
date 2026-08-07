@@ -80,6 +80,12 @@ export class IntegrationBridge {
   /** Bridges enregistrés par les modules, indépendamment de l'état connecté/déconnecté. */
   private registeredBridges: Map<string, BridgeRegisterEvent> = new Map();
 
+  /** Clés (`{moduleName}:{bridgeInstance}`) des bridges actuellement connectés — sert à dériver
+   *  un statut MQTT agrégé unique (`mqtt:connected`/`mqtt:disconnected`, voir §11 du socle pour
+   *  l'indicateur équivalent côté HA WebSocket) : un bridge par application métier existe, mais
+   *  le tableau de bord principal n'affiche qu'un seul voyant MQTT global. */
+  private connectedBridgeKeys: Set<string> = new Set();
+
   constructor(eventBus: IEventBus, logger: Logger, configService: ConfigService) {
     this.eventBus = eventBus;
     this.logger = logger;
@@ -115,6 +121,7 @@ export class IntegrationBridge {
 
     this.haMqttService.onConnectionChange((moduleName, bridgeInstance, connected) => {
       this.eventBus.emitGeneric(`integration:${moduleName}:bridge:connection`, { bridgeInstance, connected });
+      this.updateAggregateMqttStatus(moduleName, bridgeInstance, connected);
     });
 
     this.logger.info('bridge', 'IntegrationBridge initialisé');
@@ -145,6 +152,35 @@ export class IntegrationBridge {
     const key = `${data.moduleName}:${data.bridgeInstance}`;
     this.registeredBridges.delete(key);
     this.haMqttService.disconnectBridge(data.moduleName, data.bridgeInstance);
+    // Déconnexion volontaire (MqttTransport.disconnect()) : ne déclenche pas onConnectionChange
+    // (contrairement à une coupure réseau involontaire) — mise à jour manuelle nécessaire.
+    this.updateAggregateMqttStatus(data.moduleName, data.bridgeInstance, false);
+  }
+
+  /**
+   * Dérive un statut MQTT agrégé unique (au moins un bridge connecté) à partir des
+   * changements par bridge, et émet `mqtt:connected`/`mqtt:disconnected` (événements
+   * persistants du socle, voir AppService.registerCoreSocketEvents) uniquement sur
+   * transition — pas à chaque changement individuel de bridge.
+   */
+  private updateAggregateMqttStatus(moduleName: string, bridgeInstance: string, connected: boolean): void {
+    const key = `${moduleName}:${bridgeInstance}`;
+    const wasAnyConnected = this.connectedBridgeKeys.size > 0;
+
+    if (connected) {
+      this.connectedBridgeKeys.add(key);
+    } else {
+      this.connectedBridgeKeys.delete(key);
+    }
+
+    const isAnyConnected = this.connectedBridgeKeys.size > 0;
+    if (isAnyConnected === wasAnyConnected) return;
+
+    if (isAnyConnected) {
+      this.eventBus.emitGeneric('mqtt:connected', undefined);
+    } else {
+      this.eventBus.emitGeneric('mqtt:disconnected', { reason: 'Aucun bridge MQTT connecté' });
+    }
   }
 
   /**
@@ -240,6 +276,8 @@ export class IntegrationBridge {
       this.logger.info('bridge', 'Désactivation de MQTT — déconnexion de tous les bridges');
       for (const registration of this.registeredBridges.values()) {
         this.haMqttService.disconnectBridge(registration.moduleName, registration.bridgeInstance);
+        // Déconnexion volontaire : voir le commentaire dans handleBridgeUnregister.
+        this.updateAggregateMqttStatus(registration.moduleName, registration.bridgeInstance, false);
       }
     }
   }

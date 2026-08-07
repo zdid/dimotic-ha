@@ -71,6 +71,7 @@ export class TechnicalConfigManager {
   public saveInProgress: boolean = false;
   public isLoading: boolean = true;
   public isHaConnected: boolean | null = null;
+  public isMqttConnected: boolean | null = null;
   public uptime: number = 0;
   
   /**
@@ -167,15 +168,34 @@ export class TechnicalConfigManager {
       this.isHaConnected = true;
       this.notifyHaStatusChanged();
     });
-    
+
     this.socket.on('ha:disconnected', () => {
       this.isHaConnected = false;
       this.notifyHaStatusChanged();
     });
-    
-    // Application démarrée
-    this.socket.on('app:started', () => {
-      this.uptime = Date.now();
+
+    // Connexion MQTT (statut agrégé — au moins un bridge d'application connecté, voir
+    // IntegrationBridge.updateAggregateMqttStatus)
+    this.socket.on('mqtt:connected', () => {
+      this.isMqttConnected = true;
+      this.notifyMqttStatusChanged();
+    });
+
+    this.socket.on('mqtt:disconnected', () => {
+      this.isMqttConnected = false;
+      this.notifyMqttStatusChanged();
+    });
+
+    // Application démarrée — jusqu'ici jamais relayé à Socket.io (absent de
+    // SOCLE_SOCKET_EVENTS/persistentCoreEvents, voir AppService.ts) : ce handler n'avait donc
+    // jamais pu s'exécuter, l'uptime restant figé à "0s" (bug constaté le 07/08/2026). Payload
+    // serveur ({timestamp, version}, voir index.ts) — utiliser data.timestamp (l'heure réelle de
+    // démarrage) plutôt que Date.now() (l'heure de réception côté client) : l'événement étant
+    // maintenant persistant, il est rejoué tel quel à un client qui se connecte bien après le
+    // démarrage réel, Date.now() donnerait alors un uptime totalement faux à ce moment-là.
+    this.socket.on('app:started', (data: { timestamp?: string }) => {
+      this.uptime = data?.timestamp ? new Date(data.timestamp).getTime() : Date.now();
+      window.dispatchEvent(new CustomEvent('app:started', { detail: { uptime: this.uptime } }));
     });
     
     // Liste des modules
@@ -352,6 +372,13 @@ export class TechnicalConfigManager {
       detail: { isConnected: this.isHaConnected }
     }));
     if (window.Alpine) window.Alpine.store('ws').connected = this.isHaConnected;
+  }
+
+  private notifyMqttStatusChanged(): void {
+    window.dispatchEvent(new CustomEvent('mqtt:status:changed', {
+      detail: { isConnected: this.isMqttConnected }
+    }));
+    if (window.Alpine) window.Alpine.store('mqtt').connected = this.isMqttConnected;
   }
   
   // ======================================================================

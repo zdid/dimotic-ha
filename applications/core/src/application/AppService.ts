@@ -481,6 +481,7 @@ export class AppService {
     // Événements persistants du socle : statut, config, modules, etc.
     const persistentCoreEvents = [
       SOCLE_SOCKET_EVENTS.APP_STATUS,
+      SOCLE_SOCKET_EVENTS.APP_STARTED,
       SOCLE_SOCKET_EVENTS.CONFIG_CURRENT,
       SOCLE_SOCKET_EVENTS.MQTT_CONNECTED,
       SOCLE_SOCKET_EVENTS.MQTT_DISCONNECTED,

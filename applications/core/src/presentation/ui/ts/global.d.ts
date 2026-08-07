@@ -62,6 +62,7 @@ declare global {
     
     // HA events
     'ha:status:changed': CustomEvent<{ isConnected: boolean }>;
+    'mqtt:status:changed': CustomEvent<{ isConnected: boolean }>;
     'app:started': CustomEvent<{ uptime: number }>;
     
     // Other events
