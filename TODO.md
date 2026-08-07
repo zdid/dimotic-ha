@@ -418,13 +418,12 @@
 - **Statut** : Non défini
 - **Priorité** : Moyenne
 
-### 🟡 Reconstitution des équipements RFXCOM — machine d'origine perdue
+### 🟢 Reconstitution des équipements RFXCOM — machine d'origine perdue — Classée sans suite
 - **Contexte (2026-07-24)** : la machine qui exécutait RFXCOM a été perdue (carte SIM avalée par un aspirateur — pas de lien avec ws-ha, la config RFXCOM n'a simplement jamais été recréée sur la nouvelle machine). `equipements.json` (racine du projet, ancien format non lié à ws-ha) reste la seule trace des récepteurs/télécommandes réels.
 - **Fait** : analyse complète de `equipements.json` en session avec l'utilisateur — structure comprise (un récepteur porte le code de son émetteur principal, `equivalences` liste les autres télécommandes), 21 récepteurs + 61 boutons protocole `ac`/lighting2, plus `arc`/lighting1, `th9`, `elec3`. Corrections identifiées et validées avec l'utilisateur : 3 boutons obsolètes retirés, 3 codes reclassés en scènes virtuelles (marche/arrêt rez-de-chaussée, 1er étage, extinction générale maison), `k9` reclassé en `octoprint`, récepteur dressing reconstitué (ancien récepteur zigbee disparu, remplacé par le bouton AC existant). Résultat sauvegardé dans **`equipements-rfxcom-inventaire.json`** (racine du projet) — 85 équipements, avec `quoi`/`lieu`/`lieuprecis`/`friendlyname`/`identifiant` (`protocole-code`, ex: `th9-0x0501`) et pour les récepteurs un id `recept#` + émetteur principal + émetteurs associés.
 - **Points restés en suspens** (voir `points_a_trancher` dans le fichier) : `bureau1` (0x01570f52/12) et `dressing` (0x0026aad7/2) sont les 2 seuls codes dont le binôme attendu (paire `11`/`12` ou `1`/`2`) est absent du fichier source — bouton manquant probable, jamais confirmé physiquement.
-- **À faire** : croiser cet inventaire avec les entités déjà déclarées côté Home Assistant, puis recréer la configuration RFXCOM (devices/récepteurs/scènes) dans `applications/rfxcom` sur la base de ce fichier.
-- **Statut** : Inventaire reconstitué et sauvegardé — pas encore croisé avec HA, pas encore réinjecté dans la config RFXCOM
-- **Priorité** : Moyenne (pas de RFXCOM fonctionnel tant que non terminé, mais pas bloquant pour le reste)
+- **Statut** : Classée sans suite (précision utilisateur, 2026-08-07) — rien à reprendre sur ce sujet, `config-rfxcom-devices-v1.0.yaml` (racine du projet) est déjà le registre RFXCOM réel en usage courant.
+- **Priorité** : Résolu
 
 ### 🟢 EVOO7 : entité `climate` composite (plusieurs données combinées) — Corrigé (entrée stale mise à jour)
 - **Demande utilisateur (2026-07-26)**, en marge de l'ajout de `binary_sensor` (type HA forcé par donnée) : élargir aussi au type `climate`.
