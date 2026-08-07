@@ -163,6 +163,27 @@ export class ConfigService {
   }
 
   /**
+   * Retourne la liste des applications désactivées (ApplicationManager.ts).
+   */
+  getDisabledApps(): string[] {
+    return this.config.disabledApps ? [...this.config.disabledApps] : [];
+  }
+
+  /**
+   * Sauvegarde la liste des applications désactivées, dans le même fichier que ha/web/logging
+   * (data/core/config.yaml) — même narrowing que saveConfig() : les sections de module ne
+   * transitent jamais par ce chemin, chacune a son propre fichier (saveModuleConfig).
+   */
+  setDisabledApps(disabledApps: string[]): SaveResult {
+    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps } as AppConfig;
+    const result = this.writer.save(socleConfig);
+    if (result.success) {
+      this.config = { ...this.config, disabledApps };
+    }
+    return result;
+  }
+
+  /**
    * Configurations par défaut pour les sections de modules
    * Utilisées pour auto-initialiser les sections manquantes
    * 

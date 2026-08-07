@@ -8,6 +8,7 @@ import { AppConfig, configSchema } from './schema';
  * Valeurs par défaut complètes pour la configuration
  */
 const DEFAULT_CONFIG: AppConfig = {
+  disabledApps: [],
   ha: {
     ws_enable: false,
     mqtt_enable: false,

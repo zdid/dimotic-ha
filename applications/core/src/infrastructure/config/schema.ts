@@ -72,6 +72,12 @@ export const configSchema = z.object({
   ha: haConfigSchema.optional(),
   web: webSchema,
   logging: loggingSchema,
+  // Liste des applications désactivées (id de dossier sous applications/) — remplace le
+  // déplacement physique vers applications_désactivées/ (voir ApplicationManager.ts) : une
+  // application désactivée reste présente sur disque, seule sa présence dans cette liste
+  // l'empêche d'être chargée. Élimine le besoin de fs.renameSync() entre deux répertoires
+  // (qui échouait avec EXDEV sous overlay2 sans volume nommé dédié, voir Dockerfile).
+  disabledApps: z.array(z.string()).default([]),
   // Les sections spécifiques aux modules seront ajoutées dynamiquement
 }).passthrough();
 // ⚠️ .passthrough() est indispensable : sans lui, Zod strippe silencieusement toute clé de

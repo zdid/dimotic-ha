@@ -93,7 +93,7 @@ export class AppService {
     this.haRegistryTracer.resetChangeLog();
 
     // Initialiser le gestionnaire d'applications
-    this.applicationManager = new ApplicationManager(restartManager, logger);
+    this.applicationManager = new ApplicationManager(restartManager, logger, configService);
     
     // Initialiser l'état WS depuis la config
     this.initializeWsState();
@@ -259,6 +259,13 @@ export class AppService {
         this.logger.warn('AppService', `Aucun répertoire applications trouvé à ${appsDir}: ${err}`);
         return;
       }
+
+      // Applications désactivées (data/core/config.yaml, disabledApps) — toujours présentes
+      // physiquement sous applications/ (voir ApplicationManager.ts), donc explicitement
+      // exclues ici pour reproduire le comportement antérieur (une app désactivée n'a aucune
+      // trace dans this.modules : ni entrée de menu, ni schéma de config enregistré).
+      const disabledApps = new Set(this.applicationManager.listAll().disabled);
+      dirs = dirs.filter(dir => !disabledApps.has(dir.name));
 
       for (const dir of dirs) {
         // Vérifier si le répertoire contient dist/domain/index.js ou src/domain/index.ts

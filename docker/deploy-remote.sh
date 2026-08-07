@@ -16,12 +16,16 @@
 # conteneur à celui du dépôt (voir TODO.md).
 #
 # Le volume est donc explicitement supprimé puis recréé vide avant `up -d`, pour
-# forcer Docker à le repeupler depuis la nouvelle image. Comme l'activation/
-# désactivation des applications (Paramètres Techniques > Gestion des
-# applications) vit uniquement dans ce volume — dossier `applications_désactivées/`,
-# jamais dans data/ — ce script sauvegarde la liste des applications désactivées
-# AVANT de recréer le volume, puis la réapplique après (déplacement de dossier,
-# méthode équivalente à l'UI, voir CLAUDE.md règle 7).
+# forcer Docker à le repeupler depuis la nouvelle image.
+#
+# ⚠️ L'activation/désactivation des applications (Paramètres Techniques > Gestion
+# des applications) vit depuis le 07/08/2026 dans `data/core/config.yaml`
+# (disabledApps, voir ApplicationManager.ts) — PAS dans le volume `stack_app-code`.
+# `data/` est un bind-mount séparé (`./data:/app/data`), jamais touché par la
+# recréation du volume ci-dessous : aucune sauvegarde/réapplication n'est donc
+# nécessaire ici, contrairement à l'ancien mécanisme (déplacement de dossier dans
+# applications_désactivées/, qui lui vivait dans le volume et ne survivait pas à
+# sa recréation).
 #
 # Usage : ./docker/deploy-remote.sh
 # Variables d'environnement optionnelles (valeurs par défaut = ha2) :
@@ -48,25 +52,17 @@ ssh_cmd() {
 
 echo "==> Déploiement sur ${SSH_USER}@${HOST}:${REMOTE_DIR} (volume ${VOLUME_NAME})"
 
-echo "==> 1/6 Sauvegarde de la liste des applications désactivées (avant recréation du volume)"
-DISABLED_APPS="$(ssh_cmd "sudo docker exec ${CONTAINER_NAME} sh -c 'ls \"/app/applications_désactivées\" 2>/dev/null'" || true)"
-if [ -n "$DISABLED_APPS" ]; then
-  echo "    Actuellement désactivées : $(echo "$DISABLED_APPS" | tr '\n' ' ')"
-else
-  echo "    Aucune (ou premier déploiement — conteneur pas encore démarré)"
-fi
-
-echo "==> 2/6 Pull de la nouvelle image"
+echo "==> 1/4 Pull de la nouvelle image"
 ssh_cmd "cd ${REMOTE_DIR} && sudo docker compose pull"
 
-echo "==> 3/6 Arrêt du conteneur"
+echo "==> 2/4 Arrêt du conteneur"
 ssh_cmd "cd ${REMOTE_DIR} && sudo docker compose down"
 
-echo "==> 4/6 Recréation du volume ${VOLUME_NAME} (sera repeuplé depuis la nouvelle image)"
+echo "==> 3/4 Recréation du volume ${VOLUME_NAME} (sera repeuplé depuis la nouvelle image)"
 ssh_cmd "sudo docker volume rm ${VOLUME_NAME}" || true
 ssh_cmd "sudo docker volume create ${VOLUME_NAME}"
 
-echo "==> 5/6 Démarrage avec le code neuf"
+echo "==> 4/4 Démarrage avec le code neuf"
 ssh_cmd "cd ${REMOTE_DIR} && sudo docker compose up -d"
 
 echo "    Attente du démarrage..."
@@ -78,28 +74,6 @@ for _ in $(seq 1 30); do
 done
 if [ "$STATUS" != "healthy" ]; then
   echo "    ⚠️  Le conteneur n'est pas 'healthy' après 60s (statut actuel : ${STATUS}) — vérifier les logs (docker logs ${CONTAINER_NAME})."
-fi
-
-if [ -n "$DISABLED_APPS" ]; then
-  echo "==> 6/6 Réapplication des applications désactivées"
-  RESTART_NEEDED=false
-  while IFS= read -r app; do
-    [ -z "$app" ] && continue
-    echo "    Désactivation de ${app}"
-    if ssh_cmd "sudo docker exec ${CONTAINER_NAME} sh -c 'mv \"/app/applications/${app}\" \"/app/applications_désactivées/${app}\"'"; then
-      RESTART_NEEDED=true
-    else
-      echo "    ⚠️  Échec pour ${app} (déjà absente de applications/ ?)"
-    fi
-  done <<< "$DISABLED_APPS"
-
-  if [ "$RESTART_NEEDED" = true ]; then
-    echo "    Redémarrage pour appliquer la désactivation"
-    ssh_cmd "sudo docker restart ${CONTAINER_NAME}"
-    sleep 5
-  fi
-else
-  echo "==> 6/6 Rien à réappliquer"
 fi
 
 echo "==> Terminé. Statut final :"

@@ -53,6 +53,8 @@ const mockConfigService = {
   saveConfig: vi.fn(),
   reload: vi.fn(),
   ensureModuleSections: vi.fn(),
+  getDisabledApps: vi.fn().mockReturnValue([]),
+  setDisabledApps: vi.fn().mockReturnValue({ success: true }),
 } as unknown as ConfigService;
 
 const mockSocketBridge = {

@@ -6,60 +6,115 @@ import { existsSync, mkdirSync, readdirSync, renameSync, statSync } from 'node:f
 import * as path from 'node:path';
 import { Logger } from '../infrastructure/logger';
 import type { RestartManager } from './RestartManager';
+import type { ConfigService } from '../infrastructure/config/ConfigService';
 
 /**
  * ApplicationManager - Gère l'activation et la désactivation dynamique des applications
- * 
- * Structure des répertoires :
- * - ACTIF : applications/{app}/src/ + applications/{app}/dist/
- * - DÉSACTIVÉ : applications_désactivées/{app}/src/ + applications_désactivées/{app}/dist/
- * - CORE : applications/core/ (toujours actif, ne peut pas être désactivé)
- * 
+ *
+ * Toutes les applications restent physiquement dans applications/{app}/ en permanence —
+ * l'état activé/désactivé est une simple liste (`disabledApps`) dans data/core/config.yaml
+ * (voir ConfigService.getDisabledApps/setDisabledApps), pas un déplacement de dossier.
+ *
+ * Ancienne conception (jusqu'au 07/08/2026) : déplacement physique via fs.renameSync() entre
+ * applications/ et applications_désactivées/ — abandonnée après avoir découvert (03/08/2026,
+ * voir Dockerfile) qu'elle échoue avec EXDEV sous overlay2 tant qu'un volume Docker nommé
+ * dédié ne couvre pas tout /app. Le nouveau mécanisme n'a plus ce besoin : aucune opération de
+ * déplacement de fichier n'a plus lieu en fonctionnement normal.
+ *
+ * `migrateLegacyDisabledDir()` (appelée une fois au démarrage) rapatrie automatiquement toute
+ * application encore présente dans applications_désactivées/ (installations existantes, ex.
+ * ha2) vers applications/ + `disabledApps`, pour une transition sans intervention manuelle.
+ *
  * Responsabilités :
  * - Lister les applications activées et désactivées
- * - Activer une application (déplacement depuis applications_désactivées/)
- * - Désactiver une application (déplacement vers applications_désactivées/)
+ * - Activer une application (retrait de `disabledApps`)
+ * - Désactiver une application (ajout à `disabledApps`)
  * - Déclencher un restart après modification
  */
 export class ApplicationManager {
   private readonly projectRoot: string;
   private readonly appsDir: string;
-  private readonly disabledAppsDir: string;
+  private readonly legacyDisabledAppsDir: string;
   private logger: Logger;
   private restartManager: RestartManager;
+  private configService: ConfigService;
 
   /**
    * Crée un nouveau ApplicationManager
    */
-  constructor(restartManager: RestartManager, logger: Logger) {
+  constructor(restartManager: RestartManager, logger: Logger, configService: ConfigService) {
     // Chemin vers la racine du projet
     this.projectRoot = process.env.PROJECT_ROOT || path.resolve(path.join(__dirname, '../../../../'));
-    
-    // Répertoires des applications
+
+    // Répertoire des applications (toujours actives physiquement)
     this.appsDir = path.join(this.projectRoot, 'applications');
-    this.disabledAppsDir = path.join(this.projectRoot, 'applications_désactivées');
+    // Répertoire historique — plus jamais alimenté, seulement vidé une fois au démarrage
+    // par migrateLegacyDisabledDir() pour les installations pré-07/08/2026.
+    this.legacyDisabledAppsDir = path.join(this.projectRoot, 'applications_désactivées');
 
     this.restartManager = restartManager;
     this.logger = logger;
+    this.configService = configService;
 
-    // S'assurer que les répertoires existent
-    this.ensureDirectories();
-  }
-
-  /**
-   * S'assure que tous les répertoires nécessaires existent
-   */
-  private ensureDirectories(): void {
-    // Applications activées
     if (!existsSync(this.appsDir)) {
       mkdirSync(this.appsDir, { recursive: true });
       this.logger.info('ApplicationManager', `Répertoire ${this.appsDir} créé`);
     }
-    
-    // Applications désactivées
-    if (!existsSync(this.disabledAppsDir)) {
-      mkdirSync(this.disabledAppsDir, { recursive: true });
-      this.logger.info('ApplicationManager', `Répertoire ${this.disabledAppsDir} créé`);
+
+    this.migrateLegacyDisabledDir();
+  }
+
+  /**
+   * Migration one-shot : rapatrie toute application encore trouvée dans
+   * applications_désactivées/ (ancien mécanisme) vers applications/, en l'ajoutant à
+   * `disabledApps` si elle n'y est pas déjà — pour que son état désactivé soit préservé sous
+   * le nouveau mécanisme sans action manuelle sur les installations existantes.
+   */
+  private migrateLegacyDisabledDir(): void {
+    if (!existsSync(this.legacyDisabledAppsDir)) return;
+
+    let legacyEntries: string[] = [];
+    try {
+      legacyEntries = readdirSync(this.legacyDisabledAppsDir).filter((entry) => {
+        if (entry.startsWith('.')) return false;
+        try {
+          return statSync(path.join(this.legacyDisabledAppsDir, entry)).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+    } catch (error) {
+      this.logger.warn('ApplicationManager', `Erreur de lecture de ${this.legacyDisabledAppsDir}: ${error}`);
+      return;
+    }
+
+    if (legacyEntries.length === 0) return;
+
+    const disabledApps = new Set(this.configService.getDisabledApps());
+    let migrated = 0;
+
+    for (const appId of legacyEntries) {
+      const legacyPath = path.join(this.legacyDisabledAppsDir, appId);
+      const activePath = path.join(this.appsDir, appId);
+      try {
+        if (existsSync(activePath)) {
+          this.logger.warn('ApplicationManager', `Migration ${appId} : ${activePath} existe déjà, dossier legacy ignoré (à nettoyer manuellement)`);
+          continue;
+        }
+        renameSync(legacyPath, activePath);
+        disabledApps.add(appId);
+        migrated++;
+        this.logger.info('ApplicationManager', `Migration : ${appId} rapatrié depuis applications_désactivées/ vers applications/ (reste désactivé via config)`);
+      } catch (error) {
+        this.logger.error('ApplicationManager', `Échec de migration de ${appId}: ${error}`);
+      }
+    }
+
+    if (migrated > 0) {
+      const result = this.configService.setDisabledApps([...disabledApps]);
+      if (!result.success) {
+        this.logger.error('ApplicationManager', `Échec de sauvegarde de disabledApps après migration: ${result.error}`);
+      }
     }
   }
 
@@ -67,10 +122,12 @@ export class ApplicationManager {
    * Liste toutes les applications (activées + désactivées)
    */
   listAll(): { activated: string[]; disabled: string[] } {
-    this.logger.info('ApplicationManager', `Scanning for applications - active: ${this.appsDir}, disabled: ${this.disabledAppsDir}`);
-    const activated = this.getApplicationsInDir(this.appsDir);
-    const disabled = this.getApplicationsInDir(this.disabledAppsDir);
-    this.logger.info('ApplicationManager', `listAll: activated=${JSON.stringify(activated)}, disabled=${JSON.stringify(disabled)}`);
+    const all = this.getApplicationsInDir(this.appsDir).filter((appId) => appId !== 'core');
+    const disabledSet = new Set(this.configService.getDisabledApps());
+
+    const activated = all.filter((appId) => !disabledSet.has(appId));
+    const disabled = all.filter((appId) => disabledSet.has(appId));
+
     return { activated, disabled };
   }
 
@@ -79,9 +136,9 @@ export class ApplicationManager {
    */
   private getApplicationsInDir(baseDir: string): string[] {
     const apps: string[] = [];
-    
+
     if (!existsSync(baseDir)) return apps;
-    
+
     try {
       const entries = readdirSync(baseDir).filter(entry => {
         if (entry.startsWith('.')) return false;
@@ -92,7 +149,7 @@ export class ApplicationManager {
           return false;
         }
       });
-      
+
       for (const entry of entries) {
         if (this.isValidAppDir(path.join(baseDir, entry))) {
           apps.push(entry);
@@ -101,7 +158,7 @@ export class ApplicationManager {
     } catch (error) {
       this.logger.warn('ApplicationManager', `Erreur de lecture du répertoire ${baseDir}: ${error}`);
     }
-    
+
     return apps;
   }
 
@@ -113,50 +170,37 @@ export class ApplicationManager {
     const srcDir = path.join(dirPath, 'src');
     const distDir = path.join(dirPath, 'dist');
     const packageJson = path.join(dirPath, 'package.json');
-    
+
     // Une application valide a au moins un de ces éléments
     return existsSync(srcDir) || existsSync(distDir) || existsSync(packageJson);
   }
 
   /**
-   * Active une application (déplace de applications_désactivées/ vers applications/)
+   * Active une application (retire son id de `disabledApps`)
    */
   enable(appId: string): { success: boolean; error?: string } {
     try {
-      // Valider le nom de l'application
       if (!this.isValidAppId(appId)) {
         return { success: false, error: `Nom d'application invalide: ${appId}` };
       }
 
-      // Vérifier que l'application n'est pas déjà activée
-      if (this.listAll().activated.includes(appId)) {
+      if (!existsSync(path.join(this.appsDir, appId))) {
+        return { success: false, error: `Application ${appId} introuvable dans applications/` };
+      }
+
+      const disabledApps = this.configService.getDisabledApps();
+      if (!disabledApps.includes(appId)) {
         return { success: false, error: `Application ${appId} déjà activée` };
       }
 
-      // Vérifier que l'application existe dans applications_désactivées/
-      if (!this.listAll().disabled.includes(appId)) {
-        return { success: false, error: `Application ${appId} non trouvée dans applications_désactivées/` };
+      const result = this.configService.setDisabledApps(disabledApps.filter((id) => id !== appId));
+      if (!result.success) {
+        return { success: false, error: result.error };
       }
 
-      // S'assurer que les répertoires cibles existent
-      this.ensureDirectories();
-
-      // Déplacer toute l'application (src/ + dist/ + package.json, etc.)
-      const disabledPath = path.join(this.disabledAppsDir, appId);
-      const activePath = path.join(this.appsDir, appId);
-      
-      if (existsSync(disabledPath)) {
-        if (existsSync(activePath)) {
-          return { success: false, error: `Conflit : ${appId} existe déjà dans applications/` };
-        }
-        renameSync(disabledPath, activePath);
-        this.logger.info('ApplicationManager', `Application ${appId} déplacée de applications_désactivées/ vers applications/`);
-      }
-
-      // Déclencher un restart
       this.restartManager.scheduleRestart();
       this.logger.info('ApplicationManager', `Application ${appId} activée`);
-      
+
       return { success: true };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -166,44 +210,35 @@ export class ApplicationManager {
   }
 
   /**
-   * Désactive une application (déplace de applications/ vers applications_désactivées/)
+   * Désactive une application (ajoute son id à `disabledApps`)
    */
   disable(appId: string): { success: boolean; error?: string } {
     try {
-      // Valider le nom de l'application
       if (!this.isValidAppId(appId)) {
         return { success: false, error: `Nom d'application invalide: ${appId}` };
       }
 
-      // Vérifier que ce n'est pas une application core
       if (appId === 'core') {
         return { success: false, error: `Impossible de désactiver l'application core` };
       }
 
-      // Vérifier que l'application existe dans applications/
-      if (!this.listAll().activated.includes(appId)) {
-        return { success: false, error: `Application ${appId} non trouvée dans applications/` };
+      if (!existsSync(path.join(this.appsDir, appId))) {
+        return { success: false, error: `Application ${appId} introuvable dans applications/` };
       }
 
-      // S'assurer que les répertoires cibles existent
-      this.ensureDirectories();
-
-      // Déplacer toute l'application
-      const activePath = path.join(this.appsDir, appId);
-      const disabledPath = path.join(this.disabledAppsDir, appId);
-      
-      if (existsSync(activePath)) {
-        if (existsSync(disabledPath)) {
-          return { success: false, error: `Conflit : ${appId} existe déjà dans applications_désactivées/` };
-        }
-        renameSync(activePath, disabledPath);
-        this.logger.info('ApplicationManager', `Application ${appId} déplacée de applications/ vers applications_désactivées/`);
+      const disabledApps = this.configService.getDisabledApps();
+      if (disabledApps.includes(appId)) {
+        return { success: false, error: `Application ${appId} déjà désactivée` };
       }
 
-      // Déclencher un restart
+      const result = this.configService.setDisabledApps([...disabledApps, appId]);
+      if (!result.success) {
+        return { success: false, error: result.error };
+      }
+
       this.restartManager.scheduleRestart();
       this.logger.info('ApplicationManager', `Application ${appId} désactivée`);
-      
+
       return { success: true };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
