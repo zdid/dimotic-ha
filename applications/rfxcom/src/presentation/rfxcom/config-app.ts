@@ -326,12 +326,12 @@ function renderConfiguredDevices(): void {
         <button class="btn btn-danger" data-action="delete-device" data-id="${escapeHtml(d.uniqueId)}">🗑️</button>
       </div>
       <div class="content-col">
-        <div class="line1">
+        <div class="line1"><strong>${escapeHtml(t.quoi)} — ${escapeHtml(t.lieuPrecis)} / ${escapeHtml(t.lieu)} / ${escapeHtml(t.pere)} / ${escapeHtml(t.grandPere)}</strong></div>
+        <div class="line2">
           <span class="mono">${escapeHtml(d.uniqueId)}</span>
           &middot; Vers HA: <input type="checkbox" data-action="toggle-transmit" data-id="${escapeHtml(d.uniqueId)}" ${d.transmitToHa ? 'checked' : ''}>
           &middot; Dernière réception: ${d.lastSeen ? new Date(d.lastSeen).toLocaleString('fr-FR') : '--'}
         </div>
-        <div class="line2">${escapeHtml(t.quoi)} — ${escapeHtml(t.lieuPrecis)} / ${escapeHtml(t.lieu)} / ${escapeHtml(t.pere)} / ${escapeHtml(t.grandPere)}</div>
       </div>
     </div>
   `;
@@ -348,11 +348,11 @@ function renderDiscoveredDevices(): void {
         <button class="btn btn-primary" data-action="edit-device" data-id="${escapeHtml(d.uniqueId)}">✏️</button>
       </div>
       <div class="content-col">
-        <div class="line1">
+        <div class="line1"><strong>${escapeHtml(d.defaultQuoi)}</strong></div>
+        <div class="line2">
           <span class="mono">${escapeHtml(d.uniqueId)}</span>
           &middot; Détecté à: ${new Date(d.detectedAt).toLocaleString('fr-FR')}
         </div>
-        <div class="line2">${escapeHtml(d.defaultQuoi)}</div>
       </div>
     </div>
   `).join('') || '<p>Aucun device en auto-découverte</p>';
