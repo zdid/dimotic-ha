@@ -237,7 +237,7 @@ export class IntegrationBridge {
 
   /** Même garantie d'area que publishDiscoveryWithArea, pour le chemin passthrough (NOMMAGE). */
   private async publishDiscoveryPassthroughWithArea(moduleName: string, data: PassthroughDiscoveryRequestEvent): Promise<void> {
-    const payload = data.payload as { device?: { suggested_area?: string } } | undefined;
+    const payload = data.payload as { device?: { suggested_area?: string; name?: string } } | undefined;
     const suggestedArea = payload?.device?.suggested_area;
     if (suggestedArea) {
       const capitalized = this.capitalizeAreaName(suggestedArea);
@@ -246,6 +246,16 @@ export class IntegrationBridge {
         await this.areaEnsureService.ensureArea(capitalized);
       }
     }
+
+    // Même règle que RFXCOM (taxonomy.ts::buildDisplayName) : device.name raccourci (lieu précis,
+    // repli sur le quoi) plutôt que la chaîne QUOI---OÙ complète — sinon redondant avec l'area HA
+    // déjà donnée par suggested_area ci-dessus. Les sources passthrough (zigbee2mqtt) publient leurs
+    // devices déjà nommés selon la convention QUOI---OÙ mais ne le raccourcissent jamais elles-mêmes
+    // (demande utilisateur, 07/08/2026, pour aligner ce chemin sur RFXCOM).
+    if (payload?.device?.name) {
+      payload.device.name = this.buildShortDeviceName(payload.device.name);
+    }
+
     this.haMqttService.publishDiscoveryPassthrough(moduleName, data.bridgeInstance, data.sourceTopic, data.payload);
   }
 
@@ -257,6 +267,31 @@ export class IntegrationBridge {
     const trimmed = name.trim();
     if (!trimmed) return trimmed;
     return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+  }
+
+  /**
+   * Extrait quoi/lieu précis/lieu d'un nom "QUOI---lieu_precis--lieu--pere--grand_pere" (protocole
+   * nommage_specs v1.0). Duplication volontaire et minimale de RfxComService/taxonomy.ts::
+   * extractTaxonomy — pas de dépendance inter-app, seuls les deux champs utiles ici sont extraits.
+   */
+  private parseQuoiLieu(fullName: string): { rawQuoi: string; nomPrecis: string | null; nomLieu: string | null } {
+    const parts = fullName.split('---');
+    const rawQuoi = (parts[0] || '').trim();
+    const lieux = parts[1] ? parts[1].split('--').map((s) => s.trim()) : [];
+    const nomPrecis = lieux[0] || null;
+    const nomLieu = lieux.length > 1 ? (lieux[1] || null) : (lieux[0] || null);
+    return { rawQuoi, nomPrecis, nomLieu };
+  }
+
+  /**
+   * Nom de device court et lisible, à la place de la chaîne de taxonomie brute complète — même
+   * règle que RfxComService/taxonomy.ts::buildDisplayName : priorité au lieu précis (ex:
+   * "Plafonnier") ; repli sur le quoi (ex: "Lumière") si pas de lieu précis distinct du lieu.
+   */
+  private buildShortDeviceName(fullName: string): string {
+    const { rawQuoi, nomPrecis, nomLieu } = this.parseQuoiLieu(fullName);
+    const label = nomPrecis && nomPrecis !== nomLieu ? nomPrecis : rawQuoi;
+    return this.capitalizeAreaName(label);
   }
 
   /**
