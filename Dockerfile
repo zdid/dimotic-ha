@@ -37,6 +37,14 @@
 # non corrigée à ce jour, contournement délibéré). `build:ui` (assets navigateur)
 # reste nécessaire et s'exécute normalement — seul le côté serveur est interprété
 # plutôt que précompilé.
+#
+# CMD lance scripts/supervisor.js (Node pur) plutôt que `tsx` directement : il relance
+# l'application à chaque process.exit(0) (RestartManager.ts, ex: après activation/désactivation
+# d'application) — constaté empiriquement (07/08/2026) que `tsx watch` ne le fait PAS lui-même
+# quand le script qu'il enveloppe s'arrête volontairement. `restart: unless-stopped` (voir
+# compose.yaml) reste en place comme filet de sécurité si ce superviseur lui-même plante — les
+# deux mécanismes se complètent, celui-ci évite juste le coût d'un redémarrage complet du
+# conteneur pour un simple redémarrage applicatif.
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -101,4 +109,4 @@ EXPOSE 8080 49161 11434
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["applications/core/node_modules/.bin/tsx", "applications/core/src/index.ts"]
+CMD ["node", "applications/core/scripts/supervisor.js"]
