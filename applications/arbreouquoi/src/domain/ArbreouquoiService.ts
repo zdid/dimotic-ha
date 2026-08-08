@@ -5,9 +5,9 @@ import type { HaStructuredEntity } from '../../../core/dist/ha/types/ha-entity';
 import type { HaArea, HaDevice, HaQuoiDefinition } from '../../../core/dist/ha/types/ha-structure';
 import type { HaStructureRegistry } from '../../../core/dist/ha/sync/HaStructureRegistry';
 import { arbreouquoiConfigSchema, type ArbreouquoiConfig } from './config-schema';
-import type { 
-  OuNode, 
-  OuWithQuoiNode, 
+import type {
+  OuNode,
+  OuWithQuoiNode,
   OuFirstTree,
   QuoiFirstTree,
   QuiGroupWithOu,
@@ -15,9 +15,21 @@ import type {
   EntityInfo,
   QuoiCatalogWithCounts,
   FilterOptions,
-  ArbreOuQuoiTreePayload 
+  ArbreOuQuoiTreePayload
 } from './types';
 import { ARBREOUQUOI_SOCKET_EVENTS } from './socket-events';
+
+/**
+ * Un segment du chemin OÙ, du plus général (grand_pere) au plus précis (lieu_precis). Porte son
+ * niveau explicitement — contrairement à l'ancien système qui le devinait depuis la position dans
+ * un tableau (getOuLevel(index, totalLength)), fragile et devenu carrément faux depuis que
+ * lieu_precis peut être absent alors que pere/grand_pere sont présents (voir extractOuSegments).
+ */
+interface OuSegment {
+  id: string;
+  name: string;
+  level: 'grand_pere' | 'pere' | 'lieu' | 'lieu_precis';
+}
 
 export class ArbreouquoiService {
   private refreshInterval: NodeJS.Timeout | null = null;
@@ -75,7 +87,7 @@ export class ArbreouquoiService {
   // ⭐ OBLIGATOIRE : Méthode start() asynchrone
   async start(): Promise<void> {
     this.logger.info('ArbreouquoiService', 'Démarrage du service ArbreOuQui...');
-    
+
     try {
       // Charger la configuration
       const config = this.getConfig();
@@ -94,23 +106,23 @@ export class ArbreouquoiService {
 
       const entityCount = this.haStructureRegistry.getAllEntities().length;
       this.logger.info('ArbreouquoiService', `Référentiel HA initialisé avec ${entityCount} entités`);
-      
+
       // Démarrer le rafraîchissement automatique si activé
       if (config.refresh.autoRefreshEnabled) {
         this.startAutoRefresh(config.refresh.autoRefreshInterval);
       }
-      
+
       // Envoyer la structure initiale selon le mode d'affichage
       this.emitTree();
       this.emitCatalog();
       this.emitStats();
-      
+
       // Émettre le statut
       this.emitStatus('ready', `Service démarré avec ${entityCount} entités HA, mode: ${config.display.viewMode}`);
-      
+
       // Enregistrer les événements persistants
       this.registerPersistentEvents();
-      
+
       this.logger.info('ArbreouquoiService', 'Service ArbreOuQui démarré avec succès');
     } catch (error) {
       this.logger.error('ArbreouquoiService', `Erreur de démarrage: ${error}`);
@@ -122,12 +134,12 @@ export class ArbreouquoiService {
   // OPTIONNEL : Méthode stop() pour un arrêt propre
   async stop(): Promise<void> {
     this.logger.info('ArbreouquoiService', 'Arrêt du service...');
-    
+
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
       this.refreshInterval = null;
     }
-    
+
     this.emitStatus('stopped', 'Service arrêté');
     this.logger.info('ArbreouquoiService', 'Service arrêté');
   }
@@ -182,9 +194,9 @@ export class ArbreouquoiService {
     try {
       const currentConfig = this.getConfig();
       const newConfig = { ...currentConfig, ...partialConfig };
-      
+
       this.configService.savePartialConfig(newConfig);
-      
+
       // ⚠️ Vérifier !== undefined, pas la simple vérité : autoRefreshInterval=0 est une valeur
       // valide (désactivation) mais falsy en JS — un test tronqué ignorerait silencieusement
       // toute tentative de mise à 0, laissant tourner l'ancien minuteur indéfiniment.
@@ -194,12 +206,12 @@ export class ArbreouquoiService {
           this.startAutoRefresh(newConfig.refresh.autoRefreshInterval);
         }
       }
-      
+
       // Si le mode a changé, rafraîchir immédiatement
       if (partialConfig.display?.viewMode && partialConfig.display.viewMode !== currentConfig.display.viewMode) {
         this.emitTree();
       }
-      
+
       this.eventBus.emit(ARBREOUQUOI_SOCKET_EVENTS.CONFIG_SAVED, {
         success: true,
         config: newConfig
@@ -271,13 +283,13 @@ export class ArbreouquoiService {
       const allEntities = this.requireRegistry().getAllEntities();
       const ouPaths = new Set<string>();
       for (const entity of allEntities) {
-        const path = this.extractOuPathFromEntity(entity).join('/');
+        const path = this.extractOuSegments(entity).map(s => s.id).join('/');
         if (path) ouPaths.add(path);
       }
       this.eventBus.emit(ARBREOUQUOI_SOCKET_EVENTS.STATS, {
         totalEntities: allEntities.length,
         totalOuPaths: ouPaths.size,
-        unassignedEntities: allEntities.filter(e => !this.extractOuPathFromEntity(e).length).length,
+        unassignedEntities: allEntities.filter(e => this.extractOuSegments(e).length === 0).length,
         timestamp: new Date().toISOString()
       });
     } catch (error) {
@@ -289,8 +301,8 @@ export class ArbreouquoiService {
     try {
       const config = this.getConfig();
       const viewMode = config.display.viewMode || 'ou-first';
-      const tree = viewMode === 'ou-first' 
-        ? this.buildOuFirstTreeFiltered(filterOptions) 
+      const tree = viewMode === 'ou-first'
+        ? this.buildOuFirstTreeFiltered(filterOptions)
         : this.buildQuoiFirstTreeFiltered(filterOptions);
       this.eventBus.emit(ARBREOUQUOI_SOCKET_EVENTS.TREE_STRUCTURE, {
         tree, viewMode, catalog: this.buildQuoiCatalog(), timestamp: new Date().toISOString()
@@ -305,27 +317,24 @@ export class ArbreouquoiService {
   private buildOuFirstTree(): OuFirstTree {
     const allEntities = this.requireRegistry().getAllEntities().map(e => this.sanitizeEntity(e));
     const catalog = this.requireRegistry().getQuoiCatalog();
-    
-    const entitiesWithOu: Array<{ entity: HaStructuredEntity; ouPath: string[]; ouNames: string[] }> = [];
-    
+
+    const entitiesWithOu: Array<{ entity: HaStructuredEntity; segments: OuSegment[] }> = [];
+
     for (const entity of allEntities) {
-      const ouPath = this.extractOuPathFromEntity(entity);
-      const ouNames = this.extractOuNamesFromEntity(entity);
-      if (ouPath.length > 0) {
-        entitiesWithOu.push({ entity, ouPath, ouNames });
+      const segments = this.extractOuSegments(entity);
+      if (segments.length > 0) {
+        entitiesWithOu.push({ entity, segments });
       }
     }
-    
+
     const rootOuNodes: OuNode[] = [];
     const ouNodeMap = new Map<string, OuNode>();
-    
-    for (const { entity, ouPath, ouNames } of entitiesWithOu) {
+
+    for (const { entity, segments } of entitiesWithOu) {
       let currentParent: OuNode | null = null;
-      for (let i = 0; i < ouPath.length; i++) {
-        const ouId = ouPath[i]!;
-        const ouName = ouNames[i]!;
-        const level = this.getOuLevel(i, ouPath.length);
-        
+      for (let i = 0; i < segments.length; i++) {
+        const { id: ouId, name: ouName, level } = segments[i]!;
+
         let ouNode = ouNodeMap.get(ouId);
         if (!ouNode) {
           ouNode = { id: ouId, name: ouName, level, children: [], entities: [], entityCount: 0, parentId: (currentParent as OuNode | null)?.id || null };
@@ -334,17 +343,17 @@ export class ArbreouquoiService {
           else rootOuNodes.push(ouNode);
         }
         ouNode.entityCount++;
-        if (i === ouPath.length - 1) ouNode.entities.push(entity);
+        if (i === segments.length - 1) ouNode.entities.push(entity);
         currentParent = ouNode;
       }
     }
-    
+
     this.sortOuNodes(rootOuNodes);
     const levels = this.buildOuWithQuoiNodes(rootOuNodes, catalog);
     const unassigned = allEntities
-      .filter(e => this.extractOuPathFromEntity(e).length === 0)
+      .filter(e => this.extractOuSegments(e).length === 0)
       .map(e => ({ entity: e, ouPath: [], quoiIds: e.quoi_ids, device: e.device || null, area: e.area || null }));
-    
+
     return {
       levels,
       unassigned,
@@ -356,27 +365,24 @@ export class ArbreouquoiService {
 
   private buildOuFirstTreeFiltered(filterOptions: FilterOptions): OuFirstTree {
     const allEntities = this.requireRegistry().getAllEntities().map(e => this.sanitizeEntity(e));
-    let filtered = filterOptions.showOnlyActive !== false 
-      ? allEntities.filter(e => e.state !== 'unavailable') 
+    let filtered = filterOptions.showOnlyActive !== false
+      ? allEntities.filter(e => e.state !== 'unavailable')
       : allEntities;
-    
+
     const catalog = this.requireRegistry().getQuoiCatalog();
-    const entitiesWithOu: Array<{ entity: HaStructuredEntity; ouPath: string[]; ouNames: string[] }> = [];
-    
+    const entitiesWithOu: Array<{ entity: HaStructuredEntity; segments: OuSegment[] }> = [];
+
     for (const entity of filtered) {
-      const ouPath = this.extractOuPathFromEntity(entity);
-      const ouNames = this.extractOuNamesFromEntity(entity);
-      if (ouPath.length > 0) entitiesWithOu.push({ entity, ouPath, ouNames });
+      const segments = this.extractOuSegments(entity);
+      if (segments.length > 0) entitiesWithOu.push({ entity, segments });
     }
-    
+
     const rootOuNodes: OuNode[] = [];
     const ouNodeMap = new Map<string, OuNode>();
-    for (const { entity, ouPath, ouNames } of entitiesWithOu) {
+    for (const { entity, segments } of entitiesWithOu) {
       let currentParent: OuNode | null = null;
-      for (let i = 0; i < ouPath.length; i++) {
-        const ouId = ouPath[i]!;
-        const ouName = ouNames[i]!;
-        const level = this.getOuLevel(i, ouPath.length);
+      for (let i = 0; i < segments.length; i++) {
+        const { id: ouId, name: ouName, level } = segments[i]!;
         let ouNode = ouNodeMap.get(ouId);
         if (!ouNode) {
           ouNode = { id: ouId, name: ouName, level, children: [], entities: [], entityCount: 0, parentId: (currentParent as OuNode | null)?.id || null };
@@ -385,7 +391,7 @@ export class ArbreouquoiService {
           else rootOuNodes.push(ouNode);
         }
         ouNode.entityCount++;
-        if (i === ouPath.length - 1) ouNode.entities.push(entity);
+        if (i === segments.length - 1) ouNode.entities.push(entity);
         currentParent = ouNode;
       }
     }
@@ -404,10 +410,10 @@ export class ArbreouquoiService {
   private buildQuoiFirstTree(): QuoiFirstTree {
     const allEntities = this.requireRegistry().getAllEntities().map(e => this.sanitizeEntity(e));
     const catalog = this.requireRegistry().getQuoiCatalog();
-    
+
     const quoiGroups: QuiGroupWithOu[] = [];
     const quoiMap = new Map<string, QuiGroupWithOu>();
-    
+
     for (const entity of allEntities) {
       for (const quoiId of entity.quoi_ids) {
         let group = quoiMap.get(quoiId);
@@ -418,39 +424,38 @@ export class ArbreouquoiService {
           quoiGroups.push(group);
         }
         group!.entityCount++;
-        const ouPath = this.extractOuPathFromEntity(entity);
-        const ouNames = this.extractOuNamesFromEntity(entity);
-        const ouKey = ouPath.join('/') || 'unassigned';
+        const segments = this.extractOuSegments(entity);
+        const ouKey = segments.map(s => s.id).join('/') || 'unassigned';
         if (!group!.entitiesByOu[ouKey]) group!.entitiesByOu[ouKey] = [];
         group!.entitiesByOu[ouKey].push(entity);
-        this.updateOuHierarchyForQuoi(group!, ouPath, ouNames);
+        this.updateOuHierarchyForQuoi(group!, segments);
       }
     }
-    
+
     quoiGroups.sort((a, b) => b.entityCount - a.entityCount);
     const unassigned = allEntities
-      .filter(e => this.extractOuPathFromEntity(e).length === 0)
+      .filter(e => this.extractOuSegments(e).length === 0)
       .map(e => ({ entity: e, ouPath: [], quoiIds: e.quoi_ids, device: e.device || null, area: e.area || null }));
-    
+
     return {
       quoiGroups,
       unassigned,
       totalEntities: allEntities.length,
       totalQuoiTypes: quoiGroups.length,
-      totalOuNodes: new Set(allEntities.flatMap(e => this.extractOuPathFromEntity(e))).size
+      totalOuNodes: new Set(allEntities.flatMap(e => this.extractOuSegments(e).map(s => s.id))).size
     };
   }
 
   private buildQuoiFirstTreeFiltered(filterOptions: FilterOptions): QuoiFirstTree {
     const allEntities = this.requireRegistry().getAllEntities().map(e => this.sanitizeEntity(e));
-    let filtered = filterOptions.showOnlyActive !== false 
-      ? allEntities.filter(e => e.state !== 'unavailable') 
+    let filtered = filterOptions.showOnlyActive !== false
+      ? allEntities.filter(e => e.state !== 'unavailable')
       : allEntities;
-    
+
     const catalog = this.requireRegistry().getQuoiCatalog();
     const quoiGroups: QuiGroupWithOu[] = [];
     const quoiMap = new Map<string, QuiGroupWithOu>();
-    
+
     for (const entity of filtered) {
       for (const quoiId of entity.quoi_ids) {
         let group = quoiMap.get(quoiId);
@@ -461,14 +466,13 @@ export class ArbreouquoiService {
           quoiGroups.push(group);
         }
         group!.entityCount++;
-        const ouPath = this.extractOuPathFromEntity(entity);
-        const ouNames = this.extractOuNamesFromEntity(entity);
-        const ouKey = ouPath.join('/') || 'unassigned';
+        const segments = this.extractOuSegments(entity);
+        const ouKey = segments.map(s => s.id).join('/') || 'unassigned';
         if (!group!.entitiesByOu[ouKey]) group!.entitiesByOu[ouKey] = [];
         group!.entitiesByOu[ouKey].push(entity);
       }
     }
-    
+
     return {
       quoiGroups: quoiGroups.sort((a, b) => b.entityCount - a.entityCount),
       unassigned: [],
@@ -480,52 +484,40 @@ export class ArbreouquoiService {
 
   // ============ HELPERS ============
 
-  private getOuLevel(index: number, totalLength: number): 'grand_pere' | 'pere' | 'lieu' | 'lieu_precis' {
-    if (totalLength === 1) return 'lieu';
-    if (totalLength === 2) return index === 0 ? 'lieu_precis' : 'lieu';
-    if (totalLength === 3) {
-      if (index === 0) return 'lieu_precis';
-      if (index === 1) return 'lieu';
-      return 'pere';
+  /**
+   * Extrait le chemin OÙ d'une entité, du plus général au plus précis, chaque segment portant
+   * son niveau réel — plutôt que de le déduire après coup de sa position dans un tableau (ancien
+   * `getOuLevel(index, totalLength)`, supprimé). Cette déduction par position devenait ambiguë
+   * dès que lieu_precis est absent (null) alors que pere/grand_pere sont présents — ce qui arrive
+   * désormais couramment depuis que lieu_precis == lieu n'est plus dupliqué (voir
+   * rfxcom/taxonomy.ts et nommage/NommageService.ts, 08/08/2026) : un tableau de longueur 2
+   * pouvait alors être [pere, lieu] aussi bien que [precis, lieu], selon les cas — impossible à
+   * distinguer sans porter le niveau explicitement à la source, comme ici.
+   */
+  private extractOuSegments(entity: HaStructuredEntity): OuSegment[] {
+    const attrs = entity.attributes as Record<string, unknown> | undefined;
+    const taxonomie = attrs?.attributs_taxonomie as {
+      slug_grand_pere: string | null; lieu_grand_pere: string | null;
+      slug_pere: string | null; lieu_pere: string | null;
+      slug_lieu: string | null; lieu_principal: string | null;
+      slug_precis: string | null; lieu_precis: string | null;
+    } | undefined;
+    if (!taxonomie) return [];
+
+    const segments: OuSegment[] = [];
+    if (taxonomie.slug_grand_pere) {
+      segments.push({ id: taxonomie.slug_grand_pere, name: taxonomie.lieu_grand_pere || taxonomie.slug_grand_pere, level: 'grand_pere' });
     }
-    if (index === 0) return 'lieu_precis';
-    if (index === 1) return 'lieu';
-    if (index === 2) return 'pere';
-    return 'grand_pere';
-  }
-
-  private extractOuPathFromEntity(entity: HaStructuredEntity): string[] {
-    const attrs = entity.attributes as Record<string, unknown> | undefined;
-    const taxonomie = attrs?.attributs_taxonomie as {
-      slug_grand_pere: string | null;
-      slug_pere: string | null;
-      slug_lieu: string | null;
-      slug_precis: string | null;
-    } | undefined;
-    if (!taxonomie) return [];
-    const path: string[] = [];
-    if (taxonomie.slug_grand_pere) path.push(taxonomie.slug_grand_pere);
-    if (taxonomie.slug_pere) path.push(taxonomie.slug_pere);
-    if (taxonomie.slug_lieu) path.push(taxonomie.slug_lieu);
-    if (taxonomie.slug_precis) path.push(taxonomie.slug_precis);
-    return path;
-  }
-
-  private extractOuNamesFromEntity(entity: HaStructuredEntity): string[] {
-    const attrs = entity.attributes as Record<string, unknown> | undefined;
-    const taxonomie = attrs?.attributs_taxonomie as {
-      lieu_grand_pere: string | null;
-      lieu_pere: string | null;
-      lieu_principal: string | null;
-      lieu_precis: string | null;
-    } | undefined;
-    if (!taxonomie) return [];
-    const names: string[] = [];
-    if (taxonomie.lieu_grand_pere) names.push(taxonomie.lieu_grand_pere);
-    if (taxonomie.lieu_pere) names.push(taxonomie.lieu_pere);
-    if (taxonomie.lieu_principal) names.push(taxonomie.lieu_principal);
-    if (taxonomie.lieu_precis) names.push(taxonomie.lieu_precis);
-    return names;
+    if (taxonomie.slug_pere) {
+      segments.push({ id: taxonomie.slug_pere, name: taxonomie.lieu_pere || taxonomie.slug_pere, level: 'pere' });
+    }
+    if (taxonomie.slug_lieu) {
+      segments.push({ id: taxonomie.slug_lieu, name: taxonomie.lieu_principal || taxonomie.slug_lieu, level: 'lieu' });
+    }
+    if (taxonomie.slug_precis) {
+      segments.push({ id: taxonomie.slug_precis, name: taxonomie.lieu_precis || taxonomie.slug_precis, level: 'lieu_precis' });
+    }
+    return segments;
   }
 
   private sortOuNodes(nodes: OuNode[]): void {
@@ -556,17 +548,18 @@ export class ArbreouquoiService {
     });
   }
 
-  private updateOuHierarchyForQuoi(group: QuiGroupWithOu, ouPath: string[], ouNames: string[]): void {
+  private updateOuHierarchyForQuoi(group: QuiGroupWithOu, segments: OuSegment[]): void {
     const existingIds = new Set(group.ouHierarchy.map(n => n.id));
-    if (ouPath.length === 0 || existingIds.has(ouPath[0])) return;
-    
+    if (segments.length === 0 || existingIds.has(segments[0]!.id)) return;
+
     const newNodes: OuNode[] = [];
     let parent: OuNode | null = null;
-    for (let i = 0; i < ouPath.length; i++) {
+    for (let i = 0; i < segments.length; i++) {
+      const { id, name, level } = segments[i]!;
       const node: OuNode = {
-        id: ouPath[i],
-        name: ouNames[i],
-        level: this.getOuLevel(i, ouPath.length),
+        id,
+        name,
+        level,
         children: [],
         entities: [],
         entityCount: 0,
@@ -586,7 +579,7 @@ export class ArbreouquoiService {
       const entities = allEntities.filter(e => e.quoi_ids.includes(quoiDef.quoi_id));
       const paths = new Set<string>();
       for (const e of entities) {
-        const p = this.extractOuPathFromEntity(e).join('/');
+        const p = this.extractOuSegments(e).map(s => s.id).join('/');
         paths.add(p || 'unassigned');
       }
       return { quoi: quoiDef, entityCount: entities.length, ouPaths: Array.from(paths) };
@@ -601,24 +594,25 @@ export class ArbreouquoiService {
         return;
       }
       const entity = this.sanitizeEntity(rawEntity);
-      const ouNames = this.extractOuNamesFromEntity(entity);
+      const ouSegments = this.extractOuSegments(entity);
+      const ouNames = ouSegments.map(s => s.name);
+      const myPath = ouSegments.map(s => s.id).join('/');
       const related = this.requireRegistry().getAllEntities()
         .map(e => this.sanitizeEntity(e))
         .filter(e => e.entity_id !== entityId)
         .filter(e => {
-          const ePath = this.extractOuPathFromEntity(e).join('/');
-          const myPath = this.extractOuPathFromEntity(entity).join('/');
+          const ePath = this.extractOuSegments(e).map(s => s.id).join('/');
           if (ePath === myPath) return true;
           return e.quoi_ids.some(q => entity.quoi_ids.includes(q));
         })
         .map(e => ({
           entity: e,
-          ouPath: this.extractOuNamesFromEntity(e),
+          ouPath: this.extractOuSegments(e).map(s => s.name),
           quoiIds: e.quoi_ids,
           device: e.device || null,
           area: e.area || null
         }));
-      
+
       this.eventBus.emit(ARBREOUQUOI_SOCKET_EVENTS.ENTITY_DETAILS, {
         entity,
         ouPath: ouNames.length > 0 ? ouNames : [entity.area?.name || 'N/A'],
