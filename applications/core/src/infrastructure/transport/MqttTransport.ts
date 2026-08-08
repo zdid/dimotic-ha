@@ -266,13 +266,27 @@ export class MqttTransport {
    * Crée un nouveau client MQTT et configure les événements
    */
   private createMqttClient(): void {
+    // Un ancien client peut encore exister ici (scheduleReconnect() en crée un nouveau à chaque
+    // tentative, voir le commentaire sur activeSubscriptions) — le fermer explicitement avant de
+    // le remplacer, sinon il reste vivant en arrière-plan (voir reconnectPeriod ci-dessous).
+    if (this.client) {
+      this.client.removeAllListeners();
+      this.client.end(true);
+    }
+
     const url = `mqtt://${this.config.host}:${this.config.port}`;
 
     const options: mqtt.IClientOptions = {
       clientId: this.config.clientId,
       clean: this.config.clean,
       keepalive: this.config.keepalive,
-      reconnectPeriod: this.config.reconnectDelay * 1000,
+      // Reconnexion gérée nous-mêmes (scheduleReconnect, backoff exponentiel) — PAS par mqtt.js
+      // lui-même (reconnectPeriod: 0 désactive sa reconnexion interne automatique sur ce même
+      // client). Les deux mécanismes actifs simultanément créaient un client fantôme par coupure
+      // (l'ancien continuait de retenter tout seul, jamais fermé, avec le même clientId que le
+      // nouveau) — tempête de reconnexions constatée en conditions réelles le 07/08/2026
+      // ("session taken over" en boucle sur mosquitto, des dizaines de fois par seconde).
+      reconnectPeriod: 0,
       username: this.config.username || undefined,
       password: this.config.password || undefined,
       // Configuration du LWT (Last Will and Testament)
