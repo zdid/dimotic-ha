@@ -128,7 +128,8 @@ export class ReceiverCover implements IReceiverModule {
     return {
       component: 'cover',
       essential: {
-        name: taxonomy.rawQuoi,
+        // null — voir ReceiverLight.ts::getDiscoveryEssential (corrigé le 08/08/2026).
+        name: null,
         commandEnabled: true,
         // Voir ReceiverLight.ts : sans ça, state_topic (JSON) n'est jamais reconnu par HA.
         valueTemplate: '{{ value_json.state }}',

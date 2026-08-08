@@ -45,7 +45,8 @@ export class ReceiverSwitch implements IReceiverModule {
     return {
       component: 'switch',
       essential: {
-        name: taxonomy.rawQuoi,
+        // null — voir ReceiverLight.ts::getDiscoveryEssential (corrigé le 08/08/2026).
+        name: null,
         commandEnabled: true,
         payloadOn: 'ON',
         payloadOff: 'OFF',

@@ -363,7 +363,9 @@ export class RfxComService implements IRfxComService {
     const isBouton = device.type !== 'RFXSensor' && device.type !== 'RFXMeter';
 
     const essential: EssentialEntityData = {
-      name: taxonomy.rawQuoi,
+      // null — voir ReceiverLight.ts::getDiscoveryEssential (corrigé le 08/08/2026). Vaut aussi
+      // pour les "boutons" (buildBoutonDisplayName ci-dessous répète déjà le quoi en préfixe).
+      name: null,
       deviceClass,
       unitOfMeasurement: getDefaultUnit(device.subType),
       // Sans ça, HA compare l'état de l'entité au JSON complet du topic d'état
@@ -545,7 +547,8 @@ export class RfxComService implements IRfxComService {
     const commandTopic = getCommandTopic(MODULE_NAME, this.config.bridgeInstance, deviceId);
 
     const essential: EssentialEntityData = {
-      name: taxonomy.rawQuoi,
+      // null — voir ReceiverLight.ts::getDiscoveryEssential (corrigé le 08/08/2026).
+      name: null,
       icon: scene.icon ?? 'mdi:script-text-play',
       commandEnabled: true,
       device: {

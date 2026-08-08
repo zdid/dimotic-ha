@@ -15,7 +15,8 @@ import { getDiscoveryTopic, getStateTopic, getCommandTopic, getAttributesTopic }
  * Tout le reste (topics, bloc device par défaut, etc.) est complété par cette brique.
  */
 export interface EssentialEntityData {
-  name: string;
+  /** null si l'entité n'a pas de nom propre distinct du device (voir HaMqttDiscoveryEntity.has_entity_name). */
+  name: string | null;
   deviceClass?: string;
   unitOfMeasurement?: string;
   icon?: string;
@@ -70,6 +71,7 @@ export function buildDiscoveryPayload(
 
   const entity: HaMqttDiscoveryEntity = {
     name: essential.name,
+    has_entity_name: true,
     unique_id: context.objectId,
     state_topic: stateTopic,
     device_class: essential.deviceClass,

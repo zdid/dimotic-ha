@@ -68,8 +68,19 @@ export interface HaMqttDevice {
  */
 export interface HaMqttDiscoveryEntity {
   // Champs obligatoires HA
-  name: string;                   // Nom affiché dans HA
+  name: string | null;            // Nom affiché dans HA — null si l'entité n'a pas de nom propre
+                                   // distinct du device (has_entity_name ci-dessous) : HA affiche
+                                   // alors juste device.name, sans concaténation.
   unique_id: string;             // ID unique
+  /**
+   * Convention HA moderne (docs MQTT discovery) : quand true, friendly_name = device.name si
+   * name est null, ou "{device.name} {name}" sinon — identique au calcul historique, mais évite
+   * la faute classique où name répète (littéralement ou par casse) device.name (ex: RFXCOM
+   * "Lumière lumière" quand le device retombe sur le quoi faute de lieu précis distinct —
+   * corrigé le 08/08/2026, voir ReceiverLight.ts). Mis à true partout où buildDiscoveryPayload
+   * est utilisé (discovery.ts), name reste passé tel quel par chaque module métier.
+   */
+  has_entity_name?: boolean;
   
   // Classification
   device_class?: string;         // Ex: "temperature", "motion", "binary_sensor"

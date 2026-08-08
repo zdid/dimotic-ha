@@ -78,7 +78,10 @@ export class ReceiverLight implements IReceiverModule {
     return {
       component: 'light',
       essential: {
-        name: taxonomy.rawQuoi,
+        // null, pas taxonomy.rawQuoi : device.name (buildDisplayName ci-dessous) porte déjà le
+        // quoi quand il n'y a pas de lieu précis distinct — sinon HA affiche "Lumière lumière"
+        // (has_entity_name, voir discovery.ts) (corrigé le 08/08/2026).
+        name: null,
         commandEnabled: true,
         payloadOn: 'ON',
         payloadOff: 'OFF',
