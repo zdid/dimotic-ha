@@ -403,12 +403,19 @@ export class NommageService implements INommageService {
   private emitPassthroughDiscovery(discoveryMessage: DiscoveryMessage, parsed: ParsedTaxonomy): void {
     let payload: Record<string, unknown> = { ...discoveryMessage.payload };
 
-    // name explicite (ex: zigbee2mqtt "Linkquality", "Child lock") traverse HA sans jamais être
-    // traduit — HA ne traduit que les noms qu'il calcule lui-même depuis device_class, jamais un
-    // `name` fourni par la source. Voir name-translations.ts (dictionnaire constitué à partir des
-    // noms réellement observés, demande utilisateur 08/08/2026).
-    if (typeof payload.name === 'string') {
-      payload = { ...payload, name: translateEntityName(payload.name) };
+    // name explicite (ex: zigbee2mqtt "Linkquality") traverse HA sans jamais être traduit, et une
+    // entité SANS name (ex: Linky EAST) reste indiscernable des autres entités du même
+    // device_class — HA ne calcule un nom lui-même que depuis device_class, jamais à partir de
+    // object_id. Clé = object_id (dernier segment du topic avant /config), seul identifiant
+    // toujours présent — voir name-translations.ts (point d'entrée unique, demande utilisateur
+    // 08/08/2026, remplace les surcharges ponctuelles côté zigbee2mqtt).
+    const objectId = discoveryMessage.topic.split('/').slice(-2, -1)[0];
+    const translated = objectId ? translateEntityName(objectId) : undefined;
+    // Ne touche au payload QUE si une traduction existe : un `name` absent chez zigbee2mqtt
+    // (ex: entités sans entrée au dictionnaire) doit rester absent, pas devenir `name: null`
+    // (comportement HA différent — repli sur device_class côté HA préservé tel quel).
+    if (translated !== undefined) {
+      payload = { ...payload, name: translated };
     }
 
     // suggested_area (lieu de taxonomie, pas lieu_precis) — HA ne s'en sert qu'une fois, à la
