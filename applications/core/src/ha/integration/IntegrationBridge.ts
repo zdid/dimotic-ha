@@ -262,21 +262,36 @@ export class IntegrationBridge {
   }
 
   /**
+   * Modules pour lesquels `waitForHaWsBeforeDiscovery` vaut `true` par défaut (même liste que les
+   * schémas Zod concernés — rfxcom/config-schema.ts, arexx/config-schema.ts, nommage/config-schema.ts).
+   * EVOO7 n'y figure pas (conséquences jugées faibles, décision utilisateur du 08/08/2026).
+   */
+  private static readonly APPS_WAITING_FOR_AREA_BY_DEFAULT = new Set(['rfxcom', 'arexx', 'nommage']);
+
+  /**
    * Lit `waitForHaWsBeforeDiscovery` dans la config du module appelant (RFXCOM/AREXX : champ
    * racine ; NOMMAGE : `ha.waitForHaWsBeforeDiscovery` — même structure que les schémas Zod
-   * respectifs). Absent (ex: EVOO7, qui n'expose pas ce réglage) = false, comportement best-effort
-   * inchangé — décision utilisateur du 08/08/2026, conséquences jugées faibles pour EVOO7.
+   * respectifs).
+   *
+   * ⚠️ `getModuleConfig()` renvoie la config TELLE QUE LUE SUR DISQUE, jamais repassée par le
+   * schéma Zod (qui n'est appliqué qu'à l'écriture, voir saveModuleConfig) — un config.yaml
+   * existant écrit avant l'ajout de ce champ ne le contient simplement pas. Se fier au défaut Zod
+   * (`true`) aurait donc échoué silencieusement pour toute installation existante : bug réel
+   * constaté en conditions réelles sur l'OrangePi (08/08/2026), champ absent du fichier, repli sur
+   * `false` alors que le défaut voulu est `true`. D'où APPS_WAITING_FOR_AREA_BY_DEFAULT ci-dessus,
+   * qui rejoue ce même défaut ici plutôt que de compter sur Zod pour le faire.
    */
   private shouldWaitIndefinitelyForArea(moduleName: string): boolean {
+    const defaultValue = IntegrationBridge.APPS_WAITING_FOR_AREA_BY_DEFAULT.has(moduleName);
     const config = this.configService.getModuleConfig<Record<string, unknown>>(moduleName);
-    if (!config) return false;
+    if (!config) return defaultValue;
 
     const direct = config['waitForHaWsBeforeDiscovery'];
     if (typeof direct === 'boolean') return direct;
 
     const ha = config['ha'] as Record<string, unknown> | undefined;
     const nested = ha?.['waitForHaWsBeforeDiscovery'];
-    return typeof nested === 'boolean' ? nested : false;
+    return typeof nested === 'boolean' ? nested : defaultValue;
   }
 
   /** Première lettre en capitale — même règle que AreaEnsureService.capitalize, dupliquée ici
