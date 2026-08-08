@@ -134,6 +134,21 @@ export const NOMMAGE_UI_METADATA: ModuleUiMetadata = {
       ]
     },
     {
+      title: 'Langue',
+      description: "Pays dont les traductions de noms d'entité sont utilisées (voir TranslationsRepository) — un pays inconnu est généré automatiquement au démarrage (libellés en anglais par défaut, à corriger ensuite dans data/nommage/translations/).",
+      icon: '🌍',
+      fields: [
+        {
+          name: 'language.country',
+          label: 'Pays',
+          type: 'text',
+          default: 'France',
+          placeholder: 'France',
+          hint: 'Nom de pays, pas un code de langue ISO (ex: "France", pas "fr")'
+        }
+      ]
+    },
+    {
       title: 'Logging',
       description: 'Configuration des logs de l\'application',
       icon: '📜',

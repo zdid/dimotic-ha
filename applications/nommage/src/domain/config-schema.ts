@@ -86,6 +86,13 @@ const loggingConfigSchema = z.object({
   showRawMessages: z.boolean().default(false)
 });
 
+// Pays dont les traductions de noms d'entité sont chargées (TranslationsRepository) — désigne un
+// nom de pays (ex: "France"), pas un code de langue ISO. Un pays sans fichier connu est généré
+// à la volée (voir TranslationsRepository), pas une erreur.
+const languageConfigSchema = z.object({
+  country: z.string().default('France')
+});
+
 // ============================================================================
 // Schéma principal
 // ============================================================================
@@ -100,7 +107,8 @@ export const nommageConfigSchema = z.object({
   ]),
 
   ha: haConfigSchema.default({}),
-  logging: loggingConfigSchema.default({})
+  logging: loggingConfigSchema.default({}),
+  language: languageConfigSchema.default({})
 })
   .refine(
     (config) => new Set(config.sources.map((s) => s.id)).size === config.sources.length,
@@ -123,6 +131,7 @@ export type NommageSourceConfig = z.infer<typeof nommageSourceSchema>;
 export type NommageSourceMqttConfig = z.infer<typeof sourceMqttConfigSchema>;
 export type NommageHaConfig = z.infer<typeof haConfigSchema>;
 export type NommageLoggingConfig = z.infer<typeof loggingConfigSchema>;
+export type NommageLanguageConfig = z.infer<typeof languageConfigSchema>;
 
 // ============================================================================
 // Valeurs par défaut
@@ -157,6 +166,9 @@ export const DEFAULT_NOMMAGE_CONFIG: NommageConfig = {
     level: 'info',
     showParsedMessages: false,
     showRawMessages: false
+  },
+  language: {
+    country: 'France'
   }
 };
 

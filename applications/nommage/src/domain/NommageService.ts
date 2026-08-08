@@ -20,7 +20,7 @@
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
 import type { INommageMqttIntegrationService } from '../ha/integration/nommage/NommageMqttIntegrationService';
 import { nommageConfigSchema, type NommageConfig } from './config-schema';
-import { translateEntityName } from './name-translations';
+import { TranslationsRepository } from './translations/TranslationsRepository';
 import type {
   DiscoveryMessage,
   ParsedTaxonomy,
@@ -79,6 +79,9 @@ export class NommageService implements INommageService {
 
   private config: NommageConfig;
   private discoveryTopics: string[] = [];
+  // object_id -> libellé traduit (voir TranslationsRepository). Chargé une fois au démarrage,
+  // pas de rechargement à chaud pour l'instant (mécanisme de mise à jour décidé plus tard).
+  private entityNameTranslations: Record<string, string>;
 
   // ⭐ Nombre d'entrées traitées par jour (clé "AAAA-MM-JJ", heure locale du serveur), en mémoire —
   // même limite que parsedMessagesCount/taxonomyStructures : réinitialisé au redémarrage.
@@ -88,10 +91,12 @@ export class NommageService implements INommageService {
     private eventBus: IEventBus,
     private logger: Logger,
     private configProvider: IAppConfigProvider<NommageConfig>,
-    private mqttService: INommageMqttIntegrationService
+    private mqttService: INommageMqttIntegrationService,
+    private translationsRepository: TranslationsRepository
   ) {
     this.config = this.loadConfig();
     this.discoveryTopics = this.aggregateDiscoveryTopics();
+    this.entityNameTranslations = this.translationsRepository.loadCountryTranslations(this.config.language.country);
     this.setupEventListeners();
   }
 
@@ -407,10 +412,10 @@ export class NommageService implements INommageService {
     // entité SANS name (ex: Linky EAST) reste indiscernable des autres entités du même
     // device_class — HA ne calcule un nom lui-même que depuis device_class, jamais à partir de
     // object_id. Clé = object_id (dernier segment du topic avant /config), seul identifiant
-    // toujours présent — voir name-translations.ts (point d'entrée unique, demande utilisateur
-    // 08/08/2026, remplace les surcharges ponctuelles côté zigbee2mqtt).
+    // toujours présent — voir TranslationsRepository (point d'entrée unique, un fichier YAML par
+    // pays, demande utilisateur 08/08/2026, remplace les surcharges ponctuelles côté zigbee2mqtt).
     const objectId = discoveryMessage.topic.split('/').slice(-2, -1)[0];
-    const translated = objectId ? translateEntityName(objectId) : undefined;
+    const translated = objectId ? this.entityNameTranslations[objectId] : undefined;
     // Ne touche au payload QUE si une traduction existe : un `name` absent chez zigbee2mqtt
     // (ex: entités sans entrée au dictionnaire) doit rester absent, pas devenir `name: null`
     // (comportement HA différent — repli sur device_class côté HA préservé tel quel).
@@ -643,8 +648,9 @@ export class NommageService implements INommageService {
     eventBus: IEventBus,
     logger: Logger,
     configProvider: IAppConfigProvider<NommageConfig>,
-    mqttService: INommageMqttIntegrationService
+    mqttService: INommageMqttIntegrationService,
+    translationsRepository: TranslationsRepository = new TranslationsRepository(logger)
   ): NommageService {
-    return new NommageService(eventBus, logger, configProvider, mqttService);
+    return new NommageService(eventBus, logger, configProvider, mqttService, translationsRepository);
   }
 }

@@ -1,0 +1,91 @@
+# Traductions de noms d'entité (object_id -> libellé), pays "English" — sert aussi de source pour
+# générer à la volée un fichier pour un pays inconnu (mêmes clés que translate-france.yaml, valeurs
+# reprises d'ici), voir TranslationsRepository. Valeurs = noms d'origine tels que publiés par la
+# source (zigbee2mqtt) avant toute traduction ; pour les codes Linky sans équivalent anglais réel
+# (ex: EAST, PREF), le code technique lui-même est repris tel quel.
+
+# Générique zigbee2mqtt (diagnostic/config commun à de nombreux appareils)
+linkquality: Linkquality
+indicator_mode: Indicator mode
+power_outage_memory: Power outage memory
+switch_child_lock: Child lock
+power_on_behavior: Power-on behavior
+color_power_on_behavior: Color power on behavior
+switch_type: Switch type
+countdown: Countdown
+pi_heating_demand: PI heating demand
+error: Error
+switch_scale_protection: Scale protection
+switch_frost_protection: Frost protection
+schedule_monday: Schedule monday
+schedule_tuesday: Schedule tuesday
+schedule_wednesday: Schedule wednesday
+schedule_thursday: Schedule thursday
+schedule_friday: Schedule friday
+schedule_saturday: Schedule saturday
+schedule_sunday: Schedule sunday
+workdays_schedule: Workdays schedule
+holidays_schedule: Holidays schedule
+learned_ir_code: Learned ir code
+learn_ir_code: Learn ir code
+ir_code_to_send: Ir code to send
+sensitivity: Sensitivity
+keep_time: Keep time
+coordinator_version: Coordinator version
+network_map: Network map
+connection_state: Connection state
+restart_required: Restart required
+restart: Restart
+log_level: Log level
+effect: Effect
+force: Force
+week: Week
+permit_join: Permit join
+switch_temperature_breaker: Temperature breaker
+switch_power_breaker: Power breaker
+switch_over_current_breaker: Over current breaker
+switch_over_voltage_breaker: Over voltage breaker
+switch_under_voltage_breaker: Under voltage breaker
+switch_do_not_disturb: Do not disturb
+window_detection: Window detection
+valve_detection: Valve detection
+auto_lock: Auto lock
+away_mode: Away mode
+temperature_threshold: Temperature threshold
+power_threshold: Power threshold
+over_current_threshold: Over current threshold
+over_voltage_threshold: Over voltage threshold
+under_voltage_threshold: Under voltage threshold
+away_preset_days: Away preset days
+boost_time: Boost time
+comfort_temperature: Comfort temperature
+eco_temperature: Eco temperature
+max_temperature: Max temperature
+min_temperature: Min temperature
+away_preset_temperature: Away preset temperature
+illuminance_interval: Illuminance interval
+
+# Linky (TIC standard) — codes techniques d'origine, pas de vrai mot anglais à traduire
+EAST: EAST
+EAIT: EAIT
+EASF01: EASF01
+EASF02: EASF02
+EASD01: EASD01
+site_id: PRM
+VTIC: VTIC
+SINSTI: SINSTI
+SMAXIN: SMAXIN
+SMAXIN-1: SMAXIN-1
+message1: MSG1
+message2: MSG2
+status_register: STGE
+NTARF: NTARF
+current_price: LTARF
+current_tarif: NGTF
+current_date: DATE
+SMAXSN: SMAXSN
+SMAXSN-1: SMAXSN-1
+SINSTS: SINSTS
+URMS1: URMS1
+IRMS1: IRMS1
+PREF: PREF
