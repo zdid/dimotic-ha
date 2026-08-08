@@ -97,7 +97,6 @@ let state = {
   filters: { showOnlyActive: true },
   displayConfig: {
     expandAll: false,
-    showEntityIds: true,
     showQuoiIcons: true
   }
 };
@@ -498,7 +497,6 @@ function renderEntity(entityInfo: EntityInfo): string {
       <span class="entity-icon">${quoiIcons}</span>
       <span class="entity-domain ${domain}">${domain}</span>
       <span class="entity-name">${escapeHtml(entity.attributes?.friendly_name as string || entity.entity_id)}</span>
-      ${state.displayConfig.showEntityIds ? `<span class="entity-id">${entity.entity_id}</span>` : ''}
       <span class="entity-state">${stateValue}</span>
       ${entity.device?.name ? `<span class="entity-device">[${entity.device.name}]</span>` : ''}
       ${areaName !== 'N/A' ? `<span class="entity-area">@${areaName}</span>` : ''}
@@ -515,12 +513,21 @@ function renderQuoiCatalog(): void {
   const html = `
     <h4>Légende QUOI (${state.catalog.length} types)</h4>
     <div class="quoi-icons">
-      ${state.catalog.map(item => `
+      ${state.catalog.map(item => {
+        const icon = getQuoiIcon(item.quoi.quoi_id);
+        // Icône ❓ = pas d'entrée dans getQuoiIcon() : l'icône seule ne dit pas de quel quoi il
+        // s'agit, contrairement aux autres — on affiche donc le nom à côté dans ce cas précis
+        // (demande utilisateur, 08/08/2026), pour ne pas alourdir la légende quand l'icône
+        // suffit déjà.
+        const unknown = icon === '❓';
+        return `
         <div class="quoi-catalog-item" title="${item.quoi.label} (${item.entityCount} entités)">
-          <span class="quoi-catalog-icon">${getQuoiIcon(item.quoi.quoi_id)}</span>
+          <span class="quoi-catalog-icon">${icon}</span>
+          ${unknown ? `<span class="quoi-catalog-name">${escapeHtml(item.quoi.label)}</span>` : ''}
           <span class="quoi-catalog-count">${item.entityCount}</span>
         </div>
-      `).join('')}
+      `;
+      }).join('')}
     </div>
   `;
   el.innerHTML = html;

@@ -108,7 +108,6 @@ export interface ArbreOuQuoiEntityDetailsPayload {
 // Configuration de l'affichage
 export interface DisplayConfig {
   expandAll: boolean;
-  showEntityIds: boolean;
   showQuoiIcons: boolean;
   theme: 'light' | 'dark' | 'auto';
   viewMode: 'ou-first' | 'quoi-first';

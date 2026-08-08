@@ -194,6 +194,7 @@ html, body {
 }
 .quoi-catalog-item:hover { background-color: var(--primary-color); color: white; }
 .quoi-catalog-icon { font-size: 1rem; }
+.quoi-catalog-name { font-size: 0.75rem; }
 .quoi-catalog-count { font-size: 0.75rem; color: var(--text-light); }
 
 .ou-legend { margin-top: auto; }
@@ -284,7 +285,6 @@ html, body {
 .entity-domain.unknown { background-color: #95a5a6; color: white; }
 
 .entity-name { flex: 1; font-weight: 500; }
-.entity-id { font-size: 0.8rem; color: var(--text-light); font-family: monospace; }
 .entity-state { font-size: 0.85rem; padding: 2px 6px; border-radius: var(--border-radius); background-color: var(--background-color); }
 .entity-device { font-size: 0.8rem; color: var(--text-light); font-style: italic; }
 .entity-area { font-size: 0.8rem; color: var(--text-light); }

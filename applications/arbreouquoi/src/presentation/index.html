@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Arbre Où Quoi - Visualisation du Référentiel HA</title>
   <link rel="stylesheet" href="/applications/arbreouquoi/presentation/styles/arbreouquoi.css">
-  <!-- Derniere modification: 2026-07-24 - Ajoute un champ "Rafraichissement auto (s)" dans la barre d'outils, cote client uniquement (jamais sauvegarde en config), 0 = desactive -->
+  <!-- Derniere modification: 2026-08-08 - Legende OU placee au-dessus de la legende QUOI (nombre fixe vs variable) -->
 </head>
 <body>
   <div class="app-container">
@@ -89,10 +89,6 @@
           <div class="view-mode-info" id="view-mode-info">
             Mode actuel: <strong>OÙ → QUOI → Entités</strong>
           </div>
-          <div class="quoi-catalog" id="quoi-catalog">
-            <h4>Légende QUOI</h4>
-            <div class="quoi-icons" id="quoi-icons"></div>
-          </div>
           <div class="ou-legend">
             <h4>Légende OÙ</h4>
             <div class="ou-legend-items">
@@ -101,6 +97,10 @@
               <div class="ou-legend-item"><span class="ou-legend-icon">📍</span> Lieu</div>
               <div class="ou-legend-item"><span class="ou-legend-icon">🎯</span> Lieu Précis</div>
             </div>
+          </div>
+          <div class="quoi-catalog" id="quoi-catalog">
+            <h4>Légende QUOI</h4>
+            <div class="quoi-icons" id="quoi-icons"></div>
           </div>
         </div>
 
