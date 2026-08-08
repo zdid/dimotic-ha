@@ -13,7 +13,15 @@ import type { HaStructureRegistry } from './HaStructureRegistry';
 import type { IEventBus } from '../../application/IEventBus';
 import type { Logger } from '../../infrastructure/logger/index';
 
+// Deux budgets distincts (07/08/2026, corrige un bug constaté en conditions réelles) : le
+// référentiel HA (392 entités/34 areas en usage réel) peut mettre plus de 20s à charger, largement
+// au-delà de l'ancien timeout unique de 8s — toutes les demandes arrivant juste après connexion
+// (rafale de découvertes MQTT retenues) échouaient donc systématiquement, même pour des areas déjà
+// existantes. ENSURE_TIMEOUT_MS ne couvre plus que l'appel WS lui-même (résolution/création, une
+// fois le référentiel prêt) — quasi instantané en pratique. REGISTRY_WAIT_TIMEOUT_MS est un filet
+// de sécurité large pour l'attente du référentiel (ne devrait jamais se déclencher en usage normal).
 const ENSURE_TIMEOUT_MS = 8000;
+const REGISTRY_WAIT_TIMEOUT_MS = 60000;
 
 export class AreaEnsureService {
   /**
@@ -63,7 +71,14 @@ export class AreaEnsureService {
 
   private async resolveOrCreate(name: string): Promise<string | undefined> {
     try {
-      return await this.withTimeout(this.waitThenResolveOrCreate(name), ENSURE_TIMEOUT_MS);
+      await this.withTimeout(this.waitUntilRegistryReady(), REGISTRY_WAIT_TIMEOUT_MS, `area_ensure:${name}:registry`);
+    } catch {
+      this.logger.warn('ha:area_ensure', `Échec de la garantie d'area "${name}": référentiel HA jamais prêt après ${REGISTRY_WAIT_TIMEOUT_MS}ms`);
+      return undefined;
+    }
+
+    try {
+      return await this.withTimeout(this.resolveOrCreateArea(name), ENSURE_TIMEOUT_MS, `area_ensure:${name}:create`);
     } catch (error) {
       const message = error instanceof Error ? error.message : JSON.stringify(error);
       this.logger.warn('ha:area_ensure', `Échec de la garantie d'area "${name}": ${message}`);
@@ -71,9 +86,7 @@ export class AreaEnsureService {
     }
   }
 
-  private async waitThenResolveOrCreate(name: string): Promise<string> {
-    await this.waitUntilRegistryReady();
-
+  private async resolveOrCreateArea(name: string): Promise<string> {
     const existing = this.findByName(name);
     if (existing) return existing.area_id;
 
@@ -110,12 +123,39 @@ export class AreaEnsureService {
     return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
   }
 
-  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  /**
+   * Course entre `promise` et un délai — mais `promise` elle-même n'est jamais annulée : en cas
+   * de timeout, elle continue de tourner en arrière-plan (rien ne peut interrompre un appel WS déjà
+   * envoyé). Sans le flag `timedOut` ci-dessous, son résultat final (succès ou échec, arrivé après
+   * coup) ne serait plus attrapé par personne — silencieusement perdu. Bug réel constaté le
+   * 07/08/2026 : des areas créées avec succès en arrière-plan après un timeout n'apparaissaient
+   * dans aucun log, aucune trace de leur sort.
+   */
+  private withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Timeout après ${ms}ms`)), ms);
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        reject(new Error(`Timeout après ${ms}ms`));
+      }, ms);
       promise.then(
-        (value) => { clearTimeout(timer); resolve(value); },
-        (error) => { clearTimeout(timer); reject(error); }
+        (value) => {
+          clearTimeout(timer);
+          if (timedOut) {
+            this.logger.info('ha:area_ensure', `${label} : résolu après le timeout (résultat tardif) — ${JSON.stringify(value)}`);
+          } else {
+            resolve(value);
+          }
+        },
+        (error) => {
+          clearTimeout(timer);
+          if (timedOut) {
+            const message = error instanceof Error ? error.message : JSON.stringify(error);
+            this.logger.warn('ha:area_ensure', `${label} : a aussi échoué après le timeout — ${message}`);
+          } else {
+            reject(error);
+          }
+        }
       );
     });
   }
