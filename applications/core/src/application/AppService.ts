@@ -62,6 +62,18 @@ export class AppService {
   private wsEnabled: boolean = false; // Flag pour gérer l'état WS
   private _isWsConnected: boolean = false; // État de connexion WS
   private wsConfig?: HaWsConfig; // Configuration WS sauvegardée
+
+  /**
+   * Résolue une fois pour toutes au premier `ha:ready` (référentiel HA chargé) — voir
+   * waitUntilWsRegistryReady(). Décision utilisateur du 08/08/2026 : les apps déclarant
+   * `requiredHaWs` (HAPLAN, ArbreOuQuoi, IA, Planificateur) n'ont leur `start()` appelé qu'une
+   * fois cette promesse résolue, jamais avant — attente indéfinie si HA/WS n'est jamais prêt
+   * (pas de timeout : "si HA est arrêté, pas de ready", ces apps ne démarrent alors jamais).
+   * Même schéma que AreaEnsureService.waitUntilRegistryReady, dupliqué ici volontairement (pas
+   * de dépendance croisée entre les deux services pour un mécanisme aussi simple).
+   */
+  private wsRegistryReady = false;
+  private wsRegistryReadyPromise?: Promise<void>;
   
   // Liste des modules détectés
   private modules: ApplicationModule[] = [];
@@ -219,13 +231,15 @@ export class AppService {
     // 3.5. Émettre les métadonnées UI pour chaque module qui en a
     this.emitModuleUiMetadata();
 
-    // 3.8. Démarrer les services des applications activées (NOUVEAU)
-    await this.startApplicationServices();
-
-    // 4. Démarrer HA WebSocket (si configuré)
+    // 3.7. Démarrer HA WebSocket (si configuré) — AVANT les services applicatifs : les apps
+    // requiredHaWs attendent ha:ready pour démarrer (voir startApplicationService()), la connexion
+    // doit donc déjà être en cours, sinon ha:ready ne pourrait jamais survenir (blocage garanti).
     if (this.wsEnabled && this.haWsClient) {
       this.startHaWsClient();
     }
+
+    // 3.8. Démarrer les services des applications activées (NOUVEAU)
+    await this.startApplicationServices();
 
     this.logger.info('AppService', 'Application démarrée');
   }
@@ -571,26 +585,25 @@ export class AppService {
    */
   private async startApplicationServices(): Promise<void> {
     this.logger.info('AppService', 'Démarrage des services des applications...');
-    
+
     // Récupérer la liste des applications activées
     const { activated } = this.applicationManager.listAll();
     this.logger.info('AppService', `Applications activées: ${JSON.stringify(activated)}`);
-    
-    // Pour chaque module détecté qui est activé
-    for (const module of this.modules) {
-      // Vérifier si le module est activé (on compare avec la liste des apps activées)
-      const isActivated = activated.includes(module.id);
-      
-      if (isActivated && module.id !== 'core') {  // core est géré séparément
-        try {
-          await this.startApplicationService(module.id);
-        } catch (error) {
+
+    // Démarrage EN PARALLÈLE, pas séquentiel (08/08/2026) — une app requiredHaWs peut attendre
+    // ha:ready indéfiniment (voir startApplicationService()) ; avec un for...of + await comme
+    // avant, elle aurait bloqué le démarrage de TOUTES les apps suivantes dans this.modules,
+    // même celles n'ayant aucun besoin de WS. Chaque app gère son propre gate indépendamment.
+    const startups = this.modules
+      .filter((module) => module.id !== 'core' && activated.includes(module.id))
+      .map((module) =>
+        this.startApplicationService(module.id).catch((error) => {
           this.logger.error('AppService', `Échec du démarrage du service ${module.id}: ${error}`);
-          // Continuer avec les autres modules
-        }
-      }
-    }
-    
+        })
+      );
+
+    await Promise.all(startups);
+
     this.logger.info('AppService', 'Services des applications démarrés');
   }
 
@@ -600,10 +613,24 @@ export class AppService {
    */
   private async startApplicationService(moduleId: string): Promise<void> {
     this.logger.info('AppService', `Démarrage du service pour ${moduleId}...`);
-    
+
     // Arrêter d'abord si le service existe déjà
     await this.stopApplicationService(moduleId);
-    
+
+    // Gate WS (08/08/2026, décision utilisateur) : une app déclarant requiredHaWs (HAPLAN,
+    // ArbreOuQuoi, IA, Planificateur) n'a son start() appelé qu'une fois le référentiel HA
+    // synchronisé — attente indéfinie si ws_enable est actif mais que HA/WS n'est jamais prêt
+    // (voir waitUntilWsRegistryReady). Si ws_enable est désactivé, ne bloque jamais (l'app doit
+    // déjà tolérer l'absence de WS, comportement inchangé — voir le commentaire plus bas sur
+    // haStructureRegistry potentiellement undefined).
+    const metadata = this.modules.find((m) => m.id === moduleId);
+    if (metadata?.requiredHaWs && this.wsEnabled) {
+      if (!this.wsRegistryReady) {
+        this.logger.info('AppService', `${moduleId} attend la synchronisation HA WebSocket avant de démarrer (requiredHaWs)...`);
+      }
+      await this.waitUntilWsRegistryReady();
+    }
+
     try {
       // Charger le module
       const module = await this.loadApplicationModule(moduleId);
@@ -996,6 +1023,24 @@ export class AppService {
     } catch (error) {
       this.logger.error('AppService', `Échec du chargement du référentiel HA: ${error}`);
     }
+  }
+
+  /**
+   * Résolue au premier `ha:ready` (voir loadHaRegistry) — jamais de timeout, volontairement (voir
+   * le commentaire sur wsRegistryReady). Utilisée par startApplicationService() pour retarder le
+   * démarrage des apps requiredHaWs jusqu'à ce que le référentiel HA soit réellement synchronisé.
+   */
+  private waitUntilWsRegistryReady(): Promise<void> {
+    if (this.wsRegistryReady) return Promise.resolve();
+    if (!this.wsRegistryReadyPromise) {
+      this.wsRegistryReadyPromise = new Promise((resolve) => {
+        this.eventBus.onGeneric('ha:ready', () => {
+          this.wsRegistryReady = true;
+          resolve();
+        });
+      });
+    }
+    return this.wsRegistryReadyPromise;
   }
 
   /**
