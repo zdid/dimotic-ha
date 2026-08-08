@@ -1009,6 +1009,17 @@ export class AppService {
     if (!this.haWsClient || !this.haStructureRegistry) return;
 
     try {
+      // Abonnement AVANT l'instantané (get_states), pas après (08/08/2026, corrige un bug
+      // constaté en conditions réelles) — sinon tout state_changed survenant entre les deux
+      // est manqué définitivement pour une entité dont la valeur ne change plus avant longtemps
+      // (ex: capteurs "Sun" — sensor.sun_next_dawn ne change qu'une fois par jour) : le
+      // référentiel restait figé sur "unknown" indéfiniment. get_states() reflète toujours l'état
+      // RÉEL au moment de l'appel (pas un cache), donc l'appeler après l'abonnement ne perd rien —
+      // au pire un state_changed redondant est appliqué juste avant d'être écrasé par un
+      // rebuild() tout aussi à jour. wireHaRegistryEvents() est idempotent (haEventsWired) : ne
+      // s'applique qu'à la toute première connexion, sans effet sur les reconnexions suivantes.
+      this.wireHaRegistryEvents();
+
       const { entities, areas, devices, entityRegistry } = await this.haWsClient.loadInitialRegistry();
       const registry = this.haStructureRegistry.rebuild(entities, areas, devices, entityRegistry);
 
@@ -1018,8 +1029,6 @@ export class AppService {
         deviceCount: registry.deviceCount,
       });
       this.haRegistryTracer.writeSnapshot(registry);
-
-      this.wireHaRegistryEvents();
     } catch (error) {
       this.logger.error('AppService', `Échec du chargement du référentiel HA: ${error}`);
     }

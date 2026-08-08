@@ -692,7 +692,18 @@ function getQuoiIcon(quoiId: string): string {
     lumiere: '💡', temperature: '🌡️', humidite: '💧', interrupteur: '🔘',
     prise: '🔌', volet: '🪟', porte: '🚪', fenetre: '🪟',
     detecteur: '👁️', mouvement: '🏃', fumee: '💨', gaz: '⛽', eau: '💦',
-    sonnette: '🔔', camera: '📹', alarme: '🚨', climatisation: '❄️', chauffage: '🔥'
+    sonnette: '🔔', camera: '📹', alarme: '🚨', climatisation: '❄️', chauffage: '🔥',
+    // Complété le 08/08/2026 — la liste d'origine ne couvrait qu'une petite partie du
+    // vocabulaire QUOI réellement utilisé (repli sur ❓ pour la plupart des entités).
+    thermostat: '🎛️', radiateur: '♨️', poele: '🔥', four: '🍞', plaques: '🍳',
+    compteur: '🔢', barometre: '📊', pression: '📊',
+    machine_a_laver: '🧺', lave_vaisselle: '🍽️',
+    bouton: '🔲', telecommande: '🎮', infrarouge: '📡',
+    scene: '🎬', scenes: '🎬', scenes_switch: '🎬',
+    ventilateur: '🌀', vmc: '🌀', store: '🪟', rideau: '🪟', rideaux: '🪟',
+    serrure: '🔒', portail: '🚧', arrosage: '🚿', aspirateur: '🧹',
+    media: '📺', tele: '📺', television: '📺', chaudiere: '🔥',
+    pompe_a_chaleur: '♨️', batterie: '🔋', pression_eau: '💦'
   };
   return icons[quoiId.toLowerCase()] || '❓';
 }
