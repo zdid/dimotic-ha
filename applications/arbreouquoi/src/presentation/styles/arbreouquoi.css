@@ -227,6 +227,11 @@ html, body {
 .section-content, .quoi-content, .ou-content, .quoi-entities, .entities-in-ou {
   padding: var(--spacer-sm); background-color: var(--card-background);
 }
+/* Décalage progressif par niveau OÙ (grand_pere > pere > lieu > lieu_precis) — .ou-content
+   contient les <tree-node> enfants, chacun ré-appliquant ce même padding-left : l'effet
+   d'escalier vient donc naturellement de l'empilement des niveaux imbriqués, pas d'une règle
+   par niveau (demande utilisateur, 08/08/2026). */
+.ou-content { padding-left: calc(var(--spacer-sm) + 12px); }
 
 /* OÙ Sections */
 .ou-section { border-left: 2px solid var(--border-color); }
