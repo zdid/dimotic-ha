@@ -67,6 +67,13 @@ export const RFXCOM_UI_METADATA: ModuleUiMetadata = {
           label: 'Détection continue des nouveaux devices',
           type: 'boolean',
           default: true
+        },
+        {
+          name: 'waitForHaWsBeforeDiscovery',
+          label: 'Attendre la synchronisation HA avant de publier les découvertes',
+          type: 'boolean',
+          default: true,
+          description: "Évite de créer des entités sans area assignée (HA n'applique l'area suggérée qu'une seule fois, à la création) — désactiver si les entités doivent apparaître même quand HA WebSocket est indisponible."
         }
       ]
     }

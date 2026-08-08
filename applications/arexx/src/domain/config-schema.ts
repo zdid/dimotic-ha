@@ -32,7 +32,11 @@ export const arexxConfigSchema = z.object({
   bridgeInstance: z.string().min(1).default('arexx_bridge_0001'),
 
   // Fichier de configuration centralisé (capteurs), relatif à la racine du projet
-  sensorsConfigFile: z.string().min(1).default('arexx-sensors-v1.0.yaml')
+  sensorsConfigFile: z.string().min(1).default('arexx-sensors-v1.0.yaml'),
+
+  // Voir le commentaire équivalent dans rfxcom/config-schema.ts — même risque (area jamais
+  // réappliquée après coup par HA), même défaut prudent.
+  waitForHaWsBeforeDiscovery: z.boolean().default(true)
 });
 
 export type ArexxConfig = z.infer<typeof arexxConfigSchema>;
@@ -44,5 +48,6 @@ export const DEFAULT_AREXX_CONFIG: ArexxConfig = {
   bs1000Port: 80,
   pollIntervalSeconds: 50,
   bridgeInstance: 'arexx_bridge_0001',
-  sensorsConfigFile: 'arexx-sensors-v1.0.yaml'
+  sensorsConfigFile: 'arexx-sensors-v1.0.yaml',
+  waitForHaWsBeforeDiscovery: true
 };

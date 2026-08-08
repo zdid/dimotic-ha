@@ -54,27 +54,42 @@ export class AreaEnsureService {
 
   /**
    * Garantit qu'une area du nom donné existe (la crée si nécessaire), et retourne son area_id.
-   * Best-effort : timeout interne, ne lève jamais — un échec/dépassement retourne `undefined`,
-   * l'appelant publie la découverte sans area, comme si suggested_area n'avait pas été fourni.
+   * Best-effort par défaut : timeout interne, ne lève jamais — un échec/dépassement retourne
+   * `undefined`, l'appelant publie la découverte sans area, comme si suggested_area n'avait pas
+   * été fourni.
+   *
+   * @param waitIndefinitely Si `true` (paramétrage `waitForHaWsBeforeDiscovery` de l'app
+   *   appelante, RFXCOM/AREXX/NOMMAGE — décision utilisateur du 08/08/2026), n'abandonne JAMAIS
+   *   l'attente du référentiel HA, même après REGISTRY_WAIT_TIMEOUT_MS — HA n'appliquant
+   *   suggested_area qu'une seule fois, à la création de l'entité, publier une découverte sans
+   *   area par manque de patience la laisserait sans area de façon définitive (réaffectation
+   *   manuelle requise, coûteuse à grande échelle). L'appelant (IntegrationBridge) n'appelle donc
+   *   `haMqttService.publishDiscoveryFor(...)` qu'une fois cette promesse résolue — la découverte
+   *   elle-même attend autant que nécessaire, sans borne.
    */
-  async ensureArea(rawName: string): Promise<string | undefined> {
+  async ensureArea(rawName: string, waitIndefinitely = false): Promise<string | undefined> {
     const name = this.capitalize(rawName);
     if (!name) return undefined;
 
     const pending = this.pendingCreations.get(name);
     if (pending) return pending;
 
-    const creation = this.resolveOrCreate(name).finally(() => this.pendingCreations.delete(name));
+    const creation = this.resolveOrCreate(name, waitIndefinitely).finally(() => this.pendingCreations.delete(name));
     this.pendingCreations.set(name, creation);
     return creation;
   }
 
-  private async resolveOrCreate(name: string): Promise<string | undefined> {
-    try {
-      await this.withTimeout(this.waitUntilRegistryReady(), REGISTRY_WAIT_TIMEOUT_MS, `area_ensure:${name}:registry`);
-    } catch {
-      this.logger.warn('ha:area_ensure', `Échec de la garantie d'area "${name}": référentiel HA jamais prêt après ${REGISTRY_WAIT_TIMEOUT_MS}ms`);
-      return undefined;
+  private async resolveOrCreate(name: string, waitIndefinitely: boolean): Promise<string | undefined> {
+    if (waitIndefinitely) {
+      // Pas de withTimeout ici, volontairement — voir la doc de ensureArea() ci-dessus.
+      await this.waitUntilRegistryReady();
+    } else {
+      try {
+        await this.withTimeout(this.waitUntilRegistryReady(), REGISTRY_WAIT_TIMEOUT_MS, `area_ensure:${name}:registry`);
+      } catch {
+        this.logger.warn('ha:area_ensure', `Échec de la garantie d'area "${name}": référentiel HA jamais prêt après ${REGISTRY_WAIT_TIMEOUT_MS}ms`);
+        return undefined;
+      }
     }
 
     try {

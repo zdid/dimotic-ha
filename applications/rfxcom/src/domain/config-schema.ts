@@ -29,7 +29,15 @@ export const rfxcomConfigSchema = z.object({
   // jamais écrit en EEPROM du RFXtrx433. Liste vide = tous les protocoles gérables par ce
   // récepteur sont poussés par défaut. Seul mécanisme de filtrage de protocoles restant (un filtre
   // logiciel après décodage existait ici auparavant — retiré le 2026-07-26).
-  enabledHardwareProtocols: z.array(z.string()).default([])
+  enabledHardwareProtocols: z.array(z.string()).default([]),
+
+  // Si activé (par défaut) : aucune découverte MQTT n'est publiée tant que le référentiel HA
+  // (WS) n'est pas synchronisé — garantit que suggested_area peut réellement créer/assigner
+  // l'area dès la création de l'entité (HA n'applique suggested_area qu'une seule fois, jamais
+  // rétroactivement). Sans ça, des entités créées avant que l'area existe restent SANS area de
+  // façon définitive — réaffectation manuelle requise, coûteuse à grande échelle (350+ récepteurs
+  // RFXCOM). Désactiver accepte ce risque en échange d'un démarrage qui ne dépend pas de HA WS.
+  waitForHaWsBeforeDiscovery: z.boolean().default(true)
 });
 
 export type RfxComConfig = z.infer<typeof rfxcomConfigSchema>;
@@ -41,5 +49,6 @@ export const DEFAULT_RFXCOM_CONFIG: RfxComConfig = {
   bridgeInstance: 'rfx_bridge_0001',
   devicesConfigFile: 'config-rfxcom-devices-v1.0.yaml',
   autoDiscovery: true,
-  enabledHardwareProtocols: []
+  enabledHardwareProtocols: [],
+  waitForHaWsBeforeDiscovery: true
 };

@@ -71,7 +71,12 @@ const nommageSourceSchema = z.object({
 // Configuration de transmission vers HA — commune à toutes les sources (Passthrough MQTT du socle)
 const haConfigSchema = z.object({
   // Injecter les attributs de taxonomie dans le payload relayé
-  injectTaxonomyAttributes: z.boolean().default(true)
+  injectTaxonomyAttributes: z.boolean().default(true),
+
+  // Voir le commentaire équivalent dans rfxcom/config-schema.ts — même risque (area jamais
+  // réappliquée après coup par HA une fois l'entité créée), même défaut prudent. Particulièrement
+  // sensible ici : NOMMAGE relaie potentiellement des centaines d'entités zigbee2mqtt.
+  waitForHaWsBeforeDiscovery: z.boolean().default(true)
 });
 
 // Configuration Logging — commune à toutes les sources
@@ -145,7 +150,8 @@ export const DEFAULT_NOMMAGE_CONFIG: NommageConfig = {
   enabled: true,
   sources: [DEFAULT_NOMMAGE_SOURCE],
   ha: {
-    injectTaxonomyAttributes: true
+    injectTaxonomyAttributes: true,
+    waitForHaWsBeforeDiscovery: true
   },
   logging: {
     level: 'info',

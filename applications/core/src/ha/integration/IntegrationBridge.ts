@@ -214,8 +214,10 @@ export class IntegrationBridge {
   }
 
   /**
-   * Garantit l'area suggérée (best-effort, voir AreaEnsureService) avant de publier la
-   * découverte — jamais bloquant : un échec/dépassement n'empêche jamais la publication.
+   * Garantit l'area suggérée avant de publier la découverte. Best-effort par défaut (timeout,
+   * n'empêche jamais la publication) — sauf si l'app appelante a activé
+   * `waitForHaWsBeforeDiscovery` (RFXCOM/AREXX par défaut), auquel cas la publication attend
+   * indéfiniment que l'area soit garantie (voir AreaEnsureService.ensureArea).
    */
   private async publishDiscoveryWithArea(moduleName: string, data: DiscoveryRequestEvent): Promise<void> {
     const suggestedArea = data.essential.device?.suggested_area;
@@ -223,7 +225,7 @@ export class IntegrationBridge {
       const capitalized = this.capitalizeAreaName(suggestedArea);
       if (data.essential.device) data.essential.device.suggested_area = capitalized;
       if (this.areaEnsureService) {
-        await this.areaEnsureService.ensureArea(capitalized);
+        await this.areaEnsureService.ensureArea(capitalized, this.shouldWaitIndefinitelyForArea(moduleName));
       }
     }
     this.haMqttService.publishDiscoveryFor(moduleName, data.bridgeInstance, data.component, data.objectId, data.deviceId, data.essential);
@@ -243,7 +245,7 @@ export class IntegrationBridge {
       const capitalized = this.capitalizeAreaName(suggestedArea);
       if (payload?.device) payload.device.suggested_area = capitalized;
       if (this.areaEnsureService) {
-        await this.areaEnsureService.ensureArea(capitalized);
+        await this.areaEnsureService.ensureArea(capitalized, this.shouldWaitIndefinitelyForArea(moduleName));
       }
     }
 
@@ -257,6 +259,24 @@ export class IntegrationBridge {
     }
 
     this.haMqttService.publishDiscoveryPassthrough(moduleName, data.bridgeInstance, data.sourceTopic, data.payload);
+  }
+
+  /**
+   * Lit `waitForHaWsBeforeDiscovery` dans la config du module appelant (RFXCOM/AREXX : champ
+   * racine ; NOMMAGE : `ha.waitForHaWsBeforeDiscovery` — même structure que les schémas Zod
+   * respectifs). Absent (ex: EVOO7, qui n'expose pas ce réglage) = false, comportement best-effort
+   * inchangé — décision utilisateur du 08/08/2026, conséquences jugées faibles pour EVOO7.
+   */
+  private shouldWaitIndefinitelyForArea(moduleName: string): boolean {
+    const config = this.configService.getModuleConfig<Record<string, unknown>>(moduleName);
+    if (!config) return false;
+
+    const direct = config['waitForHaWsBeforeDiscovery'];
+    if (typeof direct === 'boolean') return direct;
+
+    const ha = config['ha'] as Record<string, unknown> | undefined;
+    const nested = ha?.['waitForHaWsBeforeDiscovery'];
+    return typeof nested === 'boolean' ? nested : false;
   }
 
   /** Première lettre en capitale — même règle que AreaEnsureService.capitalize, dupliquée ici
