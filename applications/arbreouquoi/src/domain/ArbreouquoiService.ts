@@ -595,7 +595,6 @@ export class ArbreouquoiService {
       }
       const entity = this.sanitizeEntity(rawEntity);
       const ouSegments = this.extractOuSegments(entity);
-      const ouNames = ouSegments.map(s => s.name);
       const myPath = ouSegments.map(s => s.id).join('/');
       const related = this.requireRegistry().getAllEntities()
         .map(e => this.sanitizeEntity(e))
@@ -615,7 +614,9 @@ export class ArbreouquoiService {
 
       this.eventBus.emit(ARBREOUQUOI_SOCKET_EVENTS.ENTITY_DETAILS, {
         entity,
-        ouPath: ouNames.length > 0 ? ouNames : [entity.area?.name || 'N/A'],
+        ouPath: ouSegments.length > 0
+          ? ouSegments.map(s => ({ name: s.name, level: s.level }))
+          : [{ name: entity.area?.name || 'N/A', level: 'lieu' as const }],
         area: entity.area || null,
         device: entity.device || null,
         quiIds: entity.quoi_ids,

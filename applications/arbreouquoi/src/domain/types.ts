@@ -96,7 +96,9 @@ export interface ArbreOuQuoiTreePayload {
 
 export interface ArbreOuQuoiEntityDetailsPayload {
   entity: HaStructuredEntity;
-  ouPath: string[]; // Chemin OÙ complet
+  // Chaque segment porte son niveau réel (pas déduit côté client de sa position — voir le
+  // correctif du 08/08/2026 sur ArbreouquoiService.extractOuSegments, même raison).
+  ouPath: Array<{ name: string; level: 'grand_pere' | 'pere' | 'lieu' | 'lieu_precis' }>;
   area: HaArea | null;
   device: HaDevice | null;
   quiIds: string[];

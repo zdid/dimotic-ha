@@ -237,7 +237,7 @@ function initEventListeners(): void {
 
   socket.on(ARBREOUQUOI_SOCKET_EVENTS.ENTITY_DETAILS, (payload: {
     entity: HaStructuredEntity;
-    ouPath: string[];
+    ouPath: Array<{ name: string; level: 'grand_pere' | 'pere' | 'lieu' | 'lieu_precis' }>;
     area: HaArea | null;
     device: HaDevice | null;
     quiIds: string[];
@@ -553,7 +553,7 @@ function showEntityDetails(entityId: string): void {
 
 function renderEntityDetails(payload: {
   entity: HaStructuredEntity;
-  ouPath: string[];
+  ouPath: Array<{ name: string; level: 'grand_pere' | 'pere' | 'lieu' | 'lieu_precis' }>;
   area: HaArea | null;
   device: HaDevice | null;
   quiIds: string[];
@@ -590,8 +590,7 @@ function renderEntityDetails(payload: {
       <div class="details-section">
         <h3>📍 Hiérarchie OÙ</h3>
         <div class="ou-path-display">
-          ${payload.ouPath.map((name, idx) => {
-            const level = getLevelFromPathIndex(idx, payload.ouPath.length);
+          ${payload.ouPath.map(({ name, level }) => {
             return `<span class="ou-path-item"><span class="ou-path-icon">${getOuIcon(level)}</span> ${escapeHtml(name)} <span class="ou-path-level">[${level}]</span></span>`;
           }).join(' → ')}
         </div>
@@ -712,20 +711,6 @@ function escapeHtml(text: string): string {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
-}
-
-function getLevelFromPathIndex(idx: number, length: number): 'grand_pere' | 'pere' | 'lieu' | 'lieu_precis' {
-  if (length === 1) return 'lieu';
-  if (length === 2) return idx === 0 ? 'lieu_precis' : 'lieu';
-  if (length === 3) {
-    if (idx === 0) return 'lieu_precis';
-    if (idx === 1) return 'lieu';
-    return 'pere';
-  }
-  if (idx === 0) return 'lieu_precis';
-  if (idx === 1) return 'lieu';
-  if (idx === 2) return 'pere';
-  return 'grand_pere';
 }
 
 // Pont global minimal restant : ouvrir le panneau de détails déclenche un socket.emit +

@@ -1,7 +1,18 @@
 /* ArbreOuquoi Application - Styles CSS */
-/* Derniere modification: 2026-07-20 11:00:00 - Mise à jour pour les deux modes d'affichage */
+/* Derniere modification: 2026-08-08 00:00:00 - Fix :root/:host (Shadow DOM) + indentation hiérarchie OÙ */
 
-:root {
+/* :host, pas :root (08/08/2026, corrige un bug réel) — cette feuille de style est chargée via
+   <link> à l'intérieur de Shadow DOM (app-module-container ET chaque <tree-node>, qui la charge
+   une seconde fois dans son propre shadow, voir tree-node.ts) : :root cible TOUJOURS le vrai
+   <html> du document, jamais atteint depuis l'intérieur d'un shadow — ces variables ne
+   s'appliquaient donc nulle part, silencieusement (var(--xxx) non résolu = valeur initiale,
+   0px/transparent pour la plupart des propriétés concernées ici). Constaté en conditions
+   réelles : .details-panel sans fond ni ombre (illisible, superposé au reste de la page),
+   décalage progressif entre niveaux OÙ invisible. :host, lui, cible correctement l'élément hôte
+   de CHAQUE shadow où cette feuille est chargée — les variables héritent alors normalement vers
+   tous les descendants, y compris dans les shadow roots imbriqués plus profondément (tree-node
+   dans app-module-container). */
+:root, :host {
   --primary-color: #3498db;
   --primary-dark: #2980b9;
   --secondary-color: #95a5a6;
@@ -231,7 +242,7 @@ html, body {
    contient les <tree-node> enfants, chacun ré-appliquant ce même padding-left : l'effet
    d'escalier vient donc naturellement de l'empilement des niveaux imbriqués, pas d'une règle
    par niveau (demande utilisateur, 08/08/2026). */
-.ou-content { padding-left: calc(var(--spacer-sm) + 12px); }
+.ou-content { padding-left: 32px; }
 
 /* OÙ Sections */
 .ou-section { border-left: 2px solid var(--border-color); }
