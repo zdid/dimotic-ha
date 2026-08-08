@@ -310,19 +310,24 @@ export class NommageService implements INommageService {
     let nomPere: TaxonomyLevel | undefined;
     let nomGrandPere: TaxonomyLevel | undefined;
 
+    // lieu_precis == lieu n'apporte aucune information distincte — laissé vide plutôt que
+    // dupliqué avec lieu (demande utilisateur, 08/08/2026, même règle que rfxcom/taxonomy.ts).
+    const precisIfDistinct = (precis: string, lieu: string): TaxonomyLevel | undefined =>
+      precis.toLowerCase() === lieu.toLowerCase() ? undefined : { raw: precis, slug: this.slugify(precis) };
+
     if (N === 0) {
       nomLieu = undefined;
     } else if (N === 1) {
       nomLieu = { raw: lieuxSegments[0], slug: this.slugify(lieuxSegments[0]) };
     } else if (N === 2) {
-      nomPrecis = { raw: lieuxSegments[0], slug: this.slugify(lieuxSegments[0]) };
+      nomPrecis = precisIfDistinct(lieuxSegments[0], lieuxSegments[1]);
       nomLieu = { raw: lieuxSegments[1], slug: this.slugify(lieuxSegments[1]) };
     } else if (N === 3) {
-      nomPrecis = { raw: lieuxSegments[0], slug: this.slugify(lieuxSegments[0]) };
+      nomPrecis = precisIfDistinct(lieuxSegments[0], lieuxSegments[1]);
       nomLieu = { raw: lieuxSegments[1], slug: this.slugify(lieuxSegments[1]) };
       nomPere = { raw: lieuxSegments[2], slug: this.slugify(lieuxSegments[2]) };
     } else if (N >= 4) {
-      nomPrecis = { raw: lieuxSegments[0], slug: this.slugify(lieuxSegments[0]) };
+      nomPrecis = precisIfDistinct(lieuxSegments[0], lieuxSegments[1]);
       nomLieu = { raw: lieuxSegments[1], slug: this.slugify(lieuxSegments[1]) };
       nomPere = { raw: lieuxSegments[2], slug: this.slugify(lieuxSegments[2]) };
       nomGrandPere = { raw: lieuxSegments[3], slug: this.slugify(lieuxSegments[3]) };

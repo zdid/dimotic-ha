@@ -31,8 +31,14 @@ export function extractTaxonomy(fullName: string): ExtractedTaxonomy {
   const rawQuoi = (parts[0] || '').trim();
   const lieux = parts[1] ? parts[1].split('--').map((s) => s.trim()) : [];
 
-  const nomPrecis = lieux[0] || null;
+  const rawPrecis = lieux[0] || null;
   const nomLieu = lieux.length > 1 ? (lieux[1] || null) : (lieux[0] || null);
+  // lieu_precis == lieu (y compris le cas à un seul segment, où les deux valaient jusqu'ici le
+  // même texte en double) n'apporte aucune information distincte — laissé vide plutôt que
+  // dupliqué avec lieu (demande utilisateur, 08/08/2026). buildDisplayName() s'appuyait déjà sur
+  // cette égalité pour replier l'affichage sur le quoi ; ce n'était corrigé qu'à l'affichage, pas
+  // dans la donnée elle-même (attributs_taxonomie envoyés à HA gardaient le doublon).
+  const nomPrecis = rawPrecis && rawPrecis.toLowerCase() === (nomLieu ?? '').toLowerCase() ? null : rawPrecis;
   const nomPere = lieux[2] || null;
   const nomGrandPere = lieux[3] || null;
 
