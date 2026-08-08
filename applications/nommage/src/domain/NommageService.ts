@@ -20,6 +20,7 @@
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
 import type { INommageMqttIntegrationService } from '../ha/integration/nommage/NommageMqttIntegrationService';
 import { nommageConfigSchema, type NommageConfig } from './config-schema';
+import { translateEntityName } from './name-translations';
 import type {
   DiscoveryMessage,
   ParsedTaxonomy,
@@ -401,6 +402,14 @@ export class NommageService implements INommageService {
    */
   private emitPassthroughDiscovery(discoveryMessage: DiscoveryMessage, parsed: ParsedTaxonomy): void {
     let payload: Record<string, unknown> = { ...discoveryMessage.payload };
+
+    // name explicite (ex: zigbee2mqtt "Linkquality", "Child lock") traverse HA sans jamais être
+    // traduit — HA ne traduit que les noms qu'il calcule lui-même depuis device_class, jamais un
+    // `name` fourni par la source. Voir name-translations.ts (dictionnaire constitué à partir des
+    // noms réellement observés, demande utilisateur 08/08/2026).
+    if (typeof payload.name === 'string') {
+      payload = { ...payload, name: translateEntityName(payload.name) };
+    }
 
     // suggested_area (lieu de taxonomie, pas lieu_precis) — HA ne s'en sert qu'une fois, à la
     // création de l'entité, pour lui assigner automatiquement une area si elle n'en a pas déjà
