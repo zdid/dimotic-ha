@@ -1,5 +1,5 @@
 /* ArbreOuquoi Application - Styles CSS */
-/* Derniere modification: 2026-08-08 00:00:00 - Fix :root/:host (Shadow DOM) + indentation hiérarchie OÙ */
+/* Derniere modification: 2026-08-08 00:10:00 - Palette sombre fixe (alignée sur le shell, sans bascule prefers-color-scheme) */
 
 /* :host, pas :root (08/08/2026, corrige un bug réel) — cette feuille de style est chargée via
    <link> à l'intérieur de Shadow DOM (app-module-container ET chaque <tree-node>, qui la charge
@@ -12,6 +12,15 @@
    de CHAQUE shadow où cette feuille est chargée — les variables héritent alors normalement vers
    tous les descendants, y compris dans les shadow roots imbriqués plus profondément (tree-node
    dans app-module-container). */
+/* Palette sombre fixe, alignée sur le shell (ui/styles/main.css : --color-bg #1a1a2e
+   inconditionnel, PAS de bascule prefers-color-scheme — testé le 08/08/2026 : sur ce poste
+   prefers-color-scheme vaut "light" alors que le shell reste visuellement sombre partout ;
+   une bascule ici aurait donc rendu ce module clair tout en gardant le reste de l'appli sombre).
+   Avant le fix :root/:host ci-dessus, ces variables ne s'appliquaient jamais : le module
+   apparaissait sombre uniquement parce que les cartes/toolbar restaient transparentes et
+   laissaient voir le fond sombre du ModuleContainer derrière — sans être de vraies boîtes
+   (cf. bug "pas dans une boîte" corrigé le 08/08/2026). Valeurs alignées sur le shell pour
+   rester cohérent visuellement, tout en ayant maintenant de vraies boîtes distinctes. */
 :root, :host {
   --primary-color: #3498db;
   --primary-dark: #2980b9;
@@ -19,35 +28,26 @@
   --success-color: #2ecc71;
   --warning-color: #f39c12;
   --danger-color: #e74c3c;
-  --background-color: #f8f9fa;
-  --card-background: #ffffff;
-  --text-color: #2c3e50;
-  --text-light: #7f8c8d;
-  --border-color: #e0e0e0;
-  --shadow-color: rgba(0, 0, 0, 0.1);
-  
-  --ou-grand-pere-color: #8e44ad;
-  --ou-pere-color: #9b59b6;
-  --ou-lieu-color: #3498db;
-  --ou-lieu-precis-color: #2980b9;
-  
-  --spacer-xs: 4px;
-  --spacer-sm: 8px;
-  --spacer-md: 16px;
-  --spacer-lg: 24px;
-  --spacer-xl: 32px;
-  
-  --border-radius: 4px;
-  --transition: all 0.2s ease;
-}
-
-[data-theme="dark"] {
   --background-color: #1a1a2e;
   --card-background: #16213e;
   --text-color: #eaeaea;
   --text-light: #b0b0b0;
   --border-color: #3d3d5c;
   --shadow-color: rgba(0, 0, 0, 0.3);
+
+  --ou-grand-pere-color: #8e44ad;
+  --ou-pere-color: #9b59b6;
+  --ou-lieu-color: #3498db;
+  --ou-lieu-precis-color: #2980b9;
+
+  --spacer-xs: 4px;
+  --spacer-sm: 8px;
+  --spacer-md: 16px;
+  --spacer-lg: 24px;
+  --spacer-xl: 32px;
+
+  --border-radius: 4px;
+  --transition: all 0.2s ease;
 }
 
 * { box-sizing: border-box; }
@@ -150,12 +150,9 @@ html, body {
 /* Error */
 .error-message {
   padding: var(--spacer-md);
-  background-color: #f8d7da; color: #721c24;
-  border: 1px solid #f5c6cb; border-radius: var(--border-radius);
+  background-color: #491a22; color: #f8d7da;
+  border: 1px solid #721c24; border-radius: var(--border-radius);
   margin-bottom: var(--spacer-lg);
-}
-[data-theme="dark"] .error-message {
-  background-color: #491a22; color: #f8d7da; border-color: #721c24;
 }
 
 /* Main Content */
