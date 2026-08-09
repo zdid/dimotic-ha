@@ -46,3 +46,7 @@ git-backup-*
 # Sauvegardes locales (backups/[fichier]_backup_[AAAA-MM-JJ]... — jamais commitées, cf. CLAUDE.md règle 5)
 backups/
 
+# Artefacts générés par generate_esphome_floorplan.py (reproductibles depuis data/haplan/, pas de source)
+applications/haplan/tools/esphome/floorplan_*.yaml
+applications/haplan/tools/esphome/floorplan_*.png
+
