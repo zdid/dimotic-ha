@@ -51,7 +51,7 @@ réellement utilisée par RfxComTransceiver.ts — vérifiée directement dans l
 - NPM package `rfxcom` (dépendance de `applications/rfxcom`).
 
 ### 1.4 Référentiels
-- **⭐ [fonctionnelles-rfxcom_specs_v5.9.md](fonctionnelles-rfxcom_specs_v5.9.md)** - Spécifications fonctionnelles principales
+- **⭐ [fonctionnelles-rfxcom_specs_v5.10.md](fonctionnelles-rfxcom_specs_v5.10.md)** - Spécifications fonctionnelles principales
 - **⭐ [techniques-socle-ha-mqtt_specs_v4.19.md](techniques-socle-ha-mqtt_specs_v4.19.md)** - Socle technique
 - **⭐ [spec-nommage-v1.0.md](spec-nommage-v1.0.md)** - Règles de nommage
 - **⭐ [recepteurs-emetteurs-rfxcom_specs_v5.4.md](recepteurs-emetteurs-rfxcom_specs_v5.4.md)** - Récepteurs et émetteurs
@@ -518,7 +518,7 @@ disponible dans le code applicatif actuel.
 
 ### 14.1 Références
 - **[Bibliothèque rfxcom npm](https://www.npmjs.com/package/rfxcom)**
-- **[fonctionnelles-rfxcom_specs_v5.9.md](fonctionnelles-rfxcom_specs_v5.9.md)** ⭐
+- **[fonctionnelles-rfxcom_specs_v5.10.md](fonctionnelles-rfxcom_specs_v5.10.md)** ⭐
 - **[techniques-socle-ha-mqtt_specs_v4.19.md](techniques-socle-ha-mqtt_specs_v4.19.md)** ⭐
 - **[recepteurs-emetteurs-rfxcom_specs_v5.4.md](recepteurs-emetteurs-rfxcom_specs_v5.4.md)** ⭐
 
@@ -551,8 +551,8 @@ await transceiver.connect({ port, baudRate: this.config.baudRate });
 |---------|------|--------|------------|
 | 1.0 | 2026-07-11 | Mistral Vibe | Version initiale - Intégration de la bibliothèque rfxcom npm |
 | 1.2 | 2026-07-17 | Mistral Vibe | Démarrage automatique via AppService, injection `IAppConfigProvider`, traces détaillées |
-| 1.3 | 2026-08-03 | Claude | **Réécriture complète des sections décrivant l'API de la bibliothèque `rfxcom`** (§2-§8, §11, §13), qui documentaient une API fictive jamais celle réellement publiée (pas d'événement générique `'device'`, pas de `'connect'`/`'error'` génériques, options du constructeur réduites à `{debug}`, dispatch par `switch` sur le protocole et non `instanceof`, échelle de dim réelle 0-15). Nouvelle §8 "Persistance et Validation" documentant la cause racine, jusqu'ici non identifiée dans les specs, de la rafale de commandes OFF à chaque redémarrage (`lastOn`/`lastLevel`/`lastValue`/`commandDeviceId` écrits en YAML mais strippés au rechargement par le schéma Zod). §11.1/§11.3 réécrites (verrou `protocolsPushGate`, reconnexion à chaud propre à RFXCOM plutôt que redémarrage du module entier par AppService). Section "Communication Inter-Applications" (§9 de la v1.2, jamais implémentée, doublon de numérotation avec l'ancienne §9) retirée de ce document — voir l'annexe correspondante dans `fonctionnelles-rfxcom_specs_v5.9.md` §22.3, qui la documente une seule fois pour l'ensemble du module RFXCOM avec la mention explicite "non implémentée". |
+| 1.3 | 2026-08-03 | Claude | **Réécriture complète des sections décrivant l'API de la bibliothèque `rfxcom`** (§2-§8, §11, §13), qui documentaient une API fictive jamais celle réellement publiée (pas d'événement générique `'device'`, pas de `'connect'`/`'error'` génériques, options du constructeur réduites à `{debug}`, dispatch par `switch` sur le protocole et non `instanceof`, échelle de dim réelle 0-15). Nouvelle §8 "Persistance et Validation" documentant la cause racine, jusqu'ici non identifiée dans les specs, de la rafale de commandes OFF à chaque redémarrage (`lastOn`/`lastLevel`/`lastValue`/`commandDeviceId` écrits en YAML mais strippés au rechargement par le schéma Zod). §11.1/§11.3 réécrites (verrou `protocolsPushGate`, reconnexion à chaud propre à RFXCOM plutôt que redémarrage du module entier par AppService). Section "Communication Inter-Applications" (§9 de la v1.2, jamais implémentée, doublon de numérotation avec l'ancienne §9) retirée de ce document — voir l'annexe correspondante dans `fonctionnelles-rfxcom_specs_v5.10.md` §22.3, qui la documente une seule fois pour l'ensemble du module RFXCOM avec la mention explicite "non implémentée". |
 
 ---
 
-*Conforme à [fonctionnelles-rfxcom_specs_v5.9.md](fonctionnelles-rfxcom_specs_v5.9.md), [techniques-socle-ha-mqtt_specs_v4.19.md](techniques-socle-ha-mqtt_specs_v4.19.md) et [spec-nommage-v1.0.md](spec-nommage-v1.0.md)*
+*Conforme à [fonctionnelles-rfxcom_specs_v5.10.md](fonctionnelles-rfxcom_specs_v5.10.md), [techniques-socle-ha-mqtt_specs_v4.19.md](techniques-socle-ha-mqtt_specs_v4.19.md) et [spec-nommage-v1.0.md](spec-nommage-v1.0.md)*

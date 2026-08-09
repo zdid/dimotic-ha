@@ -436,7 +436,7 @@ applications/arexx/
 ### 12.1 Références
 - [Spécification de Nommage **OBLIGATOIRE**](spec-nommage-v1.0.md) ⭐
 - [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.19.md) ⭐
-- [Spécifications Fonctionnelles RFXCOM](fonctionnelles-rfxcom_specs_v5.9.md) (mécanismes partagés : taxonomie, fraîcheur d'état au démarrage)
+- [Spécifications Fonctionnelles RFXCOM](fonctionnelles-rfxcom_specs_v5.10.md) (mécanismes partagés : taxonomie, fraîcheur d'état au démarrage)
 
 ### 12.2 Glossaire
 | Terme | Définition |

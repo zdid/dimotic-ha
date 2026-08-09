@@ -1,13 +1,18 @@
 # Spécifications Fonctionnelles — Application ARBREOUQUOI
 
-**Version :** 1.2  
-**Date :** 4 Août 2026  
+**Version :** 1.3  
+**Date :** 9 Août 2026  
 **Auteur :** Mistral Vibe / Claude  
 **Statut :** En développement  
 **Type :** Application standalone  
 
-> **v1.2** : Correction de la référence `ws-ha` → `dimotic-ha` (§1.1, projet renommé le 04/08/2026),
-> sans changement fonctionnel.
+> **v1.3** : **Hiérarchie OÙ du panneau de détails corrigée** (§6.2 — ordre et libellés de niveau,
+> panneau réellement visible dans une boîte) ; **Légende OÙ placée avant la Légende QUOI, types
+> QUOI sans icône dédiée nommés, ID technique retiré de la liste d'entités** (§6.3). Root cause
+> technique (algorithme, CSS) détaillé dans `implementation-arbreouquoi_specs`. Note : ce document
+> reste daté par ailleurs (mockups décrivant encore une hiérarchie "Area" à un seul niveau plutôt
+> que la hiérarchie OÙ à 4 niveaux réellement implémentée) — rattrapage complet non fait ici,
+> hors-scope de cette session.
 
 ---
 
@@ -364,6 +369,10 @@ graph TD
 │  │ ID Area            │ area.salon          │               │
 │  └─────────────────────┴─────────────────────┘               │
 │                                                                  │
+│  📍 Hiérarchie OÙ                                                │
+│  🏠 maison [grand_pere] → 🏢 étage [pere] → 📍 chambre [lieu]    │
+│  → 🎯 chevet droit [lieu_precis]                                 │
+│                                                                  │
 │  🏷️ Classification QUOI                                         │
 │  [🌡️ température] [capteur]                                      │
 │                                                                  │
@@ -379,6 +388,14 @@ graph TD
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+> **⭐ v1.3** : **Section "Hiérarchie OÙ" du panneau de détails** (ci-dessus), corrigée pour
+> afficher les niveaux dans le bon ordre (grand_père → père → lieu → lieu précis) et avec le bon
+> libellé de niveau à chaque segment — voir `implementation-arbreouquoi_specs` pour le root cause
+> (niveau autrefois déduit de la position dans le tableau, devenu ambigu/faux dès qu'un segment
+> optionnel comme `lieu_precis` peut être absent). Panneau également corrigé pour s'afficher
+> réellement dans une boîte visible (fond, ombre) — voir `implementation-arbreouquoi_specs` pour
+> le bug CSS Shadow DOM sous-jacent.
+
 ### 6.3 Légende QUOI
 
 **Affichage :**
@@ -386,6 +403,13 @@ graph TD
 - Chaque type est représenté par son icône
 - Le nombre d'entités pour chaque type est affiché
 - Cliquer sur un type filtre l'arbre pour n'afficher que ce type
+
+> **⭐ v1.3** : **Légende OÙ affichée au-dessus de la Légende QUOI** (demande utilisateur, nombre de
+> niveaux OÙ fixe — 4 — contrairement au nombre de types QUOI qui varie). **Types QUOI sans icône
+> dédiée** (repli `❓` dans `getQuoiIcon()`) : le libellé du QUOI est désormais affiché à côté de
+> l'icône, pour rester identifiable sans dépendre du seul tooltip. **ID technique de l'entité**
+> (ex: `binary_sensor.chambre_bouton_...`) retiré de l'affichage sous chaque entité dans la liste
+> (n'apportait rien d'utile en usage courant, `showEntityIds` supprimé).
 
 ---
 

@@ -1,10 +1,16 @@
 # Spécifications Fonctionnelles - Application NOMMAGE
 
-**Version :** 1.4  
-**Date :** 4 Août 2026  
+**Version :** 1.5  
+**Date :** 9 Août 2026  
 **Auteur :** Mistral Vibe / Claude  
 **Statut :** Document de référence pour l'application NOMMAGE  
 **Document parent :** [PROMPT_PROJET.md](../PROMPT_PROJET.md)
+
+> **v1.5** : **Traduction des noms d'entité par pays** (§3.7, nouveau ; §3.4 étape 1bis ; §4.3) —
+> `TranslationsRepository`, dictionnaires YAML `object_id -> libellé` (un par pays, seeds
+> versionnés + copie runtime jamais écrasée), nouveau paramètre `nommage.language.country`
+> (défaut `"France"`). Remplace un ancien mécanisme de surcharge ponctuelle côté source
+> (zigbee2mqtt), jamais documenté non plus.
 
 > **v1.4** : **Application à chaud d'une sauvegarde de configuration** (§7.4, nouveau) — la
 > sauvegarde via le formulaire générique "Paramètres du Module" (seule UI de configuration de
@@ -214,6 +220,11 @@ elle republie le message source enrichi, avec réécriture du préfixe du topic.
 
 **Méthode :**
 1. NOMMAGE injecte `attributs_taxonomie` (voir §3.3) dans le payload JSON d'origine
+1bis. **⭐ v1.5** — si `payload.name` (le nom d'entité fourni par la source) a une correspondance
+dans le dictionnaire de traduction actif (voir §3.7 — clé = `object_id`, le dernier segment du
+topic avant `/config`, pas `name` lui-même), il est remplacé par le libellé traduit. Sans
+correspondance, `payload.name` n'est **pas** touché (un `name` absent côté source ne doit pas
+devenir explicitement `null` : ce sont deux comportements différents pour HA — voir §3.7).
 2. NOMMAGE émet `integration:nommage:passthrough:discovery` sur l'EventBus, avec :
    - `sourceTopic` = le topic **d'origine** du message (ex: `ha/sensor/temp_cuisine/config` ou
      `homeassist/sensor/temp_salon/config`) — préfixe **non modifié** par NOMMAGE
@@ -309,6 +320,46 @@ elle republie le message source enrichi, avec réécriture du préfixe du topic.
 - **Validation** avec Zod
 - **Rechargement à chaud** (redémarrage automatique)
 
+### 3.7 ⭐ Traduction des noms d'entité (`TranslationsRepository`, v1.5)
+
+**Problème** : HA ne traduit un nom d'entité que lorsqu'il le calcule lui-même depuis
+`device_class` (entité sans `name` propre) — un `name` explicite fourni par la source (ex:
+zigbee2mqtt `"Linkquality"`, `"Child lock"`) traverse HA tel quel, jamais traduit. Certaines
+entités (ex : les champs Linky `EAST`/`EASF01`/`EASF02`...) n'ont même **aucun** `name` côté
+source alors qu'elles partagent toutes le même `device_class` — sans intervention, elles
+seraient indiscernables les unes des autres dans HA.
+
+**Principe** : un dictionnaire `object_id -> libellé` par pays, appliqué dans
+`emitPassthroughDiscovery` (§3.4, étape 1bis) **avant** relais vers HA — remplace toute
+surcharge ponctuelle qui vivrait côté source (ex: l'ancien réglage par propriété
+`devices.<id>.homeassistant.<propriété>.name` de zigbee2mqtt, abandonné pour n'avoir qu'un
+seul endroit à maintenir).
+
+**Deux répertoires de fichiers YAML** (un fichier par pays, `translate-<pays>.yaml`,
+`<pays>` en minuscules) :
+- **Seeds versionnés avec le code** : `applications/nommage/src/defaultconfig/` — pour
+  l'instant `translate-france.yaml` (cible) et `translate-english.yaml` (référence/repli,
+  valeurs = noms d'origine tels que publiés par la source avant toute traduction). Copiés dans
+  `dist/defaultconfig` au build.
+- **Fichiers runtime, modifiables sans rebuild** : `data/nommage/translations/` — chaque seed y
+  est copié au démarrage **sans jamais écraser un fichier déjà présent** : une modification
+  manuelle survit à un redémarrage ou une mise à jour de l'application.
+
+**Pays configuré sans fichier connu** (ni seed, ni déjà présent en runtime) : généré à la volée
+— mêmes clés que `translate-france.yaml` (liste de référence), valeurs reprises de
+`translate-english.yaml` (repli, aucune vraie traduction) — à corriger manuellement ensuite ;
+aucun mécanisme de mise à jour automatique n'est prévu pour l'instant (décision explicitement
+différée).
+
+**Clé de recherche = `object_id`** (dernier segment du topic de découverte avant `/config`),
+**pas** le `name` d'origine : seul `object_id` est toujours présent, y compris pour les entités
+sans `name` propre côté source (voir Linky ci-dessus). Une entrée absente du dictionnaire laisse
+`payload.name` totalement intact (§3.4, étape 1bis) — jamais transformé en `name: null` (qui
+change le comportement d'affichage de HA, voir `techniques-socle-ha-mqtt_specs` §8.5.4).
+
+**Configuration** (voir §4.3/§7.1) : `nommage.language.country` (défaut `"France"`) — désigne un
+nom de pays, pas un code de langue ISO.
+
 ---
 
 ## 4. Format des Données
@@ -398,12 +449,18 @@ elle republie le message source enrichi, avec réécriture du préfixe du topic.
   // Transmission vers HA — commune à toutes les sources (voir §3.4, Passthrough MQTT du socle)
   ha: {
     injectTaxonomyAttributes: boolean; // default: true
+    waitForHaWsBeforeDiscovery: boolean; // default: true — attendre le référentiel HA avant de publier
   },
   
   logging: {
     level: 'debug' | 'info' | 'warn' | 'error'; // default: "info"
     showRawMessages: boolean;  // default: false
     showParsedMessages: boolean; // default: false
+  },
+
+  // ⭐ v1.5 — Pays dont les traductions de noms d'entité sont chargées (voir §3.7)
+  language: {
+    country: string; // default: "France" — nom de pays, pas un code de langue ISO
   }
 }
 ```

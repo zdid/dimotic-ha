@@ -1,10 +1,14 @@
 # Spécifications d'Implémentation - Application NOMMAGE
 
-**Version :** 1.4  
-**Date :** 4 Août 2026  
+**Version :** 1.5  
+**Date :** 9 Août 2026  
 **Auteur :** Mistral Vibe / Claude  
 **Statut :** Document technique pour les développeurs  
-**Document parent :** [fonctionnelles-nommage_specs_v1.4.md](./fonctionnelles-nommage_specs_v1.4.md)
+**Document parent :** [fonctionnelles-nommage_specs_v1.5.md](./fonctionnelles-nommage_specs_v1.5.md)
+
+> **v1.5** : **`TranslationsRepository`** (§3 arborescence, §4.2 exemple `emitPassthroughDiscovery`,
+> §6.3 config YAML) — traduction de noms d'entité par pays, voir `fonctionnelles-nommage_specs`
+> §3.7 pour le mécanisme complet.
 
 > **v1.4** : **Reconnexion MQTT sur sauvegarde via le formulaire générique** (§4.2.2, nouveau) —
 > `app:module:config:saved` écouté en plus de `nommage:config:save` (jamais déclenché par une UI
@@ -178,7 +182,13 @@ applications/nommage/
 │   ├── NommageService.ts          # ⭐ OBLIGATOIRE : Service principal
 │   ├── config-schema.ts           # Schéma Zod de configuration
 │   ├── socket-events.ts           # Événements Socket.io
-│   └── types.ts                   # Types TypeScript
+│   ├── types.ts                   # Types TypeScript
+│   └── translations/              # ⭐ v1.5 — voir fonctionnelles-nommage_specs §3.7
+│       └── TranslationsRepository.ts  # Chargement/génération des fichiers YAML de traduction
+│
+├── defaultconfig/                 # ⭐ v1.5 — Seeds versionnés (copiés dans dist/ au build)
+│   ├── translate-france.yaml
+│   └── translate-english.yaml
 │
 ├── ha/                           # Couche HA (Intégration)
 │   └── integration/
@@ -381,10 +391,20 @@ private slugify(text: string): string {
 // ⭐ v1.2 — Relais vers HA via le Passthrough MQTT du socle (§5.3). Remplace l'ancien
 // transmitToCore/nommage:transmit:to-core : cet exemple de code n'avait jamais été mis à jour en
 // v1.1 malgré le texte l'annonçant déjà obsolète — corrigé ici pour refléter le code réel.
+// ⭐ v1.5 — Traduction du nom d'entité (TranslationsRepository, fonctionnelles-nommage_specs §3.7)
+// AVANT le calcul de suggested_area, sur payload.name UNIQUEMENT si une correspondance existe
+// (sinon payload n'est pas touché — un name absent côté source doit le rester).
 private emitPassthroughDiscovery(discoveryMessage: DiscoveryMessage, parsed: ParsedTaxonomy): void {
-  const payload = this.config.ha.injectTaxonomyAttributes
-    ? { ...discoveryMessage.payload, attributs_taxonomie: parsed.haAttributes.attributs_taxonomie }
-    : { ...discoveryMessage.payload };
+  let payload: Record<string, unknown> = { ...discoveryMessage.payload };
+
+  const objectId = discoveryMessage.topic.split('/').slice(-2, -1)[0];
+  const translated = objectId ? this.entityNameTranslations[objectId] : undefined;
+  if (translated !== undefined) {
+    payload = { ...payload, name: translated };
+  }
+
+  // ... suggested_area (voir techniques-socle-ha-mqtt_specs §8.5.4), puis attributs_taxonomie
+  // (topic dédié json_attributes_topic, pas fusionné dans payload — voir §8.5.4 v4.19) ...
 
   this.eventBus.emit('integration:nommage:passthrough:discovery', {
     bridgeInstance: 'main',        // ⭐ voir §5.3 — obligatoire, absent à tort de l'exemple v1.1
@@ -393,6 +413,12 @@ private emitPassthroughDiscovery(discoveryMessage: DiscoveryMessage, parsed: Par
   });
 }
 ```
+
+**`entityNameTranslations`** (⭐ v1.5) : `Record<string, string>` chargé une fois au démarrage via
+`TranslationsRepository.loadCountryTranslations(config.language.country)` (injecté au
+constructeur, même principe que `mqttService` — `NommageService` reste sans accès filesystem
+direct). Voir `fonctionnelles-nommage_specs` §3.7 pour le mécanisme complet (seeds versionnés,
+copie runtime sans écrasement, génération à la volée pour un pays inconnu).
 
 **Événements EventBus écoutés :**
 - `nommage:discovery:raw` → Traitement des messages bruts
@@ -813,11 +839,16 @@ sources:
 
 ha:
   injectTaxonomyAttributes: true
+  waitForHaWsBeforeDiscovery: true
 
 logging:
   level: "info"
   showRawMessages: false
   showParsedMessages: false
+
+# ⭐ v1.5 — voir fonctionnelles-nommage_specs §3.7
+language:
+  country: "France"
 ```
 
 ---

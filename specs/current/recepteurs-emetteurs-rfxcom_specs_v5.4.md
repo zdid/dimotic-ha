@@ -1,11 +1,11 @@
 # Spécifications Fonctionnelles - Récepteurs et Émetteurs RFXCOM
 
 *Version 5.4 - 3 Août 2026*
-*Complément aux [spécifications principales](fonctionnelles-rfxcom_specs_v5.9.md)*
+*Complément aux [spécifications principales](fonctionnelles-rfxcom_specs_v5.10.md)*
 *Conforme à [spec-nommage-v1.0.md](spec-nommage-v1.0.md) et [techniques-socle-ha-mqtt_specs](techniques-socle-ha-mqtt_specs_v4.19.md)*
 
 > **v5.4** : **Rattrapage complet code/specs**, en écho au rattrapage de
-> `fonctionnelles-rfxcom_specs_v5.9.md`. Corrections principales :
+> `fonctionnelles-rfxcom_specs_v5.10.md`. Corrections principales :
 > - **§2.2, §7, §9** : format réel du `uniqueId`/`deviceId`
 >   (`{protocole}_{subType}_{sensorId}[_{unitCode}]`), pas `{protocole}_{sensorId}`.
 > - **§4.3 (nouveau)** : réponse **définitive** à la question laissée ouverte dans les sessions
@@ -51,7 +51,7 @@
 ## 1. Introduction
 
 ### 1.1 Objectif
-Ce document **complète** les [spécifications principales](fonctionnelles-rfxcom_specs_v5.9.md) en
+Ce document **complète** les [spécifications principales](fonctionnelles-rfxcom_specs_v5.10.md) en
 détaillant la gestion des **récepteurs logiques** et **émetteurs physiques RFXCOM**.
 
 ### 1.2 Périmètre
@@ -70,7 +70,7 @@ détaillant la gestion des **récepteurs logiques** et **émetteurs physiques RF
 ### 1.4 Conformité
 - [spec-nommage-v1.0.md](spec-nommage-v1.0.md) (format `quoi---ou--ou`)
 - [techniques-socle-ha-mqtt_specs](techniques-socle-ha-mqtt_specs_v4.19.md) (architecture 5 couches)
-- [fonctionnelles-rfxcom_specs](fonctionnelles-rfxcom_specs_v5.9.md) (spécifications principales)
+- [fonctionnelles-rfxcom_specs](fonctionnelles-rfxcom_specs_v5.10.md) (spécifications principales)
 
 ---
 
@@ -936,10 +936,10 @@ envoi de 'rfxcom:device:set_name' (contrat inchangé depuis v5.0).
 ### 12.2 Conformité
 - ✅ [spec-nommage-v1.0.md](spec-nommage-v1.0.md)
 - ✅ [techniques-socle-ha-mqtt_specs](techniques-socle-ha-mqtt_specs_v4.19.md)
-- ✅ [fonctionnelles-rfxcom_specs](fonctionnelles-rfxcom_specs_v5.9.md)
+- ✅ [fonctionnelles-rfxcom_specs](fonctionnelles-rfxcom_specs_v5.10.md)
 
 ### 12.3 Références
-- [Spécifications Principales RFXCOM](fonctionnelles-rfxcom_specs_v5.9.md)
+- [Spécifications Principales RFXCOM](fonctionnelles-rfxcom_specs_v5.10.md)
 - [Spécifications Implémentation RFXCOM](implementation-rfxcom_specs_v1.3.md)
 - [Spécification de Nommage **OBLIGATOIRE**](spec-nommage-v1.0.md) ⭐
 - [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.19.md) ⭐

@@ -1,5 +1,10 @@
 # Spécifications Fonctionnelles - Module RFXCOM
 
+*Version 5.10 - 9 Août 2026*
+*§5.5 : `essential.name` passe à `null` partout (5 endroits) — corrige un doublon de nom réel
+observé en direct ("Lumière lumière", "Température Température", "Bouton Chambre du bas Bouton"),
+voir `techniques-socle-ha-mqtt_specs` §8.5.4 pour `has_entity_name`.*
+
 *Version 5.9 - 3 Août 2026*
 *Rattrapage complet du décrochage code/specs constaté début août 2026 : détection automatique du
 port série (absente jusqu'ici), ordonnancement réel du push de protocoles au démarrage (verrou de
@@ -380,6 +385,20 @@ libellés des listes déroulantes d'émetteurs dans l'UI (§12) :
   récepteur qu'il pilote, contrairement au récepteur qui n'a besoin que d'un nom court (le
   `suggested_area` porte déjà le lieu côté HA).
 - Seule la **première lettre** de chaque segment est mise en majuscule, le reste est inchangé.
+
+**⭐ v5.9 — `essential.name` toujours `null` (fix doublon "Lumière lumière").** Chaque récepteur
+(ReceiverLight/Switch/Cover), le publish RFXSensor/RFXMeter et les scènes (`RfxComService`) ne
+publient plus de nom propre pour l'entité (`essential.name: null`, voir `techniques-socle-ha-mqtt_
+specs` §8.5.4 pour `has_entity_name`) — seul `device.name` (`buildDisplayName`/
+`buildBoutonDisplayName` ci-dessus) porte le libellé affiché. Avant ce correctif, `essential.name`
+valait `taxonomy.rawQuoi` (le quoi brut, non capitalisé) tandis que `device.name` valait
+`buildDisplayName(taxonomy)` (le même quoi, capitalisé, en repli faute de lieu précis distinct) —
+HA (discovery classique) concatène toujours `"{device.name} {name}"`, produisant des doublons
+visibles constatés en direct sur une instance HA réelle : "Lumière lumière", "Température
+Température", "Bouton Chambre du bas Bouton" (boutons : `device.name` = `buildBoutonDisplayName`
+inclut déjà le quoi en préfixe). Chaque device RFXCOM ne porte qu'une seule entité HA : son nom
+propre était donc systématiquement redondant avec celui du device, jamais une information
+distincte.
 
 ---
 

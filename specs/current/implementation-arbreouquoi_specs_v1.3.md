@@ -1,14 +1,17 @@
 # Spécifications d'Implémentation — Application ARBREOUQUOI
 
-**Version :** 1.2  
-**Date :** 4 Août 2026  
+**Version :** 1.3  
+**Date :** 9 Août 2026  
 **Auteur :** Mistral Vibe / Claude  
 **Statut :** En développement  
 **Type :** Application standalone  
-**Dépend de :** techniques-socle-ha-mqtt_specs_v4.12.md, guide-nouvelle-application_specs_v1.6.md, nommage_specs_v1.0.md  
+**Dépend de :** techniques-socle-ha-mqtt_specs_v4.25.md, guide-nouvelle-application_specs_v1.9.md, nommage_specs_v1.0.md  
 
-> **v1.2** : Correction de la référence `ws-ha` → `dimotic-ha` (§9.2, projet renommé le
-> 04/08/2026), sans changement fonctionnel.
+> **v1.3** : **`extractOuSegments()`** (§6.2bis, nouveau) — remplace le calcul de niveau OÙ par
+> position (`getOuLevel`), devenu ambigu depuis que `lieu_precis` peut être `null`. **Fix CSS
+> Shadow DOM `:root` → `:root, :host`** (§3.8) — cassait silencieusement toute la thématisation
+> par variable CSS de l'application, pas seulement les symptômes rapportés. Changement de forme de
+> `ArbreOuQuoiEntityDetailsPayload.ouPath` (§3.5).
 
 ---
 
@@ -358,6 +361,11 @@ interface ArbreOuQuoiTreePayload {
 }
 ```
 
+> **⭐ v1.3** : Ce bloc reste daté (structure Area à un seul niveau — voir note §6.2bis) ; une
+> interface bien réelle et actuelle, `ArbreOuQuoiEntityDetailsPayload.ouPath`, a changé cette
+> session : `string[]` → `Array<{ name: string; level: 'grand_pere' | 'pere' | 'lieu' |
+> 'lieu_precis' }>` (voir §6.2bis pour le pourquoi — `extractOuSegments()`).
+
 ### 3.6 presentation/index.html
 
 **Rôle :** Interface utilisateur principale de l'application.
@@ -491,6 +499,25 @@ let state = {
 - `.entity-item` — Éléments d'entité
 - `.details-panel` — Panneau de détails
 - `.error-message` — Message d'erreur
+
+> **⭐ v1.3 — Bug réel : `:root` ne s'applique jamais dans le Shadow DOM.** Cette feuille est
+> chargée via `<link>` à l'intérieur de Shadow DOM (`app-module-container`, et une seconde fois
+> par chaque `<tree-node>` dans son propre shadow — voir `tree-node.ts`) : un bloc `:root { ... }`
+> cible toujours le vrai `<html>` du document, jamais atteignable depuis l'intérieur d'un shadow
+> root — **toutes** les variables CSS qui y étaient définies ne s'appliquaient donc nulle part,
+> silencieusement (`var(--xxx)` non résolu = valeur initiale : `0px`/transparent pour la plupart
+> des propriétés concernées ici). Symptômes observés en direct : `.details-panel` sans fond ni
+> ombre (illisible, superposé au reste de la page), décalage progressif entre niveaux OÙ invisible
+> — pas seulement les symptômes précisément rapportés, silencieusement TOUTE la thématisation par
+> variable CSS de l'application. **Fix** : `:root, :host { ... }` — `:host` cible correctement
+> l'élément hôte de chaque shadow où la feuille est chargée, les variables héritent alors
+> normalement vers tous les descendants (y compris les shadow roots imbriqués plus profondément,
+> `tree-node` dans `app-module-container`). Palette par défaut fixée sombre (alignée sur le shell,
+> `ui/styles/main.css`, lui-même sombre de façon inconditionnelle sans lien avec
+> `prefers-color-scheme` du navigateur) — une bascule `@media (prefers-color-scheme: light)` a été
+> testée puis écartée : sur le poste de développement `prefers-color-scheme` valait déjà `light`
+> alors que le shell reste visuellement sombre partout, ce qui aurait rendu ce module clair en
+> permanence pendant que le reste de l'appli reste sombre.
 
 ---
 
@@ -682,6 +709,35 @@ const areaNodes = Array.from(areasMap.values()).map(area => {
 // 5. Trier et retourner
 areaNodes.sort((a, b) => b.entityCount - a.entityCount);
 ```
+
+### 6.2bis ⭐ v1.3 — `extractOuSegments()` : niveau OÙ tagué, pas déduit de la position
+
+> Note : l'exemple §6.2 ci-dessus décrit une hiérarchie Area à un seul niveau, antérieure à la
+> hiérarchie OÙ à 4 niveaux (grand_père/père/lieu/lieu_précis) réellement implémentée — non
+> réécrit ici (hors-scope de cette session), voir `fonctionnelles-arbreouquoi_specs` §6.1/§6.2.
+
+**Root cause corrigée** : l'ancien calcul (`getOuLevel(index, totalLength)`, côté serveur ET
+dupliqué côté client dans `app.ts`) déduisait le niveau d'un segment **de sa position dans un
+tableau de noms** (`extractOuPathFromEntity`/`extractOuNamesFromEntity`), en supposant un ordre
+et une longueur fixes. Devenu **ambigu, pas seulement inversé**, dès qu'un segment optionnel
+(`lieu_precis`, rendu `null` quand identique à `lieu` — voir `fonctionnelles-nommage_specs`) peut
+être absent : un tableau de longueur 2 peut être `[lieu, pere]` ou `[pere, grand_pere]` selon les
+segments réellement présents, la position seule ne suffit plus à savoir lequel.
+
+**Fix** : `ArbreouquoiService.extractOuSegments(entity): OuSegment[]` remplace les deux anciennes
+fonctions par une seule. Chaque segment lit directement le champ `attributs_taxonomie` qui lui
+correspond (`slug_grand_pere`/`lieu_grand_pere`, `slug_pere`/`lieu_pere`, `slug_lieu`/
+`lieu_principal`, `slug_precis`/`lieu_precis`) et pousse `{ id, name, level }` avec son niveau
+**explicite**, dans l'ordre fixe grand_père → père → lieu → précis, en ignorant les champs
+`null`. Plus aucune inférence par position, dans aucun des deux sens (construction de l'arbre ET
+panneau de détails).
+
+**Propagation côté payload** : `ArbreOuQuoiEntityDetailsPayload.ouPath` passe de `string[]` (noms
+seuls) à `Array<{ name: string; level: 'grand_pere' | 'pere' | 'lieu' | 'lieu_precis' }>` — le
+niveau voyage désormais avec le nom jusqu'au client, qui n'a plus besoin (et n'a plus le droit) de
+le redéviner lui-même. `getLevelFromPathIndex()` côté client (`app.ts`), doublon exact du même bug
+de position, supprimée. `EntityInfo.ouPath` (utilisé pour les entités **liées**, informatif
+seulement, jamais affiché avec un niveau) reste `string[]` — pas concerné.
 
 ### 6.3 Cache
 

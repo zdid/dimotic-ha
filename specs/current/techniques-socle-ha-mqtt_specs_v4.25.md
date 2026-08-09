@@ -1,8 +1,14 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.24  
-**Date :** 7 Août 2026  
+**Version :** 4.25  
+**Date :** 9 Août 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.25** : **`EssentialEntityData.name`/`HaMqttDiscoveryEntity.name` nullable + `has_entity_name`
+> systématique** (§8.5.4) — corrige un doublon réel observé en direct ("Lumière lumière",
+> "Température Température") causé par des modules passant le même mot dans `name` et
+> `device.name`. Voir aussi `fonctionnelles-rfxcom_specs` (5 endroits concernés) et
+> `implementation-rfxcom_specs`.
 
 > **v4.24** : **Suppression du volume Docker nommé `app-code`** (§11.2 réécrite) — sa seule raison
 > d'être (faire fonctionner `fs.renameSync()` entre `applications/` et `applications_désactivées/`
@@ -1686,6 +1692,19 @@ Deux familles de topics coexistent, avec des rôles distincts :
   symétriquement à `integration:{module}:discovery`. Le module métier doit capturer le `component`/
   `objectId` de l'entité **avant** toute mutation/suppression de son état interne — cette
   information peut ne plus être disponible une fois l'entité retirée de son registre interne.
+- **⭐ v4.25 — `name` nullable + `has_entity_name` systématique.** `EssentialEntityData.name` et
+  `HaMqttDiscoveryEntity.name` acceptent désormais `string | null` ; `buildDiscoveryPayload()`
+  positionne inconditionnellement `has_entity_name: true` sur toute entité construite via le socle
+  (`discovery.ts`). Convention MQTT Discovery moderne de HA : `name: null` + `has_entity_name: true`
+  affiche uniquement `device.name` (pas de concaténation), à utiliser quand un device n'a qu'une
+  seule entité et que son propre nom serait redondant avec celui du device. **Root cause d'un bug
+  réel observé en direct** : plusieurs modules (RFXCOM notamment, voir `fonctionnelles-rfxcom_specs`)
+  passaient `name: <même mot que device.name>` (ex: le quoi brut en repli faute de lieu précis) —
+  HA (discovery classique, sans `has_entity_name`) concatène toujours `"{device.name} {name}"` sans
+  jamais dédupliquer, produisant des doublons visibles ("Lumière lumière", "Température
+  Température", casse différente ou identique selon la saisie d'origine). `has_entity_name: true`
+  ne change rien pour une entité dont `name` reste une chaîne non redondante (comportement de
+  concaténation identique) — c'est uniquement l'usage de `name: null` qui change l'affichage.
 
 **Exemple de message de découverte (généré par le socle, données essentielles fournies par le module) :**
 ```json
