@@ -135,7 +135,8 @@
         <h2>🧪 Tester une commande</h2>
         <p class="description">Envoie une phrase comme si elle venait de HA (règles domotiques + outils + routage inclus), sans passer par le serveur Ollama émulé.</p>
         <div class="test-form">
-          <input type="text" id="test-input" placeholder="ex : allume la lumière du salon" />
+          <input type="text" id="test-input" list="test-history" placeholder="ex : allume la lumière du salon" autocomplete="off" />
+          <datalist id="test-history"></datalist>
           <button class="btn btn-primary" id="test-send">Envoyer</button>
         </div>
         <div class="test-result" id="test-result"></div>
@@ -156,6 +157,6 @@
 
   <script type="module" src="/applications/ia/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-07-23 00:00:00 - Création de l'application IA -->
+  <!-- Derniere modification: 2026-08-10 00:00:00 - Historique des 20 dernières commandes de test, sélectionnables dans la saisie -->
 </body>
 </html>

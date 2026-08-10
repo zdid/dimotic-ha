@@ -71,14 +71,49 @@ function setupEventListeners(): void {
   setupTestForm();
 }
 
+// Historique des commandes de test — localStorage (propre à ce navigateur, pas synchronisé entre
+// clients), demande utilisateur : les 20 dernières, sélectionnables dans la zone de saisie
+// (<datalist>), une commande n'est stockée que si elle diffère de la précédente (pas de doublons
+// consécutifs en répétant la même commande plusieurs fois).
+const TEST_HISTORY_KEY = 'ia-test-history';
+const TEST_HISTORY_MAX = 20;
+
+function loadTestHistory(): string[] {
+  try {
+    const raw = window.localStorage.getItem(TEST_HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function recordTestHistory(message: string): void {
+  const history = loadTestHistory();
+  if (history[0] === message) return; // identique à la précédente — pas stockée
+  history.unshift(message);
+  history.length = Math.min(history.length, TEST_HISTORY_MAX);
+  window.localStorage.setItem(TEST_HISTORY_KEY, JSON.stringify(history));
+  renderTestHistory(history);
+}
+
+function renderTestHistory(history: string[]): void {
+  const datalistEl = $('test-history') as HTMLDataListElement | null;
+  if (!datalistEl) return;
+  datalistEl.innerHTML = history.map((h) => `<option value="${escapeHtml(h)}"></option>`).join('');
+}
+
 function setupTestForm(): void {
   const input = $('test-input') as HTMLInputElement | null;
   const sendBtn = $('test-send') as HTMLButtonElement | null;
   if (!input || !sendBtn) return;
 
+  renderTestHistory(loadTestHistory());
+
   const send = () => {
     const message = input.value.trim();
     if (!message || !socket) return;
+
+    recordTestHistory(message);
 
     sendBtn.disabled = true;
     sendBtn.textContent = 'Envoi...';
