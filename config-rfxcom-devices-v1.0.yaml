@@ -1,200 +1,967 @@
-# Configuration RFXCOM - Devices, Récepteurs et Associations
-# Version 1.0 - 09 Juillet 2026
-# Fichier central pour TOUS les objets RFXCOM découverts et configurés
-# Format : YAML strict
-# Ce fichier contient :
-#   1. Tous les devices RFXCOM physiques (capteurs + émetteurs)
-#   2. Tous les récepteurs logiques avec leurs émetteurs appairés
-#   3. L'émetteur primaire pour chaque récepteur (celui qui envoie les commandes RF433)
-
----
-
-# =============================================================================
-# SECTION 1 : DEVICES RFXCOM PHYSIQUES
-# =============================================================================
-# Liste de TOUS les devices détectés par le transceiver RFXCOM
-# Chaque device a un identifiant unique : <protocole>_<sensorId>
-# Ces devices sont soit des capteurs (RFXSensor, RFXMeter) soit des émetteurs (Lighting1/2/4)
-
 rfxcom_devices:
-  # --- Capteurs RFXSensor ---
-  rfxsensor_0xa5b3:
-    sensorId: "0xA5B3"
-    type: "RFXSensor"
-    subType: "Temperature"
-    name: "Température---Salon"
-    protocole: "rfxsensor"
-    defaultQuoi: "Température"
-
-  rfxsensor_0xc4d2:
-    sensorId: "0xC4D2"
-    type: "RFXSensor"
-    subType: "Humidity"
-    name: "Humidité---Cuisine"
-    protocole: "rfxsensor"
-    defaultQuoi: "Humidité"
-
-  rfxsensor_0xe7f1:
-    sensorId: "0xE7F1"
-    type: "RFXSensor"
-    subType: "Motion"
-    name: "Mouvement---Couloir"
-    protocole: "rfxsensor"
-    defaultQuoi: "Mouvement"
-
-  rfxsensor_0x98a4:
-    sensorId: "0x98A4"
-    type: "RFXSensor"
-    subType: "Contact"
-    name: "Contact---Entrée"
-    protocole: "rfxsensor"
-    defaultQuoi: "Contact"
-
-  # --- Compteurs RFXMeter ---
-  rfxmeter_0xb2c3:
-    sensorId: "0xB2C3"
-    type: "RFXMeter"
-    subType: "Current"
-    name: "Courant---Tableau"
-    protocole: "rfxmeter"
-    defaultQuoi: "Courant"
-
-  rfxmeter_0xd4e5:
-    sensorId: "0xD4E5"
-    type: "RFXMeter"
-    subType: "Power"
-    name: "Puissance---Cuisine"
-    protocole: "rfxmeter"
-    defaultQuoi: "Puissance"
-
-  # --- Émetteurs Lighting (boutons, interrupteurs, télécommandes) ---
-  lighting1_0x01a2:
-    sensorId: "0x01A2"
-    type: "Lighting1"
-    subType: "AC"
-    name: "Interrupteur---Salon"
-    protocole: "lighting1"
-    defaultQuoi: "Interrupteur"
-
-  lighting2_0x02b3:
-    sensorId: "0x02B3"
-    type: "Lighting2"
-    subType: "AC"
-    name: "Bouton---Salon"
-    protocole: "lighting2"
-    defaultQuoi: "Bouton"
-
-  lighting2_0x1001:
-    sensorId: "0x1001"
-    type: "Lighting2"
-    subType: "AC"
-    name: "Bouton---Cuisine"
-    protocole: "lighting2"
-    defaultQuoi: "Bouton"
-
-  lighting2_0x1002:
-    sensorId: "0x1002"
-    type: "Lighting2"
-    subType: "AC"
-    name: "Bouton---Chambre"
-    protocole: "lighting2"
-    defaultQuoi: "Bouton"
-
-  lighting4_0x2001:
-    sensorId: "0x2001"
-    type: "Lighting4"
-    subType: "AC"
-    name: "Télécommande---Salon"
-    protocole: "lighting4"
-    defaultQuoi: "Télécommande"
-
----
-
-# =============================================================================
-# SECTION 2 : RÉCEPTEURS LOGIQUES
-# =============================================================================
-# Entités logiques associées aux devices physiques RFXCOM
-# Chaque récepteur a UN émetteur primaire (primaryEmitter) qui détermine
-# vers quel device RFXCOM les commandes seront envoyées
-# La liste complète des émetteurs appairés est dans le champ 'emitters'
-
+  lighting2_ac_0x01525c02_13:
+    uniqueId: lighting2_ac_0x01525c02_13
+    sensorId: 0x01525c02_13
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---plafonnier--chambre d'ami--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x01532d72_12:
+    uniqueId: lighting2_ac_0x01532d72_12
+    sensorId: 0x01532d72_12
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---plafonnier--chambre d'ami--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x02be2c02_13:
+    uniqueId: lighting2_ac_0x02be2c02_13
+    sensorId: 0x02be2c02_13
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---plafonnier--chambre--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x01037dae_12:
+    uniqueId: lighting2_ac_0x01037dae_12
+    sensorId: 0x01037dae_12
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---plafonnier--chambre--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-04T16:07:20.432Z'
+  lighting2_ac_0x00c53f52_11:
+    uniqueId: lighting2_ac_0x00c53f52_11
+    sensorId: 0x00c53f52_11
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---entrée--entrée--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x01731b7e_10:
+    uniqueId: lighting2_ac_0x01731b7e_10
+    sensorId: 0x01731b7e_10
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---entrée--entrée--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-07-29T21:18:28.748Z'
+  lighting2_ac_0x01571fa6_12:
+    uniqueId: lighting2_ac_0x01571fa6_12
+    sensorId: 0x01571fa6_12
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---salon--salle--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-01T23:07:53.334Z'
+  lighting2_ac_0x01570d5a_12:
+    uniqueId: lighting2_ac_0x01570d5a_12
+    sensorId: 0x01570d5a_12
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---salon--salle--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-07-30T10:42:25.388Z'
+  lighting2_ac_0x01571fa6_11:
+    uniqueId: lighting2_ac_0x01571fa6_11
+    sensorId: 0x01571fa6_11
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---lampadaire--salle--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-01T23:07:54.102Z'
+  lighting2_ac_0x01570d5a_11:
+    uniqueId: lighting2_ac_0x01570d5a_11
+    sensorId: 0x01570d5a_11
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---lampadaire--salle--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-07-30T10:42:24.539Z'
+  lighting2_ac_0x01570892_12:
+    uniqueId: lighting2_ac_0x01570892_12
+    sensorId: 0x01570892_12
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---bibliothèque--salle--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-03T07:04:10.710Z'
+  lighting2_ac_0x0156f0d6_11:
+    uniqueId: lighting2_ac_0x0156f0d6_11
+    sensorId: 0x0156f0d6_11
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---bibliothèque--salle--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-01T20:20:39.012Z'
+  lighting2_ac_0x01976816_10:
+    uniqueId: lighting2_ac_0x01976816_10
+    sensorId: 0x01976816_10
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---toilettes du bas--toilettes du bas--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x017334a2_10:
+    uniqueId: lighting2_ac_0x017334a2_10
+    sensorId: 0x017334a2_10
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---couloir--escalier--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-01T21:54:12.548Z'
+  lighting2_ac_0x01732532_10:
+    uniqueId: lighting2_ac_0x01732532_10
+    sensorId: 0x01732532_10
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---couloir--escalier--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-01T22:31:59.449Z'
+  lighting2_ac_0x01732d92_10:
+    uniqueId: lighting2_ac_0x01732d92_10
+    sensorId: 0x01732d92_10
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---couloir--escalier--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-02T08:15:43.730Z'
+  lighting2_ac_0x0156f95e_12:
+    uniqueId: lighting2_ac_0x0156f95e_12
+    sensorId: 0x0156f95e_12
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: >-
+      Bouton---salle de bain du bas--salle de bain du
+      bas--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-03T06:58:49.180Z'
+  lighting2_ac_0x01a39c3a_10:
+    uniqueId: lighting2_ac_0x01a39c3a_10
+    sensorId: 0x01a39c3a_10
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: >-
+      Bouton---salle de bain du bas--salle de bain du
+      bas--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-03T06:49:12.509Z'
+  lighting2_ac_0x00c53f52_12:
+    uniqueId: lighting2_ac_0x00c53f52_12
+    sensorId: 0x00c53f52_12
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---devant--extérieur--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x0156f95e_11:
+    uniqueId: lighting2_ac_0x0156f95e_11
+    sensorId: 0x0156f95e_11
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---chambre du bas--chambre du bas--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-07-31T21:20:57.905Z'
+  lighting2_ac_0x0196e326_10:
+    uniqueId: lighting2_ac_0x0196e326_10
+    sensorId: 0x0196e326_10
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---chambre du bas--chambre du bas--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-04T16:04:25.921Z'
+  lighting2_ac_0x017340ca_10:
+    uniqueId: lighting2_ac_0x017340ca_10
+    sensorId: 0x017340ca_10
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---buanderie--buanderie--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-03T07:03:50.490Z'
+  lighting2_ac_0x01570f52_12:
+    uniqueId: lighting2_ac_0x01570f52_12
+    sensorId: 0x01570f52_12
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---plafonnier--bureau--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-02T09:34:24.803Z'
+  lighting2_ac_0x01570892_11:
+    uniqueId: lighting2_ac_0x01570892_11
+    sensorId: 0x01570892_11
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---salle à manger--salle--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-02T20:12:56.367Z'
+  lighting2_ac_0x0156f0d6_12:
+    uniqueId: lighting2_ac_0x0156f0d6_12
+    sensorId: 0x0156f0d6_12
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---salle à manger--salle--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-07-30T10:42:25.917Z'
+  lighting2_ac_0x0aa0002d_1:
+    uniqueId: lighting2_ac_0x0aa0002d_1
+    sensorId: 0x0aa0002d_1
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---petit grenier--grenier--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x015705ee_12:
+    uniqueId: lighting2_ac_0x015705ee_12
+    sensorId: 0x015705ee_12
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---table--cuisine--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-02T21:26:48.655Z'
+  lighting2_ac_0x01a3a576_10:
+    uniqueId: lighting2_ac_0x01a3a576_10
+    sensorId: 0x01a3a576_10
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---plafonnier--cuisine--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x0229e8ae_1:
+    uniqueId: lighting2_ac_0x0229e8ae_1
+    sensorId: 0x0229e8ae_1
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---plafonnier--cuisine--rez-de-chaussée--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-07-29T21:39:54.790Z'
+  lighting2_ac_0x01525c02_1:
+    uniqueId: lighting2_ac_0x01525c02_1
+    sensorId: 0x01525c02_1
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---chevet droit--chambre d'ami--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x01532d72_11:
+    uniqueId: lighting2_ac_0x01532d72_11
+    sensorId: 0x01532d72_11
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---chevet droit--chambre d'ami--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x01525c02_5:
+    uniqueId: lighting2_ac_0x01525c02_5
+    sensorId: 0x01525c02_5
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---chevet gauche--chambre d'ami--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x02be2c02_1:
+    uniqueId: lighting2_ac_0x02be2c02_1
+    sensorId: 0x02be2c02_1
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---chevet gauche chambre--chambre--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x01037dae_11:
+    uniqueId: lighting2_ac_0x01037dae_11
+    sensorId: 0x01037dae_11
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---chevet gauche chambre--chambre--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-01T15:44:31.676Z'
+  lighting2_ac_0x02be2c02_5:
+    uniqueId: lighting2_ac_0x02be2c02_5
+    sensorId: 0x02be2c02_5
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---chevet droit chambre--chambre--étage--maison
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x0156d382_12:
+    uniqueId: lighting2_ac_0x0156d382_12
+    sensorId: 0x0156d382_12
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---chambre de jojo--chambre de jojo
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-01T22:14:49.544Z'
+  lighting2_ac_0x0156d382_11:
+    uniqueId: lighting2_ac_0x0156d382_11
+    sensorId: 0x0156d382_11
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---chevet--chambre de jojo
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-07-29T19:49:21.199Z'
+  lighting2_ac_0x01902c66_1:
+    uniqueId: lighting2_ac_0x01902c66_1
+    sensorId: 0x01902c66_1
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Télécommande---1--Télécommande 1
+    defaultQuoi: Télécommande
+    transmitToHa: true
+  lighting2_ac_0x01a678ba_1:
+    uniqueId: lighting2_ac_0x01a678ba_1
+    sensorId: 0x01a678ba_1
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Télécommande---1--Télécommande 2
+    defaultQuoi: Télécommande
+    transmitToHa: true
+    lastSeen: '2026-08-01T21:13:34.997Z'
+  lighting2_ac_0x01a678ba_2:
+    uniqueId: lighting2_ac_0x01a678ba_2
+    sensorId: 0x01a678ba_2
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Télécommande---2--Télécommande 2
+    defaultQuoi: Télécommande
+    transmitToHa: true
+    lastSeen: '2026-08-01T21:13:36.388Z'
+  lighting2_ac_0x01a678ba_3:
+    uniqueId: lighting2_ac_0x01a678ba_3
+    sensorId: 0x01a678ba_3
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Télécommande---3--Télécommande 2
+    defaultQuoi: Télécommande
+    transmitToHa: true
+    lastSeen: '2026-08-01T21:13:37.844Z'
+  lighting2_ac_0x01a678ba:
+    uniqueId: lighting2_ac_0x01a678ba
+    sensorId: '0x01a678ba'
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Télécommande---4--Télécommande 2
+    defaultQuoi: Télécommande
+    transmitToHa: true
+  lighting2_ac_0x015705ee_11:
+    uniqueId: lighting2_ac_0x015705ee_11
+    sensorId: 0x015705ee_11
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---double 1--cuisine
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-02T10:07:38.637Z'
+  lighting2_ac_0x0026aad7_2:
+    uniqueId: lighting2_ac_0x0026aad7_2
+    sensorId: 0x0026aad7_2
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---dressing--chambre du bas
+    defaultQuoi: Bouton
+    transmitToHa: true
+    lastSeen: '2026-08-01T17:26:25.076Z'
+  lighting2_ac_0x117322e6_10:
+    uniqueId: lighting2_ac_0x117322e6_10
+    sensorId: 0x117322e6_10
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---bureau de francoise--bureau
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x0229e8ae_2:
+    uniqueId: lighting2_ac_0x0229e8ae_2
+    sensorId: 0x0229e8ae_2
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---porte-coulissante-exterieur--cuisine
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting2_ac_0x02780002_1:
+    uniqueId: lighting2_ac_0x02780002_1
+    sensorId: 0x02780002_1
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Télécommande---1--Télécommande 3
+    defaultQuoi: Télécommande
+    transmitToHa: true
+  lighting2_ac_0x02780002_5:
+    uniqueId: lighting2_ac_0x02780002_5
+    sensorId: 0x02780002_5
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Télécommande---2--Télécommande 3
+    defaultQuoi: Télécommande
+    transmitToHa: true
+  lighting2_ac_0x02780002_13:
+    uniqueId: lighting2_ac_0x02780002_13
+    sensorId: 0x02780002_13
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Télécommande---3--Télécommande 3
+    defaultQuoi: Télécommande
+    transmitToHa: true
+  lighting2_ac_0x02780002:
+    uniqueId: lighting2_ac_0x02780002
+    sensorId: '0x02780002'
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Télécommande---4--Télécommande 3
+    defaultQuoi: Télécommande
+    transmitToHa: true
+  lighting2_ac_0x02be2c02:
+    uniqueId: lighting2_ac_0x02be2c02
+    sensorId: '0x02be2c02'
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Télécommande---4--Télécommande 4
+    defaultQuoi: Télécommande
+    transmitToHa: true
+  lighting2_ac_0x01525c02:
+    uniqueId: lighting2_ac_0x01525c02
+    sensorId: '0x01525c02'
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Télécommande---4--Télécommande 5
+    defaultQuoi: Télécommande
+    transmitToHa: true
+  lighting2_ac_0x00faf16e_10:
+    uniqueId: lighting2_ac_0x00faf16e_10
+    sensorId: 0x00faf16e_10
+    type: Lighting2
+    subType: AC
+    protocole: lighting2
+    name: Bouton---detecteur--couloir
+    defaultQuoi: Bouton
+    transmitToHa: true
+  lighting1_arc_e2:
+    uniqueId: lighting1_arc_e2
+    sensorId: e2
+    type: Lighting1
+    subType: ARC
+    protocole: lighting1
+    name: prise---lampadaire--infra
+    defaultQuoi: prise
+    transmitToHa: true
+  rfxmeter_power_0x8112:
+    uniqueId: rfxmeter_power_0x8112
+    sensorId: '0x8112'
+    type: RFXMeter
+    subType: Power
+    protocole: rfxmeter
+    name: Puissance---consommation--infra
+    defaultQuoi: Puissance
+    transmitToHa: true
+  rfxsensor_temperature_0x0501:
+    uniqueId: rfxsensor_temperature_0x0501
+    sensorId: '0x0501'
+    type: RFXSensor
+    subType: Temperature
+    protocole: rfxsensor
+    name: Température---chambre de jo--chambre de jo
+    defaultQuoi: Température
+    transmitToHa: true
+  rfxsensor_humidity_0x0501:
+    uniqueId: rfxsensor_humidity_0x0501
+    sensorId: '0x0501'
+    type: RFXSensor
+    subType: Humidity
+    protocole: rfxsensor
+    name: Humidité---chambre de jo--chambre de jo
+    defaultQuoi: Humidité
+    transmitToHa: true
+  rfxsensor_temperature_0xbb02:
+    uniqueId: rfxsensor_temperature_0xbb02
+    sensorId: '0xbb02'
+    type: RFXSensor
+    subType: Temperature
+    protocole: rfxsensor
+    name: Température---salle--salle
+    defaultQuoi: Température
+    transmitToHa: true
+  rfxsensor_humidity_0xbb02:
+    uniqueId: rfxsensor_humidity_0xbb02
+    sensorId: '0xbb02'
+    type: RFXSensor
+    subType: Humidity
+    protocole: rfxsensor
+    name: Humidité---salle--salle
+    defaultQuoi: Humidité
+    transmitToHa: true
+  lighting1_arc_k9:
+    uniqueId: lighting1_arc_k9
+    sensorId: k9
+    type: Lighting1
+    subType: ARC
+    protocole: lighting1
+    name: prise---octoprint--infra
+    defaultQuoi: prise
+    transmitToHa: true
 rfxcom_receivers:
-  recepteur_001:
-    receiverId: "recepteur_001"
-    name: "Lumière---Salon"
-    type: "light"
-    isDimmable: true
-    defaultLevel: 80
-    primaryEmitter: "lighting2_0x02b3"  # ⭐ Émetteur principal pour envoyer les commandes RF433
-    # Liste de TOUS les émetteurs associés à ce récepteur (relations N↔N)
+  recepteur_1000890:
+    type: light
+    receiverId: recepteur_1000890
+    name: lumière---plafonnier--chambre--étage--maison
+    primaryEmitter: lighting2_ac_0x02be2c02_13
     emitters:
-      - emitterId: "lighting2_0x02b3"
-        action: "toggle"
-      - emitterId: "lighting2_0x1001"
-        action: "set_level"
-        value: 50
-
-  recepteur_002:
-    receiverId: "recepteur_002"
-    name: "Interrupteur---Cuisine"
-    type: "switch"
-    primaryEmitter: "lighting1_0x01a2"  # ⭐
+      - emitterId: lighting2_ac_0x01037dae_12
+        action: toggle
+    transmitToHa: true
+    icon: mdi:ceiling-light
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1000919:
+    type: light
+    receiverId: recepteur_1000919
+    name: lumière---entrée--entrée--rez-de-chaussée--maison
+    primaryEmitter: lighting2_ac_0x00c53f52_11
     emitters:
-      - emitterId: "lighting1_0x01a2"
-        action: "toggle"
-      - emitterId: "lighting2_0x1001"
-        action: "on"
-
-  recepteur_003:
-    receiverId: "recepteur_003"
-    name: "Volet---Fenêtre Sud--Cuisine"
-    type: "cover"
-    coverType: "Curtain1"
-    openTimeSec: 25
-    closeTimeSec: 20
-    primaryEmitter: "lighting2_0x03c4"  # ⭐
+      - emitterId: lighting2_ac_0x01731b7e_10
+        action: toggle
+    transmitToHa: true
+    icon: mdi:lightbulb
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1000987:
+    type: light
+    receiverId: recepteur_1000987
+    name: lumière---salon--salle--rez-de-chaussée--maison
+    primaryEmitter: lighting2_ac_0x01571fa6_12
     emitters:
-      - emitterId: "lighting2_0x03c4"
-        action: "open"
-      - emitterId: "lighting2_0x04d5"
-        action: "close"
-      - emitterId: "lighting4_0x2001"
-        action: "stop"
-
-  recepteur_004:
-    receiverId: "recepteur_004"
-    name: "Tout Éteindre---Maison"
-    type: "scene"
-    primaryEmitter: "lighting2_0x1002"  # ⭐ (Optionnel pour les scènes, mais recommandé)
-    # Pour les scènes, les actions définissent ce qui se passe
+      - emitterId: lighting2_ac_0x01570d5a_12
+        action: toggle
+    transmitToHa: true
+    icon: mdi:lightbulb
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1000988:
+    type: light
+    receiverId: recepteur_1000988
+    name: lumière---lampadaire--salle--rez-de-chaussée--maison
+    primaryEmitter: lighting2_ac_0x01571fa6_11
+    emitters:
+      - emitterId: lighting2_ac_0x01570d5a_11
+        action: toggle
+    transmitToHa: true
+    icon: mdi:floor-lamp
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1000992:
+    type: light
+    receiverId: recepteur_1000992
+    name: lumière---bibliothèque--salle--rez-de-chaussée--maison
+    primaryEmitter: lighting2_ac_0x01570892_12
+    emitters:
+      - emitterId: lighting2_ac_0x0156f0d6_11
+        action: toggle
+    transmitToHa: true
+    icon: mdi:lightbulb
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001069:
+    type: light
+    receiverId: recepteur_1001069
+    name: lumière---toilettes du bas--toilettes du bas--rez-de-chaussée--maison
+    primaryEmitter: lighting2_ac_0x01976816_10
+    emitters: []
+    transmitToHa: true
+    icon: mdi:lightbulb
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001269:
+    type: light
+    receiverId: recepteur_1001269
+    name: lumière---couloir--escalier--étage--maison
+    primaryEmitter: lighting2_ac_0x017334a2_10
+    emitters:
+      - emitterId: lighting2_ac_0x01732532_10
+        action: toggle
+      - emitterId: lighting2_ac_0x01732d92_10
+        action: toggle
+    transmitToHa: true
+    icon: mdi:lightbulb
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001276:
+    type: light
+    receiverId: recepteur_1001276
+    name: >-
+      lumière---salle de bain du bas--salle de bain du
+      bas--rez-de-chaussée--maison
+    primaryEmitter: lighting2_ac_0x0156f95e_12
+    emitters:
+      - emitterId: lighting2_ac_0x01a39c3a_10
+        action: toggle
+    transmitToHa: true
+    icon: mdi:lightbulb
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001288:
+    type: light
+    receiverId: recepteur_1001288
+    name: lumière---devant--extérieur--maison
+    primaryEmitter: lighting2_ac_0x00c53f52_12
+    emitters: []
+    transmitToHa: true
+    icon: mdi:outdoor-lamp
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001289:
+    type: light
+    receiverId: recepteur_1001289
+    name: lumière---chambre du bas--chambre du bas--rez-de-chaussée--maison
+    primaryEmitter: lighting2_ac_0x0156f95e_11
+    emitters:
+      - emitterId: lighting2_ac_0x0196e326_10
+        action: toggle
+    transmitToHa: true
+    icon: mdi:lightbulb
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001312:
+    type: light
+    receiverId: recepteur_1001312
+    name: lumière---buanderie--buanderie--rez-de-chaussée--maison
+    primaryEmitter: lighting2_ac_0x017340ca_10
+    emitters: []
+    transmitToHa: true
+    icon: mdi:lightbulb
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001313:
+    type: light
+    receiverId: recepteur_1001313
+    name: lumière---plafonnier--bureau--étage--maison
+    primaryEmitter: lighting2_ac_0x01570f52_12
+    emitters: []
+    transmitToHa: true
+    icon: mdi:ceiling-light
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001324:
+    type: light
+    receiverId: recepteur_1001324
+    name: lumière---salle à manger--salle--rez-de-chaussée--maison
+    primaryEmitter: lighting2_ac_0x01570892_11
+    emitters:
+      - emitterId: lighting2_ac_0x0156f0d6_12
+        action: toggle
+    transmitToHa: true
+    icon: mdi:lightbulb
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001362:
+    type: light
+    receiverId: recepteur_1001362
+    name: lumière---petit grenier--grenier--maison
+    primaryEmitter: lighting2_ac_0x0aa0002d_1
+    emitters: []
+    transmitToHa: true
+    icon: mdi:lightbulb
+    isDimmable: false
+  recepteur_1001414:
+    type: light
+    receiverId: recepteur_1001414
+    name: lumière---table--cuisine--rez-de-chaussée--maison
+    primaryEmitter: lighting2_ac_0x015705ee_12
+    emitters: []
+    transmitToHa: true
+    icon: mdi:lightbulb
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001415:
+    type: light
+    receiverId: recepteur_1001415
+    name: lumière---plafonnier--cuisine--rez-de-chaussée--maison
+    primaryEmitter: lighting2_ac_0x01a3a576_10
+    emitters:
+      - emitterId: lighting2_ac_0x0229e8ae_1
+        action: toggle
+    transmitToHa: true
+    icon: mdi:ceiling-light
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001648:
+    type: light
+    receiverId: recepteur_1001648
+    name: lumière---chevet droit--chambre d'ami--étage--maison
+    primaryEmitter: lighting2_ac_0x01525c02_1
+    emitters:
+      - emitterId: lighting2_ac_0x01532d72_11
+        action: toggle
+    transmitToHa: true
+    icon: mdi:lamp
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001649:
+    type: light
+    receiverId: recepteur_1001649
+    name: lumière---chevet gauche--chambre d'ami--étage--maison
+    primaryEmitter: lighting2_ac_0x01525c02_5
+    emitters:
+      - emitterId: lighting2_ac_0x01532d72_11
+        action: toggle
+    transmitToHa: true
+    icon: mdi:lamp
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001658:
+    type: light
+    receiverId: recepteur_1001658
+    name: lumière---chevet gauche chambre--chambre--étage--maison
+    primaryEmitter: lighting2_ac_0x02be2c02_1
+    emitters:
+      - emitterId: lighting2_ac_0x01037dae_11
+        action: toggle
+    transmitToHa: true
+    icon: mdi:lamp
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1001659:
+    type: light
+    receiverId: recepteur_1001659
+    name: lumière---chevet droit chambre--chambre--étage--maison
+    primaryEmitter: lighting2_ac_0x02be2c02_5
+    emitters:
+      - emitterId: lighting2_ac_0x01037dae_11
+        action: toggle
+    transmitToHa: true
+    icon: mdi:lamp
+    isDimmable: false
+    lastOn: false
+    lastLevel: 100
+  recepteur_1000602:
+    type: switch
+    receiverId: recepteur_1000602
+    name: prise---lampadaire--infra
+    primaryEmitter: lighting1_arc_e2
+    emitters: []
+    transmitToHa: true
+    icon: mdi:floor-lamp
+    lastOn: false
+  recepteur_1001667:
+    type: switch
+    receiverId: recepteur_1001667
+    name: prise---octoprint--infra
+    primaryEmitter: lighting1_arc_k9
+    emitters: []
+    transmitToHa: true
+    icon: mdi:printer-3d-nozzle
+    lastOn: false
+  recepteur_1000831:
+    type: light
+    receiverId: recepteur_1000831
+    name: lumière---plafonnier--chambre d'ami ancien--étage--maison
+    primaryEmitter: lighting2_ac_0x01525c02_13
+    emitters:
+      - emitterId: lighting2_ac_0x01532d72_12
+        action: toggle
+    transmitToHa: true
+    icon: mdi:ceiling-light
+    isDimmable: false
+    defaultLevel: 100
+    lastOn: false
+    lastLevel: 100
+  scene_1000851:
+    type: scene
+    receiverId: scene_1000851
+    name: scène---rez-de-chaussée
+    transmitToHa: true
+    icon: mdi:home-floor-0
+    description: Éteint toutes les lumières de rez-de-chaussée
+    sceneType: parallel
+    delayBetweenCommands: 0
     actions:
-      - target: "recepteur_001"
-        command: "off"
-        delayMs: 0
-      - target: "recepteur_002"
-        command: "off"
-        delayMs: 200
-      - target: "recepteur_003"
-        command: "close"
-        delayMs: 500
-    # Les émetteurs associés déclenchent cette scène
-    emitters:
-      - emitterId: "lighting2_0x1002"
-        action: "activate_scene"
-
----
-
-# =============================================================================
-# SECTION 3 : MAPPING SENSORID → RECEPTEUR (Référence inverse)
-# =============================================================================
-# Optionnel : Mapping inverse pour retrouver rapidement quel récepteur
-# est associé à un sensorId donné (utile pour le traitement des messages RF433)
-# Ce mapping est généré automatiquement à partir des primaryEmitter
-#
-# sensorId_to_receiver:
-#   "0x02B3": "recepteur_001"
-#   "0x01A2": "recepteur_002"
-#   "0x03C4": "recepteur_003"
-
----
-# Fin du fichier - Version 1.0
+      - target: recepteur_1000919
+        command: turn_off
+      - target: recepteur_1000987
+        command: turn_off
+      - target: recepteur_1000988
+        command: turn_off
+      - target: recepteur_1000992
+        command: turn_off
+      - target: recepteur_1001069
+        command: turn_off
+      - target: recepteur_1001276
+        command: turn_off
+      - target: recepteur_1001289
+        command: turn_off
+      - target: recepteur_1001312
+        command: turn_off
+      - target: recepteur_1001324
+        command: turn_off
+      - target: recepteur_1001414
+        command: turn_off
+      - target: recepteur_1001415
+        command: turn_off
+  scene_1000852:
+    type: scene
+    receiverId: scene_1000852
+    name: scène---étage
+    transmitToHa: true
+    icon: mdi:home-floor-1
+    description: Éteint toutes les lumières de étage
+    sceneType: parallel
+    delayBetweenCommands: 0
+    actions:
+      - target: recepteur_1000831
+        command: turn_off
+      - target: recepteur_1000890
+        command: turn_off
+      - target: recepteur_1001269
+        command: turn_off
+      - target: recepteur_1001313
+        command: turn_off
+      - target: recepteur_1001648
+        command: turn_off
+      - target: recepteur_1001649
+        command: turn_off
+      - target: recepteur_1001658
+        command: turn_off
+      - target: recepteur_1001659
+        command: turn_off
+  scene_1000853:
+    type: scene
+    receiverId: scene_1000853
+    name: scène---maison
+    transmitToHa: true
+    icon: mdi:home-lightbulb-outline
+    description: Éteint toutes les lumières (toute la maison)
+    sceneType: parallel
+    delayBetweenCommands: 0
+    actions:
+      - target: recepteur_1000831
+        command: turn_off
+      - target: recepteur_1000890
+        command: turn_off
+      - target: recepteur_1000919
+        command: turn_off
+      - target: recepteur_1000987
+        command: turn_off
+      - target: recepteur_1000988
+        command: turn_off
+      - target: recepteur_1000992
+        command: turn_off
+      - target: recepteur_1001069
+        command: turn_off
+      - target: recepteur_1001269
+        command: turn_off
+      - target: recepteur_1001276
+        command: turn_off
+      - target: recepteur_1001288
+        command: turn_off
+      - target: recepteur_1001289
+        command: turn_off
+      - target: recepteur_1001312
+        command: turn_off
+      - target: recepteur_1001313
+        command: turn_off
+      - target: recepteur_1001324
+        command: turn_off
+      - target: recepteur_1001362
+        command: turn_off
+      - target: recepteur_1001414
+        command: turn_off
+      - target: recepteur_1001415
+        command: turn_off
+      - target: recepteur_1001648
+        command: turn_off
+      - target: recepteur_1001649
+        command: turn_off
+      - target: recepteur_1001658
+        command: turn_off
+      - target: recepteur_1001659
+        command: turn_off

@@ -3462,67 +3462,6 @@
                 }
             }
         },
-        "1001420": {
-            "lieu": "chambre du bas",
-            "lieuprecis": "dressing",
-            "equivalences": "",
-            "newsensorstypes": [
-                "lumiere"
-            ],
-            "systmotor": false,
-            "storevoletdelay": "0",
-            "storevoletdelaydecol": "0",
-            "storevoletdelaydescente": "0",
-            "num": "chambre--lumiere dressing",
-            "___nummat": 1001420,
-            "isautomatique": false,
-            "protocol": "zigbee",
-            "commandstypes": [
-                "off",
-                "on",
-                "switch"
-            ],
-            "precision": "0",
-            "correction": 0,
-            "min": "0",
-            "max": "0",
-            "textlgmax": "0",
-            "temperatureassociee": "",
-            "newcoordonnees": {
-                "lumiere": {
-                    "portrait": {
-                        "x": 69,
-                        "y": 684
-                    },
-                    "paysage": {
-                        "x": 684,
-                        "y": 532
-                    }
-                }
-            },
-            "minuteriedelay": null,
-            "persistence": false,
-            "sensorstypes": [
-                {
-                    "name": "lumiere",
-                    "commandstypes": [
-                        "off",
-                        "on",
-                        "switch"
-                    ]
-                }
-            ],
-            "coordonnees": {
-                "portrait": {
-                    "x": 69,
-                    "y": 684
-                },
-                "paysage": {
-                    "x": 684,
-                    "y": 532
-                }
-            }
-        },
         "1001425": {
             "protocol": "ac",
             "num": "0x0026aad7/2",
@@ -4056,44 +3995,6 @@
                     "y": 418
                 }
             }
-        },
-        "1001575": {
-            "protocol": "zigbee",
-            "num": "chambre du bas--lumière chevet",
-            "equivalences": "",
-            "lieu": "chambre du bas",
-            "lieuprecis": "",
-            "newsensorstypes": [
-                "prise",
-                "power",
-                "current",
-                "energy"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "___nummat": 1001575,
-            "sensorstypes": [
-                {
-                    "name": "prise",
-                    "commandstypes": [
-                        "off",
-                        "on",
-                        "switch"
-                    ]
-                },
-                {
-                    "name": "power"
-                },
-                {
-                    "name": "current"
-                },
-                {
-                    "name": "energy"
-                }
-            ]
         },
         "1001601": {
             "protocol": "evoo7",
