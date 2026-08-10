@@ -197,6 +197,9 @@ export class PlanificateurService implements IPlanificateurService {
     this.eventBus.onGeneric(PLANIFICATEUR_CLIENT_EVENTS.GET_ACTIONS, () => {
       this.eventBus.emitGeneric(PLANIFICATEUR_SOCKET_EVENTS.ACTIONS_LIST, this.recentActions);
     });
+    this.eventBus.onGeneric(PLANIFICATEUR_CLIENT_EVENTS.GET_HA_COMMANDS, () => {
+      this.eventBus.emitGeneric(PLANIFICATEUR_SOCKET_EVENTS.HA_COMMANDS_LIST, this.executionEngine.getRecentHaCommands());
+    });
 
     this.eventBus.onGeneric<{ name: string }>(PLANIFICATEUR_CLIENT_EVENTS.PLANIFICATION_ACTIVER, ({ name }) => {
       this.handler.handleCommand({ type: 'gestion', operation: 'activer', cible: 'planification', name, correlation_id: 'ui' })

@@ -12,6 +12,11 @@ export const PLANIFICATEUR_SOCKET_EVENTS = {
   // ("il me faut une trace sur l'application pour voir les actions entreprises à la réception
   // d'un message de IA"), même principe que ia:exchanges:list côté application `ia`.
   ACTIONS_LIST: 'planificateur:actions:list',
+  // ⭐ Détail des commandes réellement envoyées à HA (ou non) pour chaque étape d'exécution —
+  // demande utilisateur ("savoir si les ordres ont été ou non transformés en ordre HA, et ce qui
+  // a été envoyé à HA pour exécuter les ordres"). Alimenté par ExecutionEngine.executeAction(),
+  // couvre les 3 chemins de déclenchement (minuteur, macro dite, message ia) — pas seulement ia.
+  HA_COMMANDS_LIST: 'planificateur:ha-commands:list',
   ERROR: 'planificateur:error'
 } as const;
 
@@ -20,6 +25,7 @@ export const PLANIFICATEUR_CLIENT_EVENTS = {
   GET_MACROS: 'planificateur:macros:list:get',
   GET_PLANIFICATIONS: 'planificateur:planifications:list:get',
   GET_ACTIONS: 'planificateur:actions:list:get',
+  GET_HA_COMMANDS: 'planificateur:ha-commands:list:get',
 
   // Gestion UI directe (§4 — hors conversation, mêmes opérations que le nœud `gestion`)
   PLANIFICATION_ACTIVER: 'planificateur:planification:activer',
@@ -41,5 +47,6 @@ export const PLANIFICATEUR_PERSISTENT_EVENTS: string[] = [
   PLANIFICATEUR_SOCKET_EVENTS.STATUS,
   PLANIFICATEUR_SOCKET_EVENTS.MACROS_LIST,
   PLANIFICATEUR_SOCKET_EVENTS.PLANIFICATIONS_LIST,
-  PLANIFICATEUR_SOCKET_EVENTS.ACTIONS_LIST
+  PLANIFICATEUR_SOCKET_EVENTS.ACTIONS_LIST,
+  PLANIFICATEUR_SOCKET_EVENTS.HA_COMMANDS_LIST
 ];

@@ -53,6 +53,10 @@
     .action-row .badge { padding: 2px 8px; border-radius: var(--radius); font-size: 0.8em; margin-left: 8px; }
     .action-row .badge.ok { background: #1e5e2e; color: #a6e6ae; }
     .action-row .badge.error { background: #5e1e1e; color: #e6a6a6; }
+    .action-row .badge.outcome-resolved { background: #1e4a5e; color: #a6d6e6; }
+    .action-row .badge.outcome-fallback_conversation { background: #5e4a1e; color: #e6d6a6; }
+    .action-row .badge.outcome-ignored { background: #444; color: #ccc; }
+    .action-row .meta { color: var(--color-text-muted); font-size: 0.8em; margin-top: 4px; }
     .action-row pre {
       margin-top: 6px;
       padding: 8px;
@@ -105,6 +109,11 @@
         <div id="actions-log-list"></div>
       </div>
 
+      <div class="actions-log-card" id="ha-commands-card" style="display: none;">
+        <h2>Commandes envoyées à HA</h2>
+        <div id="ha-commands-list"></div>
+      </div>
+
       <div class="loading" id="loading">Chargement de l'application Planificateur</div>
     </div>
 
@@ -116,6 +125,6 @@
 
   <script type="module" src="/applications/planificateur/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-08-10 00:00:00 - Journal des actions reçues de IA -->
+  <!-- Derniere modification: 2026-08-10 00:00:00 - Détail des commandes envoyées à HA (résolution, repli, ignoré) + prochaine exécution -->
 </body>
 </html>

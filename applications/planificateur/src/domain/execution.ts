@@ -12,9 +12,10 @@
  */
 
 import type { HaCommandService, HaStructureRegistry, HaWsClient, Logger, IEventBus } from '../../../core/dist/exports';
-import type { DeployContext, ExecutionStep, MacroDefinition } from './types';
+import type { DeployContext, ExecutionStep, MacroDefinition, ResolvedServiceCall } from './types';
 import { resolveAction } from './resolution';
 import { CorrelatedRequester } from './correlation';
+import { PLANIFICATEUR_SOCKET_EVENTS } from './socket-events';
 
 interface DeployReply {
   correlation_id: string;
@@ -23,8 +24,35 @@ interface DeployReply {
   steps?: ExecutionStep[];
 }
 
+/** Une entrée du journal "ce qui a réellement été envoyé à HA" (demande utilisateur, voir
+ *  socket-events.ts::HA_COMMANDS_LIST) — une par étape 'action' exécutée, quel que soit le
+ *  déclencheur (minuteur, macro dite, ou message ia). */
+export interface HaCommandTrace {
+  at: string;
+  trigger: string;
+  step: { verbe?: string; quoi?: string; lieux?: string[]; valeur?: string | number; order?: string };
+  /** 'resolved' : traduit en appel de service HA direct (resolution.ts) — chemin principal.
+   *  'fallback_conversation' : verbe non couvert par resolution.ts, repli sur l'agent de
+   *  conversation natif de HA (HaWsClient.processConversation) — pas de service_call déterministe.
+   *  'ignored' : ni resolved_service_call ni order exploitable, rien envoyé à HA. */
+  outcome: 'resolved' | 'fallback_conversation' | 'ignored';
+  resolved?: ResolvedServiceCall;
+  success?: boolean;
+  error?: string;
+  /** Entité HA dont le changement d'état a déclenché cette exécution (triggers state_change
+   *  uniquement — "en corrélation des messages reçus de HA", demande utilisateur). */
+  triggeredByEntityId?: string;
+  /** Prochaine date/heure d'exécution programmée pour ce déclencheur (ISO8601), pour les triggers
+   *  temporels récurrents uniquement — reflète déjà le RÉARMEMENT suivant, pas l'horaire qui vient
+   *  de se déclencher (SchedulerRuntime.arm() recalcule next_fire_at avant la fin de l'exécution en
+   *  cours). Absent pour les triggers state_change (réactifs, pas de prochaine heure connue) et
+   *  pour les déclenchements macro dite/action immédiate (pas de minuteur). */
+  nextFireAt?: string;
+}
+
 export class ExecutionEngine {
   private readonly deployRequester: CorrelatedRequester<DeployContext, DeployReply>;
+  private readonly recentHaCommands: HaCommandTrace[] = [];
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -39,6 +67,16 @@ export class ExecutionEngine {
       'planificateur:deploy',
       'planificateur:deploy:reply'
     );
+  }
+
+  getRecentHaCommands(): HaCommandTrace[] {
+    return this.recentHaCommands;
+  }
+
+  private recordHaCommand(trace: Omit<HaCommandTrace, 'at'>): void {
+    this.recentHaCommands.unshift({ at: new Date().toISOString(), ...trace });
+    if (this.recentHaCommands.length > 20) this.recentHaCommands.length = 20;
+    this.eventBus.emitGeneric(PLANIFICATEUR_SOCKET_EVENTS.HA_COMMANDS_LIST, this.recentHaCommands);
   }
 
   buildDeployContext(triggerName: string, phraseOriginale: string, macros: MacroDefinition[]): DeployContext {
@@ -75,7 +113,8 @@ export class ExecutionEngine {
     phraseOriginale: string,
     macros: MacroDefinition[],
     triggeredEntityId?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    nextFireAt?: string
   ): Promise<{ success: boolean; message: string }> {
     const context = this.buildDeployContext(triggerName, phraseOriginale, macros);
     if (triggeredEntityId) context.triggered_entity_id = triggeredEntityId;
@@ -100,7 +139,7 @@ export class ExecutionEngine {
     }
 
     try {
-      await this.executeSteps(reply.steps, signal);
+      await this.executeSteps(reply.steps, triggerName, signal, triggeredEntityId, nextFireAt);
     } catch (error) {
       if (error instanceof AbortedExecutionError) {
         return { success: false, message: `Déploiement "${triggerName}" annulé (redéclenché entre-temps).` };
@@ -110,7 +149,13 @@ export class ExecutionEngine {
     return { success: true, message: `${reply.steps.length} étape(s) exécutée(s).` };
   }
 
-  async executeSteps(steps: ExecutionStep[], signal?: AbortSignal): Promise<void> {
+  async executeSteps(
+    steps: ExecutionStep[],
+    trigger: string,
+    signal?: AbortSignal,
+    triggeredByEntityId?: string,
+    nextFireAt?: string
+  ): Promise<void> {
     for (const step of steps.sort((a, b) => a.step - b.step)) {
       if (signal?.aborted) throw new AbortedExecutionError();
 
@@ -124,11 +169,12 @@ export class ExecutionEngine {
       }
 
       if (signal?.aborted) throw new AbortedExecutionError();
-      await this.executeAction(step);
+      await this.executeAction(step, trigger, triggeredByEntityId, nextFireAt);
     }
   }
 
-  private async executeAction(step: ExecutionStep): Promise<void> {
+  private async executeAction(step: ExecutionStep, trigger: string, triggeredByEntityId?: string, nextFireAt?: string): Promise<void> {
+    const stepSummary = { verbe: step.verbe, quoi: step.quoi, lieux: step.lieux, valeur: step.valeur, order: step.order };
     const resolved = this.registry && step.verbe && step.quoi
       ? resolveAction(this.registry, step.verbe, step.quoi, step.lieux, step.valeur)
       : undefined;
@@ -144,6 +190,7 @@ export class ExecutionEngine {
       if (!result.success) {
         this.logger.warn('ExecutionEngine', `Échec commande directe, pas de nouvelle tentative: ${result.error}`);
       }
+      this.recordHaCommand({ trigger, step: stepSummary, outcome: 'resolved', resolved, success: result.success, error: result.error, triggeredByEntityId, nextFireAt });
       return;
     }
 
@@ -153,13 +200,16 @@ export class ExecutionEngine {
       this.logger.info('ExecutionEngine', `Repli conversation.process (aucun resolved_service_call): "${step.order}"`);
       try {
         await this.haWsClient.processConversation(step.order);
+        this.recordHaCommand({ trigger, step: stepSummary, outcome: 'fallback_conversation', success: true, triggeredByEntityId, nextFireAt });
       } catch (error) {
         this.logger.error('ExecutionEngine', `Échec du repli conversation.process: ${error}`);
+        this.recordHaCommand({ trigger, step: stepSummary, outcome: 'fallback_conversation', success: false, error: String(error), triggeredByEntityId, nextFireAt });
       }
       return;
     }
 
     this.logger.warn('ExecutionEngine', `Étape action ignorée: ni resolved_service_call ni order exploitable (${JSON.stringify(step)})`);
+    this.recordHaCommand({ trigger, step: stepSummary, outcome: 'ignored', triggeredByEntityId, nextFireAt });
   }
 }
 

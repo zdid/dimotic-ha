@@ -144,7 +144,7 @@ export class CommandHandler {
         case 'execution': {
           const exec = payload as ExecutionPayload & { correlation_id: string };
           this.logger.info('CommandHandler', `Exécution directe "${exec.execution.trigger_name}" — ${exec.execution.steps.length} étape(s)`);
-          this.executionEngine.executeSteps(exec.execution.steps).catch((e) =>
+          this.executionEngine.executeSteps(exec.execution.steps, exec.execution.trigger_name).catch((e) =>
             this.logger.error('CommandHandler', `Erreur d'exécution: ${e}`)
           );
           return ok(corr, `Exécution de "${exec.execution.trigger_name}" lancée.`);
@@ -186,7 +186,7 @@ export class CommandHandler {
    * (StateWatcher) — voir execution.ts::deployAndExecute.
    */
   async handleTriggerFired(plan: PlanificationDefinition, triggeredEntityId?: string, signal?: AbortSignal): Promise<void> {
-    const result = await this.executionEngine.deployAndExecute(plan.name, plan.phrase_originale, this.listMacros(), triggeredEntityId, signal);
+    const result = await this.executionEngine.deployAndExecute(plan.name, plan.phrase_originale, this.listMacros(), triggeredEntityId, signal, plan.next_fire_at);
     // Une exécution RÉUSSIE efface l'indicateur "manqué" laissé par un rattrapage abandonné
     // précédent (demande utilisateur : disparaît à la prochaine exécution, s'il y en a une).
     if (result.success && plan.missed) {

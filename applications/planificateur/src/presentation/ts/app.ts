@@ -24,6 +24,24 @@ interface PlanificateurAction {
   success: boolean;
 }
 
+interface HaCommandTrace {
+  at: string;
+  trigger: string;
+  step: { verbe?: string; quoi?: string; lieux?: string[]; valeur?: string | number; order?: string };
+  outcome: 'resolved' | 'fallback_conversation' | 'ignored';
+  resolved?: { domain: string; service: string; entity_id: string | string[]; data?: Record<string, unknown> };
+  success?: boolean;
+  error?: string;
+  triggeredByEntityId?: string;
+  nextFireAt?: string;
+}
+
+const OUTCOME_LABELS: Record<HaCommandTrace['outcome'], string> = {
+  resolved: 'Service HA appelé',
+  fallback_conversation: 'Repli conversation HA',
+  ignored: 'Ignoré (rien envoyé)'
+};
+
 let socket: any | null = null;
 
 function init(): void {
@@ -54,6 +72,10 @@ function setupEventListeners(): void {
     updateActionsLog(actions);
   });
 
+  socket.on('planificateur:ha-commands:list', (commands: HaCommandTrace[]) => {
+    updateHaCommandsLog(commands);
+  });
+
   socket.on('connect', () => {
     console.log('[Planificateur UI] Connecté au serveur Socket.io');
     requestInitialStatus();
@@ -68,6 +90,7 @@ function requestInitialStatus(): void {
   if (!socket) return;
   socket.emit('planificateur:status:get');
   socket.emit('planificateur:actions:list:get');
+  socket.emit('planificateur:ha-commands:list:get');
 }
 
 function updateStatusDisplay(status: PlanificateurStatus): void {
@@ -100,6 +123,37 @@ function updateActionsLog(actions: PlanificateurAction[]): void {
       <pre>${escapeHtml(a.reply)}</pre>
     </div>
   `).join('');
+}
+
+function updateHaCommandsLog(commands: HaCommandTrace[]): void {
+  const cardEl = $('ha-commands-card');
+  const listEl = $('ha-commands-list');
+  if (!listEl) return;
+
+  if (commands.length === 0) {
+    if (cardEl) cardEl.style.display = 'none';
+    return;
+  }
+
+  if (cardEl) cardEl.style.display = 'block';
+  listEl.innerHTML = commands.map((c) => {
+    const stepLabel = [c.step.verbe, c.step.quoi, ...(c.step.lieux || [])].filter(Boolean).join(' ') || c.step.order || '(étape sans détail)';
+    const metaParts: string[] = [`Déclencheur : ${escapeHtml(c.trigger)}`];
+    if (c.triggeredByEntityId) metaParts.push(`En réaction à : ${escapeHtml(c.triggeredByEntityId)}`);
+    if (c.nextFireAt) metaParts.push(`Prochaine exécution : ${new Date(c.nextFireAt).toLocaleString('fr-FR')}`);
+
+    return `
+    <div class="action-row">
+      <span class="at">${new Date(c.at).toLocaleString('fr-FR')}</span>
+      <span class="source">${escapeHtml(stepLabel)}</span>
+      <span class="badge outcome-${c.outcome}">${OUTCOME_LABELS[c.outcome]}</span>
+      ${c.success === false ? '<span class="badge error">Échec</span>' : ''}
+      <div class="meta">${metaParts.join(' · ')}</div>
+      ${c.resolved ? `<pre>${escapeHtml(JSON.stringify(c.resolved, null, 2))}</pre>` : ''}
+      ${c.error ? `<pre>${escapeHtml(c.error)}</pre>` : ''}
+    </div>
+  `;
+  }).join('');
 }
 
 function escapeHtml(text: string): string {
