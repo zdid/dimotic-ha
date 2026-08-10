@@ -2,6 +2,14 @@
 
 ## Problèmes prioritaires
 
+### 🟢 RFXCOM : publication optimiste de l'état HA même transceiver débranché — Corrigé
+- **Constat utilisateur (10/08/2026)**, en testant le circuit complet IA→planificateur→HA→RFXCOM avec le transmetteur RFXCOM physiquement débranché : la commande "allumer" a quand même été relayée jusqu'à RFXCOM, qui a publié `state:"ON"` sur MQTT (confirmé retenu sur le broker via `mosquitto_sub`) — HA affichait la lumière allumée alors qu'aucune trame RF n'avait pu être émise.
+- **Cause** : `RfxComService.applyReceiverCommand()` appelait `transceiver.sendCommand()` puis publiait l'état dans le même bloc `try`, sans vérifier la connexion — `sendCommand()` ne lève une exception que si le transceiver n'a jamais été initialisé depuis le démarrage, pas s'il a été débranché après une connexion antérieure réussie.
+- **Corrigé** : vérification explicite de `transceiver.isConnected()` avant tout envoi — échec propre (`rfxcom:error`, log ERROR), aucune publication d'état optimiste.
+- **Limitation restante, non traitée** : même connecté, `sendCommand()` reste optimiste sur la RÉCEPTION RF433 par le récepteur physique lui-même — la lib `rfxcom` ne remonte que la confirmation d'écriture bas niveau sur le port série (`buildAckLogger`, `RfxComTransceiver.ts`), jamais une confirmation que le récepteur cible a réellement exécuté la commande. Un récepteur hors de portée RF, ou une pile déchargée sur un émetteur intermédiaire, resterait donc silencieusement non détecté.
+- **Statut** : Corrigé (cas transceiver débranché, 10/08/2026) — limitation RF de bout en bout restante, acceptée pour l'instant.
+- **Priorité** : Haute (fausse confiance dans le pipeline IA/planificateur — un ordre peut sembler exécuté sans l'être)
+
 ### 🟡 IA : changement de paramètres non appliqué immédiatement
 - **Constat utilisateur (10/08/2026)** : modifier les paramètres de l'application `ia` (formulaire générique "Paramètres du Module", comme pour les autres apps) ne les applique pas tout de suite — comportement à vérifier contre les autres apps (NOMMAGE a eu un bug similaire, corrigé, voir plus bas dans ce fichier : `app:module:config:saved` jamais écouté par `saveConfig()`).
 - **Piste probable, à vérifier** : `applications/ia` n'écoute peut-être pas `app:module:config:saved` (chemin réellement emprunté par le formulaire générique) ou n'a pas de logique de rechargement à chaud équivalente à `reloadConfigAndReconnectMqtt()` de NOMMAGE — reste à confirmer en lisant `IaService`/le point d'entrée du module avant de corriger.
