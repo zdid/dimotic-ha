@@ -661,6 +661,17 @@ export class RfxComService implements IRfxComService {
    * socle) et par SceneExecutor (commande/valeur déjà discrètes, une par action de scène).
    */
   private applyReceiverCommand(receiverId: string, command: string, value?: number): { success: boolean; error?: string } {
+    // ⭐ 10/08/2026 : anomalie réelle constatée en direct — transceiver.sendCommand() ne lève une
+    // exception que si `this.device` n'a JAMAIS été initialisé, pas si le port série a été
+    // débranché après une connexion antérieure réussie (le futur appelant restait alors optimiste,
+    // publiait l'état "ON" côté MQTT/HA sans qu'aucune trame RF n'ait pu être émise). Vérification
+    // explicite ici — ne garantit toujours pas la réception RF433 par le récepteur physique (voir
+    // RfxComTransceiver.buildAckLogger), mais couvre le cas concret rencontré (transceiver
+    // débranché) avant même de tenter l'envoi.
+    if (!this.transceiver.isConnected()) {
+      return { success: false, error: 'Transceiver RFXCOM non connecté — commande non envoyée' };
+    }
+
     const receiver = this.receiverManager.getReceiver(receiverId);
     if (!receiver) {
       return { success: false, error: `Récepteur inconnu: ${receiverId}` };
