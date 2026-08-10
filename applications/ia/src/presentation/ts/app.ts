@@ -23,6 +23,8 @@ interface Exchange {
   response: string;
   intermediateJson?: string;
   planificateurReply?: string;
+  promptTokens?: number;
+  completionTokens?: number;
 }
 
 let socket: any | null = null;
@@ -133,7 +135,7 @@ function setupTestForm(): void {
   });
 }
 
-function showTestResult(reply: { success: boolean; response: string; intermediateJson?: string; planificateurReply?: string }): void {
+function showTestResult(reply: { success: boolean; response: string; intermediateJson?: string; planificateurReply?: string; promptTokens?: number; completionTokens?: number }): void {
   const sendBtn = $('test-send') as HTMLButtonElement | null;
   if (sendBtn) {
     sendBtn.disabled = false;
@@ -145,8 +147,14 @@ function showTestResult(reply: { success: boolean; response: string; intermediat
   resultEl.style.display = 'block';
   resultEl.className = `test-result ${reply.success ? 'ok' : 'error'}`;
   resultEl.innerHTML = `<div>${escapeHtml(reply.response)}</div>`
+    + (reply.promptTokens !== undefined ? `<div class="tokens-label">${formatTokens(reply.promptTokens, reply.completionTokens)}</div>` : '')
     + (reply.intermediateJson ? `<pre class="intermediate-json">${escapeHtml(reply.intermediateJson)}</pre>` : '')
     + (reply.planificateurReply ? `<div class="planificateur-reply-label">Réponse de planificateur :</div><pre class="intermediate-json">${escapeHtml(reply.planificateurReply)}</pre>` : '');
+}
+
+function formatTokens(promptTokens: number, completionTokens?: number): string {
+  const total = promptTokens + (completionTokens ?? 0);
+  return `🔢 ${total} token${total > 1 ? 's' : ''} (${promptTokens} prompt + ${completionTokens ?? 0} réponse)`;
 }
 
 function requestInitialStatus(): void {
@@ -184,6 +192,7 @@ function updateExchanges(exchanges: Exchange[]): void {
       <div class="at">${new Date(e.at).toLocaleString('fr-FR')}</div>
       <div class="question">❓ ${escapeHtml(e.question)}</div>
       <div class="response">💬 ${escapeHtml(e.response)}</div>
+      ${e.promptTokens !== undefined ? `<div class="tokens-label">${formatTokens(e.promptTokens, e.completionTokens)}</div>` : ''}
       ${e.intermediateJson ? `<pre class="intermediate-json">${escapeHtml(e.intermediateJson)}</pre>` : ''}
       ${e.planificateurReply ? `<div class="planificateur-reply-label">Réponse de planificateur :</div><pre class="intermediate-json">${escapeHtml(e.planificateurReply)}</pre>` : ''}
     </div>

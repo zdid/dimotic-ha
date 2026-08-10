@@ -38,6 +38,11 @@ interface Exchange {
   /** Réponse brute de planificateur (CorrelatedReponse complète) au JSON structuré ci-dessus —
    *  absente si pas de JSON structuré, ou si planificateur n'a pas répondu (mode dégradé). */
   planificateurReply?: string;
+  /** Tokens consommés pour cet échange (cumulés sur tous les rounds Mistral, ex: appels d'outils
+   *  enchaînés) — demande utilisateur, absent seulement si l'échange n'a jamais atteint Mistral
+   *  (erreur avant le premier appel). */
+  promptTokens?: number;
+  completionTokens?: number;
 }
 
 export interface IIaService {
@@ -145,7 +150,7 @@ export class IaService implements IIaService {
     res.write(makeOllamaDoneChunk(ollamaModel, result.promptTokens, result.completionTokens));
     res.end();
 
-    this.recordExchange(question, result.finalText, result.intermediateJson, result.planificateurReply);
+    this.recordExchange(question, result.finalText, result.intermediateJson, result.planificateurReply, result.promptTokens, result.completionTokens);
   }
 
   /**
@@ -164,6 +169,11 @@ export class IaService implements IIaService {
   > {
     let currentMessages = messages;
     const toolCallsUsed: MistralToolCall[] = [];
+    // Cumulés sur tous les rounds (une boucle d'outils peut appeler Mistral plusieurs fois) —
+    // demande utilisateur : afficher le nombre de tokens consommés par appel (échange complet, pas
+    // seulement le dernier round, qui sous-comptait sinon un échange avec appel(s) d'outil).
+    let totalPromptTokens = 0;
+    let totalCompletionTokens = 0;
 
     for (let round = 1; round <= MAX_TOOL_ROUNDS; round++) {
       const result = await this.mistralClient.streamChat(currentMessages, mistralModel, options || {}, IA_TOOLS);
@@ -182,6 +192,8 @@ export class IaService implements IIaService {
         bufferedChunks.push(step.value);
       }
       this.mistralClient.recordTokenUsage(mistralModel, assembled.promptTokens, assembled.completionTokens);
+      totalPromptTokens += assembled.promptTokens;
+      totalCompletionTokens += assembled.completionTokens;
 
       if (assembled.toolCalls.length > 0) {
         this.logger.info('IaService', `Round ${round}: ${assembled.toolCalls.length} appel(s) d'outil`);
@@ -205,8 +217,8 @@ export class IaService implements IIaService {
         return {
           ok: true,
           finalText: reply?.message ?? assembled.text, // null → mode dégradé (specs §9)
-          promptTokens: assembled.promptTokens,
-          completionTokens: assembled.completionTokens,
+          promptTokens: totalPromptTokens,
+          completionTokens: totalCompletionTokens,
           bufferedChunks,
           wasStructured: true,
           intermediateJson,
@@ -217,8 +229,8 @@ export class IaService implements IIaService {
       return {
         ok: true,
         finalText: assembled.text,
-        promptTokens: assembled.promptTokens,
-        completionTokens: assembled.completionTokens,
+        promptTokens: totalPromptTokens,
+        completionTokens: totalCompletionTokens,
         bufferedChunks,
         wasStructured: false,
         intermediateJson
@@ -249,9 +261,11 @@ export class IaService implements IIaService {
       success: true,
       response: result.finalText,
       intermediateJson: result.intermediateJson,
-      planificateurReply: result.planificateurReply
+      planificateurReply: result.planificateurReply,
+      promptTokens: result.promptTokens,
+      completionTokens: result.completionTokens
     });
-    this.recordExchange(message, result.finalText, result.intermediateJson, result.planificateurReply);
+    this.recordExchange(message, result.finalText, result.intermediateJson, result.planificateurReply, result.promptTokens, result.completionTokens);
   }
 
   /** Réconcilie les deux formats de requête Ollama (specs §4, troisième piège). */
@@ -268,8 +282,8 @@ export class IaService implements IIaService {
     return messages;
   }
 
-  private recordExchange(question: string, response: string, intermediateJson?: string, planificateurReply?: string): void {
-    this.recentExchanges.unshift({ at: new Date().toISOString(), question, response, intermediateJson, planificateurReply });
+  private recordExchange(question: string, response: string, intermediateJson?: string, planificateurReply?: string, promptTokens?: number, completionTokens?: number): void {
+    this.recentExchanges.unshift({ at: new Date().toISOString(), question, response, intermediateJson, planificateurReply, promptTokens, completionTokens });
     if (this.recentExchanges.length > 20) this.recentExchanges.length = 20;
     this.eventBus.emitGeneric('ia:exchanges:list', this.recentExchanges);
   }
