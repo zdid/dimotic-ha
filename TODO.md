@@ -2,6 +2,13 @@
 
 ## Problèmes prioritaires
 
+### 🔴 RFXCOM : journal des ordres reçus avec résultat d'exécution (100 max)
+- **Demande utilisateur (10/08/2026)**, après vérification en direct du correctif ci-dessous (transceiver débranché sur la machine de test, `rfxcom` activé, mêmes ordres renvoyés via l'API Ollama émulée `/api/chat`) : RFXCOM a bien refusé les 4 commandes (`Échec de la commande turn_on... Transceiver RFXCOM non connecté`, aucune publication MQTT optimiste — le correctif fonctionne). **Mais tout ce qui est en amont continue de rapporter un succès** : `HaCommandService.sendCommand()` reçoit un ACK positif de HA pour `homeassistant.turn_on` (service générique qui accuse seulement réception de la diffusion, jamais l'exécution réelle par le device cible), la trace `planificateur:ha-commands:list` hérite de ce faux succès (`outcome:"resolved", success:true`), et Mistral a fini par répondre "La lumière de la salle est allumée. 💡" — une confabulation, puisque rien ne lui indique jamais l'échec RFXCOM réel.
+- **Besoin** : un journal tenu par RFXCOM lui-même (pas par planificateur, qui ne voit que l'ACK HA générique) des ordres reçus (device/récepteur cible, action, timestamp) avec leur résultat d'exécution réel (transceiver connecté ou non, écriture série réussie ou non — voir la limitation RF de bout en bout ci-dessous, non résolue) — 100 dernières entrées maximum, exposé sur le tableau de bord RFXCOM (même principe que `planificateur:actions:list`/`ia:exchanges:list`, socket-events + UI dédiée).
+- **Non traité** : pas encore implémenté — seule cette entrée existe pour l'instant.
+- **Statut** : Non traité
+- **Priorité** : Haute (seule source fiable de vérité sur ce qui a réellement été tenté/envoyé — sans elle, tout succès rapporté à l'utilisateur ou à l'IA au-delà de RFXCOM lui-même reste potentiellement trompeur)
+
 ### 🟢 RFXCOM : publication optimiste de l'état HA même transceiver débranché — Corrigé
 - **Constat utilisateur (10/08/2026)**, en testant le circuit complet IA→planificateur→HA→RFXCOM avec le transmetteur RFXCOM physiquement débranché : la commande "allumer" a quand même été relayée jusqu'à RFXCOM, qui a publié `state:"ON"` sur MQTT (confirmé retenu sur le broker via `mosquitto_sub`) — HA affichait la lumière allumée alors qu'aucune trame RF n'avait pu être émise.
 - **Cause** : `RfxComService.applyReceiverCommand()` appelait `transceiver.sendCommand()` puis publiait l'état dans le même bloc `try`, sans vérifier la connexion — `sendCommand()` ne lève une exception que si le transceiver n'a jamais été initialisé depuis le démarrage, pas s'il a été débranché après une connexion antérieure réussie.
