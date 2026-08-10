@@ -35,6 +35,9 @@ interface Exchange {
   response: string;
   /** JSON structuré détecté (specs §9) ou appels d'outils (specs §8) — null si conversation simple. */
   intermediateJson?: string;
+  /** Réponse brute de planificateur (CorrelatedReponse complète) au JSON structuré ci-dessus —
+   *  absente si pas de JSON structuré, ou si planificateur n'a pas répondu (mode dégradé). */
+  planificateurReply?: string;
 }
 
 export interface IIaService {
@@ -142,7 +145,7 @@ export class IaService implements IIaService {
     res.write(makeOllamaDoneChunk(ollamaModel, result.promptTokens, result.completionTokens));
     res.end();
 
-    this.recordExchange(question, result.finalText, result.intermediateJson);
+    this.recordExchange(question, result.finalText, result.intermediateJson, result.planificateurReply);
   }
 
   /**
@@ -156,7 +159,7 @@ export class IaService implements IIaService {
     mistralModel: string,
     options: OllamaChatRequestBody['options']
   ): Promise<
-    | { ok: true; finalText: string; promptTokens: number; completionTokens: number; bufferedChunks: string[]; wasStructured: boolean; intermediateJson?: string }
+    | { ok: true; finalText: string; promptTokens: number; completionTokens: number; bufferedChunks: string[]; wasStructured: boolean; intermediateJson?: string; planificateurReply?: string }
     | { ok: false; errorMessage: string }
   > {
     let currentMessages = messages;
@@ -194,15 +197,16 @@ export class IaService implements IIaService {
         : (toolCallsUsed.length > 0 ? JSON.stringify(toolCallsUsed, null, 2) : undefined);
 
       if (structured) {
-        const confirmation = await this.structuredRouter.route(structured);
+        const reply = await this.structuredRouter.route(structured);
         return {
           ok: true,
-          finalText: confirmation ?? assembled.text, // null → mode dégradé (specs §9)
+          finalText: reply?.message ?? assembled.text, // null → mode dégradé (specs §9)
           promptTokens: assembled.promptTokens,
           completionTokens: assembled.completionTokens,
           bufferedChunks,
           wasStructured: true,
-          intermediateJson
+          intermediateJson,
+          planificateurReply: reply ? JSON.stringify(reply, null, 2) : undefined
         };
       }
 
@@ -237,8 +241,13 @@ export class IaService implements IIaService {
       return;
     }
 
-    this.eventBus.emitGeneric('ia:test:reply', { success: true, response: result.finalText, intermediateJson: result.intermediateJson });
-    this.recordExchange(message, result.finalText, result.intermediateJson);
+    this.eventBus.emitGeneric('ia:test:reply', {
+      success: true,
+      response: result.finalText,
+      intermediateJson: result.intermediateJson,
+      planificateurReply: result.planificateurReply
+    });
+    this.recordExchange(message, result.finalText, result.intermediateJson, result.planificateurReply);
   }
 
   /** Réconcilie les deux formats de requête Ollama (specs §4, troisième piège). */
@@ -255,8 +264,8 @@ export class IaService implements IIaService {
     return messages;
   }
 
-  private recordExchange(question: string, response: string, intermediateJson?: string): void {
-    this.recentExchanges.unshift({ at: new Date().toISOString(), question, response, intermediateJson });
+  private recordExchange(question: string, response: string, intermediateJson?: string, planificateurReply?: string): void {
+    this.recentExchanges.unshift({ at: new Date().toISOString(), question, response, intermediateJson, planificateurReply });
     if (this.recentExchanges.length > 20) this.recentExchanges.length = 20;
     this.eventBus.emitGeneric('ia:exchanges:list', this.recentExchanges);
   }

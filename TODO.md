@@ -2,6 +2,12 @@
 
 ## Problèmes prioritaires
 
+### 🟡 IA : changement de paramètres non appliqué immédiatement
+- **Constat utilisateur (10/08/2026)** : modifier les paramètres de l'application `ia` (formulaire générique "Paramètres du Module", comme pour les autres apps) ne les applique pas tout de suite — comportement à vérifier contre les autres apps (NOMMAGE a eu un bug similaire, corrigé, voir plus bas dans ce fichier : `app:module:config:saved` jamais écouté par `saveConfig()`).
+- **Piste probable, à vérifier** : `applications/ia` n'écoute peut-être pas `app:module:config:saved` (chemin réellement emprunté par le formulaire générique) ou n'a pas de logique de rechargement à chaud équivalente à `reloadConfigAndReconnectMqtt()` de NOMMAGE — reste à confirmer en lisant `IaService`/le point d'entrée du module avant de corriger.
+- **Statut** : Non traité — remonté par l'utilisateur, cause pas encore investiguée
+- **Priorité** : Moyenne (gêne les tests IA prévus prochainement, contournement possible par redémarrage complet en attendant)
+
 ### 🟢 Voyant MQTT sur le tableau de bord + Uptime figé à "0s" — Corrigé
 - **Demande utilisateur (07/08/2026)** : un voyant "MQTT connecté" équivalent au voyant "Web-Services" (HA WebSocket) existant, sur l'écran principal HA/MQTT.
 - **Constat en creusant** : `mqtt:connected`/`mqtt:disconnected` étaient déjà déclarés dans `SOCLE_SOCKET_EVENTS` (`types/events.ts`) mais **jamais émis nulle part** — infrastructure morte, même symptôme que `--plan-scale` dans HAPLAN plus tôt cette session. `HaMqttIntegrationService` suit déjà les connexions/déconnexions **par bridge** (un par application métier), sans statut agrégé unique.

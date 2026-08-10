@@ -23,11 +23,10 @@ export class StructuredRouter {
     );
   }
 
-  /** Retourne le message de confirmation de planificateur, ou null en mode dégradé (timeout). */
-  async route(structured: Record<string, unknown>): Promise<string | null> {
+  /** Retourne la réponse complète de planificateur, ou null en mode dégradé (timeout). */
+  async route(structured: Record<string, unknown>): Promise<CorrelatedReponse | null> {
     try {
-      const reply = await this.requester.request(structured, this.commandTimeoutMs);
-      return reply.message;
+      return await this.requester.request(structured, this.commandTimeoutMs);
     } catch (error) {
       this.logger.warn('StructuredRouter', `Mode dégradé (planificateur ne répond pas): ${error}`);
       return null;

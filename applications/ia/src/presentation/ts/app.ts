@@ -22,6 +22,7 @@ interface Exchange {
   question: string;
   response: string;
   intermediateJson?: string;
+  planificateurReply?: string;
 }
 
 let socket: any | null = null;
@@ -54,7 +55,7 @@ function setupEventListeners(): void {
     updateExchanges(exchanges);
   });
 
-  socket.on('ia:test:reply', (reply: { success: boolean; response: string; intermediateJson?: string }) => {
+  socket.on('ia:test:reply', (reply: { success: boolean; response: string; intermediateJson?: string; planificateurReply?: string }) => {
     showTestResult(reply);
   });
 
@@ -97,7 +98,7 @@ function setupTestForm(): void {
   });
 }
 
-function showTestResult(reply: { success: boolean; response: string; intermediateJson?: string }): void {
+function showTestResult(reply: { success: boolean; response: string; intermediateJson?: string; planificateurReply?: string }): void {
   const sendBtn = $('test-send') as HTMLButtonElement | null;
   if (sendBtn) {
     sendBtn.disabled = false;
@@ -109,7 +110,8 @@ function showTestResult(reply: { success: boolean; response: string; intermediat
   resultEl.style.display = 'block';
   resultEl.className = `test-result ${reply.success ? 'ok' : 'error'}`;
   resultEl.innerHTML = `<div>${escapeHtml(reply.response)}</div>`
-    + (reply.intermediateJson ? `<pre class="intermediate-json">${escapeHtml(reply.intermediateJson)}</pre>` : '');
+    + (reply.intermediateJson ? `<pre class="intermediate-json">${escapeHtml(reply.intermediateJson)}</pre>` : '')
+    + (reply.planificateurReply ? `<div class="planificateur-reply-label">Réponse de planificateur :</div><pre class="intermediate-json">${escapeHtml(reply.planificateurReply)}</pre>` : '');
 }
 
 function requestInitialStatus(): void {
@@ -148,6 +150,7 @@ function updateExchanges(exchanges: Exchange[]): void {
       <div class="question">❓ ${escapeHtml(e.question)}</div>
       <div class="response">💬 ${escapeHtml(e.response)}</div>
       ${e.intermediateJson ? `<pre class="intermediate-json">${escapeHtml(e.intermediateJson)}</pre>` : ''}
+      ${e.planificateurReply ? `<div class="planificateur-reply-label">Réponse de planificateur :</div><pre class="intermediate-json">${escapeHtml(e.planificateurReply)}</pre>` : ''}
     </div>
   `).join('');
 }
