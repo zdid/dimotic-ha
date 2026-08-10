@@ -1,7 +1,7 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.5
-**Date :** 3 Août 2026
+**Version :** 1.6
+**Date :** 10 Août 2026
 **Statut :** Document de référence pour l'application `applications/ia`
 
 > Conforme à `techniques-socle-ha-mqtt_specs` (architecture 5 couches, EventBus),
@@ -60,6 +60,28 @@ format Ollama attendu par HA — chunks de contenu partiel (`done: false`) puis 
 d'assemblage spécifiques (§4) et suivent leur propre boucle de traitement complète (§8) — ils ne
 sont **jamais** un simple relais passif vers HA (voir §9 pour la distinction avec l'action
 immédiate historiquement décrite comme telle).
+
+**⭐ v1.6 — Débit du plan Mistral (`RateLimiter.ts`, module générique réutilisable pour un autre
+fournisseur/modèle à l'avenir)** : chaque modèle Mistral a ses propres limites de débit sur un même
+compte (constaté par l'utilisateur : `mistral-small-latest` 1,67 req/s / 100k tokens/min,
+`mistral-large-latest` 0,25 req/s / 400k tokens/min) — `MistralClient` maintient un `RateLimiter`
+par modèle (config `mistralRateLimits`, un record non exposé dans l'UI générique, comme
+`modelMap` — éditable dans `data/ia/config.yaml`) :
+- **Throttling préventif** : espace les requêtes sortantes selon la limite de requêtes/seconde du
+  modèle, et retarde une requête si le budget de tokens glissant sur 60s (déjà consommé par les
+  requêtes précédentes) est épuisé — ne peut être qu'à moitié préventif : le coût réel d'une
+  requête n'est connu qu'après réception de la réponse (`recordTokenUsage()`, appelé par
+  `IaService`/`DeployResponder` une fois le flux entièrement consommé), jamais avant l'envoi.
+- **Backoff réactif sur 429** : si le rate limit est quand même atteint, `MistralClient` retente
+  automatiquement avec un délai exponentiel (1s, 2s, 4s, 8s, 16s, 32s, plafonné à 60s), jusqu'à 6
+  nouvelles tentatives avant d'abandonner avec un message clair destiné à l'utilisateur ("Mistral a
+  atteint sa limite de requêtes... Réessaie dans quelques instants.") plutôt que le message
+  technique brut de l'API.
+- Un modèle non présent dans `mistralRateLimits` retombe sur le profil le plus restrictif connu,
+  par prudence.
+- **Tokens consommés affichés par appel** (demande utilisateur) : `promptTokens`/`completionTokens`
+  cumulés sur tous les rounds Mistral d'un même échange (une boucle d'appels d'outils enchaîne
+  plusieurs appels, §8) — affichés sur le journal des échanges et le résultat du test manuel (§13).
 
 ## 4. Difficultés protocolaires connues
 
@@ -262,6 +284,13 @@ Tableau de bord : joignabilité de l'API Mistral (et des fournisseurs générali
 du serveur Ollama émulé, derniers échanges (question/réponse, horodatés, fournisseur utilisé) à
 titre de journal — pas d'onglet de configuration avancée en v1 au-delà de §12.
 
+**⭐ v1.6** : chaque échange affiche désormais aussi (demandes utilisateur) — la réponse brute
+complète de `planificateur` au JSON structuré envoyé (`planificateurReply`, `success`/`message`
+inclus, pas seulement le message de confirmation déjà utilisé comme réponse conversationnelle) ;
+le nombre de tokens consommés (§3). Le champ de test manuel propose un historique des 20 dernières
+commandes testées (`<datalist>`, `localStorage`, propre au navigateur) — une commande n'y est
+ajoutée que si elle diffère de la précédente (pas de doublons en répétant la même commande).
+
 ## 14. Limitations connues / décisions
 
 - Le routage multi-IA (§6) a deux points non résolus avant implémentation réelle : la source fiable
@@ -284,6 +313,7 @@ titre de journal — pas d'onglet de configuration avancée en v1 au-delà de §
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.6 | 10/08/2026 | Claude | **Throttling préventif + backoff réactif sur rate limit Mistral** (§3, nouveau module `RateLimiter.ts` par modèle), **tokens consommés affichés par appel** (§3/§13), **trace complète de la réponse planificateur** dans le journal des échanges (§13), **historique des commandes de test** (`<datalist>`, §13). Toutes demandes utilisateur, session du 10/08/2026 (rate limit constaté en direct pendant les tests). |
 | 1.5 | 03/08/2026 | Claude | **Prise en compte du déclencheur réactif `state_change`** (`fonctionnelles-planificateur_specs` v1.5) : §10 étendue à quatre situations de déclenchement (ajout du changement d'état d'entité), mention du nouveau champ de contexte `triggered_entity_id` enrichissant la réinterprétation pour ce cas. §9 précise que `trigger.type` admet cette nouvelle valeur sans changer la structure du JSON échangé. §5 mentionne que `regles_mistral.txt` couvre désormais ce déclencheur. Nouvelle limitation connue (§14) : ambiguïté récurrent/one-shot de "quand X, fais Y" non résolue, traité récurrent par défaut, sans clarification demandée à l'utilisateur. |
 | 1.4 | 24/07/2026 | Claude | (Voir version archivée — pas de changement de contenu identifié entre 1.3 et 1.4 au moment de cette révision, seule la date d'en-tête diffère.) |
 | 1.3 | 23/07/2026 | Claude | **Révision architecturale majeure**, issue d'une session de conception approfondie avec l'utilisateur : (1) nouvelle §6 "Routage multi-IA" — le concept "VoiceRouter" existait déjà comme document de conception séparé (`voice-router-spec.md`, jamais implémenté), intégré ici. (2) `ia` gagne un accès HA en lecture (`requiredHaWs: true`, était `false`) pour résoudre localement les outils de lecture. (3) Nouvelles §7/§8 : `ia` déclare lui-même un jeu d'outils fixe à Mistral (pas de délégation aux outils natifs de HA comme le disait la v1.2) et exécute une vraie boucle d'appel d'outils (résultats réinjectés, Mistral rappelé), pas un simple relais passif. (4) L'action immédiate, un appel d'outil résolu, devient une planification immédiate non répétitive traitée par le point d'exécution unique de `planificateur` — troisième voie vers le même mécanisme que le minuteur et la macro directe. (5) Nouveaux événements EventBus `ia:tool:execute`/`:reply`. Sections renumérotées en conséquence, toutes les références croisées internes et vers `fonctionnelles-planificateur_specs` corrigées. |

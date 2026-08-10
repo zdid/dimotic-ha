@@ -1,5 +1,11 @@
 # Spécifications Fonctionnelles - Module RFXCOM
 
+*Version 5.12 - 10 Août 2026*
+*§8.6/§8.7/§8.8 : reconnexion automatique du transceiver (boucle 5s), correction de la publication
+optimiste d'état sur transceiver déconnecté, journal des ordres reçus avec résultat d'exécution
+réel — toutes demandes utilisateur suite à une anomalie constatée en direct (commande "réussie"
+sans qu'aucune trame RF n'ait pu être émise).*
+
 *Version 5.11 - 10 Août 2026*
 *§17.1 : second déclencheur de republication de découverte — `integration:rfxcom:ha:online`
 (birth message natif de HA sur `homeassistant/status`, indépendant de la connexion de notre propre
@@ -655,6 +661,53 @@ Depuis les Paramètres Techniques, un changement de `port` ou `baudRate` déclen
 > Ce mécanisme remplace un ancien comportement où le module entier était redémarré par `AppService`
 > à chaque sauvegarde de configuration — désactivé, RFXCOM gère désormais sa propre reconnexion.
 
+### 8.6 Reconnexion Automatique du Transceiver Matériel (⭐ nouveau v5.12)
+
+Si le transceiver est absent au démarrage, ou se déconnecte en cours de fonctionnement (câble USB
+débranché), une boucle retente une connexion **toutes les 5 secondes** plutôt que d'exiger un
+redémarrage complet de l'application (demande utilisateur, 10/08/2026) :
+- Démarrée dès `onConnectionChange(connected=false)` — couvre à la fois l'échec de connexion
+  initial et une déconnexion ultérieure (le callback est enregistré avant le tout premier appel de
+  connexion).
+- Chaque tentative redétecte le port via `PortDetector` (`/dev/serial/by-id`, stable même si le
+  numéro `/dev/ttyUSBx` change) et referme une éventuelle instance orpheline d'une tentative
+  précédente avant de réessayer.
+- Arrêtée dès `connected=true` ; nettoyée à l'arrêt du service. Un seul minuteur actif à la fois
+  (idempotent).
+- Échecs silencieux entre tentatives (le motif initial a déjà été journalisé) — seule la
+  reconnexion réussie (ou l'absence prolongée) est notable.
+
+### 8.7 Publication Optimiste de l'État Corrigée (⭐ nouveau v5.12)
+
+**Anomalie réelle constatée en direct (10/08/2026)** : avec le transmetteur physiquement débranché,
+une commande "allumer" envoyée depuis IA/`planificateur` était quand même relayée jusqu'à RFXCOM,
+qui publiait `state:"ON"` sur MQTT (confirmé retenu sur le broker) sans qu'aucune trame RF n'ait pu
+être émise — HA affichait la lumière allumée alors que rien ne s'était physiquement passé.
+`transceiver.sendCommand()` ne lève une exception que si le transceiver n'a **jamais** été
+initialisé depuis le démarrage, pas s'il a été débranché après une connexion antérieure réussie.
+
+**Corrigé** : `applyReceiverCommand()` vérifie désormais explicitement `transceiver.isConnected()`
+avant tout envoi — échec propre (`rfxcom:error`, log ERROR), aucune publication d'état optimiste si
+le transceiver n'est pas connecté.
+
+> ⚠️ **Limitation restante, non traitée** : même connecté, la commande reste optimiste sur la
+> **réception RF433 par le récepteur physique lui-même** — la bibliothèque `rfxcom` ne remonte que
+> la confirmation d'écriture bas niveau sur le port série (`buildAckLogger`), jamais une
+> confirmation que le récepteur cible a réellement exécuté la commande. Un récepteur hors de
+> portée RF, ou une pile déchargée sur un émetteur intermédiaire, reste donc silencieusement non
+> détecté.
+
+### 8.8 Journal des Ordres Reçus (⭐ nouveau v5.12)
+
+Suite à la découverte que l'ACK générique `homeassistant.turn_on`/`turn_off` de HA masque les
+échecs RFXCOM réels à tous les niveaux en amont (`planificateur`, `ia` — Mistral peut confabuler un
+succès sur cette seule base, voir `fonctionnelles-planificateur_specs` §8), RFXCOM tient désormais
+son propre journal (`rfxcom:orders:list`, 100 dernières entrées, événement persistant) : chaque
+ordre reçu (récepteur cible, commande, valeur) avec le résultat réel d'`applyReceiverCommand()`
+(connecté ou non, erreur de résolution/transmission le cas échéant) — seule source de vérité
+fiable, indépendante de tout ce qui se passe en amont. Nouvelle carte "Journal des ordres reçus"
+sur le tableau de bord.
+
 ---
 
 ## 9. État au Démarrage et Gestion des Données QUOI/OÙ
@@ -1275,7 +1328,7 @@ Voir historique §22.3 pour le détail complet des versions précédentes.
 
 ### 22.1 Références
 - [Spécification de Nommage **OBLIGATOIRE**](spec-nommage-v1.0.md) ⭐
-- [Spécifications Implémentation RFXCOM](implementation-rfxcom_specs_v1.4.md)
+- [Spécifications Implémentation RFXCOM](implementation-rfxcom_specs_v1.5.md)
 - [Spécifications Récepteurs/Émetteurs RFXCOM](recepteurs-emetteurs-rfxcom_specs_v5.4.md)
 - [Spécifications Techniques Socle HA-MQTT **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.19.md) ⭐
 - [Documentation librairie npm rfxcom](https://www.npmjs.com/package/rfxcom)
@@ -1321,6 +1374,7 @@ Capacités Request/Reply envisagées : `rfxcom:devices:list`, `rfxcom:device:get
 | 5.9 | 2026-08-03 | Claude | **Rattrapage documentaire complet** (voir bandeau en tête de document) : détection automatique du port (§8.2, absente jusqu'ici), verrou d'ordonnancement démarrage→push protocoles→découverte (§8.3), reconnexion à chaud (§8.5), retrait de découverte à la désélection (§17.3), topic dédié attributs de taxonomie (§2.6/§17.2, remplace un mécanisme jamais fonctionnel), format réel des identifiants (§2.2), absence d'état "unknown" fictif au démarrage (§9.2), arborescence réelle (§18), numérotation des sections corrigée, section Communication Inter-Applications déplacée en annexe et marquée non implémentée (§22.3), nouvelles limitations documentées (§20) dont la cause racine de la rafale OFF à chaque redémarrage. Aucun changement de comportement — travail de documentation uniquement, faisant suite à plusieurs semaines de dérive entre code et specs. |
 | 5.10 | 2026-08-09 | Claude | `essential.name` passe à `null` partout (5 endroits, §5.5) — corrige un doublon de nom réel ("Lumière lumière"), voir `techniques-socle-ha-mqtt_specs` §8.5.4 pour `has_entity_name`. |
 | 5.11 | 2026-08-10 | Claude | **Second déclencheur de republication de découverte** (§17.1) — `integration:rfxcom:ha:online`, alimenté par le birth message MQTT natif de HA, en plus du démarrage/de la reconnexion du bridge propre à RFXCOM. Voir `techniques-socle-ha-mqtt_specs` §8.5.4bis pour le mécanisme complet. Ancienne version v5.10 archivée. |
+| 5.12 | 2026-08-10 | Claude | **Trois correctifs suite à une anomalie constatée en direct** (transceiver débranché, commande "réussie" sans transmission RF) : reconnexion automatique du transceiver (§8.6, boucle 5s), publication optimiste d'état corrigée (§8.7, vérification `isConnected()` avant tout envoi), journal des ordres reçus avec résultat d'exécution réel (§8.8, `rfxcom:orders:list`, 100 max). Ancienne version v5.11 archivée. |
 
 ---
 

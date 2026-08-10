@@ -1,7 +1,7 @@
 # Spécifications Fonctionnelles — Application PLANIFICATEUR
 
-**Version :** 1.5
-**Date :** 3 Août 2026
+**Version :** 1.6
+**Date :** 10 Août 2026
 **Statut :** Document de référence pour l'application `applications/planificateur`
 
 > Conforme à `techniques-socle-ha-mqtt_specs` (architecture 5 couches, EventBus,
@@ -243,6 +243,22 @@ qu'une nouvelle table indépendante à maintenir.
 L'entité ciblée (`entity_id`) est résolue séparément, via `HaStructureRegistry`, à partir du couple
 `quoi`/`lieux` — la même taxonomie que celle utilisée partout ailleurs dans le socle.
 
+**⭐ v1.6 — Deux niveaux de résolution pour `lieux`** (corrige "éteins le salon" ciblant toute
+l'area "Salle" au lieu du seul "Salon", bug constaté en direct) :
+1. **Area HA** (niveau habituel) : chaque terme de `lieux` est d'abord comparé aux areas connues
+   de `HaStructureRegistry` (nom ou `area_id`).
+2. **Repli sur le lieu précis de la taxonomie**, uniquement pour un terme qui ne correspond à
+   AUCUNE area — comparé à l'attribut `attributs_taxonomie.lieu_precis`/`slug_precis` de chaque
+   entité (ex: "Salon", "Lampadaire", "Bibliothèque" : plusieurs appareils du même `quoi`
+   peuvent coexister dans la même area "Salle", distingués uniquement par ce lieu précis — qui
+   n'existe jamais comme area HA à part entière). Jamais appliqué en plus d'une correspondance
+   area déjà trouvée, pour ne pas élargir une cible déjà précisément résolue.
+
+Le contexte envoyé à `ia` pour la réinterprétation à l'exécution (§6, `entities_snapshot`) inclut
+désormais `lieu_precis` par entité, en plus de `area_id` — sans lui, Mistral ne voyait jamais
+"Salon" nulle part (seulement l'area "Salle", identique pour les 4 lumières de la pièce) et
+normalisait par prudence vers l'area englobante, faute de donnée plus précise à vérifier.
+
 Si le verbe n'est pas connu de cette table (ambigu, nouveau, non encore prévu), la résolution
 échoue silencieusement et `resolved_service_call` reste absent — voir §8 pour le repli associé.
 
@@ -259,6 +275,19 @@ Si le verbe n'est pas connu de cette table (ambigu, nouveau, non encore prévu),
   l'ordre en langage naturel (`order`) est transmis tel quel, HA reste responsable de le traduire
   en commande réelle. Filet de sécurité pour les cas non couverts par la table du §7, pas le
   chemin principal.
+
+**⭐ v1.6 — Deux journaux distincts sur le tableau de bord** (demandes utilisateur, la première
+n'étant pas suffisante — l'ACK de `homeassistant.turn_on`/`turn_off` par HA confirme seulement la
+diffusion du service, jamais l'exécution réelle par le device cible, Mistral pouvant confabuler un
+succès sur cette seule base) :
+- **Journal des actions reçues de `ia`** (`planificateur:actions:list`, 20 dernières) : chaque
+  `ia:command`/`ia:tool:execute` reçu, avec la requête et la réponse complète (`CorrelatedReponse`).
+- **Détail des commandes envoyées à HA** (`planificateur:ha-commands:list`, 20 dernières) : pour
+  chaque étape `action` exécutée (§8, quel que soit le déclencheur — minuteur, macro dite, message
+  `ia`), l'issue réelle (`resolved` service HA appelé / `fallback_conversation` / `ignored`),
+  succès/échec, l'entité à l'origine pour un déclenchement `state_change`, et la prochaine
+  date/heure d'exécution programmée pour un déclencheur temporel récurrent (`next_fire_at`, déjà
+  réarmé par `SchedulerRuntime` au moment de la trace).
 
 ## 9. Communication interne (EventBus)
 
@@ -318,6 +347,7 @@ Un badge "manqué" s'ajoute au badge actif/inactif d'une planification quand `mi
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.6 | 10/08/2026 | Claude | **Résolution de `lieux` sur le lieu précis en repli de l'area HA** (§7, corrige "éteins le salon" ciblant toute la salle), `entities_snapshot` enrichi de `lieu_precis` (§6). **Deux journaux sur le tableau de bord** (§8) : actions reçues de `ia`, détail des commandes envoyées à HA (issue réelle, entité déclenchante, prochaine exécution). Toutes demandes utilisateur, session du 10/08/2026. |
 | 1.5 | 03/08/2026 | Claude | **Déclencheur réactif `state_change`** (nouvelle §3.2) : règles sur changement d'état d'entité (précise via `entity_id`, ou par défaut sur tout un domaine via `domain`), priorité entité>domaine, comportement "minuterie" (annulation/relance par couple planification/entité). §6 étendue à quatre situations de déclenchement (ajout du changement d'état), contexte de déploiement enrichi de `triggered_entity_id` pour le ciblage implicite. Nouvelle §5.1 : persistance d'une heure cible absolue (`next_fire_at`) et reprise sur le temps réellement restant après coupure pour les triggers temporels (corrige un comportement antérieur où `delay`/`duration` repartaient intégralement à zéro à chaque redémarrage, jamais documenté comme tel), fenêtre de rattrapage configurable (`catchUpWindowSeconds`, §10) au-delà de laquelle un déclenchement est abandonné et marqué `missed` (badge UI, §11). §2 étendue (`next_fire_at`/`pending`/`missed` sur `PlanificationDefinition`, champs de `Trigger` pour `state_change`). Limitations connues (§12) : reprise imprécise pour `state_change` (durée d'attente jamais persistée), ambiguïté récurrent/one-shot non résolue, `missed` non suivi par entité pour une règle de domaine. |
 | 1.4 | 24/07/2026 | Claude | (Voir version archivée — pas de changement de contenu identifié entre 1.3 et 1.4 au moment de cette révision, seule la date d'en-tête diffère.) |
 | 1.3 | 23/07/2026 | Claude | **Révision majeure**, en miroir de `fonctionnelles-ia_specs` v1.3 : `resolved_service_call` n'est plus un placeholder inactif — c'est le mécanisme d'exécution **principal**, peuplé par `planificateur` lui-même (nouvelle §7 "Résolution des actions vers un service HA", table verbe→service à deux niveaux, prolongeant la table verbe→quoi des règles domotiques). §6 réécrite : trois déclencheurs convergent désormais vers le point d'exécution unique (minuteur, macro directe, **appel d'outil résolu** — nouveau, traité comme planification immédiate via `{type:"delay",seconds:0}`). §8 (ancienne §7) réécrite : exécution directe via `resolved_service_call` en chemin principal, agent de conversation HA relégué en repli. Toutes les références vers `fonctionnelles-ia_specs` corrigées suite à sa renumérotation. |

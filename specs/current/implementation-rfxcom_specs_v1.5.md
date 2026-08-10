@@ -1,5 +1,10 @@
 # Spécifications Techniques d'Implémentation - Module RFXCOM
 
+*Version 1.5 - 10 Août 2026*
+*§6.1 : vérification `isConnected()` avant tout envoi + journal des ordres reçus (`recordOrder()`).
+§11.1 (nouveau) : boucle de reconnexion automatique du transceiver (5s). Voir
+`fonctionnelles-rfxcom_specs` §8.6/§8.7/§8.8.*
+
 *Version 1.4 - 10 Août 2026*
 *§11.1 : nouveau listener `integration:rfxcom:ha:online`, rappelle `publishInitialDiscoveries()` —
 second déclencheur de republication de découverte, voir `fonctionnelles-rfxcom_specs` §17.1 et
@@ -56,7 +61,7 @@ réellement utilisée par RfxComTransceiver.ts — vérifiée directement dans l
 - NPM package `rfxcom` (dépendance de `applications/rfxcom`).
 
 ### 1.4 Référentiels
-- **⭐ [fonctionnelles-rfxcom_specs_v5.11.md](fonctionnelles-rfxcom_specs_v5.11.md)** - Spécifications fonctionnelles principales
+- **⭐ [fonctionnelles-rfxcom_specs_v5.12.md](fonctionnelles-rfxcom_specs_v5.12.md)** - Spécifications fonctionnelles principales
 - **⭐ [techniques-socle-ha-mqtt_specs_v4.19.md](techniques-socle-ha-mqtt_specs_v4.19.md)** - Socle technique
 - **⭐ [spec-nommage-v1.0.md](spec-nommage-v1.0.md)** - Règles de nommage
 - **⭐ [recepteurs-emetteurs-rfxcom_specs_v5.4.md](recepteurs-emetteurs-rfxcom_specs_v5.4.md)** - Récepteurs et émetteurs
@@ -251,7 +256,10 @@ gestionnaire serveur ne les traite, voir `fonctionnelles-rfxcom_specs` §20).
 ### 6.1 Flux d'Exécution (réel)
 
 ```
-HA → EventBus → RfxComService.applyReceiverCommand()
+HA → EventBus → RfxComService.applyReceiverCommand()   ⭐ v1.5 : enveloppe recordOrder() +
+        │                                                  applyReceiverCommandInternal()
+        ▼
+⭐ v1.5 : transceiver.isConnected() ? sinon échec propre, aucun envoi tenté
         │
         ▼
 ReceiverManager → Receiver{Switch|Light|Cover}.translateHaCommand()
@@ -264,7 +272,17 @@ Appel de la méthode du transmitter (switchOn/switchOff/setLevel/open/close/stop
         │
         ▼
 buildAckLogger() — callback loggé à l'écriture sur le port série (pas une confirmation RF433)
+        │
+        ▼
+⭐ v1.5 : recordOrder() journalise le résultat réel (recentOrders, 100 max, rfxcom:orders:list)
 ```
+
+**⭐ v1.5** : `applyReceiverCommand()` (nom conservé côté appelant) enveloppe désormais
+`applyReceiverCommandInternal()` (logique inchangée, renommée) — chaque appel est journalisé via
+`recordOrder(receiverId, command, value, result)`, quel que soit le point de sortie (échec précoce
+— transceiver non connecté, récepteur/émetteur introuvable — ou succès/échec de `sendCommand()`).
+Voir `fonctionnelles-rfxcom_specs` §8.6/§8.7/§8.8 pour le contexte complet (anomalie constatée en
+direct : publication d'état optimiste sur transceiver débranché).
 
 ### 6.2 Dispatch par Protocole (réel — remplace `instanceof` fictif)
 
@@ -461,6 +479,23 @@ déconnecte. Voir `techniques-socle-ha-mqtt_specs` §8.5.4bis pour le mécanisme
 **Comportement en cas d'échec de connexion** : `WARNING` (pas `ERROR`), `isConnected = false`,
 application non bloquée, indicateur UI "Déconnecté".
 
+**⭐ v1.5 — Boucle de reconnexion automatique (5s)** :
+```typescript
+this.transceiver.onConnectionChange((connected) => {
+  this.emitStatus();
+  if (connected) this.stopReconnectLoop();
+  else this.startReconnectLoop();
+});
+```
+Enregistré avant le tout premier `connect()` — un échec de connexion initial déclenche donc aussi
+`notifyConnection(false, ...)` côté `RfxComTransceiver`, et donc la boucle, sans code dédié dans le
+bloc `catch` de `start()`. `startReconnectLoop()` est idempotent (`setInterval`, 5000ms) ;
+`attemptAutoReconnect()` (une itération) : `if (transceiver.isConnected()) { stopReconnectLoop(); return; }`,
+sinon `transceiver.disconnect()` (referme une instance orpheline éventuelle) puis
+`transceiver.connect({port: resolvePort(), baudRate})` — échec silencieux, nouvelle tentative dans
+5s. `resolvePort()` redétecte via `PortDetector` à chaque tentative (le port `/dev/serial/by-id`
+peut réapparaître sous le même chemin stable). Nettoyée dans `stop()`.
+
 ### 11.2 Arrêt
 
 ```typescript
@@ -537,7 +572,7 @@ disponible dans le code applicatif actuel.
 
 ### 14.1 Références
 - **[Bibliothèque rfxcom npm](https://www.npmjs.com/package/rfxcom)**
-- **[fonctionnelles-rfxcom_specs_v5.11.md](fonctionnelles-rfxcom_specs_v5.11.md)** ⭐
+- **[fonctionnelles-rfxcom_specs_v5.12.md](fonctionnelles-rfxcom_specs_v5.12.md)** ⭐
 - **[techniques-socle-ha-mqtt_specs_v4.19.md](techniques-socle-ha-mqtt_specs_v4.19.md)** ⭐
 - **[recepteurs-emetteurs-rfxcom_specs_v5.4.md](recepteurs-emetteurs-rfxcom_specs_v5.4.md)** ⭐
 
@@ -571,8 +606,9 @@ await transceiver.connect({ port, baudRate: this.config.baudRate });
 | 1.0 | 2026-07-11 | Mistral Vibe | Version initiale - Intégration de la bibliothèque rfxcom npm |
 | 1.2 | 2026-07-17 | Mistral Vibe | Démarrage automatique via AppService, injection `IAppConfigProvider`, traces détaillées |
 | 1.4 | 2026-08-10 | Claude | **Second déclencheur de découverte** (§11.1) — listener `integration:rfxcom:ha:online` rappelant `publishInitialDiscoveries()`, alimenté par le birth message MQTT natif de HA. Voir `fonctionnelles-rfxcom_specs` v5.11 et `techniques-socle-ha-mqtt_specs` §8.5.4bis. Ancienne version v1.3 archivée. |
-| 1.3 | 2026-08-03 | Claude | **Réécriture complète des sections décrivant l'API de la bibliothèque `rfxcom`** (§2-§8, §11, §13), qui documentaient une API fictive jamais celle réellement publiée (pas d'événement générique `'device'`, pas de `'connect'`/`'error'` génériques, options du constructeur réduites à `{debug}`, dispatch par `switch` sur le protocole et non `instanceof`, échelle de dim réelle 0-15). Nouvelle §8 "Persistance et Validation" documentant la cause racine, jusqu'ici non identifiée dans les specs, de la rafale de commandes OFF à chaque redémarrage (`lastOn`/`lastLevel`/`lastValue`/`commandDeviceId` écrits en YAML mais strippés au rechargement par le schéma Zod). §11.1/§11.3 réécrites (verrou `protocolsPushGate`, reconnexion à chaud propre à RFXCOM plutôt que redémarrage du module entier par AppService). Section "Communication Inter-Applications" (§9 de la v1.2, jamais implémentée, doublon de numérotation avec l'ancienne §9) retirée de ce document — voir l'annexe correspondante dans `fonctionnelles-rfxcom_specs_v5.11.md` §22.3, qui la documente une seule fois pour l'ensemble du module RFXCOM avec la mention explicite "non implémentée". |
+| 1.5 | 2026-08-10 | Claude | **Vérification `isConnected()` + journal des ordres** (§6.1) — `applyReceiverCommand()` refuse tout envoi si le transceiver n'est pas connecté, chaque ordre journalisé (`recordOrder()`, `rfxcom:orders:list`). **Boucle de reconnexion automatique** (§11.1, 5s) sur `onConnectionChange(connected=false)`. Voir `fonctionnelles-rfxcom_specs` v5.12. Ancienne version v1.4 archivée. |
+| 1.3 | 2026-08-03 | Claude | **Réécriture complète des sections décrivant l'API de la bibliothèque `rfxcom`** (§2-§8, §11, §13), qui documentaient une API fictive jamais celle réellement publiée (pas d'événement générique `'device'`, pas de `'connect'`/`'error'` génériques, options du constructeur réduites à `{debug}`, dispatch par `switch` sur le protocole et non `instanceof`, échelle de dim réelle 0-15). Nouvelle §8 "Persistance et Validation" documentant la cause racine, jusqu'ici non identifiée dans les specs, de la rafale de commandes OFF à chaque redémarrage (`lastOn`/`lastLevel`/`lastValue`/`commandDeviceId` écrits en YAML mais strippés au rechargement par le schéma Zod). §11.1/§11.3 réécrites (verrou `protocolsPushGate`, reconnexion à chaud propre à RFXCOM plutôt que redémarrage du module entier par AppService). Section "Communication Inter-Applications" (§9 de la v1.2, jamais implémentée, doublon de numérotation avec l'ancienne §9) retirée de ce document — voir l'annexe correspondante dans `fonctionnelles-rfxcom_specs_v5.12.md` §22.3, qui la documente une seule fois pour l'ensemble du module RFXCOM avec la mention explicite "non implémentée". |
 
 ---
 
-*Conforme à [fonctionnelles-rfxcom_specs_v5.11.md](fonctionnelles-rfxcom_specs_v5.11.md), [techniques-socle-ha-mqtt_specs_v4.19.md](techniques-socle-ha-mqtt_specs_v4.19.md) et [spec-nommage-v1.0.md](spec-nommage-v1.0.md)*
+*Conforme à [fonctionnelles-rfxcom_specs_v5.12.md](fonctionnelles-rfxcom_specs_v5.12.md), [techniques-socle-ha-mqtt_specs_v4.19.md](techniques-socle-ha-mqtt_specs_v4.19.md) et [spec-nommage-v1.0.md](spec-nommage-v1.0.md)*
