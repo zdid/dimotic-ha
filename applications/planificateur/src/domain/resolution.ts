@@ -59,58 +59,18 @@ function slugify(text: string): string {
     .replace(/_+/g, '_');
 }
 
-/** Résout les entity_id ciblés par (quoi, lieux) via HaStructureRegistry. */
+/** Résout les entity_id ciblés par (quoi, lieux) via HaStructureRegistry.getEntitiesByQuoiAndLieux
+ *  — recherche de lieu indépendante du niveau taxonomique (lieu_precis/lieu/lieu_pere/
+ *  lieu_grand_pere), voir le graphe de lieux dans HaStructureRegistry (demande utilisateur
+ *  10/08/2026, généralise le repli lieu_precis initial : "salon" comme "toilettes de l'étage"
+ *  passent par le même mécanisme, sans que ce module ait à savoir à quel niveau chacun est codifié). */
 export function resolveEntityIds(
   registry: HaStructureRegistry,
   quoi: string,
   lieux: string[] = []
 ): string[] {
   const quoiId = slugify(quoi);
-
-  if (lieux.length === 0) {
-    return registry.getEntitiesByQuoi(quoiId).map((e) => e.entity_id);
-  }
-
-  const areas = [...registry.getAreas().values()];
-  const entityIds = new Set<string>();
-
-  for (const lieu of lieux) {
-    const lieuSlug = slugify(lieu);
-    const matchedAreas = areas.filter((a) => slugify(a.name) === lieuSlug || slugify(a.area_id) === lieuSlug);
-
-    let matchedFromArea = 0;
-    for (const area of matchedAreas) {
-      for (const entity of registry.getEntitiesByAreaAndQuoi(area.area_id, quoiId)) {
-        entityIds.add(entity.entity_id);
-        matchedFromArea++;
-      }
-    }
-    if (matchedFromArea > 0) continue;
-
-    // ⭐ 10/08/2026 — repli sur le lieu précis de la taxonomie (ex: "Salon", plus fin que l'area
-    // HA "Salle" qui le contient). Déclenché si aucune area HA ne matche OU si l'area qui matche
-    // ne contient aucune entité de ce quoi (cas réel rencontré : une area HA "Salon" existe pour
-    // un tout autre usage — module infrarouge/télécommande TV — sans aucune lumière ; la vraie
-    // lumière du salon est rattachée à l'area "Salle" et distinguée uniquement par son
-    // attributs_taxonomie.lieu_precis="salon"). Sans le test sur matchedFromArea, ce cas
-    // court-circuitait le repli via le `continue` précédent et renvoyait un résultat vide au lieu
-    // de chercher plus finement. Demande utilisateur : "éteins le salon" partait en repli
-    // conversation.process faute de service HA résolu.
-    for (const entity of registry.getEntitiesByQuoi(quoiId)) {
-      if (matchesLieuPrecis(entity, lieuSlug)) {
-        entityIds.add(entity.entity_id);
-      }
-    }
-  }
-
-  return [...entityIds];
-}
-
-function matchesLieuPrecis(entity: { attributes: Record<string, unknown> }, lieuSlug: string): boolean {
-  const taxonomie = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
-  if (!taxonomie) return false;
-  if (typeof taxonomie.slug_precis === 'string' && taxonomie.slug_precis === lieuSlug) return true;
-  return typeof taxonomie.lieu_precis === 'string' && slugify(taxonomie.lieu_precis) === lieuSlug;
+  return registry.getEntitiesByQuoiAndLieux(quoiId, lieux).map((e) => e.entity_id);
 }
 
 /** Résout une intention (verbe/quoi/lieux/valeur) en resolved_service_call, ou undefined. */

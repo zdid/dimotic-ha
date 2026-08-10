@@ -21,18 +21,13 @@ function slugify(text: string): string {
     .replace(/_+/g, '_');
 }
 
+// Résolution déléguée à HaStructureRegistry.getEntitiesByQuoiAndLieux (graphe de lieux,
+// indépendant du niveau taxonomique — voir applications/planificateur/src/domain/resolution.ts
+// pour la même logique côté exécution) : évite de dupliquer ici un matching area-seule qui ne
+// couvrait ni lieu_precis ni lieu_pere.
 function resolveEntities(registry: HaStructureRegistry, quoi?: string, lieux?: string[]): Array<{ entity_id: string; state?: string; name?: string }> {
   const quoiId = quoi ? slugify(quoi) : undefined;
-
-  let entities = quoiId ? registry.getEntitiesByQuoi(quoiId) : registry.getAllEntities();
-
-  if (lieux?.length) {
-    const areas = [...registry.getAreas().values()];
-    const lieuxSlugs = new Set(lieux.map(slugify));
-    const matchedAreaIds = new Set(areas.filter((a) => lieuxSlugs.has(slugify(a.name)) || lieuxSlugs.has(slugify(a.area_id))).map((a) => a.area_id));
-    entities = entities.filter((e) => e.area_id && matchedAreaIds.has(e.area_id));
-  }
-
+  const entities = registry.getEntitiesByQuoiAndLieux(quoiId, lieux ?? []);
   return entities.map((e) => ({ entity_id: e.entity_id, state: e.state, name: e.friendly_name }));
 }
 

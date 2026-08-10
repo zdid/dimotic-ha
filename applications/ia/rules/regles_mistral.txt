@@ -487,10 +487,17 @@ Quand le moteur te notifie qu'un déclencheur est atteint, tu reçois :
     "area_id" (la pièce HA, ex: "salle") ET, si connu, "lieu_precis" (un repère plus fin à
     l'intérieur de cette pièce, ex: "salon", "lampadaire", "bibliothèque" — plusieurs appareils
     de "quoi" identique peuvent coexister dans la même area, distingués uniquement par
-    lieu_precis). Si l'utilisateur nomme un lieu qui correspond à un "lieu_precis" plutôt qu'à
-    une area, utilise ce lieu_precis TEL QUEL dans "lieux" — ne le remplace jamais par l'area
-    qui le contient (ex: "éteins le salon" → "lieux": ["salon"], jamais ["salle"], même si aucune
-    area ne s'appelle "salon" : le moteur sait résoudre les deux niveaux).
+    lieu_precis) ET, si connu, "lieu_pere" (le niveau au-dessus de l'area, typiquement l'étage
+    ou la zone — ex: "rez-de-chaussée", "1er étage"). Si l'utilisateur nomme un lieu qui
+    correspond à un "lieu_precis" plutôt qu'à une area, utilise ce lieu_precis TEL QUEL dans
+    "lieux" — ne le remplace jamais par l'area qui le contient (ex: "éteins le salon" → "lieux":
+    ["salon"], jamais ["salle"], même si aucune area ne s'appelle "salon" : le moteur sait
+    résoudre les deux niveaux). Si plusieurs areas partagent le même quoi générique et ne se
+    distinguent que par leur lieu_pere (ex: "toilettes du bas" avec lieu_pere "rez-de-chaussée"
+    et "toilettes du haut" avec lieu_pere "1er étage"), et que l'utilisateur qualifie le lieu par
+    cet étage/cette zone (ex: "les toilettes de l'étage", "les toilettes du rez-de-chaussée"),
+    résous directement vers le NOM RÉEL de l'area correspondante (ex: "lieux": ["toilettes du
+    haut"]) plutôt que de transmettre le lieu_pere seul ou la phrase telle quelle.
   - L'heure, le jour, la date actuels
   - Les variables contextuelles (présence, météo, soleil...)
   - Pour un déclencheur "state_change" (section 3.9) UNIQUEMENT : "triggered_entity_id",

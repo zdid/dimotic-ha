@@ -51,6 +51,18 @@ export class HaStructureRegistry {
   private lastFullSync: Date | null = null;
   private logger: Logger;
 
+  // Graphe de lieux (specs à venir) — un "nœud" par valeur de lieu rencontrée dans
+  // attributs_taxonomie, tous niveaux confondus (lieu_precis/lieu/lieu_pere/lieu_grand_pere,
+  // via leurs champs slug_*). Sert getEntitiesByQuoiAndLieux() : recherche d'un terme de lieu
+  // indépendante du niveau où il est codifié (demande utilisateur 10/08/2026 — "toilettes de
+  // l'étage" doit se résoudre aussi bien qu'un lieu précis comme "salon"). Reconstruit
+  // paresseusement (drapeau "dirty") à la première lecture suivant une mutation du registre —
+  // à cette échelle (quelques centaines d'entités) une reconstruction complète est immédiate,
+  // plus simple et plus sûre qu'un maintien incrémental avec comptage de références sur les
+  // arêtes (nécessaire pour gérer correctement une suppression/reclassification d'entité).
+  private lieuGraphDirty = true;
+  private lieuChildren: Map<string, Set<string>> = new Map();
+
   /**
    * @param classifier - Classifieur pour déterminer les QUOI des entités
    * @param config - Configuration de structuration
@@ -200,6 +212,7 @@ export class HaStructureRegistry {
     }
 
     this.lastFullSync = new Date();
+    this.invalidateLieuGraph();
     this.logger.info('ha:structure_registry', `Registre structuré initialisé: ${this.areas.size} areas, ${this.devices.size} devices, ${this.entityMap.size} entités`);
 
     return this.getRegistry();
@@ -350,6 +363,7 @@ export class HaStructureRegistry {
     }
 
     this.entityMap.set(rawEntity.entity_id, updatedEntity);
+    this.invalidateLieuGraph();
     this.logger.debug('ha:structure_registry', `Entité mise à jour: ${rawEntity.entity_id}`);
 
     return updatedEntity;
@@ -378,6 +392,7 @@ export class HaStructureRegistry {
 
     // Ajouter à la structure (area → QUOI)
     this.addEntityToStructure(structuredEntity);
+    this.invalidateLieuGraph();
 
     this.logger.debug('ha:structure_registry', `Nouvelle entité ajoutée: ${structuredEntity.entity_id}`);
 
@@ -474,6 +489,7 @@ export class HaStructureRegistry {
 
     this.removeEntityFromStructure(entity);
     this.entityMap.delete(entityId);
+    this.invalidateLieuGraph();
     this.logger.debug('ha:structure_registry', `Entité supprimée: ${entityId}`);
 
     return true;
@@ -731,20 +747,136 @@ export class HaStructureRegistry {
 
   /**
    * Récupère les entités par Area et QUOI.
-   * 
+   *
    * @param areaId - ID de l'area à filtrer
    * @param quoiId - ID du QUOI à filtrer
    * @returns Tableau d'entités appartenant à cette area et ce QUOI
    */
   getEntitiesByAreaAndQuoi(areaId: string, quoiId: string): HaStructuredEntity[] {
     const area = this.areas.get(areaId);
-    
+
     if (!area) {
       return [];
     }
 
     const quoi = area.quoiMap.get(quoiId);
     return quoi ? [...quoi.entities] : [];
+  }
+
+  /**
+   * Résout les entités d'un QUOI (optionnel) dont le lieu correspond à au moins un des termes
+   * demandés — recherche volontairement indépendante du niveau taxonomique auquel chaque terme
+   * est codifié (lieu/area, lieu_pere, lieu_grand_pere pour un lieu "large" ; lieu_precis pour un
+   * repère fin) : "toilettes du haut" (lieu/area), "étage" (lieu_pere), "maison" (lieu_grand_pere
+   * pour la plupart des entités, mais aussi lieu_principal littéral d'une area technique — les
+   * deux se combinent sans conflit), "salon" (lieu_precis d'une lumière de la Salle). `quoi` est
+   * le niveau de filtrage principal : on part des entités de ce QUOI, puis on ne garde que
+   * celles dont le lieu correspond — jamais l'inverse (demande utilisateur 10/08/2026).
+   *
+   * Un terme matche une entité de deux façons distinctes, jamais combinées :
+   *  - directement, si son lieu_precis (propre à CETTE entité, ex: "plafonnier", "escalier")
+   *    égale le terme — un repère précis est un simple label local, jamais un nœud du graphe :
+   *    plusieurs pièces sans rapport réutilisent le même label ("plafonnier" apparaît dans une
+   *    dizaine de pièces différentes) — le laisser participer au graphe de containment ci-dessous
+   *    ferait converger toutes ces pièces vers le même nœud "plafonnier" et un terme comme
+   *    "toilettes du haut" (dont c'est un enfant) ramènerait alors TOUTES les pièces ayant elles
+   *    aussi un "plafonnier", bug réel observé le 10/08/2026 lors du test en direct de "toilettes
+   *    de l'étage".
+   *  - via le graphe de containment (grand_pere → pere → lieu/area uniquement, PAS lieu_precis) :
+   *    le lieu/area de l'entité tombe dans le sous-arbre du terme — ce graphe ne représente que
+   *    de l'imbrication physique réelle (pièce ⊂ étage ⊂ maison), jamais des labels répétés.
+   *
+   * `lieuTerms` vide → retourne simplement les entités du QUOI (comportement de
+   * getEntitiesByQuoi). Plusieurs termes → union des entités trouvées pour chacun (OU, pas ET :
+   * "lieux" porte aussi bien un lieu unique qualifié que plusieurs lieux visés séparément, ex.
+   * ["salon", "cuisine"] — voir regles_mistral.txt §2.1, "lieux" toujours un tableau).
+   *
+   * @param quoiId - ID du QUOI à filtrer, ou undefined pour ne filtrer que par lieu
+   * @param lieuTerms - termes de lieu à résoudre (déjà en langage naturel, pas nécessairement slugifiés)
+   */
+  getEntitiesByQuoiAndLieux(quoiId: string | undefined, lieuTerms: string[]): HaStructuredEntity[] {
+    this.rebuildLieuGraphIfNeeded();
+
+    const candidates = quoiId ? this.getEntitiesByQuoi(quoiId) : this.getAllEntities();
+    if (lieuTerms.length === 0) return candidates;
+
+    const termSlugs = new Set(lieuTerms.map((t) => this.slugifyLieu(t)));
+    const reachableAreas = new Set<string>();
+    for (const term of termSlugs) {
+      for (const slug of this.collectLieuSubtree(term)) reachableAreas.add(slug);
+    }
+
+    return candidates.filter((entity) => {
+      const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
+      const precis = taxonomy?.slug_precis;
+      if (typeof precis === 'string' && precis && termSlugs.has(precis)) return true;
+
+      const lieu = (typeof taxonomy?.slug_lieu === 'string' && taxonomy.slug_lieu) || entity.area_id;
+      return lieu !== undefined && reachableAreas.has(lieu);
+    });
+  }
+
+  /** Ensemble des slugs atteignables depuis lieuSlug (lui inclus) en suivant les arêtes
+   *  parent→enfant du graphe de containment (grand_pere → pere → lieu/area) — sûr vis-à-vis des
+   *  cycles (ex: "maison" est à la fois ancêtre de "rez_de_chaussee" pour la plupart des pièces
+   *  ET, via une area technique du même nom, un lieu enfant de "rez_de_chaussee" — un parcours en
+   *  profondeur avec ensemble de nœuds visités traverse ce genre de boucle sans souci). */
+  private collectLieuSubtree(lieuSlug: string): Set<string> {
+    const visited = new Set<string>();
+    const stack = [lieuSlug];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const children = this.lieuChildren.get(current);
+      if (children) {
+        for (const child of children) {
+          if (!visited.has(child)) stack.push(child);
+        }
+      }
+    }
+    return visited;
+  }
+
+  private rebuildLieuGraphIfNeeded(): void {
+    if (!this.lieuGraphDirty) return;
+
+    this.lieuChildren.clear();
+
+    for (const entity of this.entityMap.values()) {
+      const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
+      if (!taxonomy) continue;
+
+      // lieu_precis volontairement exclu : c'est un label local à l'entité (voir
+      // getEntitiesByQuoiAndLieux), jamais une arête du graphe de containment.
+      const levels = [taxonomy.slug_grand_pere, taxonomy.slug_pere, taxonomy.slug_lieu]
+        .filter((v): v is string => typeof v === 'string' && v.length > 0);
+      if (levels.length < 2) continue;
+
+      for (let i = 0; i + 1 < levels.length; i++) {
+        const parent = levels[i]!;
+        const child = levels[i + 1]!;
+        if (parent === child) continue;
+        if (!this.lieuChildren.has(parent)) this.lieuChildren.set(parent, new Set());
+        this.lieuChildren.get(parent)!.add(child);
+      }
+    }
+
+    this.lieuGraphDirty = false;
+  }
+
+  private invalidateLieuGraph(): void {
+    this.lieuGraphDirty = true;
+  }
+
+  private slugifyLieu(text: string): string {
+    return text
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .replace(/_+/g, '_');
   }
 
   /**
@@ -832,6 +964,7 @@ export class HaStructureRegistry {
     this.devices.clear();
     this.entityMap.clear();
     this.lastFullSync = null;
+    this.invalidateLieuGraph();
 
     if (this.config.includeUnassigned) {
       this.unassigned = this.createUnassignedArea();

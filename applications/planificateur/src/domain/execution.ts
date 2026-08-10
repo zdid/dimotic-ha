@@ -93,13 +93,19 @@ export class ExecutionEngine {
       // "Salle", identique pour les 4 lumières de la pièce) et retombait sur l'area, faute de
       // donnée plus précise à vérifier. Extrait de l'attribut attributs_taxonomie déjà publié
       // (voir techniques-socle-ha-mqtt_specs §8.5.4 v4.19 pour le mécanisme de publication).
+      // ⭐ 10/08/2026 (suite, même jour) : lieu_pere ajouté — cas "toilettes de l'étage" vs
+      // "toilettes du rez-de-chaussée" : deux areas HA distinctes ("toilettes du bas"/"toilettes
+      // du haut") partagent le même quoi générique, seul lieu_pere (étage/rez-de-chaussée) les
+      // distingue. Permet à Mistral de résoudre lui-même vers le nom d'area réel avant même
+      // d'appeler l'outil, plutôt que de transmettre un terme ambigu — voir regles_mistral.txt §4.
       entities_snapshot: this.registry ? this.registry.getAllEntities().map((e) => ({
         entity_id: e.entity_id,
         friendly_name: e.friendly_name,
         state: e.state,
         domain: e.domain,
         area_id: e.area_id,
-        lieu_precis: (e.attributes?.attributs_taxonomie as Record<string, unknown> | undefined)?.lieu_precis
+        lieu_precis: (e.attributes?.attributs_taxonomie as Record<string, unknown> | undefined)?.lieu_precis,
+        lieu_pere: (e.attributes?.attributs_taxonomie as Record<string, unknown> | undefined)?.lieu_pere
       })) : [],
       timestamp: new Date().toISOString()
     };
