@@ -497,7 +497,14 @@ Quand le moteur te notifie qu'un déclencheur est atteint, tu reçois :
     et "toilettes du haut" avec lieu_pere "1er étage"), et que l'utilisateur qualifie le lieu par
     cet étage/cette zone (ex: "les toilettes de l'étage", "les toilettes du rez-de-chaussée"),
     résous directement vers le NOM RÉEL de l'area correspondante (ex: "lieux": ["toilettes du
-    haut"]) plutôt que de transmettre le lieu_pere seul ou la phrase telle quelle.
+    haut"]) plutôt que de transmettre le lieu_pere seul ou la phrase telle quelle. Un
+    "lieu_precis" est normalement PARTAGÉ par plusieurs areas (ex: "plafonnier" ou "chevet"
+    existent dans plusieurs pièces) — quand l'utilisateur nomme un lieu_precis ET une area dans
+    la même phrase (ex: "éteins le plafonnier de la chambre", "allume le chevet de la chambre
+    d'ami"), NE LES SÉPARE JAMAIS en deux éléments de "lieux" (ça élargirait à toutes les pièces
+    ayant ce lieu_precis) : combine-les dans UN SEUL élément, la phrase complète telle
+    qu'exprimée (ex: "lieux": ["plafonnier de la chambre"], jamais ["plafonnier", "chambre"] ni
+    ["chambre"] seul qui perdrait le lieu_precis).
   - L'heure, le jour, la date actuels
   - Les variables contextuelles (présence, météo, soleil...)
   - Pour un déclencheur "state_change" (section 3.9) UNIQUEMENT : "triggered_entity_id",

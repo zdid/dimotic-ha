@@ -787,9 +787,21 @@ export class HaStructureRegistry {
    *    de l'imbrication physique réelle (pièce ⊂ étage ⊂ maison), jamais des labels répétés.
    *
    * `lieuTerms` vide → retourne simplement les entités du QUOI (comportement de
-   * getEntitiesByQuoi). Plusieurs termes → union des entités trouvées pour chacun (OU, pas ET :
-   * "lieux" porte aussi bien un lieu unique qualifié que plusieurs lieux visés séparément, ex.
-   * ["salon", "cuisine"] — voir regles_mistral.txt §2.1, "lieux" toujours un tableau).
+   * getEntitiesByQuoi). Plusieurs éléments du tableau → union des entités trouvées pour chacun
+   * (OU, pas ET : "lieux" porte aussi bien un lieu unique qualifié que plusieurs lieux visés
+   * séparément, ex. ["salon", "cuisine"] — voir regles_mistral.txt §2.1, "lieux" toujours un
+   * tableau).
+   *
+   * Chaque élément peut lui-même être une phrase composée (ex: "plafonnier de la chambre") —
+   * un lieu_precis comme "plafonnier" ou "chevet" est normalement partagé par plusieurs pièces
+   * (demande utilisateur 10/08/2026 : "il est normal que le lieu précis existe dans plusieurs
+   * pièces... il faut pouvoir dire éteins le plafonnier de la chambre"). On tente d'abord
+   * l'élément TEL QUEL comme un seul terme (cas normal : nom d'area réel type "toilettes du
+   * haut", ou lieu_precis seul type "salon") ; seulement s'il ne matche AUCUNE entité du QUOI,
+   * on le découpe en mots (hors mots vides "de/du/des/la/le/les/l/au/aux/à") et on exige que
+   * CHACUN matche (ET), pour distinguer "le plafonnier" (partout) de "le plafonnier de la
+   * chambre" (une seule pièce) sans casser le cas d'une phrase entière qui désigne déjà un nœud
+   * réel du graphe.
    *
    * @param quoiId - ID du QUOI à filtrer, ou undefined pour ne filtrer que par lieu
    * @param lieuTerms - termes de lieu à résoudre (déjà en langage naturel, pas nécessairement slugifiés)
@@ -800,20 +812,47 @@ export class HaStructureRegistry {
     const candidates = quoiId ? this.getEntitiesByQuoi(quoiId) : this.getAllEntities();
     if (lieuTerms.length === 0) return candidates;
 
-    const termSlugs = new Set(lieuTerms.map((t) => this.slugifyLieu(t)));
-    const reachableAreas = new Set<string>();
-    for (const term of termSlugs) {
-      for (const slug of this.collectLieuSubtree(term)) reachableAreas.add(slug);
+    const matched = new Set<HaStructuredEntity>();
+    for (const phrase of lieuTerms) {
+      const wholeSlug = this.slugifyLieu(phrase);
+      const wholeMatches = candidates.filter((e) => this.matchesLieuTerm(e, wholeSlug));
+      if (wholeMatches.length > 0) {
+        for (const e of wholeMatches) matched.add(e);
+        continue;
+      }
+
+      const subTerms = this.tokenizeLieuPhrase(phrase);
+      if (subTerms.length < 2) continue;
+      for (const entity of candidates) {
+        if (subTerms.every((sub) => this.matchesLieuTerm(entity, sub))) matched.add(entity);
+      }
     }
 
-    return candidates.filter((entity) => {
-      const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
-      const precis = taxonomy?.slug_precis;
-      if (typeof precis === 'string' && precis && termSlugs.has(precis)) return true;
+    return [...matched];
+  }
 
-      const lieu = (typeof taxonomy?.slug_lieu === 'string' && taxonomy.slug_lieu) || entity.area_id;
-      return lieu !== undefined && reachableAreas.has(lieu);
-    });
+  /** Un terme (déjà slugifié) matche une entité directement (son propre lieu_precis) ou via le
+   *  sous-arbre de containment de son lieu/area — voir getEntitiesByQuoiAndLieux. */
+  private matchesLieuTerm(entity: HaStructuredEntity, termSlug: string): boolean {
+    const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
+    const precis = taxonomy?.slug_precis;
+    if (typeof precis === 'string' && precis === termSlug) return true;
+
+    const lieu = (typeof taxonomy?.slug_lieu === 'string' && taxonomy.slug_lieu) || entity.area_id;
+    return lieu !== undefined && this.collectLieuSubtree(termSlug).has(lieu);
+  }
+
+  private readonly LIEU_STOPWORDS = new Set(['de', 'du', 'des', 'la', 'le', 'les', 'l', 'au', 'aux', 'a', 'et']);
+
+  /** Découpe une phrase de lieu en mots significatifs (hors mots vides français) — utilisé
+   *  uniquement en repli quand la phrase entière ne matche aucun nœud (voir getEntitiesByQuoiAndLieux). */
+  private tokenizeLieuPhrase(phrase: string): string[] {
+    return phrase
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 0 && !this.LIEU_STOPWORDS.has(word));
   }
 
   /** Ensemble des slugs atteignables depuis lieuSlug (lui inclus) en suivant les arêtes
