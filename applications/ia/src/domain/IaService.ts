@@ -168,7 +168,10 @@ export class IaService implements IIaService {
     for (let round = 1; round <= MAX_TOOL_ROUNDS; round++) {
       const result = await this.mistralClient.streamChat(currentMessages, mistralModel, options || {}, IA_TOOLS);
       if (!result.ok) {
-        return { ok: false, errorMessage: `Erreur API Mistral ${result.status}: ${result.errorText}` };
+        // 429 épuisé après backoff (MistralClient) : errorText est déjà un message clair et
+        // final destiné à l'utilisateur — pas la peine de le noyer sous un préfixe technique.
+        const errorMessage = result.status === 429 ? result.errorText : `Erreur API Mistral ${result.status}: ${result.errorText}`;
+        return { ok: false, errorMessage };
       }
 
       const gen = translateMistralStream(result.body, mistralModel);
