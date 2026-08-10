@@ -44,6 +44,12 @@ export const RFXCOM_SOCKET_EVENTS = {
   // --- Protocoles (fonctionnelles-rfxcom_specs §8.2) ---
   PROTOCOLS_LIST: 'rfxcom:protocols:list',
 
+  // --- Journal des ordres reçus (demande utilisateur 10/08/2026) : chaque commande HA→RFXCOM
+  // reçue, avec son résultat d'exécution réel (transceiver connecté ou non, transmission tentée
+  // ou non) — seule source de vérité fiable, indépendante de l'ACK générique HA en amont (voir
+  // TODO.md "RFXCOM : journal des ordres reçus avec résultat d'exécution").
+  ORDERS_LIST: 'rfxcom:orders:list',
+
   // --- Erreurs ---
   ERROR: 'rfxcom:error'
 } as const;
@@ -58,6 +64,7 @@ export const RFXCOM_CLIENT_EVENTS = {
   GET_DEVICES: 'rfxcom:devices:list:get',
   GET_RECEIVERS: 'rfxcom:receivers:list:get',
   GET_SCENES: 'rfxcom:scenes:list:get',
+  GET_ORDERS: 'rfxcom:orders:list:get',
 
   // --- Devices ---
   DEVICES_REFRESH: 'rfxcom:devices:refresh',
@@ -111,5 +118,6 @@ export const RFXCOM_PERSISTENT_EVENTS: string[] = [
   RFXCOM_SOCKET_EVENTS.DEVICES_LIST,
   RFXCOM_SOCKET_EVENTS.RECEIVERS_LIST,
   RFXCOM_SOCKET_EVENTS.SCENES_LIST,
-  RFXCOM_SOCKET_EVENTS.PROTOCOLS_LIST
+  RFXCOM_SOCKET_EVENTS.PROTOCOLS_LIST,
+  RFXCOM_SOCKET_EVENTS.ORDERS_LIST
 ];

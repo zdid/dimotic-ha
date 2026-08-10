@@ -111,6 +111,29 @@
 
     .btn-primary { background: var(--color-accent); color: white; }
     .btn-secondary { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-primary); }
+
+    .orders-card {
+      background: var(--color-surface);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-top: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+    .orders-card h2 { margin-top: 0; color: var(--color-text); border-bottom: 1px solid var(--color-primary); padding-bottom: 10px; }
+
+    .order-row {
+      padding: 8px 12px;
+      background: var(--color-background);
+      border-radius: var(--radius);
+      margin-bottom: 8px;
+      font-size: 0.9em;
+      font-family: monospace;
+    }
+    .order-row .at { color: var(--color-text-muted); font-size: 0.85em; margin-right: 8px; }
+    .order-row .badge { padding: 2px 8px; border-radius: var(--radius); font-size: 0.8em; margin-left: 8px; font-family: sans-serif; }
+    .order-row .badge.ok { background: var(--color-success); color: white; }
+    .order-row .badge.error { background: var(--color-error); color: white; }
+    .order-row .error-msg { display: block; margin-top: 4px; color: var(--color-text-muted); font-family: sans-serif; font-size: 0.85em; }
   </style>
 </head>
 <body>
@@ -147,6 +170,11 @@
         <div id="recent-devices-list"></div>
       </div>
 
+      <div class="orders-card" id="orders-card" style="display: none;">
+        <h2>Journal des ordres reçus</h2>
+        <div id="orders-list"></div>
+      </div>
+
       <div class="loading" id="loading">Chargement de l'application RFXCOM</div>
     </div>
 
@@ -158,6 +186,6 @@
 
   <script type="module" src="/applications/rfxcom/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-07-21 19:00:00 - Création de l'application RFXCOM -->
+  <!-- Derniere modification: 2026-08-10 00:00:00 - Journal des ordres reçus (résultat d'exécution réel) -->
 </body>
 </html>

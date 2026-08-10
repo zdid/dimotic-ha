@@ -38,6 +38,15 @@ interface RfxComDevicesListEvent {
   discovered: RfxComDiscoveredDevice[];
 }
 
+interface RfxComOrderTrace {
+  at: string;
+  receiverId: string;
+  command: string;
+  value?: number;
+  success: boolean;
+  error?: string;
+}
+
 let socket: any | null = null;
 
 function init(): void {
@@ -72,6 +81,10 @@ function setupEventListeners(): void {
     socket.emit('rfxcom:devices:list:get');
   });
 
+  socket.on('rfxcom:orders:list', (orders: RfxComOrderTrace[]) => {
+    updateOrdersList(orders);
+  });
+
   socket.on('connect', () => {
     console.log('[RFXCOM UI] Connecté au serveur Socket.io');
     requestInitialStatus();
@@ -86,6 +99,7 @@ function requestInitialStatus(): void {
   if (!socket) return;
   socket.emit('rfxcom:status:get');
   socket.emit('rfxcom:devices:list:get');
+  socket.emit('rfxcom:orders:list:get');
 }
 
 function updateStatusDisplay(status: RfxComStatus): void {
@@ -122,6 +136,27 @@ function updateRecentDevices(discovered: RfxComDiscoveredDevice[]): void {
     <div class="device-row">
       <span>${escapeHtml(d.uniqueId)} (${escapeHtml(d.defaultQuoi)})</span>
       <span>${new Date(d.detectedAt).toLocaleTimeString('fr-FR')}</span>
+    </div>
+  `).join('');
+}
+
+function updateOrdersList(orders: RfxComOrderTrace[]): void {
+  const cardEl = $('orders-card');
+  const listEl = $('orders-list');
+  if (!listEl) return;
+
+  if (orders.length === 0) {
+    if (cardEl) cardEl.style.display = 'none';
+    return;
+  }
+
+  if (cardEl) cardEl.style.display = 'block';
+  listEl.innerHTML = orders.map((o) => `
+    <div class="order-row">
+      <span class="at">${new Date(o.at).toLocaleString('fr-FR')}</span>
+      <span>${escapeHtml(o.receiverId)} → ${escapeHtml(o.command)}${o.value !== undefined ? ` (${o.value})` : ''}</span>
+      <span class="badge ${o.success ? 'ok' : 'error'}">${o.success ? 'OK' : 'Échec'}</span>
+      ${o.error ? `<span class="error-msg">${escapeHtml(o.error)}</span>` : ''}
     </div>
   `).join('');
 }

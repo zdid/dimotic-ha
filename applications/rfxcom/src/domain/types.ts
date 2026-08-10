@@ -208,3 +208,14 @@ export interface SceneExecutionResult {
   errors: Array<{ receiverId: string; action: string; error: string }>;
   duration: number;
 }
+
+/** Une entrée du journal des ordres reçus (HA→RFXCOM) avec leur résultat d'exécution réel —
+ *  demande utilisateur 10/08/2026, voir socket-events.ts::ORDERS_LIST. */
+export interface RfxComOrderTrace {
+  at: string;
+  receiverId: string;
+  command: string;
+  value?: number;
+  success: boolean;
+  error?: string;
+}

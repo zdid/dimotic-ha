@@ -14,7 +14,7 @@ import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from 
 import { createRfxComError, getCommandTopic } from '../../../core/dist/exports';
 import { rfxcomConfigSchema, type RfxComConfig } from './config-schema';
 import type { RfxComDevicesConfigFile, ReceiverConfigEntry } from './devices-config-schema';
-import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult } from './types';
+import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult, RfxComOrderTrace } from './types';
 import { DeviceManager } from './devices/DeviceManager';
 import { ReceiverManager } from './receivers/ReceiverManager';
 import { SceneManager } from './scenes/SceneManager';
@@ -77,6 +77,19 @@ export class RfxComService implements IRfxComService {
   // systématiquement la course contre la vraie séquence connexion+statut).
   private protocolsPushGate: Promise<void> = Promise.resolve();
   private resolveProtocolsPushGate: (() => void) | null = null;
+
+  // ⭐ 10/08/2026, demande utilisateur : si le transceiver est absent au démarrage ou se déconnecte
+  // en cours de route (ex: câble USB débranché), retente une connexion toutes les 5s plutôt que
+  // d'exiger un redémarrage complet de l'application pour retenter. Un seul minuteur actif à la
+  // fois (démarré au premier échec/déconnexion, arrêté dès la reconnexion réussie) — voir
+  // startReconnectLoop/stopReconnectLoop.
+  private static readonly RECONNECT_LOOP_INTERVAL_MS = 5000;
+  private reconnectLoopTimer: ReturnType<typeof setInterval> | null = null;
+
+  // ⭐ 10/08/2026, demande utilisateur : journal des ordres reçus (HA→RFXCOM) avec leur résultat
+  // d'exécution réel — 100 dernières entrées maximum, voir socket-events.ts::ORDERS_LIST.
+  private static readonly MAX_ORDERS = 100;
+  private readonly recentOrders: RfxComOrderTrace[] = [];
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -145,7 +158,14 @@ export class RfxComService implements IRfxComService {
     // existe côté socle mais n'est atteignable que via une référence directe au service, pas via
     // l'EventBus). Hors périmètre de cette passe, voir le rapport final.
     this.transceiver.onMessage((message) => this.handleRfxMessage(message));
-    this.transceiver.onConnectionChange(() => this.emitStatus());
+    this.transceiver.onConnectionChange((connected) => {
+      this.emitStatus();
+      if (connected) {
+        this.stopReconnectLoop();
+      } else {
+        this.startReconnectLoop();
+      }
+    });
 
     // Pas de garantie d'ordre entre 'status' et la résolution de connect() (voir
     // RfxComTransceiver.onHardwareStatus) — callback plutôt qu'un appel juste après l'await.
@@ -192,6 +212,7 @@ export class RfxComService implements IRfxComService {
 
   async stop(): Promise<void> {
     this.logger.info('RfxComService', 'Arrêt du service RFXCOM...');
+    this.stopReconnectLoop();
     this.transceiver.disconnect();
     this.eventBus.emitGeneric('integration:bridge:unregister', {
       moduleName: MODULE_NAME,
@@ -282,6 +303,49 @@ export class RfxComService implements IRfxComService {
         createRfxComError('RFXCOM_CONNECTION_ERROR', message, 'rfxcom:transceiver', { port: newPort }));
     }
     this.emitStatus();
+  }
+
+  /**
+   * Démarre la boucle de reconnexion automatique (toutes les 5s) — demande utilisateur, transceiver
+   * absent au démarrage ou déconnecté en cours de route (câble USB débranché). Idempotent : un
+   * minuteur déjà actif n'est pas recréé (déconnexions répétées, ou échec initial suivi d'une
+   * déconnexion ultérieure signalée par le même callback).
+   */
+  private startReconnectLoop(): void {
+    if (this.reconnectLoopTimer) return;
+    this.logger.info('RfxComService', `Transceiver RFXCOM indisponible — nouvelle tentative de connexion toutes les ${RfxComService.RECONNECT_LOOP_INTERVAL_MS / 1000}s`);
+    this.reconnectLoopTimer = setInterval(() => {
+      void this.attemptAutoReconnect();
+    }, RfxComService.RECONNECT_LOOP_INTERVAL_MS);
+  }
+
+  /** Arrête la boucle de reconnexion — appelé dès qu'une (re)connexion réussit, ou à l'arrêt du service. */
+  private stopReconnectLoop(): void {
+    if (!this.reconnectLoopTimer) return;
+    clearInterval(this.reconnectLoopTimer);
+    this.reconnectLoopTimer = null;
+  }
+
+  /**
+   * Une tentative de la boucle de reconnexion — silencieuse en cas d'échec (pas la peine de
+   * logguer à chaque itération de 5s, seul le résultat final compte) ; le WARNING initial
+   * (déconnexion/échec) a déjà été journalisé par ailleurs (connect()/onConnectionChange). Le
+   * succès arrête la boucle via onConnectionChange (connected=true), pas ici directement — un seul
+   * point de vérité pour "reconnecté".
+   */
+  private async attemptAutoReconnect(): Promise<void> {
+    if (this.transceiver.isConnected()) {
+      this.stopReconnectLoop();
+      return;
+    }
+    const port = this.resolvePort();
+    try {
+      this.transceiver.disconnect(); // referme une éventuelle instance orpheline d'une tentative précédente
+      this.hasPushedHardwareProtocolsThisSession = false;
+      await this.transceiver.connect({ port, baudRate: this.config.baudRate });
+    } catch {
+      // Échec silencieux — nouvelle tentative dans 5s (onConnectionChange a déjà tracé le motif).
+    }
   }
 
   /**
@@ -660,7 +724,29 @@ export class RfxComService implements IRfxComService {
    * scènes). Factorisé pour être réutilisé à la fois par handleHaCommand (payload JSON `/set` du
    * socle) et par SceneExecutor (commande/valeur déjà discrètes, une par action de scène).
    */
+  /** Enveloppe applyReceiverCommandInternal() pour journaliser chaque ordre reçu avec son résultat
+   *  réel (recentOrders, demande utilisateur 10/08/2026) — seule source de vérité indépendante de
+   *  l'ACK générique HA en amont, voir TODO.md. */
   private applyReceiverCommand(receiverId: string, command: string, value?: number): { success: boolean; error?: string } {
+    const result = this.applyReceiverCommandInternal(receiverId, command, value);
+    this.recordOrder(receiverId, command, value, result);
+    return result;
+  }
+
+  private recordOrder(receiverId: string, command: string, value: number | undefined, result: { success: boolean; error?: string }): void {
+    this.recentOrders.unshift({
+      at: new Date().toISOString(),
+      receiverId,
+      command,
+      value,
+      success: result.success,
+      error: result.error
+    });
+    if (this.recentOrders.length > RfxComService.MAX_ORDERS) this.recentOrders.length = RfxComService.MAX_ORDERS;
+    this.eventBus.emitGeneric('rfxcom:orders:list', this.recentOrders);
+  }
+
+  private applyReceiverCommandInternal(receiverId: string, command: string, value?: number): { success: boolean; error?: string } {
     // ⭐ 10/08/2026 : anomalie réelle constatée en direct — transceiver.sendCommand() ne lève une
     // exception que si `this.device` n'a JAMAIS été initialisé, pas si le port série a été
     // débranché après une connexion antérieure réussie (le futur appelant restait alors optimiste,
@@ -925,6 +1011,7 @@ export class RfxComService implements IRfxComService {
     this.eventBus.onGeneric('rfxcom:devices:list:get', () => this.emitDevicesList());
     this.eventBus.onGeneric('rfxcom:receivers:list:get', () => this.emitReceiversList());
     this.eventBus.onGeneric('rfxcom:scenes:list:get', () => this.emitScenesList());
+    this.eventBus.onGeneric('rfxcom:orders:list:get', () => this.eventBus.emitGeneric('rfxcom:orders:list', this.recentOrders));
 
     this.eventBus.onGeneric('rfxcom:devices:refresh', () => this.emitDevicesList());
 
