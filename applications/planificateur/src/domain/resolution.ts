@@ -78,21 +78,24 @@ export function resolveEntityIds(
     const lieuSlug = slugify(lieu);
     const matchedAreas = areas.filter((a) => slugify(a.name) === lieuSlug || slugify(a.area_id) === lieuSlug);
 
-    if (matchedAreas.length > 0) {
-      for (const area of matchedAreas) {
-        for (const entity of registry.getEntitiesByAreaAndQuoi(area.area_id, quoiId)) {
-          entityIds.add(entity.entity_id);
-        }
+    let matchedFromArea = 0;
+    for (const area of matchedAreas) {
+      for (const entity of registry.getEntitiesByAreaAndQuoi(area.area_id, quoiId)) {
+        entityIds.add(entity.entity_id);
+        matchedFromArea++;
       }
-      continue;
     }
+    if (matchedFromArea > 0) continue;
 
     // ⭐ 10/08/2026 — repli sur le lieu précis de la taxonomie (ex: "Salon", plus fin que l'area
-    // HA "Salle" qui le contient) : uniquement si ce terme ne correspond à AUCUNE area HA, pour ne
-    // jamais élargir une cible déjà précisément résolue par area. Demande utilisateur : "éteins le
-    // salon" éteignait toute la salle (les 4 lumières), faute de ce repli — seule l'area "Salle"
-    // était consultable, "Salon" n'existe qu'en attribut d'entité (attributs_taxonomie.lieu_precis),
-    // jamais comme area HA à part entière.
+    // HA "Salle" qui le contient). Déclenché si aucune area HA ne matche OU si l'area qui matche
+    // ne contient aucune entité de ce quoi (cas réel rencontré : une area HA "Salon" existe pour
+    // un tout autre usage — module infrarouge/télécommande TV — sans aucune lumière ; la vraie
+    // lumière du salon est rattachée à l'area "Salle" et distinguée uniquement par son
+    // attributs_taxonomie.lieu_precis="salon"). Sans le test sur matchedFromArea, ce cas
+    // court-circuitait le repli via le `continue` précédent et renvoyait un résultat vide au lieu
+    // de chercher plus finement. Demande utilisateur : "éteins le salon" partait en repli
+    // conversation.process faute de service HA résolu.
     for (const entity of registry.getEntitiesByQuoi(quoiId)) {
       if (matchesLieuPrecis(entity, lieuSlug)) {
         entityIds.add(entity.entity_id);
