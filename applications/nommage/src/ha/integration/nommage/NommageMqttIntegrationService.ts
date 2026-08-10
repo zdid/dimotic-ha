@@ -244,13 +244,25 @@ export class NommageMqttIntegrationService implements INommageMqttIntegrationSer
   private processDiscoveryMessage(sourceId: string, topic: string, payload: Record<string, unknown>): void {
     let rawName: string;
 
-    if (typeof payload.name === 'string') {
+    // device.name en priorité : la convention de nommage "QUOI---LIEU" (nommage_specs §2) est
+    // portée par le nom de l'APPAREIL (ex: zigbee2mqtt friendly_name "gros ballon---maison--
+    // maison--rez de chaussée"), pas par le nom de chaque entité individuelle. Bug réel constaté
+    // le 10/08/2026 : en donnant la priorité à payload.name, toute entité z2m ayant son propre nom
+    // explicite (switch/select/diagnostic — ex: "Linkquality", "Power outage memory", "Temperature
+    // breaker") parsait ce nom d'entité au lieu du nom d'appareil, ne trouvait jamais "---",
+    // n'obtenait donc aucun lieu ni suggested_area — alors que les capteurs sans nom propre
+    // (device_class seul, ex: temperature/power) retombaient par accident sur device.name et
+    // parsaient correctement. HA n'appliquant suggested_area qu'à la toute première découverte
+    // d'un device (voir AreaEnsureService), le device restait sans area de façon définitive dès
+    // qu'une entité "nommée" arrivait en premier — expliquait des devices zigbee sans pièce,
+    // différents à chaque redémarrage selon l'ordre d'arrivée des messages retenus.
+    if (typeof payload === 'object' && payload &&
+        typeof (payload as { device?: { name?: string } }).device?.name === 'string') {
+      rawName = (payload as { device: { name: string } }).device.name;
+    } else if (typeof payload.name === 'string') {
       rawName = payload.name;
     } else if (typeof payload.raw_name === 'string') {
       rawName = payload.raw_name;
-    } else if (typeof payload === 'object' && payload &&
-               typeof (payload as { device?: { name?: string } }).device?.name === 'string') {
-      rawName = (payload as { device: { name: string } }).device.name;
     } else {
       rawName = JSON.stringify(payload);
     }

@@ -234,6 +234,17 @@ export class RfxComService implements IRfxComService {
       }
     );
 
+    // ⭐ Second déclencheur, indépendant du précédent (voir HA_STATUS_TOPIC, techniques-socle-ha-mqtt_specs
+    // §8.5.4) : HA peut redémarrer seul (broker + notre bridge restent connectés en continu), et
+    // ne réapplique jamais suggested_area rétroactivement sur un device déjà créé — mais republier
+    // sa découverte reste utile/inoffensif (idempotent côté HA) pour couvrir le cas où HA ne
+    // connaissait pas encore ces devices (ex: config HA effacée puis redémarrée). Pas de dépendance
+    // à protocolsPushGate ici : HA online n'a aucun rapport avec l'état du transceiver série.
+    this.eventBus.onGeneric<{ bridgeInstance: string }>(
+      `integration:${MODULE_NAME}:ha:online`,
+      () => this.publishInitialDiscoveries()
+    );
+
     // Reconnecte le transceiver (port série) à chaud si sa config a réellement changé — même
     // pattern qu'EVOO7 pour son broker MQTT (Evoo7Service.reconnectMqttIfConfigChanged). Le
     // redémarrage automatique du service entier sur sauvegarde de config reste désactivé

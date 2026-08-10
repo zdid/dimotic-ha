@@ -233,6 +233,17 @@ export function getBridgeStatusTopic(moduleName: string, bridgeInstance: string)
 }
 
 /**
+ * ⭐ Topic de "birth message" de HA (config par défaut de l'intégration MQTT native de HA,
+ * option `birth_message`) : HA y publie `online` (retenu) une fois complètement démarré, et
+ * `offline` (via son propre LWT) à l'arrêt. Un module qui republie sa découverte uniquement à sa
+ * PROPRE connexion MQTT peut la manquer si HA n'était pas encore prêt à ce moment précis (aucune
+ * garantie d'ordre entre "notre bridge se connecte" et "HA a fini de démarrer") — s'abonner à ce
+ * topic donne un second déclencheur, indépendant du premier. Le payload retenu est délivré
+ * immédiatement à l'abonnement si HA est déjà en ligne, pas seulement sur un futur changement.
+ */
+export const HA_STATUS_TOPIC = 'homeassistant/status';
+
+/**
  * Construit le topic de disponibilité HA.
  */
 export function getAvailabilityTopic(component: string, objectId: string): string {

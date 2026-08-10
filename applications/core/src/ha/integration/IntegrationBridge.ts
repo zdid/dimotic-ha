@@ -124,6 +124,14 @@ export class IntegrationBridge {
       this.updateAggregateMqttStatus(moduleName, bridgeInstance, connected);
     });
 
+    // ⭐ Second déclencheur de republication de découverte (voir HA_STATUS_TOPIC dans ha-mqtt.ts) —
+    // chaque module écoute cet événement s'il veut republier sa découverte quand HA redémarre
+    // sans que notre propre bridge MQTT n'ait eu besoin de se reconnecter (ex: HA seul redémarré,
+    // broker resté up).
+    this.haMqttService.onHaOnline((moduleName, bridgeInstance) => {
+      this.eventBus.emitGeneric(`integration:${moduleName}:ha:online`, { bridgeInstance });
+    });
+
     this.logger.info('bridge', 'IntegrationBridge initialisé');
   }
 

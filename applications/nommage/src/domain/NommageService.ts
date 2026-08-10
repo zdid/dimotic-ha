@@ -214,6 +214,21 @@ export class NommageService implements INommageService {
           `Erreur lors de la reconnexion après sauvegarde: ${error}`);
       });
     });
+
+    // ⭐ Second déclencheur de republication de découverte (voir HA_STATUS_TOPIC,
+    // techniques-socle-ha-mqtt_specs §8.5.4 — même correctif que RFXCOM). NOMMAGE ne maintient
+    // pas de liste des devices déjà vus (passthrough réactif, pas de registre local) : on
+    // déclenche donc une reconnexion complète de toutes les sources plutôt qu'un "republish"
+    // ciblé — un nouvel abonnement fait redélivrer par le broker tous les messages retenus
+    // (les découvertes déjà publiées par zigbee2mqtt/etc.), qui repassent alors par le pipeline
+    // normal (suggested_area, traductions...) comme à la connexion initiale.
+    this.eventBus.on('integration:nommage:ha:online', () => {
+      this.logger.info('NommageService', 'HA en ligne — reconnexion des sources MQTT pour republier la découverte');
+      this.reloadConfigAndReconnectMqtt().catch((error) => {
+        this.logger.error('NommageService',
+          `Erreur lors de la reconnexion sur HA online: ${error}`);
+      });
+    });
   }
 
   // ==========================================================================

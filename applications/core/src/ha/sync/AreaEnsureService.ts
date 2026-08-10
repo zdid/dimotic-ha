@@ -17,9 +17,15 @@ import type { Logger } from '../../infrastructure/logger/index';
 // référentiel HA (392 entités/34 areas en usage réel) peut mettre plus de 20s à charger, largement
 // au-delà de l'ancien timeout unique de 8s — toutes les demandes arrivant juste après connexion
 // (rafale de découvertes MQTT retenues) échouaient donc systématiquement, même pour des areas déjà
-// existantes. ENSURE_TIMEOUT_MS ne couvre plus que l'appel WS lui-même (résolution/création, une
-// fois le référentiel prêt) — quasi instantané en pratique. REGISTRY_WAIT_TIMEOUT_MS est un filet
-// de sécurité large pour l'attente du référentiel (ne devrait jamais se déclencher en usage normal).
+// existantes. ENSURE_TIMEOUT_MS couvre l'appel WS lui-même (résolution/création, une fois le
+// référentiel prêt) — quasi instantané en pratique. Ni lui ni REGISTRY_WAIT_TIMEOUT_MS ne
+// s'appliquent quand waitIndefinitely=true (RFXCOM/AREXX/NOMMAGE) — voir resolveOrCreate (⭐
+// 10/08/2026 : un device pouvait encore être créé sans area sous charge malgré ce flag, le
+// timeout de création n'était jusque-là ignoré que pour l'attente du référentiel, pas pour
+// l'appel WS suivant). Les deux timeouts restent actifs pour les apps sans
+// waitForHaWsBeforeDiscovery (ex: EVOO7). REGISTRY_WAIT_TIMEOUT_MS est un filet de sécurité large
+// pour l'attente du référentiel (ne
+// devrait jamais se déclencher en usage normal, apps sans waitIndefinitely uniquement aussi).
 const ENSURE_TIMEOUT_MS = 8000;
 const REGISTRY_WAIT_TIMEOUT_MS = 60000;
 
@@ -50,7 +56,21 @@ export class AreaEnsureService {
     private readonly haStructureRegistry: HaStructureRegistry,
     private readonly eventBus: IEventBus,
     private readonly logger: Logger
-  ) {}
+  ) {
+    // ⭐ 10/08/2026 : registryReady était un verrou à sens unique — une fois vrai après le tout
+    // premier ha:ready, plus jamais réarmé. Or AppService.loadHaRegistry() reconstruit
+    // entièrement HaStructureRegistry (rebuild()) et réémet ha:ready à CHAQUE reconnexion WS, pas
+    // seulement au démarrage. Sans ce reset, une reconnexion (ex: redémarrage de HA) laissait
+    // ensureArea() croire le référentiel prêt alors qu'il venait d'être vidé et était en cours de
+    // rechargement (jusqu'à 20s+ pour un référentiel réel) — findByName() ne trouvait donc plus
+    // des areas pourtant déjà créées côté HA, déclenchant des créations en double rejetées
+    // ("already in use") en boucle jusqu'à la fin du rechargement. Constaté en conditions réelles :
+    // 191 échecs sur une seule reconnexion, contre 0 avant celle-ci.
+    this.eventBus.onGeneric('ha:disconnected', () => {
+      this.registryReady = false;
+      this.registryReadyPromise = undefined;
+    });
+  }
 
   /**
    * Garantit qu'une area du nom donné existe (la crée si nécessaire), et retourne son area_id.
@@ -88,6 +108,23 @@ export class AreaEnsureService {
         await this.withTimeout(this.waitUntilRegistryReady(), REGISTRY_WAIT_TIMEOUT_MS, `area_ensure:${name}:registry`);
       } catch {
         this.logger.warn('ha:area_ensure', `Échec de la garantie d'area "${name}": référentiel HA jamais prêt après ${REGISTRY_WAIT_TIMEOUT_MS}ms`);
+        return undefined;
+      }
+    }
+
+    // ⭐ 10/08/2026 : l'appel WS de création/résolution lui-même ne doit PAS non plus être borné
+    // par ENSURE_TIMEOUT_MS quand waitIndefinitely=true — jusqu'ici ce garde-fou ne couvrait que
+    // l'attente du référentiel ci-dessus, pas cet appel. Sous charge (dizaines de devices créant
+    // leur area quasi simultanément au démarrage à froid), ce timeout de 8s pouvait encore se
+    // déclencher malgré waitIndefinitely=true, publiant la découverte sans area — contraire à
+    // l'intention documentée ("n'abandonne JAMAIS"). Le try/catch reste : une vraie erreur WS
+    // (pas un timeout) continue de retourner undefined plutôt que de bloquer la publication.
+    if (waitIndefinitely) {
+      try {
+        return await this.resolveOrCreateArea(name);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : JSON.stringify(error);
+        this.logger.warn('ha:area_ensure', `Échec de la garantie d'area "${name}": ${message}`);
         return undefined;
       }
     }

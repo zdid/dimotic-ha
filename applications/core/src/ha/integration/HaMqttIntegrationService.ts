@@ -9,7 +9,7 @@
 import { MqttTransport, type MqttMessage } from '../../infrastructure/transport/MqttTransport';
 import { Logger } from '../../infrastructure/logger/index';
 import { createMqttError } from '../../types/errors';
-import { getBridgeStatusTopic } from './types/ha-mqtt';
+import { getBridgeStatusTopic, HA_STATUS_TOPIC } from './types/ha-mqtt';
 import type { HaMqttDiscoveryEntity, HaMqttStateMessage } from './types/ha-mqtt';
 import { buildDiscoveryPayload, publishDiscovery, publishAttributes, unpublishDiscovery, type EssentialEntityData } from './discovery';
 import { publishState, subscribeCommands, parseIncomingCommand, type ParsedIncomingCommand } from './stateCommand';
@@ -28,6 +28,7 @@ export interface HaMqttBrokerConfig {
 
 type CommandCallback = (event: ParsedIncomingCommand) => void;
 type ConnectionCallback = (moduleName: string, bridgeInstance: string, connected: boolean) => void;
+type HaOnlineCallback = (moduleName: string, bridgeInstance: string) => void;
 
 function bridgeKey(moduleName: string, bridgeInstance: string): string {
   return `${moduleName}:${bridgeInstance}`;
@@ -37,6 +38,7 @@ export class HaMqttIntegrationService {
   private bridges: Map<string, MqttTransport> = new Map();
   private commandCallbacks: CommandCallback[] = [];
   private connectionCallbacks: ConnectionCallback[] = [];
+  private haOnlineCallbacks: HaOnlineCallback[] = [];
 
   constructor(private readonly logger: Logger) {}
 
@@ -80,10 +82,15 @@ export class HaMqttIntegrationService {
       this.logger.error('ha:mqtt', `${appError.code} sur ${key}: ${appError.message}`);
     });
 
-    transport.onMessage((message) => this.handleMessage(message));
+    transport.onMessage((message) => this.handleMessage(moduleName, bridgeInstance, message));
 
     this.bridges.set(key, transport);
     transport.connect();
+    // ⭐ Second déclencheur de republication de découverte, indépendant de "notre bridge vient de
+    // se connecter" — voir HA_STATUS_TOPIC. QoS 0 : un birth message manqué au tout premier
+    // abonnement (course avec l'envoi du retained par le broker) n'est pas critique, le
+    // déclencheur "bridge connection" existant reste le chemin principal.
+    transport.subscribe(HA_STATUS_TOPIC, 0);
   }
 
   /**
@@ -209,11 +216,30 @@ export class HaMqttIntegrationService {
     this.connectionCallbacks.push(callback);
   }
 
+  /** ⭐ Notifié quand HA publie `online` sur HA_STATUS_TOPIC — voir ha-mqtt.ts pour le pourquoi. */
+  onHaOnline(callback: HaOnlineCallback): void {
+    this.haOnlineCallbacks.push(callback);
+  }
+
   // ===========================================================================
   // Privé
   // ===========================================================================
 
-  private handleMessage(message: MqttMessage): void {
+  private handleMessage(moduleName: string, bridgeInstance: string, message: MqttMessage): void {
+    if (message.topic === HA_STATUS_TOPIC) {
+      if (message.payload.toString() === 'online') {
+        this.logger.info('ha:mqtt', `HA en ligne (birth message) — republication de la découverte pour ${bridgeKey(moduleName, bridgeInstance)}`);
+        for (const callback of this.haOnlineCallbacks) {
+          try {
+            callback(moduleName, bridgeInstance);
+          } catch (error) {
+            this.logger.error('ha:mqtt', `Erreur dans callback HA online: ${error}`);
+          }
+        }
+      }
+      return;
+    }
+
     const parsed = parseIncomingCommand(message);
     if (!parsed) return;
 

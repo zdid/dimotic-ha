@@ -420,7 +420,7 @@ export class HaStructureRegistry {
    */
   private removeEntityFromStructure(entity: HaStructuredEntity): void {
     // Supprimer de toutes les areas
-    for (const [areaId, area] of this.areas) {
+    for (const [_areaId, area] of this.areas) {
       for (const [qId, quoi] of area.quoiMap) {
         quoi.entities = quoi.entities.filter(e => e.entity_id !== entity.entity_id);
         // Nettoyer les QUOI vides
@@ -428,10 +428,19 @@ export class HaStructureRegistry {
           area.quoiMap.delete(qId);
         }
       }
-      // Nettoyer les areas vides
-      if (area.quoiMap.size === 0) {
-        this.areas.delete(areaId);
-      }
+      // ⚠️ Ex "nettoyer les areas vides" (this.areas.delete(areaId) si quoiMap vide) — RETIRÉ le
+      // 10/08/2026, bug réel constaté en conditions réelles : une area vient d'être créée par
+      // AreaEnsureService.resolveOrCreateArea (via addArea, quoiMap vide tant qu'aucune entité ne
+      // lui est encore rattachée dans CE registre local — l'assignation arrive séparément, de façon
+      // asynchrone, via un futur entity_registry_updated poussé par HA) ; si ce nettoyage tournait
+      // pour la mise à jour d'une entité complètement différente pendant cette fenêtre, l'area
+      // fraîchement créée disparaissait aussitôt du registre local — alors qu'elle existe bel et
+      // bien côté HA. AreaEnsureService.findByName() ne la retrouvait alors plus, redéclenchait une
+      // création WS, rejetée par HA ("name already in use") : c'est la cause des zigbee "mal pris en
+      // compte" au démarrage (nombre variable, dépend du hasard des mises à jour d'entités
+      // concurrentes). Une area a par ailleurs sa propre suppression, réelle celle-ci, câblée sur le
+      // vrai événement WS area_registry_updated (voir removeArea() / AppService.ts) — ce nettoyage
+      // "areas vides" était de toute façon redondant avec elle, en plus d'être incorrect.
     }
 
     // Supprimer de unassigned
