@@ -22,12 +22,21 @@ import { SchedulerRuntime } from './scheduler-runtime';
 import { StateWatcher } from './state-watcher';
 import { ExecutionEngine } from './execution';
 import { CommandHandler } from './handler';
-import type { DomoticNode, ExecuterActionParams } from './types';
-import { PLANIFICATEUR_CLIENT_EVENTS } from './socket-events';
+import type { DomoticNode, ExecuterActionParams, CorrelatedReponse } from './types';
+import { PLANIFICATEUR_CLIENT_EVENTS, PLANIFICATEUR_SOCKET_EVENTS } from './socket-events';
 
 export interface IPlanificateurService {
   start(): Promise<void>;
   stop(): Promise<void>;
+}
+
+/** Une entrée du journal des actions reçues de `ia` (ia:command / ia:tool:execute). */
+interface PlanificateurAction {
+  at: string;
+  source: 'ia:command' | 'ia:tool:execute';
+  request: string;
+  reply: string;
+  success: boolean;
 }
 
 export class PlanificateurService implements IPlanificateurService {
@@ -39,6 +48,7 @@ export class PlanificateurService implements IPlanificateurService {
   private readonly executionEngine: ExecutionEngine;
   private readonly handler: CommandHandler;
   private readonly haCommandService?: HaCommandService;
+  private readonly recentActions: PlanificateurAction[] = [];
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -144,15 +154,36 @@ export class PlanificateurService implements IPlanificateurService {
   private wireEventBus(): void {
     this.eventBus.onGeneric<DomoticNode & { correlation_id: string }>('ia:command', (payload) => {
       this.handler.handleCommand(payload)
-        .then((reply) => this.eventBus.emitGeneric('ia:command:reply', reply))
+        .then((reply) => {
+          this.recordAction('ia:command', payload, reply);
+          this.eventBus.emitGeneric('ia:command:reply', reply);
+        })
         .catch((e) => this.logger.error('PlanificateurService', `Erreur ia:command: ${e}`));
     });
 
     this.eventBus.onGeneric<ExecuterActionParams & { correlation_id: string }>('ia:tool:execute', (payload) => {
       this.handler.handleToolExecute(payload)
-        .then((reply) => this.eventBus.emitGeneric('ia:tool:execute:reply', reply))
+        .then((reply) => {
+          this.recordAction('ia:tool:execute', payload, reply);
+          this.eventBus.emitGeneric('ia:tool:execute:reply', reply);
+        })
         .catch((e) => this.logger.error('PlanificateurService', `Erreur ia:tool:execute: ${e}`));
     });
+  }
+
+  /** Journalise une action reçue de `ia`, en mémoire (20 dernières) — demande utilisateur, voir
+   *  socket-events.ts::ACTIONS_LIST. Même principe que IaService.recordExchange côté `ia`. */
+  private recordAction(source: PlanificateurAction['source'], request: unknown, reply: CorrelatedReponse): void {
+    const { correlation_id: _correlation_id, ...requestWithoutCorrelation } = request as Record<string, unknown>;
+    this.recentActions.unshift({
+      at: new Date().toISOString(),
+      source,
+      request: JSON.stringify(requestWithoutCorrelation, null, 2),
+      reply: JSON.stringify(reply, null, 2),
+      success: reply.success
+    });
+    if (this.recentActions.length > 20) this.recentActions.length = 20;
+    this.eventBus.emitGeneric(PLANIFICATEUR_SOCKET_EVENTS.ACTIONS_LIST, this.recentActions);
   }
 
   // ==========================================================================
@@ -163,6 +194,9 @@ export class PlanificateurService implements IPlanificateurService {
     this.eventBus.onGeneric(PLANIFICATEUR_CLIENT_EVENTS.GET_STATUS, () => this.emitStatus());
     this.eventBus.onGeneric(PLANIFICATEUR_CLIENT_EVENTS.GET_MACROS, () => this.emitMacros());
     this.eventBus.onGeneric(PLANIFICATEUR_CLIENT_EVENTS.GET_PLANIFICATIONS, () => this.emitPlanifications());
+    this.eventBus.onGeneric(PLANIFICATEUR_CLIENT_EVENTS.GET_ACTIONS, () => {
+      this.eventBus.emitGeneric(PLANIFICATEUR_SOCKET_EVENTS.ACTIONS_LIST, this.recentActions);
+    });
 
     this.eventBus.onGeneric<{ name: string }>(PLANIFICATEUR_CLIENT_EVENTS.PLANIFICATION_ACTIVER, ({ name }) => {
       this.handler.handleCommand({ type: 'gestion', operation: 'activer', cible: 'planification', name, correlation_id: 'ui' })

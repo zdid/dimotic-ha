@@ -16,6 +16,14 @@ interface PlanificateurStatus {
   activeSchedules: string[];
 }
 
+interface PlanificateurAction {
+  at: string;
+  source: 'ia:command' | 'ia:tool:execute';
+  request: string;
+  reply: string;
+  success: boolean;
+}
+
 let socket: any | null = null;
 
 function init(): void {
@@ -42,6 +50,10 @@ function setupEventListeners(): void {
     showMainContent();
   });
 
+  socket.on('planificateur:actions:list', (actions: PlanificateurAction[]) => {
+    updateActionsLog(actions);
+  });
+
   socket.on('connect', () => {
     console.log('[Planificateur UI] Connecté au serveur Socket.io');
     requestInitialStatus();
@@ -55,6 +67,7 @@ function setupEventListeners(): void {
 function requestInitialStatus(): void {
   if (!socket) return;
   socket.emit('planificateur:status:get');
+  socket.emit('planificateur:actions:list:get');
 }
 
 function updateStatusDisplay(status: PlanificateurStatus): void {
@@ -65,6 +78,34 @@ function updateStatusDisplay(status: PlanificateurStatus): void {
   if (macrosEl) macrosEl.textContent = String(status.macrosCount);
   if (planificationsEl) planificationsEl.textContent = String(status.planificationsCount);
   if (activeEl) activeEl.textContent = String(status.activeSchedules.length);
+}
+
+function updateActionsLog(actions: PlanificateurAction[]): void {
+  const cardEl = $('actions-log-card');
+  const listEl = $('actions-log-list');
+  if (!listEl) return;
+
+  if (actions.length === 0) {
+    if (cardEl) cardEl.style.display = 'none';
+    return;
+  }
+
+  if (cardEl) cardEl.style.display = 'block';
+  listEl.innerHTML = actions.map((a) => `
+    <div class="action-row">
+      <span class="at">${new Date(a.at).toLocaleString('fr-FR')}</span>
+      <span class="source">${escapeHtml(a.source)}</span>
+      <span class="badge ${a.success ? 'ok' : 'error'}">${a.success ? 'OK' : 'Échec'}</span>
+      <pre>${escapeHtml(a.request)}</pre>
+      <pre>${escapeHtml(a.reply)}</pre>
+    </div>
+  `).join('');
+}
+
+function escapeHtml(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 function showMainContent(): void {

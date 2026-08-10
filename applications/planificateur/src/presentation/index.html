@@ -32,6 +32,41 @@
     .status-item .label { font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 5px; display: block; }
     .status-item .value { font-size: 1.3em; color: var(--color-text); }
 
+    .actions-log-card {
+      background: var(--color-surface);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+    .actions-log-card h2 { margin-top: 0; color: var(--color-text); border-bottom: 1px solid var(--color-primary); padding-bottom: 10px; }
+
+    .action-row {
+      padding: 10px 12px;
+      background: var(--color-background);
+      border-radius: var(--radius);
+      margin-bottom: 8px;
+      font-size: 0.9em;
+    }
+    .action-row .at { color: var(--color-text-muted); font-size: 0.8em; }
+    .action-row .source { color: var(--color-accent); font-weight: bold; }
+    .action-row .badge { padding: 2px 8px; border-radius: var(--radius); font-size: 0.8em; margin-left: 8px; }
+    .action-row .badge.ok { background: #1e5e2e; color: #a6e6ae; }
+    .action-row .badge.error { background: #5e1e1e; color: #e6a6a6; }
+    .action-row pre {
+      margin-top: 6px;
+      padding: 8px;
+      background: var(--color-surface);
+      border-left: 3px solid var(--color-accent);
+      border-radius: var(--radius);
+      font-size: 0.8em;
+      font-family: monospace;
+      white-space: pre-wrap;
+      overflow-x: auto;
+      max-height: 250px;
+      overflow-y: auto;
+    }
+
     .loading { text-align: center; padding: 40px; color: var(--color-text-muted); }
     .actions { display: flex; gap: 10px; margin-top: 20px; }
     .btn { padding: 10px 20px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em; }
@@ -65,6 +100,11 @@
         </div>
       </div>
 
+      <div class="actions-log-card" id="actions-log-card" style="display: none;">
+        <h2>Journal des actions reçues de IA</h2>
+        <div id="actions-log-list"></div>
+      </div>
+
       <div class="loading" id="loading">Chargement de l'application Planificateur</div>
     </div>
 
@@ -76,6 +116,6 @@
 
   <script type="module" src="/applications/planificateur/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-07-23 00:00:00 - Création de l'application planificateur -->
+  <!-- Derniere modification: 2026-08-10 00:00:00 - Journal des actions reçues de IA -->
 </body>
 </html>
