@@ -87,12 +87,19 @@ export class ExecutionEngine {
       // HaStructuredEntity porte des références circulaires (entity.area → area.quoiMap →
       // quoi.entities → ... → la même entity) destinées à un usage en mémoire, jamais à être
       // sérialisées — un résumé plat évite le crash JSON.stringify côté DeployResponder (ia).
+      // ⭐ 10/08/2026 : lieu_precis ajouté (ex: "Salon", plus fin que l'area HA "Salle" qui le
+      // contient) — demande utilisateur ("éteins le salon" éteignait toute la salle). Sans ce
+      // champ, Mistral ne voyait jamais "Salon" nulle part dans le contexte (seulement l'area
+      // "Salle", identique pour les 4 lumières de la pièce) et retombait sur l'area, faute de
+      // donnée plus précise à vérifier. Extrait de l'attribut attributs_taxonomie déjà publié
+      // (voir techniques-socle-ha-mqtt_specs §8.5.4 v4.19 pour le mécanisme de publication).
       entities_snapshot: this.registry ? this.registry.getAllEntities().map((e) => ({
         entity_id: e.entity_id,
         friendly_name: e.friendly_name,
         state: e.state,
         domain: e.domain,
-        area_id: e.area_id
+        area_id: e.area_id,
+        lieu_precis: (e.attributes?.attributs_taxonomie as Record<string, unknown> | undefined)?.lieu_precis
       })) : [],
       timestamp: new Date().toISOString()
     };

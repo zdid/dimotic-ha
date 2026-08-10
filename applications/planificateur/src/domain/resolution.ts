@@ -77,14 +77,37 @@ export function resolveEntityIds(
   for (const lieu of lieux) {
     const lieuSlug = slugify(lieu);
     const matchedAreas = areas.filter((a) => slugify(a.name) === lieuSlug || slugify(a.area_id) === lieuSlug);
-    for (const area of matchedAreas) {
-      for (const entity of registry.getEntitiesByAreaAndQuoi(area.area_id, quoiId)) {
+
+    if (matchedAreas.length > 0) {
+      for (const area of matchedAreas) {
+        for (const entity of registry.getEntitiesByAreaAndQuoi(area.area_id, quoiId)) {
+          entityIds.add(entity.entity_id);
+        }
+      }
+      continue;
+    }
+
+    // ⭐ 10/08/2026 — repli sur le lieu précis de la taxonomie (ex: "Salon", plus fin que l'area
+    // HA "Salle" qui le contient) : uniquement si ce terme ne correspond à AUCUNE area HA, pour ne
+    // jamais élargir une cible déjà précisément résolue par area. Demande utilisateur : "éteins le
+    // salon" éteignait toute la salle (les 4 lumières), faute de ce repli — seule l'area "Salle"
+    // était consultable, "Salon" n'existe qu'en attribut d'entité (attributs_taxonomie.lieu_precis),
+    // jamais comme area HA à part entière.
+    for (const entity of registry.getEntitiesByQuoi(quoiId)) {
+      if (matchesLieuPrecis(entity, lieuSlug)) {
         entityIds.add(entity.entity_id);
       }
     }
   }
 
   return [...entityIds];
+}
+
+function matchesLieuPrecis(entity: { attributes: Record<string, unknown> }, lieuSlug: string): boolean {
+  const taxonomie = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
+  if (!taxonomie) return false;
+  if (typeof taxonomie.slug_precis === 'string' && taxonomie.slug_precis === lieuSlug) return true;
+  return typeof taxonomie.lieu_precis === 'string' && slugify(taxonomie.lieu_precis) === lieuSlug;
 }
 
 /** Résout une intention (verbe/quoi/lieux/valeur) en resolved_service_call, ou undefined. */

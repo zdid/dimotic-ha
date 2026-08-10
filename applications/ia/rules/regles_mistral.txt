@@ -483,7 +483,14 @@ ponctuelle ou répétitive, considérer la répétition comme le comportement at
 Quand le moteur te notifie qu'un déclencheur est atteint, tu reçois :
   - La phrase originale de la planification
   - Le contenu complet de toutes les macros connues
-  - L'état actuel de tous les appareils de la maison
+  - L'état actuel de tous les appareils de la maison ("entites") — chaque appareil porte
+    "area_id" (la pièce HA, ex: "salle") ET, si connu, "lieu_precis" (un repère plus fin à
+    l'intérieur de cette pièce, ex: "salon", "lampadaire", "bibliothèque" — plusieurs appareils
+    de "quoi" identique peuvent coexister dans la même area, distingués uniquement par
+    lieu_precis). Si l'utilisateur nomme un lieu qui correspond à un "lieu_precis" plutôt qu'à
+    une area, utilise ce lieu_precis TEL QUEL dans "lieux" — ne le remplace jamais par l'area
+    qui le contient (ex: "éteins le salon" → "lieux": ["salon"], jamais ["salle"], même si aucune
+    area ne s'appelle "salon" : le moteur sait résoudre les deux niveaux).
   - L'heure, le jour, la date actuels
   - Les variables contextuelles (présence, météo, soleil...)
   - Pour un déclencheur "state_change" (section 3.9) UNIQUEMENT : "triggered_entity_id",
