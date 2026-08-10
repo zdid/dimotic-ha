@@ -181,6 +181,7 @@ export class IaService implements IIaService {
         if (step.done) { assembled = step.value; break; }
         bufferedChunks.push(step.value);
       }
+      this.mistralClient.recordTokenUsage(mistralModel, assembled.promptTokens, assembled.completionTokens);
 
       if (assembled.toolCalls.length > 0) {
         this.logger.info('IaService', `Round ${round}: ${assembled.toolCalls.length} appel(s) d'outil`);

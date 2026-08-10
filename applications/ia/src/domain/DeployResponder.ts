@@ -77,6 +77,7 @@ export class DeployResponder {
     for (let step = await gen.next(); ; step = await gen.next()) {
       if (step.done) { assembled = step.value; break; }
     }
+    this.mistralClient.recordTokenUsage(mistralModel, assembled.promptTokens, assembled.completionTokens);
 
     const parsed = this.parseExecution(assembled.text);
     if (!parsed) {

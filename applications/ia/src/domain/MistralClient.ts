@@ -7,6 +7,7 @@
 import type { Logger } from '../../../core/dist/exports';
 import type { IaConfig } from './config-schema';
 import type { OllamaMessage } from './types';
+import { RateLimiter } from './RateLimiter';
 
 export interface MistralToolSchema {
   type: 'function';
@@ -48,6 +49,11 @@ function sleep(ms: number): Promise<void> {
 }
 
 export class MistralClient {
+  // Un RateLimiter par modèle Mistral — des modèles différents du même compte ont des quotas
+  // indépendants (constaté par l'utilisateur : mistral-small 1,67 req/s / 100k tokens/min,
+  // mistral-large 0,25 req/s / 400k tokens/min), créés à la demande (lazy) au premier appel.
+  private readonly rateLimiters = new Map<string, RateLimiter>();
+
   constructor(
     private readonly config: IaConfig,
     private readonly logger: Logger
@@ -55,6 +61,38 @@ export class MistralClient {
 
   resolveModel(ollamaModel: string): string {
     return this.config.modelMap[ollamaModel.toLowerCase().trim()] || this.config.defaultMistralModel;
+  }
+
+  private getRateLimiter(mistralModel: string): RateLimiter {
+    let limiter = this.rateLimiters.get(mistralModel);
+    if (!limiter) {
+      const limits = this.config.mistralRateLimits[mistralModel] ?? this.fallbackRateLimits();
+      if (!this.config.mistralRateLimits[mistralModel]) {
+        this.logger.warn('MistralClient', `Aucune limite configurée pour le modèle "${mistralModel}" (mistralRateLimits) — repli sur le profil le plus restrictif connu (${limits.requestsPerSecond} req/s, ${limits.tokensPerMinute} tokens/min).`);
+      }
+      limiter = new RateLimiter(mistralModel, limits.requestsPerSecond, limits.tokensPerMinute, this.logger);
+      this.rateLimiters.set(mistralModel, limiter);
+    }
+    return limiter;
+  }
+
+  /** Modèle non présent dans mistralRateLimits (nouveau modèle jamais configuré) : le profil le
+   *  plus restrictif parmi ceux connus, par prudence — mieux vaut throttler trop qu'encaisser des
+   *  429 en boucle sur un modèle dont on ignore les vraies limites. */
+  private fallbackRateLimits(): { requestsPerSecond: number; tokensPerMinute: number } {
+    const known = Object.values(this.config.mistralRateLimits);
+    if (known.length === 0) return { requestsPerSecond: 0.25, tokensPerMinute: 100000 };
+    return {
+      requestsPerSecond: Math.min(...known.map((l) => l.requestsPerSecond)),
+      tokensPerMinute: Math.min(...known.map((l) => l.tokensPerMinute))
+    };
+  }
+
+  /** À appeler par l'appelant une fois le flux entièrement consommé et l'usage réel connu (Mistral
+   *  ne le renvoie qu'à la fin de la réponse, jamais avant) — alimente le throttling préventif des
+   *  requêtes suivantes (RateLimiter.waitForSlot), pour CE modèle précis. Voir IaService/DeployResponder. */
+  recordTokenUsage(mistralModel: string, promptTokens: number, completionTokens: number): void {
+    this.getRateLimiter(mistralModel).recordUsage(promptTokens + completionTokens);
   }
 
   async streamChat(
@@ -75,7 +113,10 @@ export class MistralClient {
     };
     if (tools?.length) payload.tools = tools;
 
+    const rateLimiter = this.getRateLimiter(mistralModel);
     for (let attempt = 0; ; attempt++) {
+      await rateLimiter.waitForSlot();
+
       const response = await fetch(`${this.config.mistralBaseUrl}/chat/completions`, {
         method: 'POST',
         headers: {

@@ -13,6 +13,22 @@ export const modelMapSchema = z.record(z.string()).default({
   'mistral-large': 'mistral-large-latest'
 });
 
+// Limites du plan Mistral en cours, PAR MODÈLE (constatées par l'utilisateur, 10/08/2026 — un
+// modèle différent du même compte a des quotas indépendants, ex: mistral-large est nettement plus
+// restreint que mistral-small) — throttling préventif (RateLimiter.ts, une instance par modèle
+// dans MistralClient) en complément du backoff réactif sur 429. Non exposé dans la config UI
+// générique (même précédent que modelMap ci-dessus, un record n'y est pas éditable) : à ajuster
+// directement dans data/ia/config.yaml si le plan change.
+export const mistralRateLimitSchema = z.object({
+  requestsPerSecond: z.number().positive(),
+  tokensPerMinute: z.number().int().positive()
+});
+
+export const mistralRateLimitsSchema = z.record(mistralRateLimitSchema).default({
+  'mistral-small-latest': { requestsPerSecond: 1.67, tokensPerMinute: 100000 },
+  'mistral-large-latest': { requestsPerSecond: 0.25, tokensPerMinute: 400000 }
+});
+
 export const iaConfigSchema = z.object({
   enabled: z.boolean().default(true),
 
@@ -20,6 +36,7 @@ export const iaConfigSchema = z.object({
   mistralBaseUrl: z.string().default('https://api.mistral.ai/v1'),
   defaultMistralModel: z.string().default('mistral-small-latest'),
   modelMap: modelMapSchema,
+  mistralRateLimits: mistralRateLimitsSchema,
 
   ollamaHttpPort: z.number().int().positive().default(11434),
 
@@ -47,6 +64,10 @@ export const DEFAULT_IA_CONFIG: IaConfig = {
     'mistral:latest': 'mistral-small-latest',
     'mistral-small': 'mistral-small-latest',
     'mistral-large': 'mistral-large-latest'
+  },
+  mistralRateLimits: {
+    'mistral-small-latest': { requestsPerSecond: 1.67, tokensPerMinute: 100000 },
+    'mistral-large-latest': { requestsPerSecond: 0.25, tokensPerMinute: 400000 }
   },
   ollamaHttpPort: 11434,
   rulesFile: '../../data/ia/regles_mistral.txt',

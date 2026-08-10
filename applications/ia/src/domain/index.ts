@@ -40,7 +40,7 @@ export const IA_UI_METADATA: ModuleUiMetadata = {
   fields: [
     {
       title: 'Mistral',
-      description: 'Clé API et modèle par défaut.',
+      description: 'Clé API et modèle par défaut. Limites de débit par modèle (throttling préventif + backoff sur 429) réglables dans data/ia/config.yaml (mistralRateLimits), pas ici — un modèle différent a des quotas indépendants.',
       icon: '🔑',
       fields: [
         { name: 'mistralApiKey', label: 'Clé API Mistral', type: 'password' },
