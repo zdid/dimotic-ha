@@ -1,5 +1,10 @@
 # Spécifications Fonctionnelles - Module RFXCOM
 
+*Version 5.11 - 10 Août 2026*
+*§17.1 : second déclencheur de republication de découverte — `integration:rfxcom:ha:online`
+(birth message natif de HA sur `homeassistant/status`, indépendant de la connexion de notre propre
+bridge MQTT), voir `techniques-socle-ha-mqtt_specs` §8.5.4bis pour le mécanisme complet.*
+
 *Version 5.10 - 9 Août 2026*
 *§5.5 : `essential.name` passe à `null` partout (5 endroits) — corrige un doublon de nom réel
 observé en direct ("Lumière lumière", "Température Température", "Bouton Chambre du bas Bouton"),
@@ -1127,6 +1132,14 @@ traduction en fonction du type du `primaryEmitter`.
 Chaque device/récepteur/scène avec `transmitToHa: true` publie sa découverte au démarrage (sous
 réserve du verrou §8.3) et à chaque modification pertinente.
 
+**⭐ v5.11 — Second déclencheur : signal `ha:online` du socle.** En plus du démarrage/de la
+reconnexion du bridge MQTT propre à RFXCOM (déclencheur historique), `publishInitialDiscoveries()`
+est désormais aussi rappelée sur l'événement `integration:rfxcom:ha:online` — alimenté par le
+birth message MQTT **natif de HA** (`homeassistant/status`, indépendant de notre propre connexion),
+voir `techniques-socle-ha-mqtt_specs` §8.5.4bis. Nécessaire pour le cas où HA redémarre seul, sans
+que le broker MQTT ni notre bridge ne se déconnectent — sans ce second déclencheur, HA repart avec
+un registre vide et ne reçoit jamais de nouvelle découverte.
+
 ### 17.2 Topic dédié aux attributs de taxonomie
 Voir §2.6 — publié uniquement au moment de la (re)découverte, jamais à chaque changement d'état.
 Absent pour les scènes (`device_automation`, pas d'équivalent HA).
@@ -1262,7 +1275,7 @@ Voir historique §22.3 pour le détail complet des versions précédentes.
 
 ### 22.1 Références
 - [Spécification de Nommage **OBLIGATOIRE**](spec-nommage-v1.0.md) ⭐
-- [Spécifications Implémentation RFXCOM](implementation-rfxcom_specs_v1.3.md)
+- [Spécifications Implémentation RFXCOM](implementation-rfxcom_specs_v1.4.md)
 - [Spécifications Récepteurs/Émetteurs RFXCOM](recepteurs-emetteurs-rfxcom_specs_v5.4.md)
 - [Spécifications Techniques Socle HA-MQTT **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.19.md) ⭐
 - [Documentation librairie npm rfxcom](https://www.npmjs.com/package/rfxcom)
@@ -1306,6 +1319,8 @@ Capacités Request/Reply envisagées : `rfxcom:devices:list`, `rfxcom:device:get
 | 5.7 | 2026-07-21 | Claude | Scènes implémentées et testées, événements Socket.io réels, correctif socle abonnement commandes |
 | 5.8 | 2026-07-27 | Claude | Remplacement filtre logiciel → filtre matériel unique, onglet Protocoles, taxonomie 5 champs, fenêtres modales, libellés lisibles |
 | 5.9 | 2026-08-03 | Claude | **Rattrapage documentaire complet** (voir bandeau en tête de document) : détection automatique du port (§8.2, absente jusqu'ici), verrou d'ordonnancement démarrage→push protocoles→découverte (§8.3), reconnexion à chaud (§8.5), retrait de découverte à la désélection (§17.3), topic dédié attributs de taxonomie (§2.6/§17.2, remplace un mécanisme jamais fonctionnel), format réel des identifiants (§2.2), absence d'état "unknown" fictif au démarrage (§9.2), arborescence réelle (§18), numérotation des sections corrigée, section Communication Inter-Applications déplacée en annexe et marquée non implémentée (§22.3), nouvelles limitations documentées (§20) dont la cause racine de la rafale OFF à chaque redémarrage. Aucun changement de comportement — travail de documentation uniquement, faisant suite à plusieurs semaines de dérive entre code et specs. |
+| 5.10 | 2026-08-09 | Claude | `essential.name` passe à `null` partout (5 endroits, §5.5) — corrige un doublon de nom réel ("Lumière lumière"), voir `techniques-socle-ha-mqtt_specs` §8.5.4 pour `has_entity_name`. |
+| 5.11 | 2026-08-10 | Claude | **Second déclencheur de republication de découverte** (§17.1) — `integration:rfxcom:ha:online`, alimenté par le birth message MQTT natif de HA, en plus du démarrage/de la reconnexion du bridge propre à RFXCOM. Voir `techniques-socle-ha-mqtt_specs` §8.5.4bis pour le mécanisme complet. Ancienne version v5.10 archivée. |
 
 ---
 

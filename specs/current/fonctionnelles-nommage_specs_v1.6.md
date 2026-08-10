@@ -1,10 +1,28 @@
 # Spécifications Fonctionnelles - Application NOMMAGE
 
-**Version :** 1.5  
-**Date :** 9 Août 2026  
+**Version :** 1.6  
+**Date :** 10 Août 2026  
 **Auteur :** Mistral Vibe / Claude  
 **Statut :** Document de référence pour l'application NOMMAGE  
 **Document parent :** [PROMPT_PROJET.md](../PROMPT_PROJET.md)
+
+> **v1.6** : **Deux correctifs**, trouvés en creusant un bug remonté par l'utilisateur (devices
+> zigbee2mqtt sans pièce après redémarrage, différents à chaque fois) :
+> 1. **§4.1 — Ordre de priorité du champ source corrigé** : `device.name` passe **en premier**
+>    (était en dernier). La convention `QUOI---LIEU` (`nommage_specs` §2) est portée par le nom de
+>    l'**appareil** (ex: friendly_name zigbee2mqtt), jamais par le nom d'une entité individuelle.
+>    En donnant la priorité à `payload.name`, toute entité ayant son propre nom explicite (switch,
+>    select, capteur diagnostic — ex: "Linkquality", "Power outage memory") parsait ce nom
+>    d'entité, ne trouvait jamais `---`, n'obtenait donc ni lieu ni `suggested_area` — alors que
+>    les capteurs sans nom propre (`device_class` seul) retombaient par accident sur `device.name`
+>    et fonctionnaient. HA n'appliquant `suggested_area` qu'à la toute première découverte d'un
+>    device, celui-ci restait sans pièce dès qu'une entité "nommée" arrivait en premier —
+>    expliquant la variabilité constatée entre redémarrages (ordre d'arrivée des messages).
+> 2. **§7.5 (nouvelle)** : republication de la découverte sur le signal `ha:online` du socle
+>    (second déclencheur, voir `techniques-socle-ha-mqtt_specs` §8.5.4bis).
+>
+> Vérifié en conditions réelles (redémarrage complet HA + vidage du registre) : 127 devices, 0
+> device physique sans pièce (contre 41 avant ces deux correctifs).
 
 > **v1.5** : **Traduction des noms d'entité par pays** (§3.7, nouveau ; §3.4 étape 1bis ; §4.3) —
 > `TranslationsRepository`, dictionnaires YAML `object_id -> libellé` (un par pays, seeds
@@ -378,10 +396,13 @@ nom de pays, pas un code de langue ISO.
 }
 ```
 
-**Champs reconnus (par ordre de priorité) :**
-1. `name` → Nom à parser
-2. `raw_name` → Nom à parser
-3. `device.name` → Nom à parser
+**Champs reconnus (par ordre de priorité, ⭐ v1.6 — `device.name` en premier, voir bandeau de
+version en tête de document) :**
+1. `device.name` → Nom à parser — porte la convention `QUOI---LIEU`, contrairement au nom d'une
+   entité individuelle (§3.1 point 1bis)
+2. `name` → Nom à parser (repli si pas de bloc `device`, ex: sources sans regroupement par
+   appareil)
+3. `raw_name` → Nom à parser
 4. Le payload entier est traité comme une chaîne
 
 ### 4.2 Structure Parsée (ParsedTaxonomy)
@@ -559,7 +580,8 @@ graph TD
 
 1. **Réception MQTT** : `NommageMqttIntegrationService` reçoit un message
 2. **Validation du topic** : Vérifie que le topic correspond aux patterns configurés
-3. **Extraction du nom** : Récupère `name`, `raw_name` ou `device.name` du payload
+3. **Extraction du nom** : Récupère `device.name`, `name` ou `raw_name` du payload (⭐ v1.6, voir
+   §4.1 pour l'ordre de priorité exact et sa justification)
 4. **Parsing** : Séparation QUOI/OÙ et distribution des niveaux géographiques
 5. **Normalisation** : Application de slugify sur chaque segment
 6. **Création de la structure** : Génération de `ParsedTaxonomy`
@@ -691,6 +713,22 @@ vérifiant en direct sur demande explicite de l'utilisateur).
 chaud des sources MQTT qu'une sauvegarde via un chemin dédié — toutes les sources sont
 déconnectées puis reconnectées avec la configuration rechargée. Voir `implementation-nommage_specs`
 §(à préciser côté implémentation) pour le détail technique (événement écouté, méthode déclenchée).
+
+### 7.5 ⭐ Republication de la découverte au signal HA online (v1.6)
+
+**Constat** : NOMMAGE ne republiait la découverte qu'à la connexion de **ses propres** clients
+MQTT (démarrage, reconnexion réseau). Si HA lui-même redémarre sans que ces clients ne se
+déconnectent (broker resté up), HA repart avec un registre vide sans jamais recevoir de nouvelle
+découverte — les areas/devices/entités ne sont jamais recréés.
+
+**Corrigé** : NOMMAGE écoute désormais `integration:nommage:ha:online` (second déclencheur du
+socle, alimenté par le birth message MQTT natif de HA — voir `techniques-socle-ha-mqtt_specs`
+§8.5.4bis) et appelle la **même** `reloadConfigAndReconnectMqtt()` que §7.4. NOMMAGE n'entretient
+pas de registre local des devices déjà découverts (passthrough réactif, pas de suivi d'état) : une
+reconnexion complète de toutes les sources plutôt qu'une republication ciblée est donc le mécanisme
+le plus simple — un nouvel abonnement fait redélivrer par le broker tous les messages de découverte
+retenus, qui repassent alors par le pipeline normal (`suggested_area`, traductions §3.7...) comme à
+la connexion initiale.
 
 ---
 
@@ -874,6 +912,8 @@ déconnectées puis reconnectées avec la configuration rechargée. Voir `implem
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **1.6** | 10/08/2026 | Claude | **Deux correctifs de l'affectation des areas HA** : ordre de priorité `device.name`/`name`/`raw_name` corrigé (§4.1 — `device.name` porte la convention `QUOI---LIEU`, pas le nom d'une entité individuelle), nouvelle §7.5 (republication sur `ha:online`, second déclencheur du socle). Trouvé en creusant un bug de devices zigbee2mqtt sans pièce, variable à chaque redémarrage. Vérifié en conditions réelles : 0 device physique sans pièce, contre 41 avant. Ancienne version v1.5 archivée. |
+| **1.5** | 09/08/2026 | Claude | **Traduction des noms d'entité par pays** (§3.7, nouveau) — `TranslationsRepository`, dictionnaires YAML par pays, seeds versionnés + copie runtime jamais écrasée, paramètre `nommage.language.country`. Ancienne version v1.4 archivée. |
 | **1.4** | 04/08/2026 | Claude | **Application à chaud d'une sauvegarde de configuration** (§7.4, nouveau) — la sauvegarde via le formulaire générique "Paramètres du Module" ne reconnectait pas les sources MQTT avec les nouveaux paramètres ; corrigé, vérifié en direct. Ancienne version v1.3 archivée. |
 | **1.3** | 24/07/2026 | Claude | *(Historique non détaillé dans ce tableau au moment de la rédaction — voir `specs/archives/fonctionnelles-nommage_specs_v1.3.md` pour le contenu complet de cette version.)* |
 | **1.2** | 21/07/2026 | Claude | **Correction** : le code ne traitait en réalité que `couples[0]`/la première source malgré la description v1.1 — corrigé (§3.1, `NommageMqttIntegrationService` gère désormais une `Map<sourceId, MqttClient>`). **Tableau de bord enrichi** (§3.5, §4.4) : statut par connexion (nom + connecté/déconnecté) et entrées traitées par jour sur 5 jours glissants (`NommageStatus.sources[]`/`.dailyCounts[]`). Correction des chemins statiques des pages (`presentation/` fait partie de l'URL). |

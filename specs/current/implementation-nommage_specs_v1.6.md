@@ -1,10 +1,14 @@
 # Spécifications d'Implémentation - Application NOMMAGE
 
-**Version :** 1.5  
-**Date :** 9 Août 2026  
+**Version :** 1.6  
+**Date :** 10 Août 2026  
 **Auteur :** Mistral Vibe / Claude  
 **Statut :** Document technique pour les développeurs  
-**Document parent :** [fonctionnelles-nommage_specs_v1.5.md](./fonctionnelles-nommage_specs_v1.5.md)
+**Document parent :** [fonctionnelles-nommage_specs_v1.6.md](./fonctionnelles-nommage_specs_v1.6.md)
+
+> **v1.6** : **Deux correctifs** (voir `fonctionnelles-nommage_specs` v1.6 pour le contexte complet) :
+> ordre de priorité `device.name`/`name`/`raw_name` corrigé dans `processDiscoveryMessage()` (§4.1,
+> exemple de code) ; nouveau §4.2.3 documentant le listener `integration:nommage:ha:online`.
 
 > **v1.5** : **`TranslationsRepository`** (§3 arborescence, §4.2 exemple `emitPassthroughDiscovery`,
 > §6.3 config YAML) — traduction de noms d'entité par pays, voir `fonctionnelles-nommage_specs`
@@ -277,11 +281,14 @@ private isDiscoveryTopic(source: NommageSourceConfig, topic: string): boolean {
   );
 }
 
-// Extraction du nom — le topic d'origine (préfixe non modifié) est conservé pour le passthrough
+// Extraction du nom — le topic d'origine (préfixe non modifié) est conservé pour le passthrough.
+// ⭐ v1.6 : device.name en PREMIER — la convention QUOI---LIEU (nommage_specs §2) est portée par
+// le nom de l'appareil, jamais par le nom d'une entité individuelle (voir fonctionnelles-nommage
+// §4.1 pour la justification complète et le bug que cet ordre corrige).
 private processDiscoveryMessage(sourceId: string, topic: string, payload: Buffer): void {
   const message = JSON.parse(payload.toString());
-  let rawName = message.name || message.raw_name || 
-               message.device?.name || JSON.stringify(message);
+  let rawName = message.device?.name || message.name ||
+               message.raw_name || JSON.stringify(message);
   
   this.eventBus.emit('nommage:discovery:raw', {
     sourceId,        // ⭐ v1.1 — identifie la source d'origine
@@ -502,6 +509,26 @@ lui-même** : `AppService.registerCoreSocketEvents()` enregistrait ses événeme
 (dont `app:modules:config:save`) en double auprès de `SocketBridge` — chaque sauvegarde déclenchait
 donc deux fois cette reconnexion. Corrigé au niveau du socle, voir `techniques-socle-ha-mqtt_specs`
 §5.4.3.
+
+### 4.2.3 ⭐ Republication de la découverte au signal HA online (v1.6)
+
+**Contexte** : second déclencheur de republication de découverte, indépendant de la connexion des
+clients MQTT propres à NOMMAGE — voir `techniques-socle-ha-mqtt_specs` §8.5.4bis pour le mécanisme
+complet (`HA_STATUS_TOPIC`, `onHaOnline()`, événement générique `integration:{module}:ha:online`).
+
+**Implémentation** : réutilise directement `reloadConfigAndReconnectMqtt()` (§4.2.2) — pas de
+nouvelle méthode, NOMMAGE n'a pas de registre local des devices déjà découverts à mettre à jour de
+façon ciblée.
+
+```typescript
+this.eventBus.on('integration:nommage:ha:online', () => {
+  this.logger.info('NommageService',
+    'HA en ligne — reconnexion des sources MQTT pour republier la découverte');
+  this.reloadConfigAndReconnectMqtt().catch((error) => {
+    this.logger.error('NommageService', `Erreur lors de la reconnexion sur HA online: ${error}`);
+  });
+});
+```
 
 ### 4.3 Déclaration du Module
 
@@ -991,6 +1018,8 @@ mosquitto_sub -h localhost -t "$SYS/broker/subscriptions" -v
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **1.6** | 10/08/2026 | Claude | **Deux correctifs** : ordre de priorité `device.name`/`name`/`raw_name` corrigé dans `processDiscoveryMessage()` (§4.1) — `device.name` en premier, porte la convention `QUOI---LIEU`. Nouvelle §4.2.3 (listener `integration:nommage:ha:online`, réutilise `reloadConfigAndReconnectMqtt()`). Voir `fonctionnelles-nommage_specs` v1.6 pour le contexte complet. Ancienne version v1.5 archivée. |
+| **1.5** | 09/08/2026 | Claude | **`TranslationsRepository`** (§3, §4.2, §6.3) — traduction de noms d'entité par pays. Ancienne version v1.4 archivée. |
 | **1.4** | 04/08/2026 | Claude | **Reconnexion MQTT sur sauvegarde via le formulaire générique** (§4.2.2) — `app:module:config:saved` écouté en plus de `nommage:config:save`. Correction `ws-ha`→`dimotic-ha` (§7.1). Ancienne version v1.3 archivée. |
 | **1.3** | 24/07/2026 | Claude | *(Historique non détaillé dans ce tableau au moment de la rédaction — voir `specs/archives/implementation-nommage_specs_v1.3.md` pour le contenu complet de cette version.)* |
 | **1.2** | 21/07/2026 | Claude | **Correction** : le code v1.1 ne connectait/traitait en réalité que `couples[0]` malgré le texte — `NommageMqttIntegrationService` gère désormais réellement une `Map<sourceId, MqttClient>` (§4.1). Exemples de code §4.2/§5.3 réalignés sur le Passthrough MQTT réel (`bridgeInstance` obligatoire, absent à tort en v1.1). **Nouveau** : statut par connexion et entrées traitées par jour sur 5 jours glissants (§4.2.1, `NommageStatus.sources[]`/`.dailyCounts[]`). |

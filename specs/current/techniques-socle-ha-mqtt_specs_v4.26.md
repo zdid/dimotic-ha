@@ -1,8 +1,36 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.25  
-**Date :** 9 Août 2026  
+**Version :** 4.26  
+**Date :** 10 Août 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.26** : **Trois correctifs de l'affectation automatique des areas HA**, trouvés en creusant un
+> bug remonté par l'utilisateur ("à chaque redémarrage il y a plein de zigbee mal pris en compte, pas
+> forcément les mêmes") — voir détail §8.5.4bis/§8.5.4 :
+> 1. **Nouveau second déclencheur de republication de découverte** (§8.5.4bis, nouvelle) : le
+>    `homeassistant/status` de HA (`HA_STATUS_TOPIC`), abonné par bridge, indépendant de la connexion
+>    de notre propre client MQTT — une livraison retenue déclenche `integration:{module}:ha:online`
+>    sur l'EventBus, consommé par RFXCOM (`publishInitialDiscoveries()`) et NOMMAGE (reconnexion des
+>    sources).
+> 2. **`HaStructureRegistry`** : un nettoyage d'areas vides (effet de bord de
+>    `removeEntityFromStructure()`) supprimait du registre local une area **fraîchement créée**
+>    (`quoiMap` vide par construction) dès qu'une entité **sans rapport** déclenchait ce nettoyage
+>    avant que la nouvelle area ne reçoive sa première entité — causait des créations WS HA en double,
+>    rejetées ("already in use"). Nettoyage retiré (la vraie suppression d'area passe déjà par
+>    `removeArea()`, sur le véritable événement WS `area_registry_updated`).
+> 3. **`AreaEnsureService.registryReady`** était un verrou à sens unique : une fois vrai après le
+>    tout premier `ha:ready`, il ne se réarmait jamais — alors que `AppService.loadHaRegistry()`
+>    reconstruit entièrement le référentiel (et réémet `ha:ready`) à **chaque reconnexion WS**, pas
+>    seulement au démarrage. Sans réarmement, une reconnexion (ex: redémarrage de HA) laissait
+>    `ensureArea()` croire le référentiel prêt alors qu'il venait d'être vidé et rechargeait (jusqu'à
+>    20s+ pour un référentiel réel) — 191 échecs "already in use" constatés sur une seule reconnexion.
+>    Réinitialisé sur `ha:disconnected`. Au passage, le timeout de création d'area (`ENSURE_TIMEOUT_MS`,
+>    8s) ne couvrait jusqu'ici que l'attente du référentiel, pas l'appel WS de création lui-même —
+>    désormais les deux sont bien ignorés quand `waitIndefinitely=true` (RFXCOM/AREXX/NOMMAGE).
+>
+> Vérifié en conditions réelles (redémarrage complet HA + vidage du registre) : 127 devices, 0 device
+> physique sans pièce (les 5 restants sont des intégrations système HA sans lieu : Backup, Bluetooth,
+> Sun, Google Translate, bridge Zigbee2MQTT).
 
 > **v4.25** : **`EssentialEntityData.name`/`HaMqttDiscoveryEntity.name` nullable + `has_entity_name`
 > systématique** (§8.5.4) — corrige un doublon réel observé en direct ("Lumière lumière",
@@ -1657,6 +1685,77 @@ Deux familles de topics coexistent, avec des rôles distincts :
   reçu leur area automatiquement (les 10 restants : 9 devices HA natifs sans rapport, 1 device
   EVOO7 partagé bloqué par le même effet "figé à la première création" — sa toute première
   entité découverte n'avait pas de lieu de taxonomie saisi).
+- **⭐ v4.26 — Trois correctifs supplémentaires**, l'assignation restant imparfaite malgré v4.18/
+  v4.19 (constaté par l'utilisateur : "à chaque redémarrage il y a plein de zigbee mal pris en
+  compte, pas forcément les mêmes") :
+  1. **`HaStructureRegistry.removeEntityFromStructure()`** effectuait un nettoyage "areas vides"
+     (`if (area.quoiMap.size === 0) this.areas.delete(areaId)`) à chaque retrait d'entité — une
+     area **fraîchement créée** par `AreaEnsureService.resolveOrCreateArea()` a un `quoiMap` vide
+     par construction (aucune entité ne lui est encore rattachée localement, l'association arrive
+     de façon asynchrone via un `entity_registry_updated` ultérieur). Si une entité **sans
+     rapport** déclenchait ce nettoyage dans la brève fenêtre avant que la nouvelle area ne
+     reçoive sa première entité, l'area disparaissait du registre **local** bien qu'existant
+     réellement côté HA — `findByName()` la manquait alors sur un `ensureArea()` ultérieur pour le
+     même nom, déclenchant une création WS en double, rejetée par HA (`"invalid_info: The name X
+     is already in use"`). Nettoyage retiré entièrement : la vraie suppression d'area passe déjà
+     par `removeArea()` (méthode existante, câblée sur le véritable événement WS
+     `area_registry_updated`), rendant ce nettoyage à la fois redondant et dangereux.
+  2. **`AreaEnsureService.registryReady`** (le verrou "référentiel prêt", résolu une fois pour
+     toutes au premier `ha:ready`) ne se **réarmait jamais** après une reconnexion WS à HA. Or
+     `AppService.loadHaRegistry()` reconstruit entièrement `HaStructureRegistry` (`rebuild()`) et
+     **réémet `ha:ready`** à chaque connexion **et** reconnexion, pas seulement au démarrage. Sans
+     réarmement, `ensureArea()` sautait l'attente du référentiel lors d'une reconnexion (ex:
+     redémarrage de HA), courant contre un registre en cours de rechargement (jusqu'à 20s+ pour un
+     référentiel réel, §8.5.4 v4.18) — **191 échecs "already in use" constatés sur une seule
+     reconnexion** en conditions réelles, contre 0 avant celle-ci. Corrigé : `registryReady` et
+     `registryReadyPromise` réinitialisés sur l'événement `ha:disconnected` du socle, pour que
+     tout `ensureArea()` arrivant après une déconnexion réattende bien le `ha:ready` suivant.
+  3. Au passage : le timeout de création d'area (`ENSURE_TIMEOUT_MS`, 8s) ne couvrait jusqu'ici
+     que l'attente du référentiel (`REGISTRY_WAIT_TIMEOUT_MS`) quand `waitIndefinitely=true`
+     (RFXCOM/AREXX/NOMMAGE via `waitForHaWsBeforeDiscovery`), pas l'appel WS de création/résolution
+     lui-même — un device pouvait donc encore être créé sans area sous charge (dizaines de devices
+     créant leur area quasi simultanément au démarrage à froid) malgré ce paramétrage, contraire à
+     l'intention documentée ("n'abandonne jamais"). Les deux timeouts sont désormais ignorés
+     ensemble quand `waitIndefinitely=true`.
+
+  Vérifié en conditions réelles après les trois correctifs (redémarrage complet de HA + vidage du
+  registre `.storage`) : **127 devices, 0 device physique sans pièce** (les 5 restants sont des
+  intégrations système HA sans lieu : Backup, Bluetooth, Sun, Google Translate, bridge
+  Zigbee2MQTT) ; 0 échec "already in use" sur la reconnexion suivant le correctif #2, contre 191
+  avant.
+
+#### 8.5.4bis Second déclencheur de republication de découverte : `homeassistant/status` (⭐ v4.26)
+
+**Constat** : le seul déclencheur de republication de la découverte MQTT jusqu'ici était la
+connexion de **notre propre** client MQTT (`publishInitialDiscoveries()` côté RFXCOM, reconnexion
+des sources côté NOMMAGE). Si HA lui-même redémarre **sans** que notre client MQTT ne se
+déconnecte/reconnecte (broker MQTT resté up), aucune republication ne se déclenchait — HA
+redémarrait avec un registre vide et ne recevait jamais la découverte pourtant nécessaire pour
+recréer ses areas/devices/entités.
+
+**Mécanisme** : `homeassistant/status` est le topic MQTT **birth/LWT propre à HA** (`online` /
+`offline`, retenu, publié par l'intégration MQTT native de HA — indépendant de notre topic LWT par
+`bridgeInstance`, §8.5.4). `HaMqttIntegrationService.connectBridge()` s'y abonne (QoS 0) en plus de
+ses topics habituels, pour **chaque bridge**. Une livraison retenue avec payload `'online'`
+déclenche les callbacks enregistrés via `onHaOnline(callback)` — **immédiate même si HA était déjà
+en ligne avant notre propre abonnement**, propriété clé des topics retenus MQTT qu'un simple
+événement de connexion de notre client ne peut pas reproduire.
+
+**Câblage** : `IntegrationBridge.initialize()` relaie chaque appel de callback en un événement
+générique `integration:{moduleName}:ha:online` sur l'EventBus — un module d'intégration s'y abonne
+comme n'importe quel autre événement `integration:*`, sans dépendance directe à
+`HaMqttIntegrationService`. Consommateurs actuels :
+- **RFXCOM** : rappelle `publishInitialDiscoveries()` (même méthode que le déclencheur historique
+  au démarrage/reconnexion du bridge, §17.1 `fonctionnelles-rfxcom_specs`).
+- **NOMMAGE** : NOMMAGE n'entretient pas de registre local des devices déjà vus (passthrough
+  réactif) — reconnexion complète de toutes les sources plutôt qu'une republication ciblée ; un
+  nouvel abonnement fait redélivrer par le broker tous les messages de découverte retenus, qui
+  repassent alors par le pipeline normal (`suggested_area`, traductions...) comme à la connexion
+  initiale (§7.5 `fonctionnelles-nommage_specs`).
+
+Optionnel par construction : un module qui n'appelle pas `onHaOnline()`/n'écoute pas
+`integration:{module}:ha:online` conserve son comportement antérieur (republication au seul
+démarrage/reconnexion du bridge MQTT propre au module).
 - **⭐ v4.19 — Attributs de taxonomie : topic MQTT dédié, remplace deux approches jamais
   fonctionnelles.** `attributs_taxonomie` a connu trois conceptions successives, seule la
   troisième fonctionne réellement (vérifié en conditions réelles sur une instance HA) :
@@ -2197,6 +2296,8 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.26** | 10/08/2026 | Claude | **Trois correctifs de l'affectation automatique des areas HA** (§8.5.4/§8.5.4bis) : nouveau second déclencheur de republication de découverte sur `homeassistant/status` (birth message HA, indépendant de notre propre connexion MQTT — `HA_STATUS_TOPIC`, `onHaOnline()`, événement `integration:{module}:ha:online`), retrait d'un nettoyage d'areas vides dans `HaStructureRegistry` qui supprimait à tort des areas fraîchement créées, réarmement du verrou `registryReady` d'`AreaEnsureService` sur `ha:disconnected` (ne se réarmait jamais après une reconnexion WS, causant 191 échecs "already in use" sur une seule reconnexion). Trouvé en creusant un bug remonté par l'utilisateur ("à chaque redémarrage il y a plein de zigbee mal pris en compte, pas forcément les mêmes"). Vérifié en conditions réelles : 127 devices, 0 device physique sans pièce. Ancienne version v4.25 archivée. |
+| **4.25** | 09/08/2026 | Claude | **`EssentialEntityData.name`/`HaMqttDiscoveryEntity.name` nullable + `has_entity_name` systématique** (§8.5.4) — corrige un doublon réel observé en direct ("Lumière lumière", "Température Température") causé par des modules passant le même mot dans `name` et `device.name`. Ancienne version v4.24 archivée. |
 | **4.24** | 07/08/2026 | Claude | **Suppression du volume Docker nommé `app-code`** (§11.2 réécrite), suite à une question utilisateur ayant mené au remplacement du mécanisme d'activation/désactivation d'application (`fs.renameSync` → liste `disabledApps` dans `data/core/config.yaml`, voir `TODO.md`) — sa seule raison d'être documentée depuis la v4.22. `/app` vit désormais dans les couches de l'image + la couche conteneur éphémère habituelle. §11.3 (liste des volumes) et §11.4 (avertissement cartes SD) mis à jour en conséquence. `docker/deploy-remote.sh` grandement simplifié (pull + up -d, plus de recréation de volume). Vérifié en local (build + démarrage sans volume) et en direct sur `ha2` (image `0.1.7`). Ancienne version v4.23 archivée. |
 | **4.23** | 04/08/2026 | Claude | **Rattrapage de dérive code/specs** (session de vérification demandée par l'utilisateur, ~24h après la v4.22) — cinq ajouts distincts constatés dans le code sans trace dans les specs : (1) **§5.3/§5.4.3** — `SOCLE_SOCKET_EVENTS` scindé en deux constantes (serveur→client / client→serveur, `SOCLE_CLIENT_EVENTS` nouveau) après découverte d'un bug de double-traitement des 8 événements client→serveur du socle (`config:get/save/validate`, `logs:get`, `ha:structure:get`, `ha:command:send`, `app:modules:config:get/save`), repéré via une reconnexion MQTT en double sur Nommage. (2) **§10.3/§10.4** — bouton de redémarrage manuel (Paramètres Techniques → Journalisation). (3) **§11** — numéro de version de l'image Docker Hub corrigé (`:0.1.0`→schéma `X.Y.Z` réel, `:0.1.3` au moment de cette version), commande `docker buildx` documentée. (4) **§11.4** — `compose.deploy.yaml` (fichier de déploiement autonome pour machine cible, créé le 03/08 après la v4.22), avec un avertissement sur la fiabilité des cartes SD suite à un incident réel constaté le jour même sur un déploiement Pi4. (5) **§7.5** — correctif d'un crash au démarrage sur champ YAML `null` (`deepMerge`/`loader.ts`). Aucun de ces cinq points n'avait de changelog ni de mise à jour de spec au moment de son commit — voir aussi les correctifs correspondants sur `fonctionnelles-nommage_specs`/`implementation-nommage_specs` (v1.4) pour le détail du bug Nommage, et le renommage `ws-ha`→`dimotic-ha` corrigé dans 4 autres specs qui référençaient encore l'ancien nom. |
 | **4.22** | 03/08/2026 | Claude | **Deuxième réécriture de la §11 "Docker"**, quelques heures après la v4.21 — la conception "code monté depuis l'hôte" obligeait à `git clone` sur chaque machine cible (question utilisateur : "pourquoi en externe, pourquoi pas en interne ?"). Nouvelle conception autosuffisante : le code est construit pendant `docker build` (plus de service `build` séparé). Piège réel découvert en vérifiant ce design, documenté en détail (§11.2) : `fs.renameSync()` (activation/désactivation d'application) échoue avec `EXDEV` dès que le code applicatif vit uniquement dans les couches de l'image (`overlay2`) OU sur deux bind-mounts hôte séparés (même disque physique) — seul un volume Docker nommé unique couvrant tout `/app`, peuplé automatiquement au premier démarrage, fonctionne. Image republiée sur Docker Hub avec ce correctif. Ancienne version v4.21 archivée. |
