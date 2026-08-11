@@ -110,6 +110,7 @@
     .actions { display: flex; gap: 10px; margin-top: 20px; }
     .btn { padding: 10px 20px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em; }
     .btn-primary { background: var(--color-accent); color: white; }
+    .btn-secondary { background: var(--color-surface-light); color: var(--color-text); border: 1px solid var(--color-primary); }
   </style>
 </head>
 <body>
@@ -148,6 +149,7 @@
           <input type="text" id="test-input" list="test-history" placeholder="ex : allume la lumière du salon" autocomplete="off" />
           <datalist id="test-history"></datalist>
           <button class="btn btn-primary" id="test-send">Envoyer</button>
+          <button class="btn btn-secondary" id="test-compare" title="Envoie la même phrase à Claude et Mistral — celui actif exécute réellement, l'autre s'arrête juste avant (comparaison, résultat dans data/ia/comparatif.log)">🧪 Comparer</button>
         </div>
         <div class="test-result" id="test-result"></div>
       </div>

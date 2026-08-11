@@ -29,6 +29,18 @@ import { IA_CLIENT_EVENTS } from './socket-events';
 
 const MAX_TOOL_ROUNDS = 5; // garde-fou — évite une boucle d'outils infinie en cas de réponse aberrante
 
+type RunChatRoundsResult =
+  | { ok: true; finalText: string; promptTokens: number; completionTokens: number; cachedTokens: number; bufferedChunks: string[]; wasStructured: boolean; intermediateJson?: string; planificateurReply?: string }
+  | { ok: false; errorMessage: string };
+
+/** Une "moitié" du comparatif Claude/Mistral (handleCompareCommand) — voir extractDecision(). */
+interface ComparisonSide {
+  provider: 'mistral' | 'anthropic';
+  model: string;
+  latencyMs: number;
+  decision: Record<string, unknown>;
+}
+
 interface Exchange {
   at: string;
   question: string;
@@ -203,11 +215,11 @@ export class IaService implements IIaService {
   private async runChatRounds(
     messages: OllamaMessage[],
     mistralModel: string,
-    options: OllamaChatRequestBody['options']
-  ): Promise<
-    | { ok: true; finalText: string; promptTokens: number; completionTokens: number; cachedTokens: number; bufferedChunks: string[]; wasStructured: boolean; intermediateJson?: string; planificateurReply?: string }
-    | { ok: false; errorMessage: string }
-  > {
+    options: OllamaChatRequestBody['options'],
+    // Comparatif Claude/Mistral (handleCompareCommand) — absent (undefined) pour tout appel normal
+    // (/api/chat, test manuel), comportement strictement inchangé dans ce cas.
+    runOpts?: { providerOverride?: 'mistral' | 'anthropic'; dryRun?: boolean }
+  ): Promise<RunChatRoundsResult> {
     let currentMessages = messages;
     const toolCallsUsed: MistralToolCall[] = [];
     // Cumulés sur tous les rounds (une boucle d'outils peut appeler Mistral plusieurs fois) —
@@ -222,7 +234,7 @@ export class IaService implements IIaService {
     let forceToolChoice: 'any' | undefined;
 
     for (let round = 1; round <= MAX_TOOL_ROUNDS; round++) {
-      const result = await this.mistralClient.streamChat(currentMessages, mistralModel, options || {}, IA_TOOLS, forceToolChoice, MISTRAL_PROMPT_CACHE_KEY);
+      const result = await this.mistralClient.streamChat(currentMessages, mistralModel, options || {}, IA_TOOLS, forceToolChoice, MISTRAL_PROMPT_CACHE_KEY, runOpts?.providerOverride);
       forceToolChoice = undefined; // ne force jamais deux rounds de suite (voir MistralClient.streamChat)
       if (!result.ok) {
         // 429 épuisé après backoff (MistralClient) : errorText est déjà un message clair et
@@ -248,7 +260,7 @@ export class IaService implements IIaService {
         toolCallsUsed.push(...assembled.toolCalls);
         currentMessages = [...currentMessages, { role: 'assistant', content: assembled.text, tool_calls: assembled.toolCalls }];
         for (const call of assembled.toolCalls) {
-          const toolResult = await this.toolExecutor.execute(call);
+          const toolResult = await this.toolExecutor.execute(call, runOpts?.dryRun);
           currentMessages = [...currentMessages, { role: 'tool', tool_call_id: call.id, content: toolResult }];
         }
         continue; // rappelle Mistral avec les résultats d'outils (specs §8, étape 4)
@@ -276,7 +288,9 @@ export class IaService implements IIaService {
         : (toolCallsUsed.length > 0 ? JSON.stringify(toolCallsUsed, null, 2) : undefined);
 
       if (structured) {
-        const reply = await this.structuredRouter.route(structured);
+        // dry-run (comparatif) : jamais transmis à planificateur, voir ToolExecutor.execute pour
+        // le même principe côté executer_action.
+        const reply = runOpts?.dryRun ? null : await this.structuredRouter.route(structured);
         return {
           ok: true,
           finalText: reply?.message ?? assembled.text, // null → mode dégradé (specs §9)
@@ -334,6 +348,63 @@ export class IaService implements IIaService {
     this.recordExchange(message, result.finalText, result.intermediateJson, result.planificateurReply, result.promptTokens, result.completionTokens, result.cachedTokens);
   }
 
+  /**
+   * ⭐ Comparatif Claude/Mistral (demande utilisateur, 11/08/2026) — envoie la même phrase aux deux
+   * fournisseurs : celui actif en config (this.config.provider) exécute réellement, exactement
+   * comme handleTestCommand ; l'autre s'arrête juste avant l'exécution/dispatch (dry-run, voir
+   * runChatRounds/ToolExecutor.execute) — jamais de double effet de bord sur la maison ni de
+   * planification fantôme. Compare la décision structurée (verbe/quoi/lieux ou JSON
+   * planification/gestion/macro), pas le texte, et le temps de réponse ; journalise une ligne dans
+   * data/ia/comparatif.log (tail -f dessus, demande utilisateur).
+   */
+  private async handleCompareCommand(message: string): Promise<void> {
+    if (!message?.trim()) return;
+
+    const activeProvider = this.config.provider;
+    const otherProvider: 'mistral' | 'anthropic' = activeProvider === 'anthropic' ? 'mistral' : 'anthropic';
+    const messages = this.rulesProvider.inject([{ role: 'user', content: message }]);
+
+    const runSide = async (provider: 'mistral' | 'anthropic', dryRun: boolean): Promise<ComparisonSide> => {
+      const model = this.mistralClient.resolveModel(this.config.defaultMistralModel, provider);
+      const startedAt = Date.now();
+      const result = await this.runChatRounds(messages, model, {}, { providerOverride: provider, dryRun });
+      const latencyMs = Date.now() - startedAt;
+      return { provider, model, latencyMs, decision: extractDecision(result) };
+    };
+
+    // En parallèle : fournisseurs distincts (rate limiters séparés dans MistralClient), pas
+    // d'interférence, et le temps total du comparatif reste celui du plus lent des deux plutôt que
+    // la somme.
+    const [active, other] = await Promise.all([
+      runSide(activeProvider, false),
+      runSide(otherProvider, true)
+    ]);
+
+    const diffs = diffDecisions(active.decision, other.decision);
+    this.logComparison(message, active, other, diffs);
+
+    this.eventBus.emitGeneric('ia:compare:reply', {
+      question: message,
+      active,
+      other,
+      match: diffs.length === 0,
+      diffs
+    });
+  }
+
+  /** Une ligne par comparaison, format compact à plat — pensé pour `tail -f data/ia/comparatif.log`. */
+  private logComparison(question: string, active: ComparisonSide, other: ComparisonSide, diffs: string[]): void {
+    const fmtSide = (s: ComparisonSide) => `${s.provider}:${s.model} ${s.latencyMs}ms ${JSON.stringify(s.decision)}`;
+    const verdict = diffs.length === 0 ? 'MATCH' : `DIFF(${diffs.join('; ')})`;
+    const line = `${new Date().toISOString()} | "${question}" | actif=${fmtSide(active)} | compare=${fmtSide(other)} | ${verdict}\n`;
+    const logPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia', 'comparatif.log');
+    try {
+      fs.appendFileSync(logPath, line);
+    } catch (error) {
+      this.logger.error('IaService', `Échec d'écriture dans ${logPath}: ${error}`);
+    }
+  }
+
   /** Réconcilie les deux formats de requête Ollama (specs §4, troisième piège). */
   private buildMessages(body: OllamaChatRequestBody): OllamaMessage[] {
     let messages = [...(body.messages || [])];
@@ -365,6 +436,9 @@ export class IaService implements IIaService {
     });
     this.eventBus.onGeneric<{ message: string }>(IA_CLIENT_EVENTS.TEST_SEND, ({ message }) => {
       this.handleTestCommand(message).catch((error) => this.logger.error('IaService', `Erreur test manuel: ${error}`));
+    });
+    this.eventBus.onGeneric<{ message: string }>(IA_CLIENT_EVENTS.COMPARE_SEND, ({ message }) => {
+      this.handleCompareCommand(message).catch((error) => this.logger.error('IaService', `Erreur comparatif: ${error}`));
     });
   }
 
@@ -404,4 +478,48 @@ function extractQuestion(messages: OllamaMessage[]): string {
  *  peu importe qu'il soit enrobé de balises markdown ```json ou de texte libre autour. */
 function isUnverifiedQuoiIntrouvable(text: string): boolean {
   return /"error"\s*:\s*"quoi_introuvable"/.test(text);
+}
+
+/** Normalise le résultat d'un round (comparatif Claude/Mistral, handleCompareCommand) en une
+ *  décision structurée comparable champ à champ — jamais le texte final, qui varie d'une IA à
+ *  l'autre même à décision identique (formulations différentes). Trois cas : (1) un appel d'outil
+ *  executer_action a eu lieu → {kind:'action', verbe, quoi, lieux, valeur} ; (2) un JSON structuré
+ *  (planification/gestion/macro/...) a été produit → l'objet tel quel ; (3) ni l'un ni l'autre
+ *  (réponse conversationnelle, quoi_introuvable, erreur) → {kind:'texte'|'erreur', ...}. */
+function extractDecision(result: RunChatRoundsResult): Record<string, unknown> {
+  if (!result.ok) return { kind: 'erreur', message: result.errorMessage };
+  if (!result.intermediateJson) return { kind: 'texte', reponse: result.finalText };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.intermediateJson);
+  } catch {
+    return { kind: 'texte', reponse: result.finalText };
+  }
+
+  if (Array.isArray(parsed)) {
+    const actionCall = (parsed as MistralToolCall[]).find((c) => c?.function?.name === 'executer_action');
+    if (!actionCall) return { kind: 'texte', reponse: result.finalText };
+    const args = typeof actionCall.function.arguments === 'string'
+      ? JSON.parse(actionCall.function.arguments)
+      : actionCall.function.arguments;
+    return { kind: 'action', verbe: args?.verbe, quoi: args?.quoi, lieux: args?.lieux, valeur: args?.valeur };
+  }
+
+  if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
+  return { kind: 'texte', reponse: result.finalText };
+}
+
+/** Diff champ à champ (pas texte à texte) entre deux décisions normalisées — clé absente d'un côté
+ *  traitée comme `undefined`, pas ignorée (une IA qui omet un champ que l'autre renseigne EST une
+ *  différence de comportement, pas un détail à masquer). */
+function diffDecisions(a: Record<string, unknown>, b: Record<string, unknown>): string[] {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  const diffs: string[] = [];
+  for (const key of keys) {
+    const av = JSON.stringify(a[key]);
+    const bv = JSON.stringify(b[key]);
+    if (av !== bv) diffs.push(`${key}: ${av} ≠ ${bv}`);
+  }
+  return diffs;
 }

@@ -76,12 +76,16 @@ export class MistralClient {
     private readonly logger: Logger
   ) {}
 
-  resolveModel(ollamaModel: string): string {
+  // `providerOverride` : ignore le `provider` global de la config pour CET appel précis — utilisé
+  // par le comparatif Claude/Mistral (IaService.handleCompareCommand) pour interroger les deux
+  // fournisseurs dans le même échange, indépendamment de celui actuellement actif en config.
+  resolveModel(ollamaModel: string, providerOverride?: 'mistral' | 'anthropic'): string {
     const config = this.getConfig();
+    const provider = providerOverride ?? config.provider;
     // Mode comparatif Claude (config-schema.ts::provider) : un seul modèle actif, pas de table de
     // correspondance équivalente à modelMap (celle-ci reste dédiée aux alias envoyés par HA côté
     // Mistral, ex: "mistral" → "mistral-small-latest").
-    if (config.provider === 'anthropic') return config.defaultAnthropicModel;
+    if (provider === 'anthropic') return config.defaultAnthropicModel;
     return config.modelMap[ollamaModel.toLowerCase().trim()] || config.defaultMistralModel;
   }
 
@@ -134,7 +138,9 @@ export class MistralClient {
     // Voir MISTRAL_PROMPT_CACHE_KEY — optionnel pour ne pas casser un appelant qui ne s'en
     // soucierait pas (pas de valeur par défaut ici : chaque appelant choisit explicitement,
     // évite qu'un futur usage générique de ce client cache par erreur un prompt sans rapport).
-    promptCacheKey?: string
+    promptCacheKey?: string,
+    // Voir resolveModel() ci-dessus — même rôle, pour le comparatif Claude/Mistral.
+    providerOverride?: 'mistral' | 'anthropic'
   ): Promise<MistralStreamResult> {
     const config = this.getConfig();
     // Mode comparatif Claude (voir config-schema.ts::provider) : même format de requête/réponse
@@ -142,7 +148,7 @@ export class MistralClient {
     // base_url/clé/modèle changent. L'en-tête Authorization: Bearer reste correct dans les deux
     // cas (confirmé par la doc Anthropic pour cette couche précise — pas x-api-key, réservé à
     // l'API Messages native, hors scope ici).
-    const useAnthropic = config.provider === 'anthropic';
+    const useAnthropic = (providerOverride ?? config.provider) === 'anthropic';
     const apiKey = useAnthropic ? config.anthropicApiKey : config.mistralApiKey;
     const baseUrl = useAnthropic ? config.anthropicBaseUrl : config.mistralBaseUrl;
     if (!apiKey) {

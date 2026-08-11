@@ -22,6 +22,21 @@ interface IaStatus {
   providerConfigured: boolean;
 }
 
+interface ComparisonSide {
+  provider: 'mistral' | 'anthropic';
+  model: string;
+  latencyMs: number;
+  decision: Record<string, unknown>;
+}
+
+interface CompareReply {
+  question: string;
+  active: ComparisonSide;
+  other: ComparisonSide;
+  match: boolean;
+  diffs: string[];
+}
+
 interface Exchange {
   at: string;
   question: string;
@@ -77,6 +92,10 @@ function setupEventListeners(): void {
     showTestResult(reply);
   });
 
+  socket.on('ia:compare:reply', (reply: CompareReply) => {
+    showCompareResult(reply);
+  });
+
   socket.on('connect', () => {
     console.log('[IA UI] Connecté au serveur Socket.io');
     requestInitialStatus();
@@ -121,6 +140,7 @@ function renderTestHistory(history: string[]): void {
 function setupTestForm(): void {
   const input = $('test-input') as HTMLInputElement | null;
   const sendBtn = $('test-send') as HTMLButtonElement | null;
+  const compareBtn = $('test-compare') as HTMLButtonElement | null;
   if (!input || !sendBtn) return;
 
   renderTestHistory(loadTestHistory());
@@ -147,6 +167,28 @@ function setupTestForm(): void {
   input.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Enter') send();
   });
+
+  // Comparatif Claude/Mistral (demande utilisateur, 11/08/2026) — même phrase aux deux
+  // fournisseurs, résultat détaillé dans data/ia/comparatif.log (tail -f), résumé bref ici.
+  if (compareBtn) {
+    compareBtn.addEventListener('click', () => {
+      const message = input.value.trim();
+      if (!message || !socket) return;
+
+      recordTestHistory(message);
+
+      compareBtn.disabled = true;
+      compareBtn.textContent = 'Comparaison...';
+      const resultEl = $('test-result');
+      if (resultEl) {
+        resultEl.style.display = 'block';
+        resultEl.className = 'test-result';
+        resultEl.textContent = 'En attente des deux réponses...';
+      }
+
+      socket.emit('ia:compare:send', { message });
+    });
+  }
 }
 
 function showTestResult(reply: { success: boolean; response: string; intermediateJson?: string; planificateurReply?: string; promptTokens?: number; completionTokens?: number }): void {
@@ -164,6 +206,28 @@ function showTestResult(reply: { success: boolean; response: string; intermediat
     + (reply.promptTokens !== undefined ? `<div class="tokens-label">${formatTokens(reply.promptTokens, reply.completionTokens)}</div>` : '')
     + (reply.intermediateJson ? `<pre class="intermediate-json">${escapeHtml(reply.intermediateJson)}</pre>` : '')
     + (reply.planificateurReply ? `<div class="planificateur-reply-label">Réponse de planificateur :</div><pre class="intermediate-json">${escapeHtml(reply.planificateurReply)}</pre>` : '');
+}
+
+function showCompareResult(reply: CompareReply): void {
+  const compareBtn = $('test-compare') as HTMLButtonElement | null;
+  if (compareBtn) {
+    compareBtn.disabled = false;
+    compareBtn.textContent = '🧪 Comparer';
+  }
+
+  const resultEl = $('test-result');
+  if (!resultEl) return;
+  const providerLabel = (p: 'mistral' | 'anthropic') => (p === 'anthropic' ? 'Claude' : 'Mistral');
+  const fmtSide = (s: ComparisonSide, isActive: boolean) =>
+    `<div>${isActive ? '▶️' : '⏸️'} <strong>${providerLabel(s.provider)}</strong> (${escapeHtml(s.model)}, ${s.latencyMs} ms)${isActive ? '' : ' — non exécuté (comparatif)'}</div>`
+    + `<pre class="intermediate-json">${escapeHtml(JSON.stringify(s.decision, null, 2))}</pre>`;
+
+  resultEl.style.display = 'block';
+  resultEl.className = `test-result ${reply.match ? 'ok' : 'error'}`;
+  resultEl.innerHTML = `<div class="tokens-label">${reply.match ? '✅ Décisions identiques' : `⚠️ Décisions différentes : ${reply.diffs.map(escapeHtml).join(' ; ')}`}</div>`
+    + fmtSide(reply.active, true)
+    + fmtSide(reply.other, false)
+    + `<div class="tokens-label">Détail complet dans data/ia/comparatif.log</div>`;
 }
 
 function formatTokens(promptTokens: number, completionTokens?: number): string {

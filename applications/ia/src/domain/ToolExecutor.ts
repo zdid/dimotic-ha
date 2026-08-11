@@ -47,8 +47,12 @@ export class ToolExecutor {
     );
   }
 
-  /** Exécute un appel d'outil et retourne le contenu à réinjecter en message role:tool. */
-  async execute(call: MistralToolCall): Promise<string> {
+  /** Exécute un appel d'outil et retourne le contenu à réinjecter en message role:tool.
+   *  `dryRun` (comparatif Claude/Mistral, IaService.handleCompareCommand) : les outils de lecture
+   *  (lister_entites/obtenir_etat) s'exécutent normalement (sans effet de bord, la comparaison
+   *  reste fidèle au comportement réel du modèle), seul executer_action est intercepté — jamais
+   *  transmis à planificateur, pour ne jamais agir deux fois sur la maison depuis un test. */
+  async execute(call: MistralToolCall, dryRun = false): Promise<string> {
     const args = typeof call.function.arguments === 'string'
       ? safeParse(call.function.arguments)
       : call.function.arguments;
@@ -73,6 +77,9 @@ export class ToolExecutor {
           lieux: Array.isArray(args?.lieux) ? (args!.lieux as string[]) : [],
           valeur: args?.valeur as string | number | undefined
         };
+        if (dryRun) {
+          return JSON.stringify({ success: true, message: '[comparatif] action non exécutée (dry-run)', dryRun: true });
+        }
         try {
           const reply = await this.toolExecuteRequester.request(params, this.toolExecuteTimeoutMs);
           return JSON.stringify({ success: reply.success, message: reply.message });
