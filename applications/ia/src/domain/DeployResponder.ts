@@ -15,6 +15,7 @@
 import type { Logger, IEventBus } from '../../../core/dist/exports';
 import type { DeployRequest, DeployReply, ExecutionStep, OllamaMessage } from './types';
 import type { MistralClient } from './MistralClient';
+import { MISTRAL_PROMPT_CACHE_KEY } from './MistralClient';
 import type { RulesProvider } from './rules';
 import { translateMistralStream, stripMarkdownFences } from './streaming';
 
@@ -64,7 +65,7 @@ export class DeployResponder {
     const messages = this.rulesProvider.inject([triggerMessage]);
     const mistralModel = this.mistralClient.resolveModel(this.defaultModel);
 
-    const result = await this.mistralClient.streamChat(messages, mistralModel, {});
+    const result = await this.mistralClient.streamChat(messages, mistralModel, {}, undefined, undefined, MISTRAL_PROMPT_CACHE_KEY);
     if (!result.ok) {
       this.reply(req.correlation_id, false, `Erreur Mistral ${result.status}: ${result.errorText}`);
       return;

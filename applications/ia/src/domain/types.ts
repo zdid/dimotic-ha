@@ -44,7 +44,14 @@ export interface MistralChatCompletionChunk {
     };
     finish_reason?: string | null;
   }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    // ⭐ Tokens du prompt servis depuis le cache Mistral (prompt_cache_key, MistralClient.ts) —
+    // facturés à 10% du tarif normal. Vérifié en direct (10/08/2026) : présent aussi bien en
+    // réponse non-streamée qu'en dernier chunk d'un flux SSE.
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
 }
 
 /** Résultat de l'assemblage complet d'un flux Mistral (streaming.ts). */
@@ -53,6 +60,7 @@ export interface AssembledMistralResponse {
   toolCalls: MistralToolCall[];
   promptTokens: number;
   completionTokens: number;
+  cachedTokens: number;
 }
 
 /** Ensemble des types JSON de premier niveau routés vers planificateur (specs §9). */

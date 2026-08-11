@@ -16,7 +16,7 @@ import * as path from 'node:path';
 import type { Response } from 'express';
 import type { IEventBus, Logger, IAppConfigProvider, HaStructureRegistry, HaWsClient } from '../../../core/dist/exports';
 import { iaConfigSchema, type IaConfig } from './config-schema';
-import { MistralClient } from './MistralClient';
+import { MistralClient, MISTRAL_PROMPT_CACHE_KEY } from './MistralClient';
 import { RulesProvider } from './rules';
 import { ToolExecutor } from './ToolExecutor';
 import { StructuredRouter } from './StructuredRouter';
@@ -43,6 +43,9 @@ interface Exchange {
    *  (erreur avant le premier appel). */
   promptTokens?: number;
   completionTokens?: number;
+  /** ⭐ Portion de promptTokens servie depuis le cache Mistral (prompt_cache_key,
+   *  MistralClient.MISTRAL_PROMPT_CACHE_KEY) — facturée à 10% du tarif normal. 0 si aucun hit. */
+  cachedTokens?: number;
 }
 
 export interface IIaService {
@@ -187,7 +190,7 @@ export class IaService implements IIaService {
     res.write(makeOllamaDoneChunk(ollamaModel, result.promptTokens, result.completionTokens));
     res.end();
 
-    this.recordExchange(question, result.finalText, result.intermediateJson, result.planificateurReply, result.promptTokens, result.completionTokens);
+    this.recordExchange(question, result.finalText, result.intermediateJson, result.planificateurReply, result.promptTokens, result.completionTokens, result.cachedTokens);
   }
 
   /**
@@ -201,7 +204,7 @@ export class IaService implements IIaService {
     mistralModel: string,
     options: OllamaChatRequestBody['options']
   ): Promise<
-    | { ok: true; finalText: string; promptTokens: number; completionTokens: number; bufferedChunks: string[]; wasStructured: boolean; intermediateJson?: string; planificateurReply?: string }
+    | { ok: true; finalText: string; promptTokens: number; completionTokens: number; cachedTokens: number; bufferedChunks: string[]; wasStructured: boolean; intermediateJson?: string; planificateurReply?: string }
     | { ok: false; errorMessage: string }
   > {
     let currentMessages = messages;
@@ -211,13 +214,14 @@ export class IaService implements IIaService {
     // seulement le dernier round, qui sous-comptait sinon un échange avec appel(s) d'outil).
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
+    let totalCachedTokens = 0;
     // Un seul essai de rattrapage par échange (voir plus bas, détection "quoi_introuvable" non
     // vérifié) — jamais plus, pour ne pas boucler indéfiniment si Mistral persiste malgré tout.
     let quoiIntrouvableRetried = false;
     let forceToolChoice: 'any' | undefined;
 
     for (let round = 1; round <= MAX_TOOL_ROUNDS; round++) {
-      const result = await this.mistralClient.streamChat(currentMessages, mistralModel, options || {}, IA_TOOLS, forceToolChoice);
+      const result = await this.mistralClient.streamChat(currentMessages, mistralModel, options || {}, IA_TOOLS, forceToolChoice, MISTRAL_PROMPT_CACHE_KEY);
       forceToolChoice = undefined; // ne force jamais deux rounds de suite (voir MistralClient.streamChat)
       if (!result.ok) {
         // 429 épuisé après backoff (MistralClient) : errorText est déjà un message clair et
@@ -236,6 +240,7 @@ export class IaService implements IIaService {
       this.mistralClient.recordTokenUsage(mistralModel, assembled.promptTokens, assembled.completionTokens);
       totalPromptTokens += assembled.promptTokens;
       totalCompletionTokens += assembled.completionTokens;
+      totalCachedTokens += assembled.cachedTokens;
 
       if (assembled.toolCalls.length > 0) {
         this.logger.info('IaService', `Round ${round}: ${assembled.toolCalls.length} appel(s) d'outil`);
@@ -276,6 +281,7 @@ export class IaService implements IIaService {
           finalText: reply?.message ?? assembled.text, // null → mode dégradé (specs §9)
           promptTokens: totalPromptTokens,
           completionTokens: totalCompletionTokens,
+          cachedTokens: totalCachedTokens,
           bufferedChunks,
           wasStructured: true,
           intermediateJson,
@@ -288,6 +294,7 @@ export class IaService implements IIaService {
         finalText: assembled.text,
         promptTokens: totalPromptTokens,
         completionTokens: totalCompletionTokens,
+        cachedTokens: totalCachedTokens,
         bufferedChunks,
         wasStructured: false,
         intermediateJson
@@ -320,9 +327,10 @@ export class IaService implements IIaService {
       intermediateJson: result.intermediateJson,
       planificateurReply: result.planificateurReply,
       promptTokens: result.promptTokens,
-      completionTokens: result.completionTokens
+      completionTokens: result.completionTokens,
+      cachedTokens: result.cachedTokens
     });
-    this.recordExchange(message, result.finalText, result.intermediateJson, result.planificateurReply, result.promptTokens, result.completionTokens);
+    this.recordExchange(message, result.finalText, result.intermediateJson, result.planificateurReply, result.promptTokens, result.completionTokens, result.cachedTokens);
   }
 
   /** Réconcilie les deux formats de requête Ollama (specs §4, troisième piège). */
@@ -339,8 +347,8 @@ export class IaService implements IIaService {
     return messages;
   }
 
-  private recordExchange(question: string, response: string, intermediateJson?: string, planificateurReply?: string, promptTokens?: number, completionTokens?: number): void {
-    this.recentExchanges.unshift({ at: new Date().toISOString(), question, response, intermediateJson, planificateurReply, promptTokens, completionTokens });
+  private recordExchange(question: string, response: string, intermediateJson?: string, planificateurReply?: string, promptTokens?: number, completionTokens?: number, cachedTokens?: number): void {
+    this.recentExchanges.unshift({ at: new Date().toISOString(), question, response, intermediateJson, planificateurReply, promptTokens, completionTokens, cachedTokens });
     if (this.recentExchanges.length > 20) this.recentExchanges.length = 20;
     this.eventBus.emitGeneric('ia:exchanges:list', this.recentExchanges);
   }

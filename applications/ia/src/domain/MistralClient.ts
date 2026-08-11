@@ -34,6 +34,18 @@ function ollamaOptionsToMistral(options: MistralOptions = {}): Record<string, un
   return out;
 }
 
+// ⭐ Clé de cache de prompt Mistral (prompt_cache_key), commune à tous les appels de l'app — le
+// but est de faire matcher le préfixe partagé (regles_mistral.txt + catalogue quoi/lieux, voir
+// RulesProvider) entre TOUS les appels de `ia`, qu'ils viennent de IaService (conversation
+// directe) ou de DeployResponder (réinterprétation à l'exécution) : c'est le même contenu de
+// message system dans les deux cas, donc la même clé permet aux deux chemins de profiter du
+// même cache. Vérifié en direct (10/08/2026) contre l'API Mistral réelle : premier appel avec
+// cette clé → `cached_tokens: 0` ; second appel, même contenu, même clé → ~99% du prompt system
+// (11232/11263 tokens) servi depuis le cache, facturé à 10% du tarif normal (voir doc Mistral,
+// https://docs.mistral.ai/studio-api/conversations/advanced/prompt-caching) ; sans la clé,
+// aucun cache même avec un contenu strictement identique — confirmé, pas un effet automatique.
+export const MISTRAL_PROMPT_CACHE_KEY = 'dimotic-ha-ia';
+
 // Backoff exponentiel sur 429 (rate limit Mistral) : 1s, 2s, 4s, 8s, 16s, 32s, puis plafonné à 60s
 // (demande utilisateur, constaté en direct pendant une session de test). RATE_LIMIT_MAX_RETRIES
 // borne le nombre total de tentatives après le 429 initial — sans borne, un rate limit persistant
@@ -107,7 +119,11 @@ export class MistralClient {
     // empêcherait Mistral d'atteindre le round final texte/JSON (création de planification,
     // gestion, macro — aucun de ces cas n'appelle d'outil) et le ferait échouer avec "trop
     // d'appels d'outils enchaînés" une fois MAX_TOOL_ROUNDS atteint.
-    toolChoice?: 'any'
+    toolChoice?: 'any',
+    // Voir MISTRAL_PROMPT_CACHE_KEY — optionnel pour ne pas casser un appelant qui ne s'en
+    // soucierait pas (pas de valeur par défaut ici : chaque appelant choisit explicitement,
+    // évite qu'un futur usage générique de ce client cache par erreur un prompt sans rapport).
+    promptCacheKey?: string
   ): Promise<MistralStreamResult> {
     if (!this.config.mistralApiKey) {
       return { ok: false, status: 503, errorText: 'mistralApiKey non configurée' };
@@ -121,6 +137,7 @@ export class MistralClient {
     };
     if (tools?.length) payload.tools = tools;
     if (toolChoice && tools?.length) payload.tool_choice = toolChoice;
+    if (promptCacheKey) payload.prompt_cache_key = promptCacheKey;
 
     const rateLimiter = this.getRateLimiter(mistralModel);
     for (let attempt = 0; ; attempt++) {

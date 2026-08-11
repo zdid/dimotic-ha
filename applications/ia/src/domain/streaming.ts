@@ -145,6 +145,7 @@ export async function* translateMistralStream(
   let buffer = '';
   let promptTokens = 0;
   let completionTokens = 0;
+  let cachedTokens = 0;
   const textParts: string[] = [];
   const toolCallBuffer = new Map<number, ToolCallBufferEntry>();
   let finished = false;
@@ -186,6 +187,7 @@ export async function* translateMistralStream(
       if (chunk.usage) {
         promptTokens = chunk.usage.prompt_tokens ?? promptTokens;
         completionTokens = chunk.usage.completion_tokens ?? completionTokens;
+        cachedTokens = chunk.usage.prompt_tokens_details?.cached_tokens ?? cachedTokens;
       }
 
       if (content) {
@@ -212,5 +214,5 @@ export async function* translateMistralStream(
     toolCalls.push({ id: tc.id, type: 'function', function: { name: tc.function.name, arguments: args } });
   }
 
-  return { text: textParts.join(''), toolCalls, promptTokens, completionTokens };
+  return { text: textParts.join(''), toolCalls, promptTokens, completionTokens, cachedTokens };
 }
