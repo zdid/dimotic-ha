@@ -85,7 +85,16 @@ export class RulesProvider {
   private buildCatalogText(): string {
     if (!this.registry) return '';
 
-    const quoiList = this.registry.getQuoiCatalog().map((q) => q.label || q.quoi_id).join(', ');
+    // Pas des cibles adressables par une commande domotique — demande utilisateur : "bouton"
+    // (déclencheur physique, pas un "quoi" qu'on allume/éteint), "telecommande"/"scenes_switch"
+    // (accessoires de déclenchement), "zigbee2mqtt_bridge" (infrastructure technique). Filtré ici
+    // uniquement (pas dans getQuoiCatalog() lui-même, réutilisé ailleurs — ex: arbreouquoi — où
+    // ces quoi restent des catégories légitimes à parcourir).
+    const EXCLUDED_QUOI_IDS = new Set(['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge']);
+    const quoiList = this.registry.getQuoiCatalog()
+      .filter((q) => !EXCLUDED_QUOI_IDS.has(q.quoi_id))
+      .map((q) => q.label || q.quoi_id)
+      .join(', ');
     const lieuxList = this.registry.getLieuCatalog().join(', ');
     if (!quoiList && !lieuxList) return '';
 
