@@ -77,7 +77,7 @@ export class IaService implements IIaService {
     _haWsClient?: HaWsClient // non utilisé directement : ia n'exécute jamais d'action elle-même
   ) {
     this.config = iaConfigSchema.parse(configProvider.getAppConfig());
-    this.mistralClient = new MistralClient(this.config, this.logger);
+    this.mistralClient = new MistralClient(() => this.config, this.logger);
     this.rulesProvider = new RulesProvider(this.resolveRulesPath(), this.logger, this.haStructureRegistry, () => this.config.excludedQuoiIds);
     this.toolExecutor = new ToolExecutor(this.eventBus, this.logger, this.haStructureRegistry, this.config.toolExecuteTimeoutMs);
     this.structuredRouter = new StructuredRouter(this.eventBus, this.logger, this.config.commandTimeoutMs);

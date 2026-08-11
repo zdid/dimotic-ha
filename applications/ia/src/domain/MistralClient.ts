@@ -67,23 +67,30 @@ export class MistralClient {
   private readonly rateLimiters = new Map<string, RateLimiter>();
 
   constructor(
-    private readonly config: IaConfig,
+    // Getter plutôt qu'un IaConfig figé : IaService réassigne this.config (nouvel objet) au
+    // rechargement à chaud (watchConfigFile()) — un champ construit une seule fois par valeur
+    // (comme c'était le cas avant) resterait bloqué sur les valeurs de config au démarrage. Même
+    // précédent que RulesProvider (getExcludedQuoiIds), nécessaire ici depuis l'ajout du
+    // comparatif Claude (provider peut changer sans redémarrage).
+    private readonly getConfig: () => IaConfig,
     private readonly logger: Logger
   ) {}
 
   resolveModel(ollamaModel: string): string {
+    const config = this.getConfig();
     // Mode comparatif Claude (config-schema.ts::provider) : un seul modèle actif, pas de table de
     // correspondance équivalente à modelMap (celle-ci reste dédiée aux alias envoyés par HA côté
     // Mistral, ex: "mistral" → "mistral-small-latest").
-    if (this.config.provider === 'anthropic') return this.config.defaultAnthropicModel;
-    return this.config.modelMap[ollamaModel.toLowerCase().trim()] || this.config.defaultMistralModel;
+    if (config.provider === 'anthropic') return config.defaultAnthropicModel;
+    return config.modelMap[ollamaModel.toLowerCase().trim()] || config.defaultMistralModel;
   }
 
   private getRateLimiter(mistralModel: string): RateLimiter {
     let limiter = this.rateLimiters.get(mistralModel);
     if (!limiter) {
-      const limits = this.config.mistralRateLimits[mistralModel] ?? this.fallbackRateLimits();
-      if (!this.config.mistralRateLimits[mistralModel]) {
+      const config = this.getConfig();
+      const limits = config.mistralRateLimits[mistralModel] ?? this.fallbackRateLimits();
+      if (!config.mistralRateLimits[mistralModel]) {
         this.logger.warn('MistralClient', `Aucune limite configurée pour le modèle "${mistralModel}" (mistralRateLimits) — repli sur le profil le plus restrictif connu (${limits.requestsPerSecond} req/s, ${limits.tokensPerMinute} tokens/min).`);
       }
       limiter = new RateLimiter(mistralModel, limits.requestsPerSecond, limits.tokensPerMinute, this.logger);
@@ -96,7 +103,7 @@ export class MistralClient {
    *  plus restrictif parmi ceux connus, par prudence — mieux vaut throttler trop qu'encaisser des
    *  429 en boucle sur un modèle dont on ignore les vraies limites. */
   private fallbackRateLimits(): { requestsPerSecond: number; tokensPerMinute: number } {
-    const known = Object.values(this.config.mistralRateLimits);
+    const known = Object.values(this.getConfig().mistralRateLimits);
     if (known.length === 0) return { requestsPerSecond: 0.25, tokensPerMinute: 100000 };
     return {
       requestsPerSecond: Math.min(...known.map((l) => l.requestsPerSecond)),
@@ -129,14 +136,15 @@ export class MistralClient {
     // évite qu'un futur usage générique de ce client cache par erreur un prompt sans rapport).
     promptCacheKey?: string
   ): Promise<MistralStreamResult> {
+    const config = this.getConfig();
     // Mode comparatif Claude (voir config-schema.ts::provider) : même format de requête/réponse
     // (couche de compatibilité OpenAI d'Anthropic), donc réutilise ce client tel quel — seuls
     // base_url/clé/modèle changent. L'en-tête Authorization: Bearer reste correct dans les deux
     // cas (confirmé par la doc Anthropic pour cette couche précise — pas x-api-key, réservé à
     // l'API Messages native, hors scope ici).
-    const useAnthropic = this.config.provider === 'anthropic';
-    const apiKey = useAnthropic ? this.config.anthropicApiKey : this.config.mistralApiKey;
-    const baseUrl = useAnthropic ? this.config.anthropicBaseUrl : this.config.mistralBaseUrl;
+    const useAnthropic = config.provider === 'anthropic';
+    const apiKey = useAnthropic ? config.anthropicApiKey : config.mistralApiKey;
+    const baseUrl = useAnthropic ? config.anthropicBaseUrl : config.mistralBaseUrl;
     if (!apiKey) {
       return { ok: false, status: 503, errorText: `${useAnthropic ? 'anthropicApiKey' : 'mistralApiKey'} non configurée` };
     }

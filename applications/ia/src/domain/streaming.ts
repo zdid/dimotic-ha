@@ -203,15 +203,16 @@ export async function* translateMistralStream(
   }
   void finished;
 
+  // ⭐ `arguments` reste une STRING JSON brute (jamais parsée ici) — c'est le format attendu par le
+  // protocole (OpenAI/Mistral/Anthropic tool_calls), y compris quand ce tool_call est réinjecté
+  // tel quel dans l'historique au tour suivant (IaService.runChatRounds). Mistral tolérait un objet
+  // déjà parsé à cet endroit, mais la couche de compatibilité OpenAI d'Anthropic le rejette
+  // strictement (400 "Input should be a valid string") — bug réel constaté en conditions réelles en
+  // testant le comparatif Claude (config-schema.ts::provider). ToolExecutor.execute() parse déjà
+  // lui-même la string au moment de l'exécution, donc rien d'autre à changer.
   const toolCalls: MistralToolCall[] = [];
   for (const tc of toolCallBuffer.values()) {
-    let args: string | Record<string, unknown> = tc.function.arguments;
-    try {
-      args = JSON.parse(tc.function.arguments);
-    } catch {
-      // arguments non-JSON — conservés en texte brut, ToolExecutor décidera quoi en faire
-    }
-    toolCalls.push({ id: tc.id, type: 'function', function: { name: tc.function.name, arguments: args } });
+    toolCalls.push({ id: tc.id, type: 'function', function: { name: tc.function.name, arguments: tc.function.arguments } });
   }
 
   return { text: textParts.join(''), toolCalls, promptTokens, completionTokens, cachedTokens };
