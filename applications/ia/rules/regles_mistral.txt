@@ -104,7 +104,9 @@ de la phrase, le "quoi" (type d'entité visé) et l'"area" (zone de la maison).
 Avant toute chose, tu dois classifier la requête reçue parmi ces types :
 
   A. ACTION IMMÉDIATE
-     La phrase décrit quelque chose à faire maintenant.
+     La phrase décrit quelque chose à faire maintenant, SANS marqueur de délai/heure
+     future ("dans X min/h", "à HHhMM") — un tel marqueur bascule TOUJOURS en D, même
+     pour une action unique et même si le verbe correspond à la table 0.1.
      Exemples : "allume le salon", "éteins tout", "baisse les volets"
      → Traité exclusivement via l'outil executer_action (section 0.5),
        jamais par une réponse JSON directe.

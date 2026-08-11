@@ -66,16 +66,58 @@ export function stripMarkdownFences(text: string): string {
   return body.join('\n');
 }
 
-/** Tente d'extraire un JSON structuré (type ∈ STRUCTURED_TYPES) du texte assemblé. */
-export function extractStructuredJson(text: string): Record<string, unknown> | null {
-  const cleaned = stripMarkdownFences(text);
-  try {
-    const data = JSON.parse(cleaned);
-    if (data && typeof data === 'object' && STRUCTURED_TYPES.has(data.type)) {
-      return data;
+/** Cherche un bloc ```json ... ``` (ou ``` ... ```) n'importe où dans le texte, pas seulement en
+ *  tout début — Mistral fait parfois précéder le JSON d'une phrase d'introduction ("Voici la
+ *  structure JSON générée...") au lieu de répondre uniquement en JSON comme demandé, ce que
+ *  stripMarkdownFences() (qui exige que le texte commence directement par les balises) ne
+ *  détecte pas : bug réel constaté en conditions réelles — la planification "annoncée" dans la
+ *  réponse n'était en fait jamais créée, `extractStructuredJson` retombant silencieusement sur
+ *  "réponse conversationnelle" faute de JSON exploitable au tout début du texte. */
+function extractFencedBlock(text: string): string | null {
+  const match = text.match(/```(?:json)?\s*\n([\s\S]*?)```/);
+  return match ? match[1].trim() : null;
+}
+
+/** Repli ultime si aucune balise de code n'est présente : premier '{' jusqu'à son '}' correspondant
+ *  (comptage de profondeur, tolère les objets imbriqués) — couvre le cas, plus rare, d'un JSON nu
+ *  précédé de texte libre sans même de balises markdown. */
+function extractBraceBlock(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
     }
-  } catch {
-    // pas un JSON exploitable, réponse conversationnelle libre — comportement attendu
+  }
+  return null;
+}
+
+/**
+ * Tente d'extraire un JSON structuré (type ∈ STRUCTURED_TYPES) du texte assemblé — trois essais
+ * par ordre de priorité (le premier qui produit un objet avec un `type` reconnu l'emporte) :
+ * (1) le texte entier, une fois les balises markdown retirées s'il commence directement par elles
+ * (comportement historique, chemin le plus courant) ; (2) un bloc de code n'importe où dans le
+ * texte (voir extractFencedBlock) ; (3) le premier objet `{...}` brut trouvé (voir
+ * extractBraceBlock). Le filtre `STRUCTURED_TYPES.has(data.type)` protège contre un faux positif
+ * sur un JSON d'exemple qui apparaîtrait incidemment dans une réponse conversationnelle — `type`
+ * devrait alors correspondre par hasard à l'une des 7 valeurs reconnues, très improbable.
+ */
+export function extractStructuredJson(text: string): Record<string, unknown> | null {
+  const candidates = [stripMarkdownFences(text), extractFencedBlock(text), extractBraceBlock(text)]
+    .filter((c): c is string => c !== null);
+
+  for (const candidate of candidates) {
+    try {
+      const data = JSON.parse(candidate);
+      if (data && typeof data === 'object' && STRUCTURED_TYPES.has(data.type)) {
+        return data;
+      }
+    } catch {
+      // essai suivant — pas un JSON exploitable avec cette stratégie d'extraction
+    }
   }
   return null;
 }
