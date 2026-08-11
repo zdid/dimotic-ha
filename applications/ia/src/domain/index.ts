@@ -49,6 +49,20 @@ export const IA_UI_METADATA: ModuleUiMetadata = {
       ]
     },
     {
+      title: 'Comparatif Claude (optionnel)',
+      description: 'Bascule TOUT le traitement domotique vers Claude au lieu de Mistral, via la couche de compatibilité OpenAI d\'Anthropic — sert à comparer les deux sur les mêmes commandes, pas un routage permanent. Nécessite une clé API sur platform.claude.com (distincte d\'un abonnement claude.ai Pro).',
+      icon: '🧪',
+      fields: [
+        { name: 'provider', label: 'Fournisseur actif', type: 'select', options: [
+          { value: 'mistral', label: 'Mistral' },
+          { value: 'anthropic', label: 'Claude (comparatif)' }
+        ] },
+        { name: 'anthropicApiKey', label: 'Clé API Anthropic', type: 'password' },
+        { name: 'anthropicBaseUrl', label: 'URL de base de l\'API', type: 'string', default: 'https://api.anthropic.com/v1' },
+        { name: 'defaultAnthropicModel', label: 'Modèle', type: 'string', default: 'claude-sonnet-5' }
+      ]
+    },
+    {
       title: 'Serveur Ollama émulé',
       description: 'Port dédié, indépendant du port web du socle.',
       icon: '📡',

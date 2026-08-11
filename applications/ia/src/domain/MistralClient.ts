@@ -72,6 +72,10 @@ export class MistralClient {
   ) {}
 
   resolveModel(ollamaModel: string): string {
+    // Mode comparatif Claude (config-schema.ts::provider) : un seul modèle actif, pas de table de
+    // correspondance équivalente à modelMap (celle-ci reste dédiée aux alias envoyés par HA côté
+    // Mistral, ex: "mistral" → "mistral-small-latest").
+    if (this.config.provider === 'anthropic') return this.config.defaultAnthropicModel;
     return this.config.modelMap[ollamaModel.toLowerCase().trim()] || this.config.defaultMistralModel;
   }
 
@@ -125,8 +129,16 @@ export class MistralClient {
     // évite qu'un futur usage générique de ce client cache par erreur un prompt sans rapport).
     promptCacheKey?: string
   ): Promise<MistralStreamResult> {
-    if (!this.config.mistralApiKey) {
-      return { ok: false, status: 503, errorText: 'mistralApiKey non configurée' };
+    // Mode comparatif Claude (voir config-schema.ts::provider) : même format de requête/réponse
+    // (couche de compatibilité OpenAI d'Anthropic), donc réutilise ce client tel quel — seuls
+    // base_url/clé/modèle changent. L'en-tête Authorization: Bearer reste correct dans les deux
+    // cas (confirmé par la doc Anthropic pour cette couche précise — pas x-api-key, réservé à
+    // l'API Messages native, hors scope ici).
+    const useAnthropic = this.config.provider === 'anthropic';
+    const apiKey = useAnthropic ? this.config.anthropicApiKey : this.config.mistralApiKey;
+    const baseUrl = useAnthropic ? this.config.anthropicBaseUrl : this.config.mistralBaseUrl;
+    if (!apiKey) {
+      return { ok: false, status: 503, errorText: `${useAnthropic ? 'anthropicApiKey' : 'mistralApiKey'} non configurée` };
     }
 
     const payload: Record<string, unknown> = {
@@ -137,16 +149,17 @@ export class MistralClient {
     };
     if (tools?.length) payload.tools = tools;
     if (toolChoice && tools?.length) payload.tool_choice = toolChoice;
-    if (promptCacheKey) payload.prompt_cache_key = promptCacheKey;
+    // Jamais transmis en mode anthropic — voir commentaire de provider dans config-schema.ts.
+    if (promptCacheKey && !useAnthropic) payload.prompt_cache_key = promptCacheKey;
 
     const rateLimiter = this.getRateLimiter(mistralModel);
     for (let attempt = 0; ; attempt++) {
       await rateLimiter.waitForSlot();
 
-      const response = await fetch(`${this.config.mistralBaseUrl}/chat/completions`, {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${this.config.mistralApiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
           Accept: 'text/event-stream'
         },

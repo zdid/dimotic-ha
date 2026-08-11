@@ -38,6 +38,22 @@ export const iaConfigSchema = z.object({
   modelMap: modelMapSchema,
   mistralRateLimits: mistralRateLimitsSchema,
 
+  // ⭐ Comparatif Claude vs Mistral (demande utilisateur, 11/08/2026) — bascule TOUT le traitement
+  // domotique (§7-§10 specs) vers l'autre fournisseur, via la couche de compatibilité OpenAI
+  // d'Anthropic (https://platform.claude.com/docs/en/api/openai-sdk, base_url
+  // https://api.anthropic.com/v1) : même format de requête/réponse que Mistral, donc réutilise
+  // MistralClient.streamChat() tel quel (juste base_url/clé/modèle différents). PAS le routage
+  // multi-IA du §6 (non implémenté — une session par device, conversation libre hors domotique) :
+  // ici un seul fournisseur actif à la fois pour tout le domaine domotique, à but de comparaison,
+  // pas de bascule dynamique par phrase. Anthropic présente cette couche comme faite pour
+  // tester/comparer des modèles, pas pour de la prod long terme — cohérent avec cet usage précis.
+  // MISTRAL_PROMPT_CACHE_KEY n'est jamais transmis en mode anthropic (MistralClient.ts) : le cache
+  // de Claude fonctionne différemment et son exposition via cette couche n'est pas confirmée.
+  provider: z.enum(['mistral', 'anthropic']).default('mistral'),
+  anthropicApiKey: z.string().optional(),
+  anthropicBaseUrl: z.string().default('https://api.anthropic.com/v1'),
+  defaultAnthropicModel: z.string().default('claude-sonnet-5'),
+
   ollamaHttpPort: z.number().int().positive().default(11434),
 
   // Chemin relatif à la racine de l'application (applications/ia/), sauf s'il est absolu — voir
@@ -80,6 +96,9 @@ export const DEFAULT_IA_CONFIG: IaConfig = {
     'mistral-small-latest': { requestsPerSecond: 1.67, tokensPerMinute: 100000 },
     'mistral-large-latest': { requestsPerSecond: 0.25, tokensPerMinute: 400000 }
   },
+  provider: 'mistral',
+  anthropicBaseUrl: 'https://api.anthropic.com/v1',
+  defaultAnthropicModel: 'claude-sonnet-5',
   ollamaHttpPort: 11434,
   rulesFile: '../../data/ia/regles_mistral.txt',
   commandTimeoutMs: 2000,
