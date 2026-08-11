@@ -50,7 +50,18 @@ export const iaConfigSchema = z.object({
 
   // Délais d'attente pour les échanges de corrélation avec planificateur
   commandTimeoutMs: z.number().int().positive().default(2000),
-  toolExecuteTimeoutMs: z.number().int().positive().default(10000)
+  toolExecuteTimeoutMs: z.number().int().positive().default(10000),
+
+  // ⭐ Quoi exclus du catalogue quoi/lieux statique injecté dans le prompt système (rules.ts,
+  // techniques-socle-ha-mqtt_specs §8.3.3) — demande utilisateur : certains quoi ne désignent pas
+  // une cible adressable par une commande domotique (déclencheurs physiques, accessoires,
+  // infrastructure technique), et leurs "lieux" ne sont souvent pas de vrais lieux non plus
+  // (ex: "Télécommande 2" comme lieu, "1"-"4" comme numéro de bouton). Non exposé dans la config
+  // UI générique — même précédent que modelMap/mistralRateLimits ci-dessus (pas de type de champ
+  // "liste de chaînes" réellement implémenté côté ConfigForm.ts, seul le type "array" — objets
+  // complexes — l'est) : à ajuster directement dans data/ia/config.yaml, rechargé à chaud
+  // (IaService surveille ce fichier, même mécanisme que RulesProvider pour regles_mistral.txt).
+  excludedQuoiIds: z.array(z.string()).default(['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge'])
 });
 
 export type IaConfig = z.infer<typeof iaConfigSchema>;
@@ -72,5 +83,6 @@ export const DEFAULT_IA_CONFIG: IaConfig = {
   ollamaHttpPort: 11434,
   rulesFile: '../../data/ia/regles_mistral.txt',
   commandTimeoutMs: 2000,
-  toolExecuteTimeoutMs: 10000
+  toolExecuteTimeoutMs: 10000,
+  excludedQuoiIds: ['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge']
 };

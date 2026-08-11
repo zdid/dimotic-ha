@@ -51,7 +51,12 @@ export interface IIaService {
 }
 
 export class IaService implements IIaService {
-  private readonly config: IaConfig;
+  // Plus "readonly" : rechargée à chaud (voir watchConfigFile()) — pour l'instant uniquement
+  // excludedQuoiIds en dépend (via le callback passé à RulesProvider ci-dessous), les autres
+  // champs (clé Mistral, timeouts...) restent lus une seule fois par les composants déjà
+  // construits avec leur valeur au démarrage (mistralClient, toolExecutor...), pas de
+  // rechargement à chaud pour eux tant que ça n'a pas été demandé.
+  private config: IaConfig;
   private readonly mistralClient: MistralClient;
   private readonly rulesProvider: RulesProvider;
   private readonly toolExecutor: ToolExecutor;
@@ -59,17 +64,18 @@ export class IaService implements IIaService {
   private readonly deployResponder: DeployResponder;
   private ollamaServer?: OllamaHttpServer;
   private readonly recentExchanges: Exchange[] = [];
+  private configWatcher?: fs.FSWatcher;
 
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
-    configProvider: IAppConfigProvider<IaConfig>,
+    private readonly configProvider: IAppConfigProvider<IaConfig>,
     private readonly haStructureRegistry?: HaStructureRegistry,
     _haWsClient?: HaWsClient // non utilisé directement : ia n'exécute jamais d'action elle-même
   ) {
     this.config = iaConfigSchema.parse(configProvider.getAppConfig());
     this.mistralClient = new MistralClient(this.config, this.logger);
-    this.rulesProvider = new RulesProvider(this.resolveRulesPath(), this.logger, this.haStructureRegistry);
+    this.rulesProvider = new RulesProvider(this.resolveRulesPath(), this.logger, this.haStructureRegistry, () => this.config.excludedQuoiIds);
     this.toolExecutor = new ToolExecutor(this.eventBus, this.logger, this.haStructureRegistry, this.config.toolExecuteTimeoutMs);
     this.structuredRouter = new StructuredRouter(this.eventBus, this.logger, this.config.commandTimeoutMs);
     this.deployResponder = new DeployResponder(this.eventBus, this.logger, this.mistralClient, this.rulesProvider, this.config.defaultMistralModel);
@@ -97,6 +103,35 @@ export class IaService implements IIaService {
     }
   }
 
+  /**
+   * ⭐ Surveillance de data/ia/config.yaml (même mécanisme que RulesProvider pour
+   * regles_mistral.txt) — rechargement à chaud demandé par l'utilisateur pour `excludedQuoiIds`
+   * (config-schema.ts), qui n'est pas éditable depuis le formulaire générique "Paramètres du
+   * Module" (aucun type de champ "liste de chaînes" réellement implémenté côté ConfigForm.ts,
+   * seul le type "array" — objets complexes — l'est) : ce fichier doit pouvoir être modifié à la
+   * main sans redémarrage. `configProvider.reload()` relit et refusionne tous les fichiers
+   * data/{app}/config.yaml (ConfigService.reload() → loader.load()), pas seulement celui-ci —
+   * réutilise le mécanisme déjà existant plutôt que de reparser le YAML nous-mêmes.
+   */
+  private watchConfigFile(): void {
+    const configPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia', 'config.yaml');
+    if (!fs.existsSync(configPath)) return; // pas encore créé (jamais sauvegardé) — rien à surveiller
+
+    try {
+      this.configWatcher = fs.watch(configPath, () => {
+        try {
+          this.configProvider.reload();
+          this.config = iaConfigSchema.parse(this.configProvider.getAppConfig());
+          this.logger.info('IaService', `Configuration rechargée depuis ${configPath} (excludedQuoiIds: ${this.config.excludedQuoiIds.join(', ') || 'aucun'})`);
+        } catch (error) {
+          this.logger.error('IaService', `Échec du rechargement de ${configPath}: ${error}`);
+        }
+      });
+    } catch (error) {
+      this.logger.warn('IaService', `Surveillance de ${configPath} indisponible: ${error}`);
+    }
+  }
+
   async start(): Promise<void> {
     this.logger.info('IaService', 'Démarrage du service ia...');
 
@@ -105,6 +140,7 @@ export class IaService implements IIaService {
     }
 
     this.rulesProvider.load();
+    this.watchConfigFile();
     this.deployResponder.wire();
     this.setupSocketEventListeners();
 
@@ -118,6 +154,7 @@ export class IaService implements IIaService {
   async stop(): Promise<void> {
     this.logger.info('IaService', 'Arrêt du service ia...');
     this.rulesProvider.stop();
+    this.configWatcher?.close();
     this.ollamaServer?.stop();
     this.logger.info('IaService', 'Service ia arrêté');
   }

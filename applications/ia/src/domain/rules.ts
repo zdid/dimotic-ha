@@ -17,7 +17,12 @@ export class RulesProvider {
     private readonly logger: Logger,
     // Optionnel : sans lui, le catalogue quoi/lieux n'est simplement pas injecté (comportement
     // antérieur inchangé) — voir buildCatalogText.
-    private readonly registry?: HaStructureRegistry
+    private readonly registry?: HaStructureRegistry,
+    // Callback plutôt qu'une valeur figée : lu à CHAQUE appel de buildCatalogText(), reflète donc
+    // toujours la config `ia` courante — y compris après un rechargement à chaud
+    // (IaService.excludedQuoiIds, surveillance de data/ia/config.yaml) sans que RulesProvider
+    // n'ait besoin d'être reconstruit ni notifié explicitement.
+    private readonly getExcludedQuoiIds?: () => string[]
   ) {}
 
   load(): void {
@@ -85,17 +90,17 @@ export class RulesProvider {
   private buildCatalogText(): string {
     if (!this.registry) return '';
 
-    // Pas des cibles adressables par une commande domotique — demande utilisateur : "bouton"
-    // (déclencheur physique, pas un "quoi" qu'on allume/éteint), "telecommande"/"scenes_switch"
-    // (accessoires de déclenchement), "zigbee2mqtt_bridge" (infrastructure technique). Filtré ici
+    // Config `ia` (excludedQuoiIds, config-schema.ts) — quoi pas adressables par une commande
+    // domotique (déclencheurs physiques, accessoires, infrastructure technique), et dont le lieu
+    // associé n'est souvent pas un vrai lieu non plus (voir getLieuCatalog()). Filtré ici
     // uniquement (pas dans getQuoiCatalog() lui-même, réutilisé ailleurs — ex: arbreouquoi — où
     // ces quoi restent des catégories légitimes à parcourir).
-    const EXCLUDED_QUOI_IDS = new Set(['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge']);
+    const excluded = new Set(this.getExcludedQuoiIds?.() ?? []);
     const quoiList = this.registry.getQuoiCatalog()
-      .filter((q) => !EXCLUDED_QUOI_IDS.has(q.quoi_id))
+      .filter((q) => !excluded.has(q.quoi_id))
       .map((q) => q.label || q.quoi_id)
       .join(', ');
-    const lieuxList = this.registry.getLieuCatalog().join(', ');
+    const lieuxList = this.registry.getLieuCatalog(excluded).join(', ');
     if (!quoiList && !lieuxList) return '';
 
     return [

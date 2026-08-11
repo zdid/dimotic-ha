@@ -19,12 +19,6 @@ import { Logger } from '../../infrastructure/logger/index';
 // Il utilise HaClassifier pour classer les entités.
 // =============================================================================
 
-// ⭐ Quoi dont le lieu associé n'est pas un vrai lieu physique adressable — voir getLieuCatalog().
-// Demande utilisateur, en observant le catalogue en direct : "bouton" (RFXCOM, déclencheur
-// physique, pas un lieu), "telecommande" (lieu_precis = simple numéro de bouton 1-4, lieu_principal
-// = "Télécommande N"), "scenes_switch" (lieu_principal = couleur du boîtier, "blanc"/"noir"),
-// "zigbee2mqtt_bridge" (infrastructure technique).
-const LIEU_CATALOG_EXCLUDED_QUOI = new Set(['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge']);
 
 /**
  * Configuration pour la structuration.
@@ -992,26 +986,30 @@ export class HaStructureRegistry {
    * ⭐ Catalogue de tous les lieux connus, tous niveaux confondus (lieu_precis, lieu/area,
    * lieu_pere, lieu_grand_pere) — dérivé de attributs_taxonomie de chaque entité, valeurs
    * "affichage" (pas les slugs). Destiné à une exposition statique côté `ia` (voir
-   * `techniques-socle-ha-mqtt_specs` §8.3.2, `applications/ia/src/domain/rules.ts`) : demande
-   * utilisateur — cette liste change rarement (seulement à l'ajout/modification/suppression de
-   * matériel), transmettre à Mistral une vérité déjà connue évite un aller-retour d'outil et,
-   * bien plus important, évite qu'il devine/halluciner qu'un lieu n'existe pas faute de donnée
-   * sous les yeux (source du bug "quoi_introuvable" injustifié constaté en conditions réelles).
-   * Calcul direct à chaque appel (pas de cache dirty-flag comme le graphe de containment
+   * `techniques-socle-ha-mqtt_specs` §8.3.2/§8.3.3, `applications/ia/src/domain/rules.ts`) :
+   * demande utilisateur — cette liste change rarement (seulement à l'ajout/modification/
+   * suppression de matériel), transmettre à Mistral une vérité déjà connue évite un aller-retour
+   * d'outil et, bien plus important, évite qu'il devine/halluciner qu'un lieu n'existe pas faute
+   * de donnée sous les yeux (source du bug "quoi_introuvable" injustifié constaté en conditions
+   * réelles). Calcul direct à chaque appel (pas de cache dirty-flag comme le graphe de containment
    * ci-dessus) : un simple passage sur les entités, coût négligeable à cette échelle.
+   *
+   * `excludedQuoiIds` (optionnel) : slugs de QUOI dont le lieu associé n'est pas un vrai lieu
+   * physique adressable — laissé au choix de l'appelant (`core` reste sans opinion sur cette
+   * politique) ; `ia` la pilote via sa config `excludedQuoiIds` (rechargeable à chaud, voir
+   * `IaService`), ex: "telecommande" a pour lieu_precis un simple numéro de bouton (1-4,
+   * "Télécommande 2" comme lieu_principal), "scenes_switch" a pour lieu_principal la couleur du
+   * boîtier ("blanc"/"noir") — aucun des deux n'est un lieu réel.
    */
-  getLieuCatalog(): string[] {
+  getLieuCatalog(excludedQuoiIds?: Iterable<string>): string[] {
+    const excluded = excludedQuoiIds instanceof Set ? excludedQuoiIds : new Set(excludedQuoiIds ?? []);
+
     const lieux = new Set<string>();
     for (const entity of this.entityMap.values()) {
       const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
       if (!taxonomy) continue;
-      // ⭐ Exclusion des quoi dont le lieu associé n'est pas un vrai lieu physique adressable
-      // (demande utilisateur, constaté en inspectant le catalogue en direct) : "Télécommande" a
-      // pour lieu_precis un simple numéro de bouton (1-4, "Télécommande 2" comme lieu_principal),
-      // "scènes switch" a pour lieu_principal la couleur du boîtier ("blanc"/"noir"), "bouton"
-      // (RFXCOM) et "Zigbee2MQTT Bridge" ne désignent pas non plus un endroit qu'on cible.
       const slugQuoi = taxonomy.slug_quoi;
-      if (typeof slugQuoi === 'string' && LIEU_CATALOG_EXCLUDED_QUOI.has(slugQuoi)) continue;
+      if (typeof slugQuoi === 'string' && excluded.has(slugQuoi)) continue;
       for (const field of ['lieu_precis', 'lieu_principal', 'lieu_pere', 'lieu_grand_pere'] as const) {
         const value = taxonomy[field];
         // Un lieu qui n'est qu'un nombre brut (ex: le numéro d'un bouton sur une télécommande)
