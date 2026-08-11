@@ -126,6 +126,7 @@ export class IaService implements IIaService {
           this.configProvider.reload();
           this.config = iaConfigSchema.parse(this.configProvider.getAppConfig());
           this.logger.info('IaService', `Configuration rechargée depuis ${configPath} (excludedQuoiIds: ${this.config.excludedQuoiIds.join(', ') || 'aucun'})`);
+          this.emitStatus(); // reflète tout changement de `provider` (comparatif Claude) sans attendre un GET_STATUS
         } catch (error) {
           this.logger.error('IaService', `Échec du rechargement de ${configPath}: ${error}`);
         }
@@ -371,7 +372,13 @@ export class IaService implements IIaService {
     this.eventBus.emitGeneric('ia:status', {
       mistralConfigured: !!this.config.mistralApiKey,
       ollamaHttpPort: this.config.ollamaHttpPort,
-      rulesLoaded: this.rulesProvider.getRules().length > 0
+      rulesLoaded: this.rulesProvider.getRules().length > 0,
+      // ⭐ Fournisseur/modèle réellement actif (comparatif Claude, config-schema.ts::provider) —
+      // demande utilisateur : le savoir en un coup d'œil dans l'UI plutôt que de le déduire d'un
+      // badge toujours étiqueté "Mistral".
+      provider: this.config.provider,
+      activeModel: this.config.provider === 'anthropic' ? this.config.defaultAnthropicModel : this.config.defaultMistralModel,
+      providerConfigured: this.config.provider === 'anthropic' ? !!this.config.anthropicApiKey : !!this.config.mistralApiKey
     });
   }
 

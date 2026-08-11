@@ -15,6 +15,11 @@ interface IaStatus {
   mistralConfigured: boolean;
   ollamaHttpPort: number;
   rulesLoaded: boolean;
+  // ⭐ Comparatif Claude (config-schema.ts::provider, IaService.emitStatus()) — savoir en un coup
+  // d'œil quel fournisseur traite réellement les commandes, plutôt qu'un badge toujours "Mistral".
+  provider: 'mistral' | 'anthropic';
+  activeModel: string;
+  providerConfigured: boolean;
 }
 
 interface Exchange {
@@ -132,7 +137,7 @@ function setupTestForm(): void {
     if (resultEl) {
       resultEl.style.display = 'block';
       resultEl.className = 'test-result';
-      resultEl.textContent = 'En attente de Mistral...';
+      resultEl.textContent = 'En attente de la réponse...';
     }
 
     socket.emit('ia:test:send', { message });
@@ -176,13 +181,16 @@ function updateStatusDisplay(status: IaStatus): void {
   const badgeEl = $('mistral-badge');
   const portEl = $('ollama-port');
   const rulesEl = $('rules-status');
+  const providerEl = $('provider-status');
 
+  const providerLabel = status.provider === 'anthropic' ? 'Claude' : 'Mistral';
   if (badgeEl) {
-    badgeEl.textContent = status.mistralConfigured ? 'Clé Mistral configurée' : 'Clé Mistral manquante';
-    badgeEl.className = `status-badge ${status.mistralConfigured ? 'connected' : 'disconnected'}`;
+    badgeEl.textContent = status.providerConfigured ? `Clé ${providerLabel} configurée` : `Clé ${providerLabel} manquante`;
+    badgeEl.className = `status-badge ${status.providerConfigured ? 'connected' : 'disconnected'}`;
   }
   if (portEl) portEl.textContent = String(status.ollamaHttpPort);
   if (rulesEl) rulesEl.textContent = status.rulesLoaded ? 'Chargées' : 'Absentes';
+  if (providerEl) providerEl.textContent = `${providerLabel} (${status.activeModel})`;
 }
 
 function updateExchanges(exchanges: Exchange[]): void {
