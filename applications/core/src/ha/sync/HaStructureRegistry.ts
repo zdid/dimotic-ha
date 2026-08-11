@@ -982,6 +982,31 @@ export class HaStructureRegistry {
   }
 
   /**
+   * ⭐ Catalogue de tous les lieux connus, tous niveaux confondus (lieu_precis, lieu/area,
+   * lieu_pere, lieu_grand_pere) — dérivé de attributs_taxonomie de chaque entité, valeurs
+   * "affichage" (pas les slugs). Destiné à une exposition statique côté `ia` (voir
+   * `techniques-socle-ha-mqtt_specs` §8.3.2, `applications/ia/src/domain/rules.ts`) : demande
+   * utilisateur — cette liste change rarement (seulement à l'ajout/modification/suppression de
+   * matériel), transmettre à Mistral une vérité déjà connue évite un aller-retour d'outil et,
+   * bien plus important, évite qu'il devine/halluciner qu'un lieu n'existe pas faute de donnée
+   * sous les yeux (source du bug "quoi_introuvable" injustifié constaté en conditions réelles).
+   * Calcul direct à chaque appel (pas de cache dirty-flag comme le graphe de containment
+   * ci-dessus) : un simple passage sur les entités, coût négligeable à cette échelle.
+   */
+  getLieuCatalog(): string[] {
+    const lieux = new Set<string>();
+    for (const entity of this.entityMap.values()) {
+      const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
+      if (!taxonomy) continue;
+      for (const field of ['lieu_precis', 'lieu_principal', 'lieu_pere', 'lieu_grand_pere'] as const) {
+        const value = taxonomy[field];
+        if (typeof value === 'string' && value) lieux.add(value);
+      }
+    }
+    return [...lieux].sort((a, b) => a.localeCompare(b, 'fr'));
+  }
+
+  /**
    * Récupère le timestamp de la dernière synchronisation complète.
    */
   getLastFullSync(): Date | null {

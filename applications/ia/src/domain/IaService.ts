@@ -69,7 +69,7 @@ export class IaService implements IIaService {
   ) {
     this.config = iaConfigSchema.parse(configProvider.getAppConfig());
     this.mistralClient = new MistralClient(this.config, this.logger);
-    this.rulesProvider = new RulesProvider(this.resolveRulesPath(), this.logger);
+    this.rulesProvider = new RulesProvider(this.resolveRulesPath(), this.logger, this.haStructureRegistry);
     this.toolExecutor = new ToolExecutor(this.eventBus, this.logger, this.haStructureRegistry, this.config.toolExecuteTimeoutMs);
     this.structuredRouter = new StructuredRouter(this.eventBus, this.logger, this.config.commandTimeoutMs);
     this.deployResponder = new DeployResponder(this.eventBus, this.logger, this.mistralClient, this.rulesProvider, this.config.defaultMistralModel);
