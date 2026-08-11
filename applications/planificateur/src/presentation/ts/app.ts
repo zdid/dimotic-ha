@@ -16,6 +16,23 @@ interface PlanificateurStatus {
   activeSchedules: string[];
 }
 
+interface PlanificationDefinition {
+  id?: number;
+  name: string;
+  active: boolean;
+  phrase_originale: string;
+  trigger: { type: string };
+  next_fire_at?: string;
+  missed?: boolean;
+}
+
+interface IaTestReply {
+  success: boolean;
+  response: string;
+  intermediateJson?: string;
+  planificateurReply?: string;
+}
+
 interface PlanificateurAction {
   at: string;
   source: 'ia:command' | 'ia:tool:execute';
@@ -51,6 +68,8 @@ function init(): void {
     socket = window.app.socketService.getSocket();
 
     setupEventListeners();
+    setupTabs();
+    setupNewPlanificationModal();
     requestInitialStatus();
     hideLoading();
 
@@ -66,6 +85,10 @@ function setupEventListeners(): void {
   socket.on('planificateur:status', (status: PlanificateurStatus) => {
     updateStatusDisplay(status);
     showMainContent();
+  });
+
+  socket.on('planificateur:planifications:list', (plans: PlanificationDefinition[]) => {
+    updatePlanificationsList(plans);
   });
 
   socket.on('planificateur:actions:list', (actions: PlanificateurAction[]) => {
@@ -89,6 +112,7 @@ function setupEventListeners(): void {
 function requestInitialStatus(): void {
   if (!socket) return;
   socket.emit('planificateur:status:get');
+  socket.emit('planificateur:planifications:list:get');
   socket.emit('planificateur:actions:list:get');
   socket.emit('planificateur:ha-commands:list:get');
 }
@@ -101,6 +125,151 @@ function updateStatusDisplay(status: PlanificateurStatus): void {
   if (macrosEl) macrosEl.textContent = String(status.macrosCount);
   if (planificationsEl) planificationsEl.textContent = String(status.planificationsCount);
   if (activeEl) activeEl.textContent = String(status.activeSchedules.length);
+}
+
+function formatNextFireAt(plan: PlanificationDefinition): string {
+  if (plan.trigger.type === 'state_change') return 'Réactif (changement d\'état)';
+  if (!plan.next_fire_at) return plan.active ? 'Non programmée' : '—';
+  return `Prochaine exécution : ${new Date(plan.next_fire_at).toLocaleString('fr-FR')}`;
+}
+
+function updatePlanificationsList(plans: PlanificationDefinition[]): void {
+  const listEl = $('planifications-list');
+  if (!listEl) return;
+
+  if (plans.length === 0) {
+    listEl.innerHTML = '<div class="empty">Aucune planification enregistrée.</div>';
+    return;
+  }
+
+  const sorted = [...plans].sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+
+  listEl.innerHTML = sorted.map((p) => `
+    <div class="plan-row">
+      <div class="plan-num">#${p.id ?? '?'}</div>
+      <div class="plan-info">
+        <div class="plan-name">
+          ${p.name ? escapeHtml(p.name) : ''}
+          <span class="status-badge ${p.active ? 'active' : 'inactive'}">${p.active ? 'active' : 'inactive'}</span>
+          ${p.missed ? '<span class="status-badge missed">manqué</span>' : ''}
+        </div>
+        <div class="plan-phrase">"${escapeHtml(p.phrase_originale)}"</div>
+        <div class="plan-next">${escapeHtml(formatNextFireAt(p))}</div>
+      </div>
+      <div class="plan-actions">
+        ${p.active
+          ? `<button class="btn btn-secondary" data-action="planification-desactiver" data-name="${escapeHtml(p.name)}">Désactiver</button>`
+          : `<button class="btn btn-primary" data-action="planification-activer" data-name="${escapeHtml(p.name)}">Activer</button>`}
+        <button class="btn btn-danger" data-action="planification-supprimer" data-name="${escapeHtml(p.name)}">Supprimer</button>
+      </div>
+    </div>
+  `).join('');
+
+  wirePlanificationActions(listEl);
+}
+
+function wirePlanificationActions(container: HTMLElement): void {
+  container.querySelectorAll<HTMLButtonElement>('button[data-action]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const action = btn.dataset.action;
+      const name = btn.dataset.name;
+      if (!action || !name || !socket) return;
+
+      switch (action) {
+        case 'planification-activer': socket.emit('planificateur:planification:activer', { name }); break;
+        case 'planification-desactiver': socket.emit('planificateur:planification:desactiver', { name }); break;
+        case 'planification-supprimer': socket.emit('planificateur:planification:supprimer', { name }); break;
+      }
+    });
+  });
+}
+
+function setupTabs(): void {
+  const root = moduleRoot();
+  root.querySelectorAll<HTMLButtonElement>('.tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      if (!tab) return;
+      root.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+      root.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+      btn.classList.add('active');
+      $(`tab-${tab}`)?.classList.add('active');
+    });
+  });
+}
+
+/**
+ * Modale de création — soumet la phrase telle quelle à ia (`ia:test:send`, même mécanisme que le
+ * formulaire de test du dashboard `ia`, specs §13) : aucune validation/structuration locale, c'est
+ * Mistral qui décide si la phrase est une planification exploitable et répond via `ia:test:reply`.
+ */
+function setupNewPlanificationModal(): void {
+  const openBtn = $('new-planification-btn');
+  const overlay = $('new-planification-overlay');
+  const cancelBtn = $('new-planification-cancel');
+  const submitBtn = $('new-planification-submit') as HTMLButtonElement | null;
+  const input = $('new-planification-input') as HTMLTextAreaElement | null;
+  const successEl = $('new-planification-success');
+  const errorEl = $('new-planification-error');
+  if (!openBtn || !overlay || !cancelBtn || !submitBtn || !input) return;
+
+  const resetAlerts = () => {
+    if (successEl) { successEl.style.display = 'none'; successEl.textContent = ''; }
+    if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+  };
+
+  const open = () => {
+    input.value = '';
+    resetAlerts();
+    overlay.classList.add('active');
+    input.focus();
+  };
+
+  const close = () => {
+    overlay.classList.remove('active');
+  };
+
+  openBtn.addEventListener('click', open);
+  cancelBtn.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) close();
+  });
+
+  submitBtn.addEventListener('click', () => {
+    const message = input.value.trim();
+    if (!message || !socket) return;
+
+    resetAlerts();
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Validation...';
+
+    const onReply = (reply: IaTestReply) => {
+      socket.off('ia:test:reply', onReply);
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Valider';
+
+      // planificateurReply.success distingue "ia a compris et planificateur a enregistré" d'un
+      // simple échange conversationnel (aucun JSON structuré produit) — reply.success ne couvre
+      // que l'absence d'erreur technique côté ia, pas la validation métier de la planification.
+      let planifOk: boolean | undefined;
+      try {
+        planifOk = reply.planificateurReply ? JSON.parse(reply.planificateurReply).success : undefined;
+      } catch { /* ignore, traité comme indéterminé */ }
+
+      if (reply.success && planifOk !== false) {
+        if (successEl) { successEl.textContent = reply.response; successEl.style.display = 'block'; }
+        socket.emit('planificateur:planifications:list:get');
+        socket.emit('planificateur:status:get');
+        setTimeout(close, 1500);
+      } else if (errorEl) {
+        errorEl.textContent = reply.response || 'La planification n\'a pas pu être créée.';
+        errorEl.style.display = 'block';
+      }
+    };
+
+    socket.on('ia:test:reply', onReply);
+    socket.emit('ia:test:send', { message });
+  });
 }
 
 function updateActionsLog(actions: PlanificateurAction[]): void {

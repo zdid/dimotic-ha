@@ -90,6 +90,11 @@ export interface PlanificationDefinition {
   action: DomoticNode;
   // Reprise après coupure (voir SchedulerRuntime/StateWatcher) — jamais renseignés par ia/Mistral,
   // uniquement gérés par planificateur lui-même.
+  // ⭐ Identifiant numérique stable, attribué à la création (CommandHandler.nextPlanificationId) —
+  // demande utilisateur : écran principal en liste numérotée, et pouvoir dire "désactive la
+  // planification 3" (voir CommandHandler.resolvePlan). Jamais réattribué tant que la planification
+  // existe, y compris si elle est recréée sous le même nom (voir handleCommand, case 'planification').
+  id?: number;
   next_fire_at?: string;           // ISO8601 — triggers temporels, un seul minuteur par plan
   pending?: Record<string, string>; // entity_id → ISO8601 — triggers state_change, un compte à
                                      // rebours indépendant par entité (une règle par défaut sur

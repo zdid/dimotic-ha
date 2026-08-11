@@ -115,6 +115,7 @@ export const planificationDefinitionSchema: z.ZodType<PlanificationDefinition> =
     phrase_originale: z.string().min(1),
     trigger: triggerSchema,
     action: domoticNodeSchema,
+    id: z.number().optional(),
     next_fire_at: z.string().optional(),
     pending: z.record(z.string()).optional(),
     missed: z.boolean().optional()

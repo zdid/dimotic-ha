@@ -346,6 +346,10 @@ Les structures s'imbriquent librement et sans limite de profondeur.
   "modifications": { <champs à modifier si operation=modifier> }
 }
 
+// "name" accepte aussi le NUMÉRO d'une planification (affiché dans son écran, ex: "désactive la
+// planification 3" → "name": "3") — transmets-le TEL QUEL en chaîne, sans essayer de le résoudre
+// ni de le convertir en nom : c'est planificateur qui sait faire la correspondance numéro→nom.
+
 ───────────────────────────────────────────────────────────────────────────────
 3. TYPES DE DÉCLENCHEURS (trigger)
 ───────────────────────────────────────────────────────────────────────────────
@@ -724,6 +728,15 @@ Phrase : "désactive la planification salon soir semaine"
   "operation": "desactiver",
   "cible": "planification",
   "name": "salon soir semaine"
+}
+
+Phrase : "désactive la planification 3"
+
+{
+  "type": "gestion",
+  "operation": "desactiver",
+  "cible": "planification",
+  "name": "3"
 }
 
 Phrase : "liste toutes mes macros"

@@ -157,6 +157,17 @@ export class PlanificateurService implements IPlanificateurService {
         .then((reply) => {
           this.recordAction('ia:command', payload, reply);
           this.eventBus.emitGeneric('ia:command:reply', reply);
+          // Une planification/macro créée ou gérée par conversation (payload.type 'planification'
+          // ou 'gestion') doit apparaître en direct sur les dashboards déjà ouverts — contrairement
+          // aux actions UI directes (PLANIFICATION_ACTIVER etc. ci-dessous), ce chemin n'appelait
+          // jusqu'ici aucun emit*(), le tableau de bord restait figé jusqu'à un rafraîchissement
+          // manuel (constaté en testant en direct la nouvelle boîte de dialogue de création).
+          if (payload.type === 'planification' || payload.type === 'gestion') {
+            this.emitPlanifications();
+            this.emitStatus();
+          } else if (payload.type === 'macro') {
+            this.emitMacros();
+          }
         })
         .catch((e) => this.logger.error('PlanificateurService', `Erreur ia:command: ${e}`));
     });
@@ -203,17 +214,17 @@ export class PlanificateurService implements IPlanificateurService {
 
     this.eventBus.onGeneric<{ name: string }>(PLANIFICATEUR_CLIENT_EVENTS.PLANIFICATION_ACTIVER, ({ name }) => {
       this.handler.handleCommand({ type: 'gestion', operation: 'activer', cible: 'planification', name, correlation_id: 'ui' })
-        .then(() => { this.emitPlanifications(); });
+        .then(() => { this.emitPlanifications(); this.emitStatus(); });
     });
 
     this.eventBus.onGeneric<{ name: string }>(PLANIFICATEUR_CLIENT_EVENTS.PLANIFICATION_DESACTIVER, ({ name }) => {
       this.handler.handleCommand({ type: 'gestion', operation: 'desactiver', cible: 'planification', name, correlation_id: 'ui' })
-        .then(() => { this.emitPlanifications(); });
+        .then(() => { this.emitPlanifications(); this.emitStatus(); });
     });
 
     this.eventBus.onGeneric<{ name: string }>(PLANIFICATEUR_CLIENT_EVENTS.PLANIFICATION_SUPPRIMER, ({ name }) => {
       this.handler.handleCommand({ type: 'gestion', operation: 'supprimer', cible: 'planification', name, correlation_id: 'ui' })
-        .then(() => { this.emitPlanifications(); });
+        .then(() => { this.emitPlanifications(); this.emitStatus(); });
     });
 
     this.eventBus.onGeneric<{ name: string }>(PLANIFICATEUR_CLIENT_EVENTS.MACRO_SUPPRIMER, ({ name }) => {

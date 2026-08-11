@@ -65,12 +65,42 @@ export class CommandHandler {
     this.macros = this.macrosManager.load().macros;
     this.planifications = this.planificationsManager.load().planifications;
 
+    // Rattrapage : toute planification déjà sur disque avant l'ajout du champ `id` (ou modifiée à
+    // la main) en reçoit un — jamais réattribué ensuite, voir types.ts::PlanificationDefinition.id.
+    let backfilled = false;
+    for (const plan of Object.values(this.planifications)) {
+      if (typeof plan.id !== 'number') {
+        plan.id = this.nextPlanificationId();
+        backfilled = true;
+      }
+    }
+    if (backfilled) this.persistPlanifications();
+
     for (const plan of Object.values(this.planifications)) {
       // Les triggers state_change sont repris séparément par StateWatcher (voir
       // PlanificateurService), pas par SchedulerRuntime.
       if (plan.active && plan.trigger.type !== 'state_change') this.resumeOrSchedule(plan);
     }
     this.logger.info('CommandHandler', `Chargé: ${Object.keys(this.macros).length} macro(s), ${Object.keys(this.planifications).length} planification(s) (${this.schedulerRuntime.listScheduled().length} active(s))`);
+  }
+
+  /** Prochain identifiant numérique stable à attribuer — max courant + 1, jamais réutilisé. */
+  private nextPlanificationId(): number {
+    const ids = Object.values(this.planifications)
+      .map((p) => p.id)
+      .filter((id): id is number => typeof id === 'number');
+    return ids.length ? Math.max(...ids) + 1 : 1;
+  }
+
+  /** Résout une planification par nom exact, ou par son identifiant numérique en repli (demande
+   *  utilisateur : "désactive la planification 3") — jamais l'inverse (un nom qui ressemble à un
+   *  nombre reste prioritaire sur toute correspondance par id). */
+  private resolvePlan(nameOrId: string): PlanificationDefinition | undefined {
+    const direct = this.planifications[nameOrId];
+    if (direct) return direct;
+    if (!/^\d+$/.test(nameOrId)) return undefined;
+    const id = Number(nameOrId);
+    return Object.values(this.planifications).find((p) => p.id === id);
   }
 
   /**
@@ -132,10 +162,14 @@ export class CommandHandler {
 
         case 'planification': {
           const plan = payload as PlanificationDefinition & { correlation_id: string };
+          // Conserve l'id existant si on recrée une planification sous le même nom (ex: "modifie
+          // la planification X" reformulée en une nouvelle création complète par Mistral) — n'en
+          // attribue un nouveau que pour un nom réellement inédit.
+          plan.id = this.planifications[plan.name]?.id ?? this.nextPlanificationId();
           this.planifications[plan.name] = plan;
           this.persistPlanifications();
           this.armIfActive(plan);
-          return ok(corr, `Planification "${plan.name}" enregistrée et ${plan.active ? 'activée' : 'désactivée'}.`);
+          return ok(corr, `Planification "${plan.name}" (#${plan.id}) enregistrée et ${plan.active ? 'activée' : 'désactivée'}.`);
         }
 
         case 'gestion':
@@ -224,23 +258,23 @@ export class CommandHandler {
       case 'activer': {
         if (!g.name) return err(corr, 'Nom requis.');
         if (g.cible !== 'planification') return err(corr, `Activation non supportée pour: ${g.cible}`);
-        const plan = this.planifications[g.name];
+        const plan = this.resolvePlan(g.name);
         if (!plan) return err(corr, `"${g.name}" introuvable.`);
         plan.active = true;
         this.persistPlanifications();
         this.armIfActive(plan);
-        return ok(corr, `Planification "${g.name}" activée.`);
+        return ok(corr, `Planification "${plan.name}" activée.`);
       }
 
       case 'desactiver': {
         if (!g.name) return err(corr, 'Nom requis.');
         if (g.cible !== 'planification') return err(corr, `Désactivation non supportée pour: ${g.cible}`);
-        const plan = this.planifications[g.name];
+        const plan = this.resolvePlan(g.name);
         if (!plan) return err(corr, `"${g.name}" introuvable.`);
         plan.active = false;
         this.persistPlanifications();
         this.disarm(plan);
-        return ok(corr, `Planification "${g.name}" désactivée.`);
+        return ok(corr, `Planification "${plan.name}" désactivée.`);
       }
 
       case 'supprimer': {
@@ -252,12 +286,12 @@ export class CommandHandler {
           return ok(corr, `Macro "${g.name}" supprimée.`);
         }
         if (g.cible === 'planification') {
-          const plan = this.planifications[g.name];
+          const plan = this.resolvePlan(g.name);
           if (!plan) return err(corr, `Planification "${g.name}" introuvable.`);
           this.disarm(plan);
-          delete this.planifications[g.name];
+          delete this.planifications[plan.name];
           this.persistPlanifications();
-          return ok(corr, `Planification "${g.name}" supprimée.`);
+          return ok(corr, `Planification "${plan.name}" supprimée.`);
         }
         return err(corr, `Suppression non supportée pour: ${g.cible}`);
       }
@@ -265,13 +299,13 @@ export class CommandHandler {
       case 'modifier': {
         if (!g.name) return err(corr, 'Nom requis.');
         if (g.cible !== 'planification') return err(corr, `Modification non supportée pour: ${g.cible}`);
-        const plan = this.planifications[g.name];
+        const plan = this.resolvePlan(g.name);
         if (!plan || !g.modifications) return err(corr, `"${g.name}" introuvable ou modifications manquantes.`);
         this.disarm(plan);
         Object.assign(plan, g.modifications);
         this.persistPlanifications();
         this.armIfActive(plan);
-        return ok(corr, `Planification "${g.name}" modifiée.`);
+        return ok(corr, `Planification "${plan.name}" modifiée.`);
       }
 
       default:

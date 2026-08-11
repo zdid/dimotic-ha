@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/styles/main.css">
 
   <style>
-    .plan-container { max-width: 800px; margin: 0 auto; padding: 20px; }
+    .plan-container { max-width: 900px; margin: 0 auto; padding: 20px; }
     .plan-header { text-align: center; margin-bottom: 30px; }
     .plan-header h1 { color: var(--color-accent); font-size: 2em; }
 
@@ -31,6 +31,44 @@
 
     .status-item .label { font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 5px; display: block; }
     .status-item .value { font-size: 1.3em; color: var(--color-text); }
+
+    /* Onglets — Planifications / Journal (pattern rfxcom/config.html) */
+    .tabs { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--color-primary); }
+    .tab-btn {
+      background: none; border: none; color: var(--color-text-muted); padding: 10px 16px;
+      cursor: pointer; font-size: 0.95em; border-bottom: 2px solid transparent;
+    }
+    .tab-btn.active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .section { background: var(--color-surface); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-primary); padding-bottom: 10px; margin-bottom: 15px; }
+    .section-header h2 { margin: 0; }
+
+    .plan-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      background: var(--color-background);
+      border-radius: var(--radius);
+      margin-bottom: 8px;
+    }
+    .plan-row .plan-num { color: var(--color-text-muted); font-weight: bold; min-width: 2em; }
+    .plan-row .plan-info { flex: 1; min-width: 0; }
+    .plan-row .plan-name { font-weight: bold; color: var(--color-text); }
+    .plan-row .plan-phrase { font-size: 0.9em; color: var(--color-text-muted); }
+    .plan-row .plan-next { font-size: 0.8em; color: var(--color-text-muted); margin-top: 2px; }
+    .plan-row .plan-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+    .status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75em; margin-left: 8px; }
+    .status-badge.active { background: var(--color-success); color: white; }
+    .status-badge.inactive { background: var(--color-text-muted); color: white; }
+    .status-badge.missed { background: var(--color-warning); color: white; }
+
+    .empty { color: var(--color-text-muted); font-style: italic; padding: 10px; }
 
     .actions-log-card {
       background: var(--color-surface);
@@ -76,6 +114,31 @@
     .btn { padding: 10px 20px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em; }
     .btn-primary { background: var(--color-accent); color: white; }
     .btn-secondary { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-primary); }
+    .btn-danger { background: var(--color-error); color: white; }
+    .section .btn { padding: 6px 12px; font-size: 0.85em; }
+
+    /* Modale de création (pattern rfxcom/config.html) */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+      z-index: 1000; align-items: flex-start; justify-content: center; padding: 40px 20px; overflow-y: auto;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-overlay .card {
+      max-width: 640px; width: 100%; margin-bottom: 0;
+      background: var(--color-surface); border-radius: var(--radius); padding: 20px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    }
+    .modal-overlay .card h2 { margin-top: 0; }
+    .modal-overlay textarea {
+      width: 100%; min-height: 80px; padding: 10px; border-radius: var(--radius);
+      border: 1px solid var(--color-primary); background: var(--color-background); color: var(--color-text);
+      font-size: 0.95em; font-family: inherit; resize: vertical; box-sizing: border-box;
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px; }
+
+    .alert { padding: 12px; border-radius: var(--radius); margin: 10px 0; display: none; }
+    .alert-success { background: rgba(76, 175, 80, 0.1); border: 1px solid var(--color-success); color: var(--color-success); }
+    .alert-error { background: rgba(244, 67, 54, 0.1); border: 1px solid var(--color-error); color: var(--color-error); }
   </style>
 </head>
 <body>
@@ -104,14 +167,31 @@
         </div>
       </div>
 
-      <div class="actions-log-card" id="actions-log-card" style="display: none;">
-        <h2>Journal des actions reçues de IA</h2>
-        <div id="actions-log-list"></div>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="planifications">🗓️ Planifications</button>
+        <button class="tab-btn" data-tab="journal">📜 Journal</button>
       </div>
 
-      <div class="actions-log-card" id="ha-commands-card" style="display: none;">
-        <h2>Commandes envoyées à HA</h2>
-        <div id="ha-commands-list"></div>
+      <div class="tab-panel active" id="tab-planifications">
+        <div class="section">
+          <div class="section-header">
+            <h2>Planifications</h2>
+            <button class="btn btn-primary" id="new-planification-btn">➕ Nouvelle planification</button>
+          </div>
+          <div id="planifications-list"><div class="empty">Chargement...</div></div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="tab-journal">
+        <div class="actions-log-card" id="actions-log-card" style="display: none;">
+          <h2>Journal des actions reçues de IA</h2>
+          <div id="actions-log-list"></div>
+        </div>
+
+        <div class="actions-log-card" id="ha-commands-card" style="display: none;">
+          <h2>Commandes envoyées à HA</h2>
+          <div id="ha-commands-list"></div>
+        </div>
       </div>
 
       <div class="loading" id="loading">Chargement de l'application Planificateur</div>
@@ -123,8 +203,23 @@
     </div>
   </div>
 
+  <!-- Modale de création — la phrase est soumise à ia pour validation, aucune saisie structurée -->
+  <div class="modal-overlay" id="new-planification-overlay">
+    <div class="card">
+      <h2>➕ Nouvelle planification</h2>
+      <p class="description">Décris la planification en une phrase, comme tu le dirais à voix haute — elle sera soumise à l'IA pour validation.</p>
+      <textarea id="new-planification-input" placeholder="Ex : tous les jours à 8h allume le salon"></textarea>
+      <div class="alert alert-success" id="new-planification-success"></div>
+      <div class="alert alert-error" id="new-planification-error"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="new-planification-cancel">Annuler</button>
+        <button class="btn btn-primary" id="new-planification-submit">Valider</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="/applications/planificateur/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-08-10 00:00:00 - Détail des commandes envoyées à HA (résolution, repli, ignoré) + prochaine exécution -->
+  <!-- Derniere modification: 2026-08-11 00:00:00 - Écran principal en liste numérotée de planifications + modale de création + journal déplacé en onglet -->
 </body>
 </html>
