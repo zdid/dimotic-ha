@@ -25,6 +25,12 @@ interface Evoo7Status {
 }
 
 let socket: any | null = null;
+// ⭐ ModuleContainer rappelle init() à chaque réaffichage depuis son cache (revisite d'un module
+// déjà chargé, voir ModuleContainer.ts) pour rebrancher les écouteurs DOM sur les nouveaux nœuds —
+// mais la connexion socket, elle, persiste : s'abonner à nouveau à chaque appel empilerait un
+// écouteur supplémentaire par visite. Ce drapeau garantit que setupEventListeners() (socket.on)
+// ne s'exécute qu'une seule fois par cycle de vie de la page.
+let listenersReady = false;
 
 function init(): void {
   try {
@@ -32,7 +38,10 @@ function init(): void {
     // d'en ouvrir une seconde — voir arbreouquoi/app.ts pour le détail du pourquoi.
     socket = window.app.socketService.getSocket();
 
-    setupEventListeners();
+    if (!listenersReady) {
+      setupEventListeners();
+      listenersReady = true;
+    }
     requestInitialStatus();
     hideLoading();
 

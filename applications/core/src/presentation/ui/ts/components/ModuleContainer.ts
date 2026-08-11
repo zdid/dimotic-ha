@@ -145,6 +145,18 @@ export class ModuleContainer extends HTMLElement {
         // DOM (alpinejs-implementation_specs_v1.0.md §3.4) — sans cet appel, le contenu
         // réaffiché resterait inerte (aucune directive Alpine évaluée).
         window.Alpine?.initTree(container);
+        // ⭐ Pour les apps vanilla TS (pas Alpine) : le script n'est volontairement pas
+        // ré-exécuté ici (voir commentaire ci-dessus, customElements.define()), donc aucun
+        // écouteur n'est jamais rattaché aux nouveaux nœuds injectés par le innerHTML
+        // ci-dessus — les anciens écouteurs, posés sur les nœuds de la visite précédente,
+        // restent orphelins. Convention `window.{moduleId}App = { init, ... }` (déjà suivie par
+        // toutes les apps) : on rappelle explicitement `init()` pour re-brancher les
+        // écouteurs sur le DOM réellement affiché. `init()` doit être idempotent côté app —
+        // ne jamais réabonner deux fois le même événement socket (déjà le cas partout,
+        // `setupEventListeners()` gardé par un drapeau, voir chaque app.ts). Trouvé en
+        // conditions réelles (demande utilisateur) : "tester une commande" (ia) et l'écran
+        // planificateur restaient inertes après une deuxième visite depuis le menu.
+        (window as unknown as Record<string, { init?: () => void }>)[`${moduleId}App`]?.init?.();
         // Notifier que le module est chargé (pour les eventuels listeners)
         window.dispatchEvent(new CustomEvent('module:content:loaded', {
           detail: { moduleId }

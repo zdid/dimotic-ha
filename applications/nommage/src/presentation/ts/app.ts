@@ -81,6 +81,12 @@ interface TaxonomyStructure {
 
 let appStatus: NommageStatus | null = null;
 let socket: any | null = null;
+// ⭐ ModuleContainer rappelle init() à chaque réaffichage depuis son cache (revisite d'un module
+// déjà chargé, voir ModuleContainer.ts) pour rebrancher les écouteurs DOM sur les nouveaux nœuds —
+// mais la connexion socket, elle, persiste : s'abonner à nouveau à chaque appel empilerait un
+// écouteur supplémentaire par visite. Ce drapeau garantit que setupEventListeners() (socket.on)
+// ne s'exécute qu'une seule fois par cycle de vie de la page.
+let listenersReady = false;
 
 // ============================================================================
 // Initialisation
@@ -94,10 +100,13 @@ function init(): void {
     // Connexion Socket.io unique, réutilisée depuis le core (window.app.socketService) au lieu
     // d'en ouvrir une seconde — voir arbreouquoi/app.ts pour le détail du pourquoi.
     socket = window.app.socketService.getSocket();
-    
-    // Configurer les écouteurs d'événements
-    setupEventListeners();
-    
+
+    // Configurer les écouteurs d'événements (une seule fois, voir listenersReady)
+    if (!listenersReady) {
+      setupEventListeners();
+      listenersReady = true;
+    }
+
     // Demander le statut initial
     requestInitialStatus();
     
