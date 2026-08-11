@@ -99,7 +99,15 @@ export class MistralClient {
     messages: OllamaMessage[],
     mistralModel: string,
     options: MistralOptions,
-    tools?: MistralToolSchema[]
+    tools?: MistralToolSchema[],
+    // 'any' force Mistral à appeler un des outils fournis plutôt que répondre directement en
+    // texte — utilisé en repli ponctuel par IaService quand un round précédent a répondu
+    // "quoi_introuvable" sans jamais avoir vérifié via un outil (règles §0.4, "jamais par simple
+    // supposition"). Jamais la valeur par défaut : forcer un outil sur tous les rounds
+    // empêcherait Mistral d'atteindre le round final texte/JSON (création de planification,
+    // gestion, macro — aucun de ces cas n'appelle d'outil) et le ferait échouer avec "trop
+    // d'appels d'outils enchaînés" une fois MAX_TOOL_ROUNDS atteint.
+    toolChoice?: 'any'
   ): Promise<MistralStreamResult> {
     if (!this.config.mistralApiKey) {
       return { ok: false, status: 503, errorText: 'mistralApiKey non configurée' };
@@ -112,6 +120,7 @@ export class MistralClient {
       ...ollamaOptionsToMistral(options)
     };
     if (tools?.length) payload.tools = tools;
+    if (toolChoice && tools?.length) payload.tool_choice = toolChoice;
 
     const rateLimiter = this.getRateLimiter(mistralModel);
     for (let attempt = 0; ; attempt++) {

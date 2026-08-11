@@ -174,9 +174,14 @@ export class IaService implements IIaService {
     // seulement le dernier round, qui sous-comptait sinon un échange avec appel(s) d'outil).
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
+    // Un seul essai de rattrapage par échange (voir plus bas, détection "quoi_introuvable" non
+    // vérifié) — jamais plus, pour ne pas boucler indéfiniment si Mistral persiste malgré tout.
+    let quoiIntrouvableRetried = false;
+    let forceToolChoice: 'any' | undefined;
 
     for (let round = 1; round <= MAX_TOOL_ROUNDS; round++) {
-      const result = await this.mistralClient.streamChat(currentMessages, mistralModel, options || {}, IA_TOOLS);
+      const result = await this.mistralClient.streamChat(currentMessages, mistralModel, options || {}, IA_TOOLS, forceToolChoice);
+      forceToolChoice = undefined; // ne force jamais deux rounds de suite (voir MistralClient.streamChat)
       if (!result.ok) {
         // 429 épuisé après backoff (MistralClient) : errorText est déjà un message clair et
         // final destiné à l'utilisateur — pas la peine de le noyer sous un préfixe technique.
@@ -204,6 +209,21 @@ export class IaService implements IIaService {
           currentMessages = [...currentMessages, { role: 'tool', tool_call_id: call.id, content: toolResult }];
         }
         continue; // rappelle Mistral avec les résultats d'outils (specs §8, étape 4)
+      }
+
+      // ⭐ Repli anti-hallucination : Mistral a répondu "quoi_introuvable" (règles §0.4) sans
+      // avoir appelé le moindre outil dans cet échange, en violation directe de sa propre règle
+      // ("jamais par simple supposition") — constaté en conditions réelles ("allume la salle"
+      // refusé à tort, alors que l'area existe bien avec 4 lumières). On ne peut pas forcer
+      // tool_choice="any" sur tous les rounds (ça empêcherait Mistral d'atteindre le round final
+      // texte/JSON dont ont besoin planification/gestion/macro, qui n'appellent jamais d'outil) —
+      // un seul essai de rattrapage, ciblé sur ce motif précis, en relançant CE round avec
+      // tool_choice forcé pour obliger une vraie vérification avant de conclure.
+      if (!quoiIntrouvableRetried && toolCallsUsed.length === 0 && isUnverifiedQuoiIntrouvable(assembled.text)) {
+        quoiIntrouvableRetried = true;
+        forceToolChoice = 'any';
+        this.logger.warn('IaService', `Round ${round}: "quoi_introuvable" sans vérification par outil — relance forcée (tool_choice=any)`);
+        continue;
       }
 
       // Round final (pas de tool_calls) — décision : JSON structuré ou texte conversationnel.
@@ -326,4 +346,10 @@ function extractQuestion(messages: OllamaMessage[]): string {
     if (messages[i].role === 'user') return messages[i].content;
   }
   return '';
+}
+
+/** Détecte le format d'erreur "quoi_introuvable" (règles §0.4) dans une réponse texte —
+ *  peu importe qu'il soit enrobé de balises markdown ```json ou de texte libre autour. */
+function isUnverifiedQuoiIntrouvable(text: string): boolean {
+  return /"error"\s*:\s*"quoi_introuvable"/.test(text);
 }
