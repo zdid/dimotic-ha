@@ -59,7 +59,7 @@ export const IA_UI_METADATA: ModuleUiMetadata = {
         ] },
         { name: 'anthropicApiKey', label: 'Clé API Anthropic', type: 'password' },
         { name: 'anthropicBaseUrl', label: 'URL de base de l\'API', type: 'string', default: 'https://api.anthropic.com/v1' },
-        { name: 'defaultAnthropicModel', label: 'Modèle', type: 'string', default: 'claude-sonnet-5' }
+        { name: 'defaultAnthropicModel', label: 'Modèle', type: 'string', default: 'claude-haiku-4-5-20251001' }
       ]
     },
     {

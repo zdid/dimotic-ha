@@ -52,7 +52,7 @@ export const iaConfigSchema = z.object({
   provider: z.enum(['mistral', 'anthropic']).default('mistral'),
   anthropicApiKey: z.string().optional(),
   anthropicBaseUrl: z.string().default('https://api.anthropic.com/v1'),
-  defaultAnthropicModel: z.string().default('claude-sonnet-5'),
+  defaultAnthropicModel: z.string().default('claude-haiku-4-5-20251001'),
 
   ollamaHttpPort: z.number().int().positive().default(11434),
 
@@ -98,7 +98,7 @@ export const DEFAULT_IA_CONFIG: IaConfig = {
   },
   provider: 'mistral',
   anthropicBaseUrl: 'https://api.anthropic.com/v1',
-  defaultAnthropicModel: 'claude-sonnet-5',
+  defaultAnthropicModel: 'claude-haiku-4-5-20251001',
   ollamaHttpPort: 11434,
   rulesFile: '../../data/ia/regles_mistral.txt',
   commandTimeoutMs: 2000,
