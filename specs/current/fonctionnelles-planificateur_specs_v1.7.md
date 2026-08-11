@@ -1,8 +1,21 @@
 # Spécifications Fonctionnelles — Application PLANIFICATEUR
 
-**Version :** 1.6
-**Date :** 10 Août 2026
+**Version :** 1.7
+**Date :** 11 Août 2026
 **Statut :** Document de référence pour l'application `applications/planificateur`
+
+> **v1.7** : **Écran principal du tableau de bord refondu** en liste numérotée de planifications
+> (§11) — indicateur actif/inactif, nom facultatif, phrase, prochaine exécution ; création par
+> boîte de dialogue (phrase soumise à `ia` pour validation, aucune saisie structurée) ; journaux
+> existants déplacés dans un onglet séparé plutôt que supprimés. **Identifiant numérique stable**
+> (`PlanificationDefinition.id`, §2) permettant de désigner une planification par son numéro en
+> plus de son nom ("désactive la planification 3", §4). **Résolution de `lieux` déléguée au
+> nouveau graphe centralisé de `HaStructureRegistry`** (§7, voir `techniques-socle-ha-mqtt_specs`
+> §8.3.2) — remplace et généralise le repli `lieu_precis` de la v1.6, couvre aussi les phrases
+> composées ("plafonnier de la chambre") et les lieux qualifiés par étage/zone. Correctif de
+> cohérence UI : une planification créée/gérée par conversation pousse désormais une mise à jour
+> live aux dashboards déjà ouverts (auparavant seules les actions déclenchées depuis l'UI le
+> faisaient). Toutes demandes utilisateur, session du 10-11/08/2026.
 
 > Conforme à `techniques-socle-ha-mqtt_specs` (architecture 5 couches, EventBus,
 > `HaStructureRegistry`), `nommage_specs` (taxonomie QUOI/OÙ), `guide-nouvelle-application_specs`.
@@ -54,11 +67,11 @@ peuple** : c'est `planificateur` lui-même, par résolution déterministe (§7),
 `verbe`/`quoi`/`lieux` — voir §8 pour son usage à l'exécution.
 
 `PlanificationDefinition` porte, en plus de `name`/`active`/`phrase_originale`/`trigger`/`action`,
-trois champs gérés exclusivement par `planificateur` lui-même (jamais renseignés par `ia`/Mistral),
-liés à la reprise après coupure (§5) :
+quatre champs gérés exclusivement par `planificateur` lui-même (jamais renseignés par `ia`/Mistral) :
 
 | Champ | Rôle |
 |-------|------|
+| `id` | **⭐ v1.7** Identifiant numérique stable, attribué à la création (`CommandHandler.nextPlanificationId()` — max courant + 1, ou 1 si aucune planification). Jamais réattribué tant que la planification existe (préservé si elle est recréée sous le même nom), jamais réutilisé après suppression. Sert la liste numérotée du tableau de bord (§11) et permet de désigner une planification par son numéro plutôt que son nom dans une opération de gestion (§4) — utile en usage vocal, où le nom exact est parfois long ou mal mémorisé. Toute planification chargée sans `id` (fichier antérieur à la v1.7) en reçoit un au démarrage (`CommandHandler.load()`, ordre de rencontre dans le fichier). |
 | `next_fire_at` | Heure cible absolue (ISO8601) du prochain déclenchement — triggers temporels uniquement, un seul minuteur par planification. |
 | `pending` | Map `entity_id → heure cible absolue (ISO8601)` — triggers `state_change` uniquement ; plusieurs comptes à rebours indépendants possibles sous une même planification (règle par défaut sur tout un domaine, §3). |
 | `missed` | Vrai si un déclenchement temporel a été abandonné au-delà de la fenêtre de rattrapage (§5) — effacé automatiquement à la prochaine exécution réussie. |
@@ -142,6 +155,13 @@ c'est une définition disponible par son nom, jamais "programmée". Seuls `liste
 s'appliquent aux macros. Une planification désactivée reste stockée mais n'a plus de minuteur
 actif (ni de suivi d'état pour un trigger `state_change`) ; sa réactivation la reprogramme
 immédiatement selon son `trigger`.
+
+**⭐ v1.7 — Désignation par numéro** : pour une opération ciblant une planification (`name`),
+`CommandHandler.resolvePlan()` accepte le nom exact **ou** l'identifiant numérique (§2 `id`) sous
+forme de chaîne (ex: "désactive la planification 3" → `name: "3"`) — le nom reste toujours
+prioritaire si une planification porte littéralement ce nom. Mistral transmet le numéro tel quel,
+sans tenter de le résoudre lui-même (`regles_mistral.txt` §2.7) — c'est `planificateur` qui connaît
+la correspondance numéro→nom.
 
 ## 5. Stockage
 
@@ -243,21 +263,29 @@ qu'une nouvelle table indépendante à maintenir.
 L'entité ciblée (`entity_id`) est résolue séparément, via `HaStructureRegistry`, à partir du couple
 `quoi`/`lieux` — la même taxonomie que celle utilisée partout ailleurs dans le socle.
 
-**⭐ v1.6 — Deux niveaux de résolution pour `lieux`** (corrige "éteins le salon" ciblant toute
-l'area "Salle" au lieu du seul "Salon", bug constaté en direct) :
-1. **Area HA** (niveau habituel) : chaque terme de `lieux` est d'abord comparé aux areas connues
-   de `HaStructureRegistry` (nom ou `area_id`).
-2. **Repli sur le lieu précis de la taxonomie**, uniquement pour un terme qui ne correspond à
-   AUCUNE area — comparé à l'attribut `attributs_taxonomie.lieu_precis`/`slug_precis` de chaque
-   entité (ex: "Salon", "Lampadaire", "Bibliothèque" : plusieurs appareils du même `quoi`
-   peuvent coexister dans la même area "Salle", distingués uniquement par ce lieu précis — qui
-   n'existe jamais comme area HA à part entière). Jamais appliqué en plus d'une correspondance
-   area déjà trouvée, pour ne pas élargir une cible déjà précisément résolue.
+**⭐ v1.7 — Résolution déléguée au graphe de lieux centralisé** (`HaStructureRegistry.
+getEntitiesByQuoiAndLieux()`, voir `techniques-socle-ha-mqtt_specs` §8.3.2 pour le mécanisme
+complet) — remplace le repli à deux niveaux de la v1.6 (area HA puis `lieu_precis` seulement, qui
+ne couvrait ni les phrases composées ni les lieux qualifiés par étage/zone) :
+1. **Terme unique** (cas normal) : `lieu_precis` propre à l'entité, ou lieu/area dans le sous-arbre
+   de containment (area, `lieu_pere`, `lieu_grand_pere`) du terme — corrige "éteins le salon"
+   ciblant toute l'area "Salle" au lieu du seul "Salon" (bug initial v1.6), et généralise à
+   "toilettes de l'étage"/"toilettes du rez-de-chaussée" (deux areas HA distinctes ne se
+   distinguant que par leur `lieu_pere`).
+2. **Phrase composée**, en repli si le terme unique ne matche aucune entité du `quoi` : découpée en
+   mots (hors mots vides français), chacun doit matcher (ET) — "éteins le plafonnier de la
+   chambre" (`lieu_precis` "plafonnier" partagé par plusieurs pièces + area qualifiante "chambre")
+   sans élargir à tort à toutes les pièces ayant elles aussi un plafonnier.
 
 Le contexte envoyé à `ia` pour la réinterprétation à l'exécution (§6, `entities_snapshot`) inclut
-désormais `lieu_precis` par entité, en plus de `area_id` — sans lui, Mistral ne voyait jamais
-"Salon" nulle part (seulement l'area "Salle", identique pour les 4 lumières de la pièce) et
-normalisait par prudence vers l'area englobante, faute de donnée plus précise à vérifier.
+`lieu_precis` **et** `lieu_pere` par entité, en plus de `area_id` — sans `lieu_precis`, Mistral ne
+voyait jamais "Salon" nulle part (seulement l'area "Salle", identique pour les 4 lumières de la
+pièce) et normalisait par prudence vers l'area englobante ; sans `lieu_pere`, Mistral ne pouvait pas
+distinguer deux areas de même `quoi` générique ne différant que par l'étage. `regles_mistral.txt`
+instruit Mistral à résoudre lui-même un lieu qualifié par étage vers le nom d'area réel (ex:
+"toilettes du haut"), et à ne jamais séparer un `lieu_precis` et son area qualifiante en deux
+éléments de `lieux` (élargirait à tort) — toujours les combiner en une seule phrase, laissant le
+repli phrase composée du graphe de lieux la résoudre.
 
 Si le verbe n'est pas connu de cette table (ambigu, nouveau, non encore prévu), la résolution
 échoue silencieusement et `resolved_service_call` reste absent — voir §8 pour le repli associé.
@@ -307,15 +335,44 @@ rattrapage après coupure (`catchUpWindowSeconds`, §5.1 — défaut 300s).
 
 ## 11. UI
 
-Tableau de bord : nombre de macros et de planifications actives, prochain déclenchement à venir.
-Page dédiée : liste des macros et planifications (nom, statut actif/inactif, phrase d'origine),
-actions activer/désactiver/supprimer (§4 : uniquement pertinentes pour les planifications, sauf
-suppression qui s'applique aussi aux macros) — l'affichage du contenu JSON complet (étapes d'une
-macro, détail d'un déclencheur) reste à concevoir en détail lors de l'implémentation de l'UI, plus
-riche qu'un simple tableau.
+**⭐ v1.7 — Écran principal refondu** (demande utilisateur), injecté dans le Shadow DOM du
+`ModuleContainer` du socle comme les autres tableaux de bord :
 
-Un badge "manqué" s'ajoute au badge actif/inactif d'une planification quand `missed` est vrai
-(§2, §5.1) — disparaît automatiquement à la prochaine exécution réussie de cette planification.
+- **Résumé de statut** (nombre de macros, de planifications, de minuteurs actifs) au-dessus de deux
+  onglets :
+  - **Onglet "Planifications"** (par défaut) : **liste numérotée** des planifications
+    (`planificateur:planifications:list`, triée par `id` croissant) — chaque ligne porte le
+    numéro (`#id`), le nom (facultatif à l'affichage — une planification sans nom n'affiche que sa
+    phrase), un badge actif/inactif (+ "manqué" si `missed`, §2/§5.1, disparaît automatiquement à
+    la prochaine exécution réussie), la phrase d'origine entre guillemets, et la prochaine
+    exécution (`next_fire_at` formaté, "Réactif (changement d'état)" pour un trigger
+    `state_change`, "Non programmée" si absente et inactive). Boutons Activer/Désactiver/Supprimer
+    par ligne (§4, socket events déjà existants).
+  - **Onglet "Journal"** : les deux journaux déjà existants (§8) — actions reçues de `ia`, détail
+    des commandes envoyées à HA — déplacés ici tels quels (déjà existants depuis la v1.6, pas de
+    changement de contenu, seulement d'emplacement).
+- **Boîte de dialogue de création** ("➕ Nouvelle planification") : un simple champ texte pour la
+  phrase, **aucune saisie structurée** — soumise telle quelle à `ia` via `ia:test:send` (même
+  mécanisme que le formulaire de test du tableau de bord `ia`, `fonctionnelles-ia_specs` §13),
+  réponse affichée via `ia:test:reply` (succès/échec, distingué par `planificateurReply.success`
+  plutôt que par le seul `reply.success` qui ne couvre que l'absence d'erreur technique côté `ia`,
+  pas la validation métier — un simple échange conversationnel sans JSON structuré produit
+  compterait sinon à tort comme un succès de création). Liste et statut rafraîchis automatiquement
+  après une création réussie.
+
+Page dédiée (`config.html`, inchangée depuis v1.0) : gestion complète macros + planifications
+(mêmes actions), toujours accessible via le lien "📋 Macros & planifications" du tableau de bord —
+l'affichage du contenu JSON complet (étapes d'une macro, détail d'un déclencheur) y reste à
+concevoir en détail, hors périmètre de cette version.
+
+**⭐ v1.7 — Mise à jour live des dashboards déjà ouverts** : une planification créée ou gérée par
+conversation (`ia:command` — voix, ou la boîte de dialogue de création qui emprunte le même canal)
+pousse désormais `planifications:list`/`status` à tous les clients connectés, pas seulement à celui
+qui a initié la requête (`PlanificateurService.wireEventBus()`, sur tout `ia:command` de type
+`planification`/`gestion`/`macro`) — corrige un manque constaté en testant en direct la nouvelle
+boîte de dialogue : seules les actions déclenchées depuis l'UI elle-même (`PLANIFICATION_ACTIVER`
+etc.) réémettaient déjà la liste ; une planification créée par conversation restait invisible sur un
+dashboard déjà ouvert jusqu'à un rafraîchissement manuel.
 
 ## 12. Limitations connues / décisions
 
@@ -347,6 +404,7 @@ Un badge "manqué" s'ajoute au badge actif/inactif d'une planification quand `mi
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.7 | 11/08/2026 | Claude | **Écran principal en liste numérotée** (§11) : indicateur actif/inactif, nom facultatif, phrase, prochaine exécution ; journaux existants déplacés en onglet séparé ; boîte de dialogue de création (phrase soumise à `ia` pour validation). **Identifiant numérique stable** `id` (§2), résolution par numéro en plus du nom pour les opérations de gestion (§4, `CommandHandler.resolvePlan()`). **Résolution de `lieux` déléguée au graphe de lieux centralisé** de `HaStructureRegistry` (§7, voir `techniques-socle-ha-mqtt_specs` §8.3.2) — généralise le repli `lieu_precis` v1.6 aux phrases composées et aux lieux qualifiés par étage, `entities_snapshot` enrichi de `lieu_pere` (§6/§7) en plus de `lieu_precis`. **Mise à jour live des dashboards** après une planification créée/gérée par conversation (§11), manque constaté en testant la nouvelle boîte de dialogue. Toutes demandes utilisateur, session du 10-11/08/2026. |
 | 1.6 | 10/08/2026 | Claude | **Résolution de `lieux` sur le lieu précis en repli de l'area HA** (§7, corrige "éteins le salon" ciblant toute la salle), `entities_snapshot` enrichi de `lieu_precis` (§6). **Deux journaux sur le tableau de bord** (§8) : actions reçues de `ia`, détail des commandes envoyées à HA (issue réelle, entité déclenchante, prochaine exécution). Toutes demandes utilisateur, session du 10/08/2026. |
 | 1.5 | 03/08/2026 | Claude | **Déclencheur réactif `state_change`** (nouvelle §3.2) : règles sur changement d'état d'entité (précise via `entity_id`, ou par défaut sur tout un domaine via `domain`), priorité entité>domaine, comportement "minuterie" (annulation/relance par couple planification/entité). §6 étendue à quatre situations de déclenchement (ajout du changement d'état), contexte de déploiement enrichi de `triggered_entity_id` pour le ciblage implicite. Nouvelle §5.1 : persistance d'une heure cible absolue (`next_fire_at`) et reprise sur le temps réellement restant après coupure pour les triggers temporels (corrige un comportement antérieur où `delay`/`duration` repartaient intégralement à zéro à chaque redémarrage, jamais documenté comme tel), fenêtre de rattrapage configurable (`catchUpWindowSeconds`, §10) au-delà de laquelle un déclenchement est abandonné et marqué `missed` (badge UI, §11). §2 étendue (`next_fire_at`/`pending`/`missed` sur `PlanificationDefinition`, champs de `Trigger` pour `state_change`). Limitations connues (§12) : reprise imprécise pour `state_change` (durée d'attente jamais persistée), ambiguïté récurrent/one-shot non résolue, `missed` non suivi par entité pour une règle de domaine. |
 | 1.4 | 24/07/2026 | Claude | (Voir version archivée — pas de changement de contenu identifié entre 1.3 et 1.4 au moment de cette révision, seule la date d'en-tête diffère.) |

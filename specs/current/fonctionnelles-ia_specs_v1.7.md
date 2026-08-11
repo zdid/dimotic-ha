@@ -1,8 +1,15 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.6
-**Date :** 10 Août 2026
+**Version :** 1.7
+**Date :** 11 Août 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.7** : `lister_entites`/`obtenir_etat` délèguent désormais leur résolution `quoi`/`lieux` au
+> graphe de lieux centralisé de `HaStructureRegistry` (§7, voir `techniques-socle-ha-mqtt_specs`
+> §8.3.2) plutôt qu'une résolution propre à `ToolExecutor.ts` limitée aux seules areas HA, sans
+> repli. `regles_mistral.txt` enrichi (`lieu_pere` par entité en plus de `lieu_precis`, résolution
+> numéro→planification pour la gestion) — voir `fonctionnelles-planificateur_specs` v1.7 pour le
+> détail côté résolution d'action.
 
 > Conforme à `techniques-socle-ha-mqtt_specs` (architecture 5 couches, EventBus),
 > `nommage_specs` (taxonomie QUOI/OÙ), `guide-nouvelle-application_specs`. À lire avec
@@ -187,6 +194,14 @@ requête par l'API Mistral, contrairement au texte des règles qui tolère l'imp
 reste petite et fixe puisque les outils sont génériques : pas besoin de la régénérer à chaque
 nouvelle entité HA.
 
+**⭐ v1.7** — `lister_entites`/`obtenir_etat` résolvent leur filtre `quoi`/`lieux` via
+`HaStructureRegistry.getEntitiesByQuoiAndLieux()` (`ToolExecutor.ts`, voir
+`techniques-socle-ha-mqtt_specs` §8.3.2 pour le mécanisme complet) — même graphe de lieux que
+`executer_action` côté `planificateur` (§7, `fonctionnelles-planificateur_specs` §7), pour un
+comportement de résolution identique quel que soit l'outil appelé. Remplace une résolution propre à
+`ToolExecutor.ts` qui ne comparait qu'aux areas HA, sans aucun repli — plus limitée que celle de
+`planificateur` avant même la v1.6 de ce dernier, jamais documentée comme telle.
+
 ## 8. Boucle d'exécution des outils
 
 Contrairement à un simple relais, un appel d'outil déclenche un aller-retour complet avec Mistral
@@ -313,6 +328,7 @@ ajoutée que si elle diffère de la précédente (pas de doublons en répétant 
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.7 | 11/08/2026 | Claude | **`lister_entites`/`obtenir_etat` délégués au graphe de lieux centralisé** (§7, `HaStructureRegistry.getEntitiesByQuoiAndLieux()`, voir `techniques-socle-ha-mqtt_specs` §8.3.2) — remplace une résolution propre à `ToolExecutor.ts` limitée aux areas HA, sans repli, jamais documentée comme telle. `regles_mistral.txt` enrichi : `lieu_pere` exposé en plus de `lieu_precis`, résolution numéro→planification pour la gestion (voir `fonctionnelles-planificateur_specs` v1.7 §4/§7). Toutes demandes utilisateur, session du 10-11/08/2026. |
 | 1.6 | 10/08/2026 | Claude | **Throttling préventif + backoff réactif sur rate limit Mistral** (§3, nouveau module `RateLimiter.ts` par modèle), **tokens consommés affichés par appel** (§3/§13), **trace complète de la réponse planificateur** dans le journal des échanges (§13), **historique des commandes de test** (`<datalist>`, §13). Toutes demandes utilisateur, session du 10/08/2026 (rate limit constaté en direct pendant les tests). |
 | 1.5 | 03/08/2026 | Claude | **Prise en compte du déclencheur réactif `state_change`** (`fonctionnelles-planificateur_specs` v1.5) : §10 étendue à quatre situations de déclenchement (ajout du changement d'état d'entité), mention du nouveau champ de contexte `triggered_entity_id` enrichissant la réinterprétation pour ce cas. §9 précise que `trigger.type` admet cette nouvelle valeur sans changer la structure du JSON échangé. §5 mentionne que `regles_mistral.txt` couvre désormais ce déclencheur. Nouvelle limitation connue (§14) : ambiguïté récurrent/one-shot de "quand X, fais Y" non résolue, traité récurrent par défaut, sans clarification demandée à l'utilisateur. |
 | 1.4 | 24/07/2026 | Claude | (Voir version archivée — pas de changement de contenu identifié entre 1.3 et 1.4 au moment de cette révision, seule la date d'en-tête diffère.) |
