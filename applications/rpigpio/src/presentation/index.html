@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RPI GPIO - Paramétrage des pins</title>
+
+  <link rel="stylesheet" href="/styles/main.css">
+
+  <style>
+    .rpigpio-container { max-width: 900px; margin: 0 auto; padding: 20px; }
+    .rpigpio-header { text-align: center; margin-bottom: 30px; }
+    .rpigpio-header h1 { color: var(--color-accent); font-size: 2em; }
+
+    .status-card {
+      background: var(--color-surface); border-radius: var(--radius); padding: 20px;
+      margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+    .status-card h2 { margin-top: 0; color: var(--color-text); border-bottom: 1px solid var(--color-primary); padding-bottom: 10px; }
+    .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-top: 15px; }
+    .status-item .label { font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 5px; display: block; }
+    .status-item .value { font-size: 1.3em; color: var(--color-text); }
+
+    .section { background: var(--color-surface); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-primary); padding-bottom: 10px; margin-bottom: 15px; }
+    .section-header h2 { margin: 0; }
+
+    .pin-row {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      padding: 10px 12px; background: var(--color-background); border-radius: var(--radius); margin-bottom: 8px;
+    }
+    .pin-row .pin-info { flex: 1; min-width: 0; }
+    .pin-row .pin-name { font-weight: bold; color: var(--color-text); }
+    .pin-row .pin-detail { font-size: 0.9em; color: var(--color-text-muted); }
+    .pin-row .pin-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75em; margin-left: 8px; }
+    .badge.input { background: #1e4a5e; color: #a6d6e6; }
+    .badge.output { background: #1e5e2e; color: #a6e6ae; }
+    .badge.inverted { background: var(--color-warning); color: white; }
+
+    .empty { color: var(--color-text-muted); font-style: italic; padding: 10px; }
+    .loading { text-align: center; padding: 40px; color: var(--color-text-muted); }
+    .actions { display: flex; gap: 10px; margin-top: 20px; }
+    .btn { padding: 10px 20px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em; }
+    .btn-primary { background: var(--color-accent); color: white; }
+    .btn-secondary { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-primary); }
+    .btn-danger { background: var(--color-error); color: white; }
+    .section .btn { padding: 6px 12px; font-size: 0.85em; }
+
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+      z-index: 1000; align-items: flex-start; justify-content: center; padding: 40px 20px; overflow-y: auto;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-overlay .card {
+      max-width: 520px; width: 100%; margin-bottom: 0;
+      background: var(--color-surface); border-radius: var(--radius); padding: 20px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    }
+    .modal-overlay .card h2 { margin-top: 0; }
+    .form-row { margin-bottom: 12px; }
+    .form-row label { display: block; font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 4px; }
+    .form-row input[type="text"], .form-row input[type="number"], .form-row select {
+      width: 100%; padding: 8px 10px; border-radius: var(--radius);
+      border: 1px solid var(--color-primary); background: var(--color-background); color: var(--color-text);
+      font-size: 0.95em; box-sizing: border-box;
+    }
+    .form-row.checkbox { display: flex; align-items: center; gap: 8px; }
+    .form-row.checkbox label { margin-bottom: 0; }
+    .form-two-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px; }
+
+    .alert { padding: 12px; border-radius: var(--radius); margin: 10px 0; display: none; }
+    .alert-success { background: rgba(76, 175, 80, 0.1); border: 1px solid var(--color-success); color: var(--color-success); }
+    .alert-error { background: rgba(244, 67, 54, 0.1); border: 1px solid var(--color-error); color: var(--color-error); }
+  </style>
+</head>
+<body>
+  <div class="rpigpio-container">
+    <div class="rpigpio-header">
+      <h1>🔌 RPI GPIO</h1>
+      <p class="description">Paramétrage des pins (quoi/où, numéro, inversion, direction) exposés via mqtt-io</p>
+    </div>
+
+    <div id="main-container">
+      <div class="status-card" id="status-card" style="display: none;">
+        <h2>Statut</h2>
+        <div class="status-grid">
+          <div class="status-item">
+            <span class="label">Pins configurées</span>
+            <span class="value" id="pins-count">0</span>
+          </div>
+          <div class="status-item">
+            <span class="label">Machine cible</span>
+            <span class="value" id="target-host">—</span>
+          </div>
+          <div class="status-item">
+            <span class="label">Conteneur</span>
+            <span class="value" id="target-service">—</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <h2>Pins</h2>
+          <button class="btn btn-primary" id="new-pin-btn">➕ Nouveau pin</button>
+        </div>
+        <div class="alert alert-success" id="deploy-success"></div>
+        <div class="alert alert-error" id="deploy-error"></div>
+        <div id="pins-list"><div class="empty">Chargement...</div></div>
+      </div>
+
+      <div class="loading" id="loading">Chargement de l'application RPI GPIO</div>
+    </div>
+
+    <div class="actions" id="actions" style="display: none;">
+      <button class="btn btn-primary" id="deploy-btn">🚀 Générer et déployer</button>
+    </div>
+  </div>
+
+  <!-- Modale de création/modification d'un pin -->
+  <div class="modal-overlay" id="pin-overlay">
+    <div class="card">
+      <h2 id="pin-modal-title">➕ Nouveau pin</h2>
+      <input type="hidden" id="pin-id">
+      <div class="form-row">
+        <label for="pin-quoi">Quoi</label>
+        <input type="text" id="pin-quoi" placeholder="volet, lumière, prise...">
+      </div>
+      <div class="form-two-cols">
+        <div class="form-row">
+          <label for="pin-lieu-precis">Lieu précis (optionnel)</label>
+          <input type="text" id="pin-lieu-precis" placeholder="fenêtre gauche">
+        </div>
+        <div class="form-row">
+          <label for="pin-lieu">Lieu</label>
+          <input type="text" id="pin-lieu" placeholder="salon">
+        </div>
+      </div>
+      <div class="form-two-cols">
+        <div class="form-row">
+          <label for="pin-lieu-pere">Lieu parent (optionnel)</label>
+          <input type="text" id="pin-lieu-pere" placeholder="rez de chaussée">
+        </div>
+        <div class="form-row">
+          <label for="pin-lieu-grand-pere">Lieu grand-parent (optionnel)</label>
+          <input type="text" id="pin-lieu-grand-pere" placeholder="maison">
+        </div>
+      </div>
+      <div class="form-two-cols">
+        <div class="form-row">
+          <label for="pin-number">Numéro de pin (BCM)</label>
+          <input type="number" id="pin-number" min="0">
+        </div>
+        <div class="form-row">
+          <label for="pin-direction">Direction</label>
+          <select id="pin-direction">
+            <option value="output">Sortie</option>
+            <option value="input">Entrée</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row checkbox">
+        <input type="checkbox" id="pin-inverted">
+        <label for="pin-inverted">Inversé (niveau bas = actif)</label>
+      </div>
+      <div class="alert alert-error" id="pin-form-error"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="pin-cancel">Annuler</button>
+        <button class="btn btn-primary" id="pin-submit">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/applications/rpigpio/presentation/ts/app.js"></script>
+
+  <!-- Derniere modification: 2026-08-12 00:00:00 - Création de l'application rpigpio -->
+</body>
+</html>

@@ -1,0 +1,15 @@
+[Unit]
+Description=Teleinfo EDF (mode historique) - lecture alternee 2 compteurs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__REMOTE_DIR__
+ExecStart=__NODE_BIN__ __REMOTE_DIR__/main.js
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

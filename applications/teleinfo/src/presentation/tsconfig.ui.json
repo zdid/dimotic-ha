@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "node",
+    "lib": ["ES2020", "DOM"],
+    "outDir": "../../dist/presentation",
+    "rootDir": ".",
+    "baseUrl": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "sourceMap": true,
+    "paths": {
+      "/js/ts/services/SocketService.js": ["../../../core/dist/presentation/ui/js/ts/services/SocketService.d.ts"]
+    }
+  },
+  "include": ["ts/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

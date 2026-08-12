@@ -1,0 +1,19 @@
+{
+  "name": "teleinfo-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lecteur téléinformation EDF mode historique (2 compteurs, bascule GPIO) — déployé sur un RPi1, voir main.js",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js"
+  },
+  "engines": {
+    "node": ">=12"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "mqtt": "^5.13.0",
+    "rpio": "2.4.2",
+    "serialport": "9.0.7"
+  }
+}

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Téléinfo - Compteurs EDF</title>
+
+  <link rel="stylesheet" href="/styles/main.css">
+
+  <style>
+    .teleinfo-container { max-width: 900px; margin: 0 auto; padding: 20px; }
+    .teleinfo-header { text-align: center; margin-bottom: 30px; }
+    .teleinfo-header h1 { color: var(--color-accent); font-size: 2em; }
+
+    .status-card {
+      background: var(--color-surface); border-radius: var(--radius); padding: 20px;
+      margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+    .status-card h2 { margin-top: 0; color: var(--color-text); border-bottom: 1px solid var(--color-primary); padding-bottom: 10px; }
+    .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-top: 15px; }
+    .status-item .label { font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 5px; display: block; }
+    .status-item .value { font-size: 1.3em; color: var(--color-text); }
+
+    .section { background: var(--color-surface); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-primary); padding-bottom: 10px; margin-bottom: 15px; }
+    .section-header h2 { margin: 0; }
+
+    .compteur-row {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      padding: 10px 12px; background: var(--color-background); border-radius: var(--radius); margin-bottom: 8px;
+    }
+    .compteur-row .compteur-info { flex: 1; min-width: 0; }
+    .compteur-row .compteur-name { font-weight: bold; color: var(--color-text); }
+    .compteur-row .compteur-detail { font-size: 0.9em; color: var(--color-text-muted); }
+    .compteur-row .compteur-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+    .empty { color: var(--color-text-muted); font-style: italic; padding: 10px; }
+    .loading { text-align: center; padding: 40px; color: var(--color-text-muted); }
+    .actions { display: flex; gap: 10px; margin-top: 20px; }
+    .btn { padding: 10px 20px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em; }
+    .btn-primary { background: var(--color-accent); color: white; }
+    .btn-secondary { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-primary); }
+    .btn-danger { background: var(--color-error); color: white; }
+    .section .btn { padding: 6px 12px; font-size: 0.85em; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+      z-index: 1000; align-items: flex-start; justify-content: center; padding: 40px 20px; overflow-y: auto;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-overlay .card {
+      max-width: 520px; width: 100%; margin-bottom: 0;
+      background: var(--color-surface); border-radius: var(--radius); padding: 20px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    }
+    .modal-overlay .card h2 { margin-top: 0; }
+    .form-row { margin-bottom: 12px; }
+    .form-row label { display: block; font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 4px; }
+    .form-row input[type="text"], .form-row input[type="number"] {
+      width: 100%; padding: 8px 10px; border-radius: var(--radius);
+      border: 1px solid var(--color-primary); background: var(--color-background); color: var(--color-text);
+      font-size: 0.95em; box-sizing: border-box;
+    }
+    .form-two-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px; }
+
+    .alert { padding: 12px; border-radius: var(--radius); margin: 10px 0; display: none; }
+    .alert-success { background: rgba(76, 175, 80, 0.1); border: 1px solid var(--color-success); color: var(--color-success); }
+    .alert-error { background: rgba(244, 67, 54, 0.1); border: 1px solid var(--color-error); color: var(--color-error); }
+  </style>
+</head>
+<body>
+  <div class="teleinfo-container">
+    <div class="teleinfo-header">
+      <h1>⚡ Téléinfo</h1>
+      <p class="description">Compteurs EDF mode historique (quoi/où, ADCO) — 2 compteurs sur bascule GPIO</p>
+    </div>
+
+    <div id="main-container">
+      <div class="status-card" id="status-card" style="display: none;">
+        <h2>Statut</h2>
+        <div class="status-grid">
+          <div class="status-item">
+            <span class="label">Compteurs déclarés</span>
+            <span class="value" id="compteurs-count">0</span>
+          </div>
+          <div class="status-item">
+            <span class="label">Machine cible</span>
+            <span class="value" id="target-host">—</span>
+          </div>
+          <div class="status-item">
+            <span class="label">Service</span>
+            <span class="value" id="target-service">—</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <h2>Compteurs</h2>
+          <button class="btn btn-primary" id="new-compteur-btn">➕ Nouveau compteur</button>
+        </div>
+        <div class="alert alert-success" id="deploy-success"></div>
+        <div class="alert alert-error" id="deploy-error"></div>
+        <div id="compteurs-list"><div class="empty">Chargement...</div></div>
+      </div>
+
+      <div class="loading" id="loading">Chargement de l'application Téléinfo</div>
+    </div>
+
+    <div class="actions" id="actions" style="display: none;">
+      <button class="btn btn-primary" id="deploy-btn">🚀 Générer et déployer</button>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="compteur-overlay">
+    <div class="card">
+      <h2 id="compteur-modal-title">➕ Nouveau compteur</h2>
+      <input type="hidden" id="compteur-original-adco">
+      <div class="form-row">
+        <label for="compteur-adco">ADCO (numéro de série du compteur)</label>
+        <input type="text" id="compteur-adco" placeholder="20828398450">
+      </div>
+      <div class="form-row">
+        <label for="compteur-quoi">Quoi</label>
+        <input type="text" id="compteur-quoi" placeholder="compteur">
+      </div>
+      <div class="form-two-cols">
+        <div class="form-row">
+          <label for="compteur-lieu-precis">Lieu précis (optionnel)</label>
+          <input type="text" id="compteur-lieu-precis">
+        </div>
+        <div class="form-row">
+          <label for="compteur-lieu">Lieu</label>
+          <input type="text" id="compteur-lieu" placeholder="spa">
+        </div>
+      </div>
+      <div class="form-two-cols">
+        <div class="form-row">
+          <label for="compteur-lieu-pere">Lieu parent (optionnel)</label>
+          <input type="text" id="compteur-lieu-pere">
+        </div>
+        <div class="form-row">
+          <label for="compteur-lieu-grand-pere">Lieu grand-parent (optionnel)</label>
+          <input type="text" id="compteur-lieu-grand-pere">
+        </div>
+      </div>
+      <div class="alert alert-error" id="compteur-form-error"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="compteur-cancel">Annuler</button>
+        <button class="btn btn-primary" id="compteur-submit">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/applications/teleinfo/presentation/ts/app.js"></script>
+
+  <!-- Derniere modification: 2026-08-12 00:00:00 - Création de l'application teleinfo -->
+</body>
+</html>

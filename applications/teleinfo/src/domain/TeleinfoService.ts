@@ -1,0 +1,179 @@
+/**
+ * TeleinfoService — orchestrateur de l'application TELEINFO.
+ *
+ * Rôle limité au paramétrage (mêmes principes que rpigpio, 12/08/2026) : stocke les 2 compteurs
+ * (ADCO, QUOI/OÙ), génère le config.yaml de l'agent (generator.ts) et déploie l'agent + ce config
+ * sur le RPi1 cible (DeployService, SSH + systemd — pas de Docker, voir config-schema.ts).
+ */
+
+import * as path from 'node:path';
+import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
+import { teleinfoConfigSchema, type TeleinfoConfig } from './config-schema';
+import { compteursConfigSchema, DEFAULT_COMPTEURS_CONFIG, type CompteurDefinition, type CompteursConfigFile } from './storage-schema';
+import { ConfigFileManager } from './yaml/ConfigFileManager';
+import { generateAgentConfig } from './generator';
+import { DeployService } from './DeployService';
+import { TELEINFO_SOCKET_EVENTS, TELEINFO_CLIENT_EVENTS } from './socket-events';
+
+export interface TeleinfoStatus {
+  compteursCount: number;
+  target: { host: string; serviceName: string };
+}
+
+export interface ITeleinfoService {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+type SaveCompteurInput = CompteurDefinition & { originalAdco?: number };
+
+export class TeleinfoService implements ITeleinfoService {
+  private readonly config: TeleinfoConfig;
+  private readonly compteursManager: ConfigFileManager<CompteursConfigFile>;
+  private compteurs: CompteurDefinition[];
+  private readonly deployService: DeployService;
+
+  constructor(
+    private readonly eventBus: IEventBus,
+    private readonly logger: Logger,
+    private readonly configProvider: IAppConfigProvider<TeleinfoConfig>
+  ) {
+    this.config = teleinfoConfigSchema.parse(configProvider.getAppConfig());
+
+    const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'teleinfo');
+    this.compteursManager = new ConfigFileManager<CompteursConfigFile>(
+      path.join(dataDir, 'teleinfo-compteurs-v1.0.yaml'),
+      compteursConfigSchema,
+      DEFAULT_COMPTEURS_CONFIG,
+      this.logger,
+      'compteurs'
+    );
+    this.compteurs = this.compteursManager.load().compteurs;
+
+    this.deployService = new DeployService(this.logger);
+
+    this.setupEventListeners();
+  }
+
+  static create(eventBus: IEventBus, logger: Logger, configProvider: IAppConfigProvider<TeleinfoConfig>): TeleinfoService {
+    return new TeleinfoService(eventBus, logger, configProvider);
+  }
+
+  private setupEventListeners(): void {
+    this.eventBus.on(TELEINFO_CLIENT_EVENTS.GET_STATUS, () => this.emitStatus());
+    this.eventBus.on(TELEINFO_CLIENT_EVENTS.GET_COMPTEURS, () => this.emitCompteurs());
+    this.eventBus.on(TELEINFO_CLIENT_EVENTS.SAVE_COMPTEUR, (data: unknown) => this.handleSaveCompteur(data as SaveCompteurInput));
+    this.eventBus.on(TELEINFO_CLIENT_EVENTS.DELETE_COMPTEUR, (data: unknown) => this.handleDeleteCompteur(data as { adco: number }));
+    this.eventBus.on(TELEINFO_CLIENT_EVENTS.DEPLOY, () => this.handleDeploy());
+  }
+
+  async start(): Promise<void> {
+    this.logger.info('TeleinfoService', 'Démarrage du service teleinfo...');
+    this.emitStatus();
+    this.emitCompteurs();
+    this.logger.info('TeleinfoService', 'Service teleinfo démarré');
+  }
+
+  async stop(): Promise<void> {
+    this.logger.info('TeleinfoService', 'Arrêt du service teleinfo');
+  }
+
+  // ==========================================================================
+  // Compteurs — CRUD (au plus 2, contrainte physique de la bascule GPIO)
+  // ==========================================================================
+
+  private handleSaveCompteur(input: SaveCompteurInput): void {
+    try {
+      const { originalAdco, ...compteur } = input;
+      const existingIndex = this.compteurs.findIndex((c) => c.adco === (originalAdco ?? compteur.adco));
+
+      if (existingIndex === -1 && this.compteurs.length >= 2) {
+        this.emitError('2 compteurs déjà déclarés — la bascule GPIO ne gère que 2 positions. Supprime-en un avant d\'en ajouter un autre.');
+        return;
+      }
+
+      if (existingIndex === -1) {
+        this.compteurs.push(compteur);
+      } else {
+        this.compteurs[existingIndex] = compteur;
+      }
+
+      const result = this.compteursManager.save({ compteurs: this.compteurs });
+      if (!result.success) {
+        this.emitError(`Échec de sauvegarde: ${result.error}`);
+        return;
+      }
+
+      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.COMPTEUR_SAVED, compteur);
+      this.emitCompteurs();
+      this.emitStatus();
+    } catch (error) {
+      this.emitError(`Erreur de sauvegarde du compteur: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  private handleDeleteCompteur(data: { adco: number }): void {
+    const before = this.compteurs.length;
+    this.compteurs = this.compteurs.filter((c) => c.adco !== data.adco);
+    if (this.compteurs.length === before) {
+      this.emitError(`Compteur introuvable: ${data.adco}`);
+      return;
+    }
+
+    const result = this.compteursManager.save({ compteurs: this.compteurs });
+    if (!result.success) {
+      this.emitError(`Échec de suppression: ${result.error}`);
+      return;
+    }
+
+    this.eventBus.emit(TELEINFO_SOCKET_EVENTS.COMPTEUR_DELETED, { adco: data.adco });
+    this.emitCompteurs();
+    this.emitStatus();
+  }
+
+  // ==========================================================================
+  // Déploiement
+  // ==========================================================================
+
+  private async handleDeploy(): Promise<void> {
+    if (this.compteurs.length !== 2) {
+      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.DEPLOY_RESULT, {
+        success: false,
+        error: `Exactement 2 compteurs doivent être déclarés avant de déployer (actuellement ${this.compteurs.length})`
+      });
+      return;
+    }
+
+    try {
+      const agentConfigYaml = generateAgentConfig(this.config, this.compteurs);
+      const result = await this.deployService.deploy(this.config.target, agentConfigYaml);
+      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.DEPLOY_RESULT, result);
+    } catch (error) {
+      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.DEPLOY_RESULT, {
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  // ==========================================================================
+  // Émission des événements
+  // ==========================================================================
+
+  private emitCompteurs(): void {
+    this.eventBus.emit(TELEINFO_SOCKET_EVENTS.COMPTEURS_LIST, this.compteurs);
+  }
+
+  private emitStatus(): void {
+    const status: TeleinfoStatus = {
+      compteursCount: this.compteurs.length,
+      target: { host: this.config.target.host, serviceName: this.config.target.serviceName }
+    };
+    this.eventBus.emit(TELEINFO_SOCKET_EVENTS.STATUS, status);
+  }
+
+  private emitError(message: string): void {
+    this.logger.error('TeleinfoService', message);
+    this.eventBus.emit(TELEINFO_SOCKET_EVENTS.ERROR, { message });
+  }
+}
