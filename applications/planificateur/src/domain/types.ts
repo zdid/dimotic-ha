@@ -109,6 +109,18 @@ export interface PlanificationDefinition {
   // d'échec (timeout, JSON inexploitable) qui reste un simple log, pas un état persistant de la
   // planification. Effacé au prochain déclenchement réussi, même principe que `missed`.
   anomalie?: { message: string; at: string };
+  // ⭐ Terminée (demande utilisateur, 12/08/2026) — positionné par SchedulerRuntime dès qu'un
+  // trigger NON récurrent (delay/date/duration, scheduler.ts::isRecurring) se déclenche, immédiat
+  // ou différé peu importe : ce trigger précis ne se redéclenchera jamais, contrairement à un
+  // trigger récurrent qui se réarme lui-même. Sans ce marqueur, `next_fire_at` restait figé dans le
+  // passé après un déclenchement unique — au redémarrage suivant, CommandHandler.resumeOrScheduler()
+  // pouvait soit rattraper et RÉEXÉCUTER une planification déjà consommée (si dans la fenêtre de
+  // rattrapage), soit l'accumuler indéfiniment en `missed` sans jamais nettoyer. `completed_at`
+  // empêche tout nouveau réarmement (load()), et sert de base à la purge automatique après 2 jours
+  // (CommandHandler.cleanupCompletedPlanifications()). Effacé si l'utilisateur réactive
+  // explicitement la planification (gestion "activer"/"modifier") — signal explicite qu'elle doit
+  // pouvoir se redéclencher.
+  completed_at?: string;
 }
 
 export interface GestionNode {

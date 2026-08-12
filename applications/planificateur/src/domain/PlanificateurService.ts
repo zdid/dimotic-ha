@@ -49,6 +49,10 @@ export class PlanificateurService implements IPlanificateurService {
   private readonly handler: CommandHandler;
   private readonly haCommandService?: HaCommandService;
   private readonly recentActions: PlanificateurAction[] = [];
+  // ⭐ Purge périodique des planifications terminées depuis plus de 2 jours (demande utilisateur,
+  // 12/08/2026) — cleanupCompletedPlanifications() tourne déjà une fois au chargement (handler.load()),
+  // ce timer couvre le cas d'un service qui reste actif plusieurs jours sans redémarrer.
+  private cleanupTimer?: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -138,12 +142,16 @@ export class PlanificateurService implements IPlanificateurService {
     this.emitMacros();
     this.emitPlanifications();
 
+    // Toutes les heures suffit : la fenêtre de rétention est de 2 jours, pas besoin d'une purge fine.
+    this.cleanupTimer = setInterval(() => this.handler.cleanupCompletedPlanifications(), 60 * 60 * 1000);
+
     this.logger.info('PlanificateurService', 'Service planificateur démarré');
   }
 
   async stop(): Promise<void> {
     this.logger.info('PlanificateurService', 'Arrêt du service planificateur...');
     this.schedulerRuntime.stopAll();
+    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
     this.logger.info('PlanificateurService', 'Service planificateur arrêté');
   }
 

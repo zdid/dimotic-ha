@@ -18,8 +18,13 @@ import type {
 import type { ConfigFileManager } from './yaml/ConfigFileManager';
 import type { MacrosConfigFile, PlanificationsConfigFile } from './storage-schema';
 import type { SchedulerRuntime } from './scheduler-runtime';
+import { isRecurring } from './scheduler';
 import type { StateWatcher } from './state-watcher';
 import type { ExecutionEngine } from './execution';
+
+// ⭐ Rétention des planifications terminées (demande utilisateur, 12/08/2026) — voir
+// CommandHandler.cleanupCompletedPlanifications().
+const COMPLETED_RETENTION_MS = 2 * 24 * 60 * 60 * 1000;
 
 export class CommandHandler {
   private macros: Record<string, MacroDefinition>;
@@ -78,9 +83,13 @@ export class CommandHandler {
 
     for (const plan of Object.values(this.planifications)) {
       // Les triggers state_change sont repris séparément par StateWatcher (voir
-      // PlanificateurService), pas par SchedulerRuntime.
-      if (plan.active && plan.trigger.type !== 'state_change') this.resumeOrSchedule(plan);
+      // PlanificateurService), pas par SchedulerRuntime. Une planification déjà `completed_at`
+      // (trigger non récurrent déjà consommé, demande utilisateur 12/08/2026) ne doit plus jamais
+      // être reprogrammée — sinon le rattrapage après coupure (resumeOrSchedule) pourrait la
+      // réexécuter puisque next_fire_at reste figé dans le passé une fois le trigger consommé.
+      if (plan.active && !plan.completed_at && plan.trigger.type !== 'state_change') this.resumeOrSchedule(plan);
     }
+    this.cleanupCompletedPlanifications();
     this.logger.info('CommandHandler', `Chargé: ${Object.keys(this.macros).length} macro(s), ${Object.keys(this.planifications).length} planification(s) (${this.schedulerRuntime.listScheduled().length} active(s))`);
   }
 
@@ -126,10 +135,25 @@ export class CommandHandler {
     if (overdueMs <= this.catchUpWindowSeconds * 1000) {
       this.logger.info('CommandHandler', `"${plan.name}" en retard de ${Math.round(overdueMs / 1000)}s (dans la fenêtre de rattrapage) — déclenchement immédiat`);
       this.handleTriggerFired(plan).catch((e) => this.logger.error('CommandHandler', `Erreur de rattrapage pour "${plan.name}": ${e}`));
-      this.schedulerRuntime.schedule(plan);
+      // ⭐ demande utilisateur, 12/08/2026 — ce chemin de rattrapage appelle handleTriggerFired()
+      // directement, en contournant SchedulerRuntime.arm()/fire() (et donc son marquage
+      // completed_at pour les triggers non récurrents, voir scheduler-runtime.ts) : sans ce garde-
+      // fou, schedule(plan) était appelé inconditionnellement, ce qui recalculait un délai complet
+      // ET réarmait un trigger "delay"/"date" pourtant censé n'avoir lieu qu'une fois — il se
+      // redéclenchait alors une seconde fois, plus tard, après le rattrapage.
+      if (isRecurring(plan.trigger)) {
+        this.schedulerRuntime.schedule(plan);
+      } else {
+        plan.completed_at = new Date().toISOString();
+        this.persistPlanifications();
+      }
     } else {
       this.logger.warn('CommandHandler', `"${plan.name}" manquée (en retard de ${Math.round(overdueMs / 1000)}s, au-delà de la fenêtre de rattrapage de ${this.catchUpWindowSeconds}s) — abandonnée`);
       plan.missed = true;
+      // Un déclenchement non récurrent manqué ne se représentera jamais — terminée au même titre
+      // qu'un déclenchement réussi (voir cleanupCompletedPlanifications), sinon elle resterait
+      // active indéfiniment, reconsidérée (et re-logguée "manquée") à chaque redémarrage.
+      if (!isRecurring(plan.trigger)) plan.completed_at = new Date().toISOString();
       this.persistPlanifications();
     }
   }
@@ -276,6 +300,10 @@ export class CommandHandler {
         const plan = this.resolvePlan(g.name);
         if (!plan) return err(corr, `"${g.name}" introuvable.`);
         plan.active = true;
+        // ⭐ Réactivation explicite (demande utilisateur, 12/08/2026) — efface `completed_at` :
+        // sans ça, un trigger non récurrent déjà consommé resterait inerte malgré l'activation
+        // explicite (armIfActive/load() ne reprogramment jamais une planification terminée).
+        plan.completed_at = undefined;
         this.persistPlanifications();
         this.armIfActive(plan);
         return ok(corr, `Planification "${plan.name}" activée.`);
@@ -318,6 +346,9 @@ export class CommandHandler {
         if (!plan || !g.modifications) return err(corr, `"${g.name}" introuvable ou modifications manquantes.`);
         this.disarm(plan);
         Object.assign(plan, g.modifications);
+        // Modification explicite (demande utilisateur, 12/08/2026) : même raisonnement que
+        // "activer" ci-dessus — une planification modifiée doit pouvoir se redéclencher.
+        plan.completed_at = undefined;
         this.persistPlanifications();
         this.armIfActive(plan);
         return ok(corr, `Planification "${plan.name}" modifiée.`);
@@ -336,6 +367,26 @@ export class CommandHandler {
   persistPlanifications(): void {
     const result = this.planificationsManager.save({ planifications: this.planifications });
     if (!result.success) this.logger.error('CommandHandler', `Échec de sauvegarde des planifications: ${result.error}`);
+  }
+
+  /** ⭐ Purge des planifications terminées depuis plus de 2 jours (demande utilisateur, 12/08/2026)
+   *  — évite d'accumuler indéfiniment des triggers non récurrents déjà consommés (delay/date/
+   *  duration, voir SchedulerRuntime). Appelée au chargement (load()) et périodiquement
+   *  (PlanificateurService) — jamais sur une planification encore active sans completed_at, ni sur
+   *  un trigger state_change (récurrent par défaut, n'atteint jamais cet état). */
+  cleanupCompletedPlanifications(): void {
+    const cutoff = Date.now() - COMPLETED_RETENTION_MS;
+    let removed = 0;
+    for (const [name, plan] of Object.entries(this.planifications)) {
+      if (plan.completed_at && new Date(plan.completed_at).getTime() < cutoff) {
+        delete this.planifications[name];
+        removed++;
+      }
+    }
+    if (removed > 0) {
+      this.logger.info('CommandHandler', `${removed} planification(s) terminée(s) depuis plus de 2 jours — supprimée(s).`);
+      this.persistPlanifications();
+    }
   }
 }
 

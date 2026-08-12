@@ -25,6 +25,7 @@ interface PlanificationDefinition {
   next_fire_at?: string;
   missed?: boolean;
   anomalie?: { message: string; at: string };
+  completed_at?: string;
 }
 
 interface IaTestReply {
@@ -142,6 +143,7 @@ function updateStatusDisplay(status: PlanificateurStatus): void {
 }
 
 function formatNextFireAt(plan: PlanificationDefinition): string {
+  if (plan.completed_at) return `Terminée le ${new Date(plan.completed_at).toLocaleString('fr-FR')}`;
   if (plan.trigger.type === 'state_change') return 'Réactif (changement d\'état)';
   if (!plan.next_fire_at) return plan.active ? 'Non programmée' : '—';
   return `Prochaine exécution : ${new Date(plan.next_fire_at).toLocaleString('fr-FR')}`;
@@ -166,6 +168,7 @@ function updatePlanificationsList(plans: PlanificationDefinition[]): void {
           ${p.name ? escapeHtml(p.name) : ''}
           <span class="status-badge ${p.active ? 'active' : 'inactive'}">${p.active ? 'active' : 'inactive'}</span>
           ${p.missed ? '<span class="status-badge missed">manqué</span>' : ''}
+          ${p.completed_at ? '<span class="status-badge completed" title="Trigger non récurrent déjà consommé — supprimée automatiquement 2 jours après">terminée</span>' : ''}
           ${p.anomalie ? `<span class="status-badge anomalie" title="${escapeHtml(p.anomalie.message)}">⚠️ anomalie</span>` : ''}
         </div>
         <div class="plan-phrase">"${escapeHtml(p.phrase_originale)}"</div>

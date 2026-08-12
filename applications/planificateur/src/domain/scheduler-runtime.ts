@@ -64,6 +64,12 @@ export class SchedulerRuntime {
         }
       } else {
         this.timers.delete(plan.name);
+        // ⭐ Terminée (demande utilisateur, 12/08/2026) — un trigger non récurrent (delay/date/
+        // duration) ne se redéclenchera jamais : sans ce marqueur, next_fire_at restait figé dans
+        // le passé et pouvait faire réexécuter la planification au redémarrage suivant (rattrapage,
+        // voir CommandHandler.resumeOrScheduler()). Voir types.ts::PlanificationDefinition.completed_at.
+        plan.completed_at = new Date().toISOString();
+        this.onScheduled?.(plan);
       }
     };
 

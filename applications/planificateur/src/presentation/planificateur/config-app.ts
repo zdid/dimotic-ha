@@ -26,6 +26,7 @@ interface PlanificationDefinition {
   trigger: { type: string };
   missed?: boolean;
   anomalie?: { message: string; at: string };
+  completed_at?: string;
 }
 
 let socket: any | null = null;
@@ -82,7 +83,7 @@ function renderPlanifications(plans: PlanificationDefinition[]): void {
   el.innerHTML = plans.map((p) => `
     <div class="item-row">
       <div class="item-info">
-        <div class="name">${escapeHtml(p.name)} <span class="status-badge ${p.active ? 'active' : 'inactive'}">${p.active ? 'active' : 'inactive'}</span>${p.missed ? ' <span class="status-badge missed">manqué</span>' : ''}${p.anomalie ? ` <span class="status-badge anomalie" title="${escapeHtml(p.anomalie.message)}">⚠️ anomalie</span>` : ''}</div>
+        <div class="name">${escapeHtml(p.name)} <span class="status-badge ${p.active ? 'active' : 'inactive'}">${p.active ? 'active' : 'inactive'}</span>${p.missed ? ' <span class="status-badge missed">manqué</span>' : ''}${p.completed_at ? ' <span class="status-badge completed" title="Trigger non récurrent déjà consommé — supprimée automatiquement 2 jours après">terminée</span>' : ''}${p.anomalie ? ` <span class="status-badge anomalie" title="${escapeHtml(p.anomalie.message)}">⚠️ anomalie</span>` : ''}</div>
         <div class="detail">"${escapeHtml(p.phrase_originale)}" — ${escapeHtml(p.trigger.type)}</div>
         ${p.anomalie ? `<div class="detail" style="color:var(--color-error)">${escapeHtml(p.anomalie.message)}</div>` : ''}
       </div>
