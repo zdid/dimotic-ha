@@ -1,8 +1,8 @@
 # PROMPT PROJET - Règles de Développement
 
-**Version : 1.4**
-**Date : 4 Août 2026**
-**Dernière mise à jour : Table §11 "Pour Applications Spécifiques" désynchronisée depuis sa création — ne citait ni NOMMAGE, ni ARBREOUQUOI, ni IA, ni PLANIFICATEUR, ni AREXX, ni HAPLAN alors que ces 6 applications ont chacune au moins une spec fonctionnelle dédiée dans `specs/current/` (certaines depuis fin juillet). Corrigé en ajoutant les 6 lignes manquantes, sans toucher au reste du document. Ancienne version v1.3 archivée dans `specs/archives/PROMPT_PROJET_v1.3-20260804.md`.**
+**Version : 1.5**
+**Date : 13 Août 2026**
+**Dernière mise à jour : Table §11 "Pour Applications Spécifiques" — ajout des 2 lignes manquantes pour RPIGPIO (paramétrage GPIO via mqtt-io, déploiement Docker) et TELEINFO (compteurs EDF mode historique, agent RPi1 déployé par SSH+systemd), créées le 12/08/2026 avec leur spec fonctionnelle dédiée. Aucun autre changement. Ancienne version v1.4 archivée dans `specs/archives/PROMPT_PROJET_v1.4-20260804.md`.**
 
 ## 📚 Table des Matières
 1. [Règles Fondamentales](#-règles-fondamentales)
@@ -368,6 +368,8 @@ projet/
 | **Application PLANIFICATEUR** | `fonctionnelles-planificateur_specs` | **Maintenance et développement** spécifique PLANIFICATEUR (macros/planifications, déclencheurs, résolution vers un service HA) — à lire avec `fonctionnelles-ia_specs` |
 | **Application AREXX** | `fonctionnelles-arexx_specs` | **Maintenance et développement** spécifique AREXX (capteurs température/humidité BS1000/BS500) |
 | **Application HAPLAN** | `fonctionnelles-haplan_specs` | **Maintenance et développement** spécifique HAPLAN (plans de maison tactiles, pilotage d'entités HA) |
+| **Application RPIGPIO** | `fonctionnelles-rpigpio_specs` | **Maintenance et développement** spécifique RPIGPIO (paramétrage de pins GPIO via mqtt-io, déploiement Docker) |
+| **Application TELEINFO** | `fonctionnelles-teleinfo_specs` | **Maintenance et développement** spécifique TELEINFO (compteurs EDF mode historique, agent RPi1 déployé par SSH+systemd) |
 | **UI Avancée** | `presentation_specs` | Applications avec interface complexe |
 | **Gestion d'erreurs fine** | `erreurs_specs` | Applications nécessitant une gestion d'erreur spécifique |
 | **Patterns Architecturaux** | `architectural-patterns_specs` | Pour comprendre les patterns MQTT/WS globaux |
