@@ -25,16 +25,16 @@ interface IaStatus {
 interface ComparisonSide {
   provider: 'mistral' | 'anthropic';
   model: string;
+  label?: string;
   latencyMs: number;
   decision: Record<string, unknown>;
 }
 
 interface CompareReply {
   question: string;
-  active: ComparisonSide;
-  other: ComparisonSide;
+  sides: ComparisonSide[];
   match: boolean;
-  diffs: string[];
+  diffsPerSide: { label: string; diffs: string[] }[];
 }
 
 interface Exchange {
@@ -217,16 +217,16 @@ function showCompareResult(reply: CompareReply): void {
 
   const resultEl = $('test-result');
   if (!resultEl) return;
-  const providerLabel = (p: 'mistral' | 'anthropic') => (p === 'anthropic' ? 'Claude' : 'Mistral');
-  const fmtSide = (s: ComparisonSide, isActive: boolean) =>
-    `<div>${isActive ? '▶️' : '⏸️'} <strong>${providerLabel(s.provider)}</strong> (${escapeHtml(s.model)}, ${s.latencyMs} ms)${isActive ? '' : ' — non exécuté (comparatif)'}</div>`
+  const fmtSide = (s: ComparisonSide) =>
+    `<div>🧪 <strong>${escapeHtml(s.label ?? s.model)}</strong> (${escapeHtml(s.model)}, ${s.latencyMs} ms) — non exécuté (comparatif)</div>`
     + `<pre class="intermediate-json">${escapeHtml(JSON.stringify(s.decision, null, 2))}</pre>`;
+
+  const diffLines = reply.diffsPerSide.filter((d) => d.diffs.length > 0).map((d) => `${d.label}: ${d.diffs.join(' ; ')}`);
 
   resultEl.style.display = 'block';
   resultEl.className = `test-result ${reply.match ? 'ok' : 'error'}`;
-  resultEl.innerHTML = `<div class="tokens-label">${reply.match ? '✅ Décisions identiques' : `⚠️ Décisions différentes : ${reply.diffs.map(escapeHtml).join(' ; ')}`}</div>`
-    + fmtSide(reply.active, true)
-    + fmtSide(reply.other, false)
+  resultEl.innerHTML = `<div class="tokens-label">${reply.match ? '✅ Décisions identiques' : `⚠️ Décisions différentes : ${diffLines.map(escapeHtml).join(' | ')}`}</div>`
+    + reply.sides.map(fmtSide).join('')
     + `<div class="tokens-label">Détail complet dans data/ia/comparatif.log</div>`;
 }
 

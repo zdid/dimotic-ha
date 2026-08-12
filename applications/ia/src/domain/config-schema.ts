@@ -54,6 +54,26 @@ export const iaConfigSchema = z.object({
   anthropicBaseUrl: z.string().default('https://api.anthropic.com/v1'),
   defaultAnthropicModel: z.string().default('claude-haiku-4-5-20251001'),
 
+  // ⭐ Modèles interrogés par le comparatif (bouton "Comparer", IaService.handleCompareCommand) —
+  // demande utilisateur, 12/08/2026 : plus de 2 (mistral-small / claude-haiku) mais 4, mêmes clés
+  // API que ci-dessus (mistralApiKey/anthropicApiKey), un modèle de plus par marque
+  // (mistral-medium-latest, claude-sonnet-5). Versions vérifiées en direct contre l'API Mistral
+  // (endpoint /v1/models, 12/08/2026) : "mistral-small-latest" résout actuellement vers
+  // mistral-small-2603, "mistral-medium-latest" est le bon identifiant pour Mistral Medium (alias
+  // de mistral-medium-3.5). Non exposé dans la config UI générique — même précédent que
+  // modelMap/mistralRateLimits/excludedQuoiIds ci-dessus : à ajuster directement dans
+  // data/ia/config.yaml.
+  compareModels: z.array(z.object({
+    provider: z.enum(['mistral', 'anthropic']),
+    model: z.string(),
+    label: z.string().optional()
+  })).default([
+    { provider: 'mistral', model: 'mistral-small-latest', label: 'Mistral Small' },
+    { provider: 'mistral', model: 'mistral-medium-latest', label: 'Mistral Medium' },
+    { provider: 'anthropic', model: 'claude-haiku-4-5-20251001', label: 'Claude Haiku' },
+    { provider: 'anthropic', model: 'claude-sonnet-5', label: 'Claude Sonnet' }
+  ]),
+
   ollamaHttpPort: z.number().int().positive().default(11434),
 
   // Chemin relatif à la racine de l'application (applications/ia/), sauf s'il est absolu — voir
@@ -99,6 +119,12 @@ export const DEFAULT_IA_CONFIG: IaConfig = {
   provider: 'mistral',
   anthropicBaseUrl: 'https://api.anthropic.com/v1',
   defaultAnthropicModel: 'claude-haiku-4-5-20251001',
+  compareModels: [
+    { provider: 'mistral', model: 'mistral-small-latest', label: 'Mistral Small' },
+    { provider: 'mistral', model: 'mistral-medium-latest', label: 'Mistral Medium' },
+    { provider: 'anthropic', model: 'claude-haiku-4-5-20251001', label: 'Claude Haiku' },
+    { provider: 'anthropic', model: 'claude-sonnet-5', label: 'Claude Sonnet' }
+  ],
   ollamaHttpPort: 11434,
   rulesFile: '../../data/ia/regles_mistral.txt',
   commandTimeoutMs: 2000,

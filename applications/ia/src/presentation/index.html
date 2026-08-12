@@ -149,7 +149,7 @@
           <input type="text" id="test-input" list="test-history" placeholder="ex : allume la lumière du salon" autocomplete="off" />
           <datalist id="test-history"></datalist>
           <button class="btn btn-primary" id="test-send">Envoyer</button>
-          <button class="btn btn-secondary" id="test-compare" title="Envoie la même phrase à Claude et Mistral — celui actif exécute réellement, l'autre s'arrête juste avant (comparaison, résultat dans data/ia/comparatif.log)">🧪 Comparer</button>
+          <button class="btn btn-secondary" id="test-compare" title="Envoie la même phrase à tous les modèles comparatifs (config.compareModels) — jamais exécuté ni transmis à planificateur, pur comparatif (résultat dans data/ia/comparatif.log)">🧪 Comparer</button>
         </div>
         <div class="test-result" id="test-result"></div>
       </div>

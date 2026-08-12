@@ -34,10 +34,11 @@ type RunChatRoundsResult =
   | { ok: true; finalText: string; promptTokens: number; completionTokens: number; cachedTokens: number; bufferedChunks: string[]; wasStructured: boolean; intermediateJson?: string; planificateurReply?: string }
   | { ok: false; errorMessage: string };
 
-/** Une "moitié" du comparatif Claude/Mistral (handleCompareCommand) — voir extractDecision(). */
+/** Un "côté" du comparatif multi-modèles (handleCompareCommand) — voir extractDecision(). */
 interface ComparisonSide {
   provider: 'mistral' | 'anthropic';
   model: string;
+  label?: string;
   latencyMs: number;
   decision: Record<string, unknown>;
 }
@@ -379,54 +380,54 @@ export class IaService implements IIaService {
   }
 
   /**
-   * ⭐ Comparatif Claude/Mistral (demande utilisateur, 11/08/2026) — envoie la même phrase aux deux
-   * fournisseurs : celui actif en config (this.config.provider) exécute réellement, exactement
-   * comme handleTestCommand ; l'autre s'arrête juste avant l'exécution/dispatch (dry-run, voir
-   * runChatRounds/ToolExecutor.execute) — jamais de double effet de bord sur la maison ni de
-   * planification fantôme. Compare la décision structurée (verbe/quoi/lieux ou JSON
-   * planification/gestion/macro), pas le texte, et le temps de réponse ; journalise une ligne dans
-   * data/ia/comparatif.log (tail -f dessus, demande utilisateur).
+   * ⭐ Comparatif multi-modèles (demande utilisateur, 11-12/08/2026) — envoie la même phrase à tous
+   * les modèles de `config.compareModels` (4 par défaut : Mistral Small/Medium, Claude
+   * Haiku/Sonnet, mêmes clés API que le reste de l'app). AUCUN côté n'exécute réellement ni ne
+   * transmet à planificateur (toujours dry-run, voir runChatRounds/ToolExecutor.execute) — pur
+   * outil d'observation, jamais une action, quel que soit le fournisseur actif en config. Compare
+   * la décision structurée (verbe/quoi/lieux ou JSON planification/gestion/macro), pas le texte, et
+   * le temps de réponse de chacun ; journalise une ligne dans data/ia/comparatif.log (tail -f
+   * dessus, demande utilisateur).
    */
   private async handleCompareCommand(message: string): Promise<void> {
     if (!message?.trim()) return;
 
-    const activeProvider = this.config.provider;
-    const otherProvider: 'mistral' | 'anthropic' = activeProvider === 'anthropic' ? 'mistral' : 'anthropic';
     const messages = this.rulesProvider.inject([{ role: 'user', content: message }]);
 
-    const runSide = async (provider: 'mistral' | 'anthropic', dryRun: boolean): Promise<ComparisonSide> => {
-      const model = this.mistralClient.resolveModel(this.config.defaultMistralModel, provider);
+    const runSide = async (candidate: IaConfig['compareModels'][number]): Promise<ComparisonSide> => {
       const startedAt = Date.now();
-      const result = await this.runChatRounds(messages, model, {}, { providerOverride: provider, dryRun });
+      const result = await this.runChatRounds(messages, candidate.model, {}, { providerOverride: candidate.provider, dryRun: true });
       const latencyMs = Date.now() - startedAt;
-      return { provider, model, latencyMs, decision: extractDecision(result) };
+      return { provider: candidate.provider, model: candidate.model, label: candidate.label, latencyMs, decision: extractDecision(result) };
     };
 
-    // En parallèle : fournisseurs distincts (rate limiters séparés dans MistralClient), pas
-    // d'interférence, et le temps total du comparatif reste celui du plus lent des deux plutôt que
-    // la somme.
-    const [active, other] = await Promise.all([
-      runSide(activeProvider, false),
-      runSide(otherProvider, true)
-    ]);
+    // En parallèle : rate limiter séparé par modèle dans MistralClient, pas d'interférence entre
+    // candidats — le temps total du comparatif reste celui du plus lent plutôt que la somme.
+    const sides = await Promise.all(this.config.compareModels.map(runSide));
 
-    const diffs = diffDecisions(active.decision, other.decision);
-    this.logComparison(message, active, other, diffs);
+    // Pas de "côté actif" ici (tout est dry-run) — le premier candidat sert de référence pour le
+    // résumé match/diff, mais la ligne de log conserve la décision complète de chaque côté.
+    const [reference, ...rest] = sides;
+    const diffsPerSide = rest.map((s) => ({ label: s.label ?? s.model, diffs: reference ? diffDecisions(reference.decision, s.decision) : [] }));
+    const allMatch = diffsPerSide.every((d) => d.diffs.length === 0);
+
+    this.logComparison(message, sides, diffsPerSide, allMatch);
 
     this.eventBus.emitGeneric('ia:compare:reply', {
       question: message,
-      active,
-      other,
-      match: diffs.length === 0,
-      diffs
+      sides,
+      match: allMatch,
+      diffsPerSide
     });
   }
 
   /** Une ligne par comparaison, format compact à plat — pensé pour `tail -f data/ia/comparatif.log`. */
-  private logComparison(question: string, active: ComparisonSide, other: ComparisonSide, diffs: string[]): void {
-    const fmtSide = (s: ComparisonSide) => `${s.provider}:${s.model} ${s.latencyMs}ms ${JSON.stringify(s.decision)}`;
-    const verdict = diffs.length === 0 ? 'MATCH' : `DIFF(${diffs.join('; ')})`;
-    const line = `${new Date().toISOString()} | "${question}" | actif=${fmtSide(active)} | compare=${fmtSide(other)} | ${verdict}\n`;
+  private logComparison(question: string, sides: ComparisonSide[], diffsPerSide: { label: string; diffs: string[] }[], allMatch: boolean): void {
+    const fmtSide = (s: ComparisonSide) => `${s.label ?? s.model}(${s.provider}:${s.model}) ${s.latencyMs}ms ${JSON.stringify(s.decision)}`;
+    const verdict = allMatch
+      ? 'MATCH'
+      : `DIFF(${diffsPerSide.filter((d) => d.diffs.length > 0).map((d) => `${d.label}: ${d.diffs.join('; ')}`).join(' || ')})`;
+    const line = `${new Date().toISOString()} | "${question}" | ${sides.map(fmtSide).join(' | ')} | ${verdict}\n`;
     const logPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia', 'comparatif.log');
     try {
       fs.appendFileSync(logPath, line);
