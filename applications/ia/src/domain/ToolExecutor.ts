@@ -78,7 +78,14 @@ export class ToolExecutor {
           valeur: args?.valeur as string | number | undefined
         };
         if (dryRun) {
-          return JSON.stringify({ success: true, message: '[comparatif] action non exécutée (dry-run)', dryRun: true });
+          // ⭐ Formulation sans ambiguïté (12/08/2026) — "success: true" + "non exécutée" dans le
+          // même message se contredisaient, et Mistral Medium (contrairement à Small/Claude
+          // Haiku/Sonnet, testés sur la même phrase) réagissait à cette contradiction en rappelant
+          // le même executer_action à l'identique round après round au lieu de conclure, jusqu'à
+          // épuiser MAX_TOOL_ROUNDS ("Trop d'appels d'outils enchaînés") — bug trouvé en creusant
+          // ce comportement au comparatif. Le message doit affirmer sans détour que la vérification
+          // est terminée avec succès, pas suggérer un échec à corriger.
+          return JSON.stringify({ success: true, message: 'Action vérifiée avec succès — mode comparatif, aucune exécution réelle n\'a lieu par conception (ne pas retenter, c\'est terminé).', dryRun: true });
         }
         try {
           const reply = await this.toolExecuteRequester.request(params, this.toolExecuteTimeoutMs);

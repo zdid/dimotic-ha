@@ -259,7 +259,7 @@ export class IaService implements IIaService {
       totalCachedTokens += assembled.cachedTokens;
 
       if (assembled.toolCalls.length > 0) {
-        this.logger.info('IaService', `Round ${round}: ${assembled.toolCalls.length} appel(s) d'outil`);
+        this.logger.info('IaService', `Round ${round}: ${assembled.toolCalls.length} appel(s) d'outil (${assembled.toolCalls.map((c) => `${c.function.name}(${typeof c.function.arguments === 'string' ? c.function.arguments : JSON.stringify(c.function.arguments)})`).join(', ')})`);
         toolCallsUsed.push(...assembled.toolCalls);
         currentMessages = [...currentMessages, { role: 'assistant', content: assembled.text, tool_calls: assembled.toolCalls }];
         for (const call of assembled.toolCalls) {
@@ -347,6 +347,7 @@ export class IaService implements IIaService {
       };
     }
 
+    this.logger.warn('IaService', `Trop d'appels d'outils enchaînés (${MAX_TOOL_ROUNDS} rounds) — historique: ${toolCallsUsed.map((c) => c.function.name).join(' -> ')}`);
     return { ok: false, errorMessage: 'Trop d\'appels d\'outils enchaînés' };
   }
 
