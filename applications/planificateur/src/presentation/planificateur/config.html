@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Planificateur - Macros & planifications</title>
+  <title>Planificateur - Macros</title>
 
   <link rel="stylesheet" href="/styles/main.css">
 
@@ -50,18 +50,13 @@
   <div class="plan-container">
     <div class="plan-header">
       <a class="back-link" href="/applications/planificateur/presentation/index.html">← Tableau de bord</a>
-      <h1>🗓️ Macros & planifications</h1>
-      <p class="description">Gestion — la création reste 100% conversationnelle (via l'application IA)</p>
+      <h1>📋 Macros</h1>
+      <p class="description">Gestion — la création reste 100% conversationnelle (via l'application IA). Les planifications se gèrent depuis le tableau de bord.</p>
     </div>
 
     <div class="section">
       <h2>📋 Macros</h2>
       <div id="macros-list"><div class="empty">Chargement...</div></div>
-    </div>
-
-    <div class="section">
-      <h2>⏱️ Planifications</h2>
-      <div id="planifications-list"><div class="empty">Chargement...</div></div>
     </div>
   </div>
 
@@ -71,6 +66,6 @@
   <script defer src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script type="module" src="/applications/planificateur/presentation/planificateur/config-app.js"></script>
 
-  <!-- Derniere modification: 2026-07-23 00:00:00 - Création de l'application planificateur -->
+  <!-- Derniere modification: 2026-08-12 00:00:00 - Retrait de la liste des planifications (doublon avec le tableau de bord, demande utilisateur) — page recentrée sur les macros -->
 </body>
 </html>

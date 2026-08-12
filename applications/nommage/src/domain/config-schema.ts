@@ -76,7 +76,18 @@ const haConfigSchema = z.object({
   // Voir le commentaire équivalent dans rfxcom/config-schema.ts — même risque (area jamais
   // réappliquée après coup par HA une fois l'entité créée), même défaut prudent. Particulièrement
   // sensible ici : NOMMAGE relaie potentiellement des centaines d'entités zigbee2mqtt.
-  waitForHaWsBeforeDiscovery: z.boolean().default(true)
+  waitForHaWsBeforeDiscovery: z.boolean().default(true),
+
+  // ⭐ 12/08/2026 (demande utilisateur) — un device physiquement neutre (ex: module relais mural
+  // Tuya) déclaré côté source avec un QUOI "lumière"/"lumiere" (ex: "lumière---vitrine--cuisine")
+  // est promu en composant HA `light` au lieu du `switch` publié tel quel par la source (Zigbee2MQTT
+  // ne connaît pas notre taxonomie, seulement les capacités physiques du device — il ne peut donc
+  // pas savoir que ce relais pilote un vrai luminaire). Uniquement le composant `switch`
+  // effectivement basé sur le QUOI : les autres entités du même device (select power_on_behavior,
+  // number countdown...) restent inchangées. Le payload HA "switch" basique (state_topic,
+  // command_topic, payload_on/off) est compatible avec le schéma "light" par défaut de HA (pas de
+  // brightness/couleur nécessaire) — vérifié par comparaison des deux schémas de découverte MQTT.
+  forceLightForLumiere: z.boolean().default(true)
 });
 
 // Configuration Logging — commune à toutes les sources
@@ -160,7 +171,8 @@ export const DEFAULT_NOMMAGE_CONFIG: NommageConfig = {
   sources: [DEFAULT_NOMMAGE_SOURCE],
   ha: {
     injectTaxonomyAttributes: true,
-    waitForHaWsBeforeDiscovery: true
+    waitForHaWsBeforeDiscovery: true,
+    forceLightForLumiere: true
   },
   logging: {
     level: 'info',

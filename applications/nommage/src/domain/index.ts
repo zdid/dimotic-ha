@@ -130,6 +130,13 @@ export const NOMMAGE_UI_METADATA: ModuleUiMetadata = {
           type: 'boolean',
           default: true,
           description: "Évite de créer des entités sans area assignée (HA n'applique l'area suggérée qu'une seule fois, à la création) — désactiver si les entités doivent apparaître même quand HA WebSocket est indisponible."
+        },
+        {
+          name: 'ha.forceLightForLumiere',
+          label: 'Republier en "light" les QUOI "lumière" exposés en switch',
+          type: 'boolean',
+          default: true,
+          description: "Un device physiquement neutre (ex: module relais mural) déclaré avec un QUOI \"lumière\" apparaît en switch dans HA (la source ne connaît que ses capacités physiques, pas notre taxonomie) — republié en light pour un rendu/contrôle vocal cohérent avec son usage réel."
         }
       ]
     },

@@ -423,6 +423,21 @@ export class NommageService implements INommageService {
   private emitPassthroughDiscovery(discoveryMessage: DiscoveryMessage, parsed: ParsedTaxonomy): void {
     let payload: Record<string, unknown> = { ...discoveryMessage.payload };
 
+    // ⭐ 12/08/2026 (demande utilisateur, config ha.forceLightForLumiere) — un QUOI "lumière"
+    // relayé en tant que composant `switch` (source ne connaissant que les capacités physiques du
+    // device, pas notre taxonomie) est republié en `light` : seul le topic de découverte change de
+    // composant, le payload traverse tel quel (compatible avec les deux schémas). Les autres
+    // entités du même device (select/number de config) ne sont jamais concernées, seul le composant
+    // effectivement `switch` l'est.
+    const effectiveTopic = (this.config.ha.forceLightForLumiere && parsed.quoi.slug === 'lumiere')
+      ? this.rewriteSwitchTopicToLight(discoveryMessage.topic)
+      : discoveryMessage.topic;
+
+    if (effectiveTopic !== discoveryMessage.topic) {
+      this.logger.info('NommageService',
+        `[${discoveryMessage.sourceId}] QUOI "lumière" sur un composant switch — republié en light (${discoveryMessage.topic} → ${effectiveTopic})`);
+    }
+
     // name explicite (ex: zigbee2mqtt "Linkquality") traverse HA sans jamais être traduit, et une
     // entité SANS name (ex: Linky EAST) reste indiscernable des autres entités du même
     // device_class — HA ne calcule un nom lui-même que depuis device_class, jamais à partir de
@@ -461,7 +476,7 @@ export class NommageService implements INommageService {
     // substitution du suffixe, robuste au nombre de segments précédents (Zigbee2MQTT peut publier
     // sur 4 OU 5 segments selon la présence d'un node_id — vérifié en direct).
     if (this.config.ha.injectTaxonomyAttributes) {
-      const attributesTopic = discoveryMessage.topic.replace(/\/config$/, '/attributs');
+      const attributesTopic = effectiveTopic.replace(/\/config$/, '/attributs');
       payload = {
         ...payload,
         json_attributes_topic: attributesTopic,
@@ -480,7 +495,7 @@ export class NommageService implements INommageService {
 
     const event: PassthroughDiscoveryEvent & { bridgeInstance: string } = {
       bridgeInstance: BRIDGE_INSTANCE,
-      sourceTopic: discoveryMessage.topic,
+      sourceTopic: effectiveTopic,
       payload
     };
 
@@ -488,6 +503,35 @@ export class NommageService implements INommageService {
 
     this.logger.debug('NommageService',
       `[${discoveryMessage.sourceId}] Relayé vers HA via Passthrough MQTT (sourceTopic: ${discoveryMessage.topic})`);
+  }
+
+  // ⭐ 12/08/2026 — trouvé en test réel (voir rewriteSwitchTopicToLight) : un device "lumière"
+  // équipé de VRAIES fonctionnalités de gradateur/couleur (ex: Lidl Livarno HG06104A) publie déjà
+  // son état principal en `light` nativement chez Zigbee2MQTT, et n'a QUE des switches auxiliaires
+  // de configuration (ex: "Ne pas déranger", verrouillage enfant) en plus — ceux-là ne doivent PAS
+  // devenir des light. Seul le segment id technique (dernier avant /config, ex: "switch",
+  // "switch_l1"/"switch_l2" pour un module 2 gangs — chaque canal pilote une lumière indépendante)
+  // identifie de façon fiable l'état principal : les switches auxiliaires ont un id du type
+  // "switch_do_not_disturb"/"switch_child_lock", jamais couvert par ce motif. `entity_category`
+  // (présent côté HA pour distinguer "config"/"diagnostic") n'est PAS fiable seul : "do_not_disturb"
+  // n'en porte pas dans la définition Zigbee2MQTT de ce modèle, alors que "child_lock" oui.
+  private static readonly LIGHT_ELIGIBLE_OBJECT_ID = /^switch(_l\d+)?$/;
+
+  /**
+   * Remplace le composant `switch` par `light` dans un topic de découverte MQTT HA
+   * (`<prefix>/<component>/[<node_id>/]<object_id>/config`, composant toujours au segment 1, juste
+   * après le préfixe — vrai pour les deux formes valides, avec ou sans node_id) — uniquement si
+   * l'id technique juste avant `/config` correspond à un état principal (voir
+   * LIGHT_ELIGIBLE_OBJECT_ID ci-dessus), jamais pour un switch auxiliaire de configuration du même
+   * device, ni pour un select/number/sensor (composant différent, jamais concernés).
+   */
+  private rewriteSwitchTopicToLight(topic: string): string {
+    const segments = topic.split('/');
+    if (segments[1] !== 'switch') return topic;
+    const technicalObjectId = segments[segments.length - 2];
+    if (!NommageService.LIGHT_ELIGIBLE_OBJECT_ID.test(technicalObjectId)) return topic;
+    segments[1] = 'light';
+    return segments.join('/');
   }
 
   // ==========================================================================

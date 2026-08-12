@@ -12,6 +12,7 @@ import type { HaWsClient } from './HaWsClient';
 import type { HaStructureRegistry } from './HaStructureRegistry';
 import type { IEventBus } from '../../application/IEventBus';
 import type { Logger } from '../../infrastructure/logger/index';
+import { guessAreaIcon } from './areaIcons';
 
 // Deux budgets distincts (07/08/2026, corrige un bug constaté en conditions réelles) : le
 // référentiel HA (392 entités/34 areas en usage réel) peut mettre plus de 20s à charger, largement
@@ -142,7 +143,10 @@ export class AreaEnsureService {
     const existing = this.findByName(name);
     if (existing) return existing.area_id;
 
-    const created = await this.haWsClient.createArea(name);
+    // ⭐ 12/08/2026 : icône assignée à la création à partir du nom (demande utilisateur) — table
+    // statique de mots-clés FR, voir areaIcons.ts. undefined si aucun motif connu : HA applique
+    // alors son icône par défaut générique, comme avant cette fonctionnalité.
+    const created = await this.haWsClient.createArea(name, guessAreaIcon(name));
     // Mis à jour immédiatement (pas seulement via l'événement area_registry_updated poussé de
     // façon asynchrone par HA) — sinon une deuxième demande concurrente pour un nom légèrement
     // différent mais convergent ne le verrait pas encore.

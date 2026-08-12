@@ -91,7 +91,7 @@ export const PLANIFICATEUR_MENU_CONFIG: ApplicationMenuConfig = {
     },
     {
       id: 'gestion',
-      label: 'Macros & planifications',
+      label: 'Macros',
       icon: '🗓️',
       path: '/applications/planificateur/presentation/planificateur/config.html',
       order: 2

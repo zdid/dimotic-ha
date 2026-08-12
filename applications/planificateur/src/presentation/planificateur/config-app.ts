@@ -1,7 +1,8 @@
 /**
- * Page de gestion des macros et planifications — liste + activer/désactiver/supprimer.
+ * Page de gestion des macros — liste + suppression.
  * La création reste 100% conversationnelle (via l'application ia) : pas de formulaire de saisie
- * JSON en v1 (specs planificateur §11).
+ * JSON en v1 (specs planificateur §11). Les planifications se gèrent depuis le tableau de bord
+ * (index.html) — cette page ne les affiche plus (doublon retiré, demande utilisateur 12/08/2026).
  */
 
 import { SocketService } from '/js/ts/services/SocketService.js';
@@ -19,16 +20,6 @@ interface MacroDefinition {
   steps: unknown[];
 }
 
-interface PlanificationDefinition {
-  name: string;
-  active: boolean;
-  phrase_originale: string;
-  trigger: { type: string };
-  missed?: boolean;
-  anomalie?: { message: string; at: string };
-  completed_at?: string;
-}
-
 let socket: any | null = null;
 
 function init(): void {
@@ -36,7 +27,6 @@ function init(): void {
   socket = socketService.connect();
 
   socket.on('planificateur:macros:list', (macros: MacroDefinition[]) => renderMacros(macros));
-  socket.on('planificateur:planifications:list', (plans: PlanificationDefinition[]) => renderPlanifications(plans));
   socket.on('connect', () => requestLists());
 
   requestLists();
@@ -44,7 +34,6 @@ function init(): void {
 
 function requestLists(): void {
   socket.emit('planificateur:macros:list:get');
-  socket.emit('planificateur:planifications:list:get');
 }
 
 function renderMacros(macros: MacroDefinition[]): void {
@@ -71,34 +60,6 @@ function renderMacros(macros: MacroDefinition[]): void {
   wireActions(el);
 }
 
-function renderPlanifications(plans: PlanificationDefinition[]): void {
-  const el = $('planifications-list');
-  if (!el) return;
-
-  if (plans.length === 0) {
-    el.innerHTML = '<div class="empty">Aucune planification enregistrée.</div>';
-    return;
-  }
-
-  el.innerHTML = plans.map((p) => `
-    <div class="item-row">
-      <div class="item-info">
-        <div class="name">${escapeHtml(p.name)} <span class="status-badge ${p.active ? 'active' : 'inactive'}">${p.active ? 'active' : 'inactive'}</span>${p.missed ? ' <span class="status-badge missed">manqué</span>' : ''}${p.completed_at ? ' <span class="status-badge completed" title="Trigger non récurrent déjà consommé — supprimée automatiquement 2 jours après">terminée</span>' : ''}${p.anomalie ? ` <span class="status-badge anomalie" title="${escapeHtml(p.anomalie.message)}">⚠️ anomalie</span>` : ''}</div>
-        <div class="detail">"${escapeHtml(p.phrase_originale)}" — ${escapeHtml(p.trigger.type)}</div>
-        ${p.anomalie ? `<div class="detail" style="color:var(--color-error)">${escapeHtml(p.anomalie.message)}</div>` : ''}
-      </div>
-      <div class="item-actions">
-        ${p.active
-          ? `<button class="btn btn-secondary" data-action="planification-desactiver" data-name="${escapeHtml(p.name)}">Désactiver</button>`
-          : `<button class="btn btn-primary" data-action="planification-activer" data-name="${escapeHtml(p.name)}">Activer</button>`}
-        <button class="btn btn-danger" data-action="planification-supprimer" data-name="${escapeHtml(p.name)}">Supprimer</button>
-      </div>
-    </div>
-  `).join('');
-
-  wireActions(el);
-}
-
 function wireActions(container: HTMLElement): void {
   container.querySelectorAll<HTMLButtonElement>('button[data-action]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -106,11 +67,8 @@ function wireActions(container: HTMLElement): void {
       const name = btn.dataset.name;
       if (!action || !name || !socket) return;
 
-      switch (action) {
-        case 'macro-supprimer': socket.emit('planificateur:macro:supprimer', { name }); break;
-        case 'planification-activer': socket.emit('planificateur:planification:activer', { name }); break;
-        case 'planification-desactiver': socket.emit('planificateur:planification:desactiver', { name }); break;
-        case 'planification-supprimer': socket.emit('planificateur:planification:supprimer', { name }); break;
+      if (action === 'macro-supprimer') {
+        socket.emit('planificateur:macro:supprimer', { name });
       }
     });
   });
