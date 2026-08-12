@@ -78,6 +78,21 @@ export class ToolExecutor {
           valeur: args?.valeur as string | number | undefined
         };
         if (dryRun) {
+          // ⭐ Vérification quoi/lieux AVANT de répondre (12/08/2026) — sans ça, le dry-run
+          // affirmait toujours "succès" même quand quoi/lieux ne résolvaient à aucune entité
+          // réelle : bug trouvé en creusant le comparatif ("baisse le volet de la cuisine" — aucun
+          // volet roulant en cuisine — Mistral Small et Claude Haiku répondaient "action réussie"
+          // sans jamais vérifier, contrairement à Claude Sonnet qui avait interrogé lister_entites
+          // et correctement refusé). Même principe que referenceValidator.ts pour le JSON structuré
+          // — ici directement au point d'exécution de l'outil, seul endroit qui voit params
+          // vraiment résolus.
+          const resolved = this.registry ? resolveEntities(this.registry, params.quoi, params.lieux) : [];
+          if (this.registry && resolved.length === 0) {
+            return JSON.stringify({
+              success: false,
+              message: `Aucune entité trouvée pour quoi="${params.quoi}" dans ${JSON.stringify(params.lieux)} — vérifie via lister_entites/obtenir_etat avant de conclure, ne réponds pas "quoi_introuvable" sans l'avoir fait.`
+            });
+          }
           // ⭐ Formulation sans ambiguïté (12/08/2026) — "success: true" + "non exécutée" dans le
           // même message se contredisaient, et Mistral Medium (contrairement à Small/Claude
           // Haiku/Sonnet, testés sur la même phrase) réagissait à cette contradiction en rappelant
