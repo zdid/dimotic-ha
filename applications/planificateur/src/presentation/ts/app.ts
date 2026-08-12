@@ -32,6 +32,9 @@ interface IaTestReply {
   response: string;
   intermediateJson?: string;
   planificateurReply?: string;
+  /** Présent tant que la conversation d'assistance (modale de création, mode assist) n'a pas
+   *  abouti à une planification réellement créée — absent une fois conclue. */
+  sessionId?: string;
 }
 
 interface PlanificateurAction {
@@ -212,9 +215,16 @@ function setupTabs(): void {
 }
 
 /**
- * Modale de création — soumet la phrase telle quelle à ia (`ia:test:send`, même mécanisme que le
- * formulaire de test du dashboard `ia`, specs §13) : aucune validation/structuration locale, c'est
- * Mistral qui décide si la phrase est une planification exploitable et répond via `ia:test:reply`.
+ * Modale de création — soumet la phrase à ia (`ia:test:send`, mode `assist`, même mécanisme que le
+ * formulaire de test du dashboard `ia`, specs §13, enrichi d'une session de clarification) : aucune
+ * validation/structuration locale, c'est Mistral qui décide si la phrase est une planification
+ * exploitable et répond via `ia:test:reply`.
+ *
+ * ⭐ Assistance Q&R (demande utilisateur, 12/08/2026) — tant que `reply.sessionId` revient renseigné,
+ * l'échange n'a pas abouti : `regles_mistral.txt` pousse déjà Mistral à poser une question de
+ * clarification plutôt que de refuser sec (quoi/lieu ambigu ou introuvable, déclencheur ambigu) —
+ * la modale affiche cette question, garde le contexte de conversation côté `ia` (sessionId), et
+ * laisse l'utilisateur répondre au lieu de tout retaper depuis zéro.
  */
 function setupNewPlanificationModal(): void {
   const openBtn = $('new-planification-btn');
@@ -224,15 +234,20 @@ function setupNewPlanificationModal(): void {
   const input = $('new-planification-input') as HTMLTextAreaElement | null;
   const successEl = $('new-planification-success');
   const errorEl = $('new-planification-error');
+  const questionEl = $('new-planification-question');
   if (!openBtn || !overlay || !cancelBtn || !submitBtn || !input) return;
+
+  let assistSessionId: string | undefined;
 
   const resetAlerts = () => {
     if (successEl) { successEl.style.display = 'none'; successEl.textContent = ''; }
     if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+    if (questionEl) { questionEl.style.display = 'none'; questionEl.textContent = ''; }
   };
 
   const open = () => {
     input.value = '';
+    assistSessionId = undefined;
     resetAlerts();
     overlay.classList.add('active');
     input.focus();
@@ -240,6 +255,7 @@ function setupNewPlanificationModal(): void {
 
   const close = () => {
     overlay.classList.remove('active');
+    assistSessionId = undefined;
   };
 
   openBtn.addEventListener('click', open);
@@ -254,11 +270,25 @@ function setupNewPlanificationModal(): void {
 
     resetAlerts();
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Validation...';
+    submitBtn.textContent = assistSessionId ? 'Envoi de la réponse...' : 'Validation...';
 
     const onReply = (reply: IaTestReply) => {
       socket.off('ia:test:reply', onReply);
       submitBtn.disabled = false;
+
+      if (reply.sessionId) {
+        // Pas encore conclu — Mistral demande une clarification (ou un aléa technique à réessayer,
+        // voir IaService.handleTestCommand). On continue la même session : la question devient le
+        // contexte, l'utilisateur répond dans le même champ.
+        assistSessionId = reply.sessionId;
+        submitBtn.textContent = 'Répondre';
+        input.value = '';
+        input.focus();
+        if (questionEl) { questionEl.textContent = reply.response; questionEl.style.display = 'block'; }
+        return;
+      }
+
+      assistSessionId = undefined;
       submitBtn.textContent = 'Valider';
 
       // planificateurReply.success distingue "ia a compris et planificateur a enregistré" d'un
@@ -281,7 +311,7 @@ function setupNewPlanificationModal(): void {
     };
 
     socket.on('ia:test:reply', onReply);
-    socket.emit('ia:test:send', { message });
+    socket.emit('ia:test:send', { message, sessionId: assistSessionId, assist: true });
   });
 }
 

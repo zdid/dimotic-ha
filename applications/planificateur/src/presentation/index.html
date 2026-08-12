@@ -141,6 +141,7 @@
     .alert { padding: 12px; border-radius: var(--radius); margin: 10px 0; display: none; }
     .alert-success { background: rgba(76, 175, 80, 0.1); border: 1px solid var(--color-success); color: var(--color-success); }
     .alert-error { background: rgba(244, 67, 54, 0.1); border: 1px solid var(--color-error); color: var(--color-error); }
+    .alert-question { background: rgba(33, 150, 243, 0.12); border: 1px solid #2196f3; color: var(--color-text); white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -210,6 +211,7 @@
     <div class="card">
       <h2>➕ Nouvelle planification</h2>
       <p class="description">Décris la planification en une phrase, comme tu le dirais à voix haute — elle sera soumise à l'IA pour validation.</p>
+      <div class="alert alert-question" id="new-planification-question"></div>
       <textarea id="new-planification-input" placeholder="Ex : tous les jours à 8h allume le salon"></textarea>
       <div class="alert alert-success" id="new-planification-success"></div>
       <div class="alert alert-error" id="new-planification-error"></div>

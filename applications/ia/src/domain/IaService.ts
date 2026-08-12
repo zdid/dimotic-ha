@@ -13,6 +13,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { Response } from 'express';
 import type { IEventBus, Logger, IAppConfigProvider, HaStructureRegistry, HaWsClient } from '../../../core/dist/exports';
 import { iaConfigSchema, type IaConfig } from './config-schema';
@@ -29,6 +30,11 @@ import { IA_CLIENT_EVENTS } from './socket-events';
 import { validateReferences, buildCorrectionRequestMessage } from './referenceValidator';
 
 const MAX_TOOL_ROUNDS = 5; // garde-fou — évite une boucle d'outils infinie en cas de réponse aberrante
+
+// ⭐ Assistance Q&R à la création de planification (demande utilisateur, 12/08/2026, option A des
+// propositions faites) — durée de vie d'une session de clarification en mémoire (jamais persistée,
+// jamais destinée à survivre un redémarrage). Glissante : réinitialisée à chaque tour.
+const ASSIST_SESSION_TTL_MS = 10 * 60 * 1000;
 
 type RunChatRoundsResult =
   | {
@@ -90,6 +96,11 @@ export class IaService implements IIaService {
   private readonly toolExecutor: ToolExecutor;
   private readonly structuredRouter: StructuredRouter;
   private readonly deployResponder: DeployResponder;
+  // ⭐ Sessions d'assistance Q&R (voir ASSIST_SESSION_TTL_MS) — jamais alimentée par un appelant qui
+  // ne passe pas `assist: true` (le formulaire générique "Tester une commande" du dashboard ia n'en
+  // envoie jamais, comportement strictement inchangé pour lui).
+  private readonly assistSessions = new Map<string, { messages: OllamaMessage[]; lastUsedAt: number }>();
+  private assistSessionsCleanupTimer?: ReturnType<typeof setInterval>;
   private ollamaServer?: OllamaHttpServer;
   private readonly recentExchanges: Exchange[] = [];
   private configWatcher?: fs.FSWatcher;
@@ -176,8 +187,19 @@ export class IaService implements IIaService {
     this.ollamaServer = new OllamaHttpServer(this.config, this.logger, (body, res) => this.handleChat(body, res));
     this.ollamaServer.start();
 
+    // Purge périodique des sessions d'assistance abandonnées (utilisateur qui ferme la modale sans
+    // conclure) — la TTL est glissante (réarmée à chaque tour), donc une purge peu fréquente suffit.
+    this.assistSessionsCleanupTimer = setInterval(() => this.cleanupAssistSessions(), 60_000);
+
     this.emitStatus();
     this.logger.info('IaService', 'Service ia démarré');
+  }
+
+  private cleanupAssistSessions(): void {
+    const cutoff = Date.now() - ASSIST_SESSION_TTL_MS;
+    for (const [id, session] of this.assistSessions) {
+      if (session.lastUsedAt < cutoff) this.assistSessions.delete(id);
+    }
   }
 
   async stop(): Promise<void> {
@@ -185,6 +207,7 @@ export class IaService implements IIaService {
     this.rulesProvider.stop();
     this.configWatcher?.close();
     this.ollamaServer?.stop();
+    if (this.assistSessionsCleanupTimer) clearInterval(this.assistSessionsCleanupTimer);
     this.logger.info('IaService', 'Service ia arrêté');
   }
 
@@ -368,18 +391,58 @@ export class IaService implements IIaService {
   /**
    * Test manuel (UI, specs §13) — traite une phrase comme si elle venait de HA, sans passer par le
    * serveur HTTP Ollama. Répond via ia:test:reply, et alimente aussi le journal des échanges.
+   *
+   * ⭐ Assistance Q&R à la création (demande utilisateur, 12/08/2026) — `assist: true` (envoyé
+   * uniquement par la modale "Nouvelle planification" de `planificateur`, jamais par le formulaire
+   * générique "Tester une commande" de ce dashboard) fait persister l'historique de conversation
+   * entre deux tours tant que l'échange n'a pas abouti à une planification réellement créée :
+   * `regles_mistral.txt` encourage déjà Mistral à poser une question de clarification en texte
+   * libre plutôt que de refuser sans appel — jusqu'ici cette question tombait dans le vide, chaque
+   * appel repartant de zéro sans le contexte de ce qui avait déjà été dit.
    */
-  private async handleTestCommand(message: string): Promise<void> {
+  private async handleTestCommand(message: string, sessionId?: string, assist?: boolean): Promise<void> {
     if (!message?.trim()) return;
 
     const mistralModel = this.mistralClient.resolveModel(this.config.defaultMistralModel);
-    const messages = this.rulesProvider.inject([{ role: 'user', content: message }]);
+    const existing = sessionId ? this.assistSessions.get(sessionId) : undefined;
+    const messages = existing
+      ? [...existing.messages, { role: 'user' as const, content: message }]
+      : this.rulesProvider.inject([{ role: 'user', content: message }]);
 
     const result = await this.runChatRounds(messages, mistralModel, {});
 
     if (!result.ok) {
-      this.eventBus.emitGeneric('ia:test:reply', { success: false, response: result.errorMessage });
+      // Échec technique (Mistral injoignable...) : la session n'est pas perdue, l'utilisateur peut
+      // réessayer le même tour — seule une conclusion réussie ou l'absence de mode assistance la ferme.
+      this.eventBus.emitGeneric('ia:test:reply', { success: false, response: result.errorMessage, sessionId });
       return;
+    }
+
+    let planifOk: boolean | undefined;
+    try {
+      planifOk = result.planificateurReply ? JSON.parse(result.planificateurReply).success : undefined;
+    } catch { /* indéterminé, traité comme non conclu */ }
+    // ⭐ Une action immédiate (specs §9) ne produit jamais de JSON structuré (wasStructured reste
+    // faux) — sans ce cas, une session restait ouverte indéfiniment après une action réellement
+    // exécutée (bug trouvé en testant : "allume le sauna du salon" → clarification → "utilise la
+    // lumière" → executer_action exécuté pour de vrai, mais wasStructured=false laissait la session
+    // active). Un tool_call lister_entites/obtenir_etat seul (lecture, pas d'action) ne conclut pas.
+    let usedExecuterAction = false;
+    if (!result.wasStructured && result.intermediateJson) {
+      try {
+        const calls = JSON.parse(result.intermediateJson);
+        if (Array.isArray(calls)) usedExecuterAction = calls.some((c) => c?.function?.name === 'executer_action');
+      } catch { /* pas un tableau de tool_calls (texte simple) — pas d'action exécutée */ }
+    }
+    const concluded = (result.wasStructured && planifOk !== false) || usedExecuterAction;
+
+    let replySessionId: string | undefined;
+    if (assist && !concluded) {
+      const id = sessionId ?? randomUUID();
+      this.assistSessions.set(id, { messages: [...messages, { role: 'assistant', content: result.finalText }], lastUsedAt: Date.now() });
+      replySessionId = id;
+    } else if (sessionId) {
+      this.assistSessions.delete(sessionId);
     }
 
     this.eventBus.emitGeneric('ia:test:reply', {
@@ -389,7 +452,8 @@ export class IaService implements IIaService {
       planificateurReply: result.planificateurReply,
       promptTokens: result.promptTokens,
       completionTokens: result.completionTokens,
-      cachedTokens: result.cachedTokens
+      cachedTokens: result.cachedTokens,
+      sessionId: replySessionId
     });
     this.recordExchange(message, result.finalText, result.intermediateJson, result.planificateurReply, result.promptTokens, result.completionTokens, result.cachedTokens);
   }
@@ -496,8 +560,8 @@ export class IaService implements IIaService {
     this.eventBus.onGeneric(IA_CLIENT_EVENTS.GET_EXCHANGES, () => {
       this.eventBus.emitGeneric('ia:exchanges:list', this.recentExchanges);
     });
-    this.eventBus.onGeneric<{ message: string }>(IA_CLIENT_EVENTS.TEST_SEND, ({ message }) => {
-      this.handleTestCommand(message).catch((error) => this.logger.error('IaService', `Erreur test manuel: ${error}`));
+    this.eventBus.onGeneric<{ message: string; sessionId?: string; assist?: boolean }>(IA_CLIENT_EVENTS.TEST_SEND, ({ message, sessionId, assist }) => {
+      this.handleTestCommand(message, sessionId, assist).catch((error) => this.logger.error('IaService', `Erreur test manuel: ${error}`));
     });
     this.eventBus.onGeneric<{ message: string }>(IA_CLIENT_EVENTS.COMPARE_SEND, ({ message }) => {
       this.handleCompareCommand(message).catch((error) => this.logger.error('IaService', `Erreur comparatif: ${error}`));
