@@ -5,7 +5,7 @@
 **Auteur :** Mistral Vibe / Claude  
 **Statut :** En développement  
 **Type :** Application standalone  
-**Dépend de :** techniques-socle-ha-mqtt_specs_v4.27.md, guide-nouvelle-application_specs_v1.9.md, nommage_specs_v1.0.md  
+**Dépend de :** techniques-socle-ha-mqtt_specs_v4.28.md, guide-nouvelle-application_specs_v1.9.md, nommage_specs_v1.0.md  
 
 > **v1.3** : **`extractOuSegments()`** (§6.2bis, nouveau) — remplace le calcul de niveau OÙ par
 > position (`getOuLevel`), devenu ambigu depuis que `lieu_precis` peut être `null`. **Fix CSS

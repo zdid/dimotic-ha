@@ -1,9 +1,23 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.27  
+**Version :** 4.28  
 **Date :** 11 Août 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
 
+> **v4.28** : **Deux correctifs distincts**, tous deux issus de bugs réels constatés par
+> l'utilisateur le 11/08/2026. (1) **`ModuleContainer` rappelle `window.{moduleId}App.init()`
+> après réaffichage depuis le cache** (§6.1) — revisiter un module (IA, Planificateur, etc.) depuis
+> le menu latéral le laissait inerte (formulaire "Tester une commande" de IA sans effet, écran
+> Planificateur bloqué sur "Chargement") : le HTML réinjecté par `innerHTML` ne rebranchait plus
+> aucun écouteur, `Alpine.initTree()` étant sans effet pour les apps vanilla TS. Convention
+> `window.{moduleId}App.init()` désormais rappelée explicitement, `init()` rendu idempotent côté
+> `setupEventListeners()` (drapeau `listenersReady`) dans les 6 apps concernées (`ia`,
+> `planificateur`, `evoo7`, `arexx`, `rfxcom`, `nommage`) — `arbreouquoi` non touché, hors
+> périmètre (n'utilise pas cette convention). (2) **`HaStructureRegistry.getLieuCatalog()`** (§8.3.3,
+> nouvelle) — catalogue de lieux statique complémentaire à `getQuoiCatalog()`, dans la continuité de
+> §8.3.1/§8.3.2, exposé côté `ia` (voir `fonctionnelles-ia_specs`) pour éviter les faux refus
+> "quoi_introuvable" observés en conditions réelles.
+>
 > **v4.27** : **Graphe de lieux centralisé dans `HaStructureRegistry`** (nouvelle §8.2bis,
 > `getEntitiesByQuoiAndLieux()`) — remplace la résolution `quoi`/`lieux` dupliquée et incohérente
 > entre `planificateur/resolution.ts` et `ia/ToolExecutor.ts` par un point unique, réutilisable par
@@ -1054,6 +1068,41 @@ mécanismes, en production depuis un moment mais jamais documentés ici :
   ne rejoue pas ses `<script>` (qui redéfiniraient des Custom Elements déjà enregistrés — invalide
   côté navigateur), seul un changement effectif de module recharge/réexécute.
 
+**⭐ v4.28 — Réaffichage depuis le cache inerte pour les apps vanilla TS (bug réel constaté par
+l'utilisateur)** : revenir sur un module déjà chargé (ex: IA, Planificateur) depuis le menu latéral
+réinjectait bien son HTML en cache (mécanisme ci-dessus), mais aucun de ses écouteurs DOM n'était
+rebranché sur les nouveaux nœuds — le seul rappel systématique après réinjection était
+`window.Alpine?.initTree(container)` (§6, pour les apps Alpine), sans effet pour les applications
+en TypeScript classique (`ia`, `planificateur`, `evoo7`, `arexx`, `rfxcom`, `nommage`), dont les
+écouteurs sont posés impérativement à l'exécution du `<script>` — jamais réexécuté ici (volontaire,
+§6.1 ci-dessus). Symptômes observés en direct : le formulaire "Tester une commande" de IA
+n'atteignait plus `ia:test:send` (confirmé côté serveur, aucune requête reçue) après une deuxième
+visite ; l'écran Planificateur restait bloqué sur "Chargement".
+
+**Correction** : `ModuleContainer` rappelle désormais explicitement
+`window.{moduleId}App.init()` juste après la réinjection du HTML en cache, en plus de
+`Alpine.initTree()` — convention déjà suivie par toutes les applications vanilla TS (voir
+`guide-nouvelle-application_specs` §3, `window.{nomApp}App = { ... }`). Cette convention porte
+désormais une exigence supplémentaire, à respecter par toute application qui l'implémente :
+
+- **`init()` doit être idempotent côté abonnements** (`setupEventListeners()`, `socket.on(...)`) :
+  la connexion Socket.io elle-même **persiste** entre deux visites (réutilisée depuis
+  `window.app.socketService`, §5.1) — rappeler `setupEventListeners()` sans protection empilerait
+  un écouteur supplémentaire par visite, un même événement serveur déclenchant alors le traitement
+  autant de fois que de visites cumulées. Chaque application concernée porte désormais un drapeau
+  de module `listenersReady : boolean`, initialisé `false`, positionné `true` après le premier
+  appel de `setupEventListeners()` — les appels suivants à `init()` sautent cette étape.
+- **Le câblage DOM, à l'inverse, doit être rejoué à chaque appel** (formulaire de test, onglets,
+  modale de création, etc.) : il porte sur des nœuds fraîchement injectés par `innerHTML`, distincts
+  de ceux de la visite précédente (l'ancien câblage, posé sur les nœuds désormais orphelins, ne sert
+  plus à rien).
+
+Testé en direct : IA (le formulaire de test répond de nouveau après une deuxième visite, vérifié
+côté serveur) et Planificateur (statut, onglets, liste, tous fonctionnels après revisite).
+**`arbreouquoi` n'a pas été touché** — il n'utilise pas la convention `window.{id}App` et n'a donc
+rien à réexécuter ici ; potentiellement affecté par le même symptôme sous une autre forme, mais hors
+périmètre de ce correctif.
+
 ### 6.2 ⭐ `Sidebar` — routage réel pour les applications à page dédiée (nouveau v4.19)
 
 `Sidebar.ts::renderModules()` distingue désormais deux comportements de clic selon la forme de
@@ -1503,6 +1552,37 @@ Seulement s'il ne matche aucune entité du QUOI, il est découpé en mots (hors 
 "de/du/des/la/le/les/l/au/aux/à/et") et **chacun** doit matcher (ET, pas OU) pour qu'une entité soit
 retenue — permet "éteins le plafonnier de la chambre" (`lieu_precis` partagé + area qualifiante,
 demande utilisateur) sans dupliquer un mécanisme de recherche compound séparé.
+
+### 8.3.3 ⭐ Catalogue de lieux statique — `getLieuCatalog()` (nouveau v4.28)
+
+Complément naturel de `getQuoiCatalog()` (§8.3.1, déjà existant) : union dédupliquée et triée
+(`localeCompare('fr')`) des valeurs `lieu_precis`/`lieu_principal`/`lieu_pere`/`lieu_grand_pere` de
+`attributs_taxonomie`, sur toutes les entités du référentiel — tous niveaux confondus, contrairement
+au graphe de containment de §8.3.2 qui distingue explicitement ces niveaux pour la résolution d'un
+terme. ~65 valeurs distinctes constatées en conditions réelles, malgré la répétition massive de
+chaque valeur par entité (plusieurs centaines d'entités partagent le même petit nombre de lieux).
+
+```typescript
+getLieuCatalog(): string[]
+```
+
+**Motivation (demande utilisateur)** : les catalogues `quoi` et `lieux` sont quasi statiques — ils
+ne changent qu'à l'ajout, la modification ou la suppression de matériel physique — contrairement à
+`entities_snapshot` (état vivant, reconstruit à chaque appel, voir `fonctionnelles-ia_specs` §7).
+Rien n'empêchait de les transmettre une bonne fois pour toutes à un consommateur plutôt que de les
+reconstruire en filtre à chaque interrogation, avec le bénéfice de profiter du cache de prompt côté
+fournisseur LLM (contenu identique à chaque appel tant que le matériel ne change pas) — voir
+`fonctionnelles-ia_specs` §5 pour le seul consommateur actuel (`RulesProvider`).
+
+Calcul direct à chaque appel (pas de cache dirty-flag comme le graphe de containment de §8.3.2) : un
+simple passage sur les entités, coût négligeable à la volumétrie actuelle (quelques centaines
+d'entités).
+
+**Effet mesuré en direct (conjointement avec le correctif ci-dessous)** : "allume la salle"
+(précédemment refusé à tort par un `quoi_introuvable` halluciné — voir `fonctionnelles-ia_specs`
+§8) se résout désormais correctement dès le premier round Mistral, sans avoir besoin de la relance
+forcée décrite dans `fonctionnelles-ia_specs` §8. Les vrais cas absents ("téléporteur quantique")
+restent correctement rejetés. Aucune régression constatée sur la création de planification.
 
 ### 8.4 Envoi de Commandes — HaCommandService
 
@@ -2347,6 +2427,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.28** | 11/08/2026 | Claude | **Deux correctifs distincts, tous deux issus de bugs réels constatés par l'utilisateur** (1) `ModuleContainer` rappelle désormais `window.{moduleId}App.init()` après réaffichage d'un module depuis son cache (§6.1) — corrige des dashboards inertes après revisite (formulaire "Tester une commande" de IA sans effet, Planificateur bloqué sur "Chargement") : le HTML réinjecté par `innerHTML` ne rebranchait plus aucun écouteur pour les apps vanilla TS (`Alpine.initTree()` sans effet pour elles). `init()` rendu idempotent côté `setupEventListeners()` (drapeau `listenersReady`) dans `ia`/`planificateur`/`evoo7`/`arexx`/`rfxcom`/`nommage` — `arbreouquoi` non touché, hors périmètre. (2) **`HaStructureRegistry.getLieuCatalog()`** (§8.3.3 nouvelle) — catalogue de lieux statique (tous niveaux confondus), complément de `getQuoiCatalog()`, exposé côté `ia` (voir `fonctionnelles-ia_specs` v1.8) pour réduire les faux refus "quoi_introuvable" en fournissant une vérité de terrain stable, propice au cache de prompt côté fournisseur LLM. Toutes demandes utilisateur, session du 11/08/2026. Ancienne version v4.27 archivée. |
 | **4.27** | 11/08/2026 | Claude | **Graphe de lieux centralisé dans `HaStructureRegistry`** (§8.3.2 nouvelle, `getEntitiesByQuoiAndLieux()`) — remplace la résolution `quoi`/`lieux` dupliquée et divergente entre `planificateur/resolution.ts` et `ia/ToolExecutor.ts`. Résolution indépendante du niveau taxonomique (area/`lieu_pere`/`lieu_grand_pere`/`lieu_precis`) via un graphe de containment construit paresseusement, plus un repli tokenisé pour les phrases composées ("plafonnier de la chambre"). Bug réel corrigé en cours de route : `lieu_precis` exclu du graphe de containment (des labels comme "plafonnier" sont réutilisés par de nombreuses pièces sans rapport, les y inclure faisait converger toutes ces pièces vers le même nœud — constaté en testant "éteins les toilettes du haut" en direct, qui éteignait aussi cuisine/chambre/bureau). Toutes demandes utilisateur, session du 10-11/08/2026. Ancienne version v4.26 archivée. |
 | **4.26** | 10/08/2026 | Claude | **Trois correctifs de l'affectation automatique des areas HA** (§8.5.4/§8.5.4bis) : nouveau second déclencheur de republication de découverte sur `homeassistant/status` (birth message HA, indépendant de notre propre connexion MQTT — `HA_STATUS_TOPIC`, `onHaOnline()`, événement `integration:{module}:ha:online`), retrait d'un nettoyage d'areas vides dans `HaStructureRegistry` qui supprimait à tort des areas fraîchement créées, réarmement du verrou `registryReady` d'`AreaEnsureService` sur `ha:disconnected` (ne se réarmait jamais après une reconnexion WS, causant 191 échecs "already in use" sur une seule reconnexion). Trouvé en creusant un bug remonté par l'utilisateur ("à chaque redémarrage il y a plein de zigbee mal pris en compte, pas forcément les mêmes"). Vérifié en conditions réelles : 127 devices, 0 device physique sans pièce. Ancienne version v4.25 archivée. |
 | **4.25** | 09/08/2026 | Claude | **`EssentialEntityData.name`/`HaMqttDiscoveryEntity.name` nullable + `has_entity_name` systématique** (§8.5.4) — corrige un doublon réel observé en direct ("Lumière lumière", "Température Température") causé par des modules passant le même mot dans `name` et `device.name`. Ancienne version v4.24 archivée. |
