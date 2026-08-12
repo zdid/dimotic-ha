@@ -85,6 +85,7 @@ function init(): void {
     }
     setupTabs();
     setupNewPlanificationModal();
+    setupYamlModal();
     requestInitialStatus();
     hideLoading();
 
@@ -112,6 +113,20 @@ function setupEventListeners(): void {
 
   socket.on('planificateur:ha-commands:list', (commands: HaCommandTrace[]) => {
     updateHaCommandsLog(commands);
+  });
+
+  // ⭐ Consultation YAML (demande utilisateur, 12/08/2026) — enregistré ici (une seule fois par
+  // cycle de vie de la page, listenersReady) plutôt que dans setupYamlModal() (rejoué à chaque
+  // revisite du module) : un socket.on() ré-enregistré à chaque revisite empilerait un écouteur
+  // supplémentaire à chaque fois, contrairement aux écouteurs DOM qui ciblent des nœuds neufs.
+  socket.on('planificateur:planification:yaml', ({ name, yaml }: { name: string; yaml: string }) => {
+    const overlay = $('yaml-overlay');
+    const titleEl = $('yaml-title');
+    const contentEl = $('yaml-content');
+    if (!overlay || !titleEl || !contentEl) return;
+    titleEl.textContent = name;
+    contentEl.textContent = yaml;
+    overlay.classList.add('active');
   });
 
   socket.on('connect', () => {
@@ -179,6 +194,8 @@ function updatePlanificationsList(plans: PlanificationDefinition[]): void {
         ${p.active
           ? `<button class="btn btn-secondary" data-action="planification-desactiver" data-name="${escapeHtml(p.name)}">Désactiver</button>`
           : `<button class="btn btn-primary" data-action="planification-activer" data-name="${escapeHtml(p.name)}">Activer</button>`}
+        <button class="btn btn-secondary" data-action="planification-modifier" data-name="${escapeHtml(p.name)}" data-phrase="${escapeHtml(p.phrase_originale)}">✏️ Modifier</button>
+        <button class="btn btn-secondary" data-action="planification-yaml" data-name="${escapeHtml(p.name)}">📄 YAML</button>
         <button class="btn btn-danger" data-action="planification-supprimer" data-name="${escapeHtml(p.name)}">Supprimer</button>
       </div>
     </div>
@@ -198,8 +215,33 @@ function wirePlanificationActions(container: HTMLElement): void {
         case 'planification-activer': socket.emit('planificateur:planification:activer', { name }); break;
         case 'planification-desactiver': socket.emit('planificateur:planification:desactiver', { name }); break;
         case 'planification-supprimer': socket.emit('planificateur:planification:supprimer', { name }); break;
+        case 'planification-modifier': openPlanificationModalForEdit?.(name, btn.dataset.phrase ?? ''); break;
+        case 'planification-yaml': requestPlanificationYaml(name); break;
       }
     });
+  });
+}
+
+/**
+ * Modale de consultation YAML (demande utilisateur, 12/08/2026) — lecture seule, une planification
+ * à la fois. requestPlanificationYaml() émet la demande ; l'écoute de la réponse (remplissage +
+ * ouverture) est câblée dans setupEventListeners() (persistante, voir listenersReady) ; ici,
+ * setupYamlModal() ne branche que le bouton de fermeture (DOM rejoué à chaque revisite du module).
+ */
+function requestPlanificationYaml(name: string): void {
+  socket?.emit('planificateur:planification:yaml:get', { name });
+}
+
+function setupYamlModal(): void {
+  const overlay = $('yaml-overlay');
+  const closeBtn = $('yaml-close');
+  if (!overlay || !closeBtn) return;
+
+  const close = () => overlay.classList.remove('active');
+
+  closeBtn.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) close();
   });
 }
 
@@ -229,6 +271,10 @@ function setupTabs(): void {
  * la modale affiche cette question, garde le contexte de conversation côté `ia` (sessionId), et
  * laisse l'utilisateur répondre au lieu de tout retaper depuis zéro.
  */
+// ⭐ Exposée par setupNewPlanificationModal() pour que wirePlanificationActions() (bouton
+// "Modifier" par ligne, demande utilisateur 12/08/2026) puisse rouvrir la même modale pré-remplie.
+let openPlanificationModalForEdit: ((name: string, phrase: string) => void) | undefined;
+
 function setupNewPlanificationModal(): void {
   const openBtn = $('new-planification-btn');
   const overlay = $('new-planification-overlay');
@@ -238,9 +284,14 @@ function setupNewPlanificationModal(): void {
   const successEl = $('new-planification-success');
   const errorEl = $('new-planification-error');
   const questionEl = $('new-planification-question');
+  const titleEl = $('new-planification-title');
+  const descEl = $('new-planification-description');
   if (!openBtn || !overlay || !cancelBtn || !submitBtn || !input) return;
 
   let assistSessionId: string | undefined;
+  // ⭐ Modification (demande utilisateur, 12/08/2026) — nom de la planification éditée, absent en
+  // mode création pure. Voir la gestion du doublon potentiel plus bas (onReply).
+  let editingPlanName: string | undefined;
 
   const resetAlerts = () => {
     if (successEl) { successEl.style.display = 'none'; successEl.textContent = ''; }
@@ -248,20 +299,28 @@ function setupNewPlanificationModal(): void {
     if (questionEl) { questionEl.style.display = 'none'; questionEl.textContent = ''; }
   };
 
-  const open = () => {
-    input.value = '';
+  const open = (editing?: { name: string; phrase: string }) => {
+    input.value = editing?.phrase ?? '';
     assistSessionId = undefined;
+    editingPlanName = editing?.name;
+    if (titleEl) titleEl.textContent = editing ? '✏️ Modifier la planification' : '➕ Nouvelle planification';
+    if (descEl) descEl.textContent = editing
+      ? 'Modifie la phrase ci-dessous puis valide — elle sera resoumise à l\'IA pour validation, comme à la création.'
+      : 'Décris la planification en une phrase, comme tu le dirais à voix haute — elle sera soumise à l\'IA pour validation.';
     resetAlerts();
     overlay.classList.add('active');
     input.focus();
   };
 
+  openPlanificationModalForEdit = (name, phrase) => open({ name, phrase });
+
   const close = () => {
     overlay.classList.remove('active');
     assistSessionId = undefined;
+    editingPlanName = undefined;
   };
 
-  openBtn.addEventListener('click', open);
+  openBtn.addEventListener('click', () => open());
   cancelBtn.addEventListener('click', close);
   overlay.addEventListener('click', (e) => {
     if (e.target === e.currentTarget) close();
@@ -298,12 +357,23 @@ function setupNewPlanificationModal(): void {
       // simple échange conversationnel (aucun JSON structuré produit) — reply.success ne couvre
       // que l'absence d'erreur technique côté ia, pas la validation métier de la planification.
       let planifOk: boolean | undefined;
+      let createdName: string | undefined;
       try {
-        planifOk = reply.planificateurReply ? JSON.parse(reply.planificateurReply).success : undefined;
+        const parsed = reply.planificateurReply ? JSON.parse(reply.planificateurReply) : undefined;
+        planifOk = parsed?.success;
+        createdName = parsed?.data?.name;
       } catch { /* ignore, traité comme indéterminé */ }
 
       if (reply.success && planifOk !== false) {
         if (successEl) { successEl.textContent = reply.response; successEl.style.display = 'block'; }
+        // ⭐ Modification (demande utilisateur, 12/08/2026) : si la version éditée a été enregistrée
+        // sous un AUTRE nom que l'original (Mistral reformule parfois le nom auto-dérivé), l'ancienne
+        // entrée devient un doublon orphelin — supprimée seulement maintenant, une fois la nouvelle
+        // version confirmée créée (jamais avant, pour ne rien perdre en cas d'échec de la modification).
+        if (editingPlanName && createdName && createdName !== editingPlanName) {
+          socket.emit('planificateur:planification:supprimer', { name: editingPlanName });
+        }
+        editingPlanName = undefined;
         socket.emit('planificateur:planifications:list:get');
         socket.emit('planificateur:status:get');
         setTimeout(close, 1500);

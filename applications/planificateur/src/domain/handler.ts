@@ -193,7 +193,11 @@ export class CommandHandler {
           this.planifications[plan.name] = plan;
           this.persistPlanifications();
           this.armIfActive(plan);
-          return ok(corr, `Planification "${plan.name}" (#${plan.id}) enregistrée et ${plan.active ? 'activée' : 'désactivée'}.`);
+          // ⭐ data.name (demande utilisateur, 12/08/2026) — l'UI "Modifier" (modale de création
+          // réutilisée) doit savoir sous quel nom la version éditée a réellement été enregistrée :
+          // si Mistral choisit un nom différent de l'original, l'ancienne entrée doit être
+          // supprimée pour éviter un doublon (voir app.ts::setupNewPlanificationModal).
+          return ok(corr, `Planification "${plan.name}" (#${plan.id}) enregistrée et ${plan.active ? 'activée' : 'désactivée'}.`, { name: plan.name, id: plan.id });
         }
 
         case 'gestion':

@@ -56,6 +56,14 @@ const RATE_LIMIT_BASE_DELAY_MS = 1000;
 const RATE_LIMIT_MAX_DELAY_MS = 60000;
 const RATE_LIMIT_MAX_RETRIES = 6;
 
+// ⭐ Bug réel constaté en direct (12/08/2026) — le fetch() vers l'API Mistral n'avait aucun délai
+// d'expiration : une connexion qui reste ouverte sans jamais répondre (aléa réseau, pas un 429 —
+// aucune erreur, aucun log) bloquait l'échange entier indéfiniment, sans aucun retour à
+// l'utilisateur (repéré en testant "Modifier" une planification : bloqué sur "Validation..."
+// plusieurs minutes, zéro activité serveur après la relance forcée tool_choice). 90s laisse large
+// marge par rapport aux réponses légitimes les plus lentes observées cette session (~50s).
+const MISTRAL_FETCH_TIMEOUT_MS = 90000;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -175,15 +183,33 @@ export class MistralClient {
     for (let attempt = 0; ; attempt++) {
       await rateLimiter.waitForSlot();
 
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          Accept: 'text/event-stream'
-        },
-        body: JSON.stringify(payload)
-      });
+      const abortController = new AbortController();
+      const timeoutTimer = setTimeout(() => abortController.abort(), MISTRAL_FETCH_TIMEOUT_MS);
+      let response: Response;
+      try {
+        response = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream'
+          },
+          body: JSON.stringify(payload),
+          signal: abortController.signal
+        });
+      } catch (error) {
+        const timedOut = error instanceof Error && error.name === 'AbortError';
+        this.logger.error('MistralClient', `${timedOut ? 'Timeout' : 'Erreur réseau'} vers ${baseUrl}: ${error}`);
+        return {
+          ok: false,
+          status: timedOut ? 504 : 0,
+          errorText: timedOut
+            ? `Mistral n'a pas répondu dans le délai imparti (${MISTRAL_FETCH_TIMEOUT_MS / 1000}s).`
+            : `Erreur réseau vers ${baseUrl}: ${error}`
+        };
+      } finally {
+        clearTimeout(timeoutTimer);
+      }
 
       if (response.status === 429) {
         const errorText = await response.text().catch(() => '');

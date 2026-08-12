@@ -7,6 +7,7 @@
  */
 
 import * as path from 'node:path';
+import * as yaml from 'js-yaml';
 import {
   HaCommandService,
   type IEventBus,
@@ -238,6 +239,14 @@ export class PlanificateurService implements IPlanificateurService {
     this.eventBus.onGeneric<{ name: string }>(PLANIFICATEUR_CLIENT_EVENTS.MACRO_SUPPRIMER, ({ name }) => {
       this.handler.handleCommand({ type: 'gestion', operation: 'supprimer', cible: 'macro', name, correlation_id: 'ui' })
         .then(() => { this.emitMacros(); });
+    });
+
+    // ⭐ Consultation YAML (demande utilisateur, 12/08/2026) — même bibliothèque que le stockage
+    // sur disque (ConfigFileManager), pour un rendu cohérent avec ce qui est réellement persisté.
+    this.eventBus.onGeneric<{ name: string }>(PLANIFICATEUR_CLIENT_EVENTS.PLANIFICATION_YAML_GET, ({ name }) => {
+      const plan = this.handler.listPlanifications().find((p) => p.name === name);
+      const text = plan ? yaml.dump(plan, { lineWidth: -1 }) : `# Planification "${name}" introuvable.`;
+      this.eventBus.emitGeneric(PLANIFICATEUR_SOCKET_EVENTS.PLANIFICATION_YAML, { name, yaml: text });
     });
   }
 
