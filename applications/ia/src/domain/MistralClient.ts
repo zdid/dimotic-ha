@@ -162,7 +162,12 @@ export class MistralClient {
       ...ollamaOptionsToMistral(options)
     };
     if (tools?.length) payload.tools = tools;
-    if (toolChoice && tools?.length) payload.tool_choice = toolChoice;
+    // ⭐ 'any' est le nom Mistral pour "force un outil" — la vraie norme OpenAI (que la couche de
+    // compatibilité d'Anthropic applique strictement) attend 'required', pas 'any' : Mistral
+    // accepte 'any' en pratique (vérifié en direct), mais Claude rejetait la requête entière avec
+    // un 400 ("Input should be 'auto', 'required' or 'none'") — bug réel constaté (12/08/2026) dès
+    // la première fois que la relance forcée (referenceValidator) s'est déclenchée côté Claude.
+    if (toolChoice && tools?.length) payload.tool_choice = useAnthropic ? 'required' : toolChoice;
     // Jamais transmis en mode anthropic — voir commentaire de provider dans config-schema.ts.
     if (promptCacheKey && !useAnthropic) payload.prompt_cache_key = promptCacheKey;
 

@@ -26,6 +26,7 @@ import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
 import { IA_CLIENT_EVENTS } from './socket-events';
+import { validateReferences, buildCorrectionRequestMessage } from './referenceValidator';
 
 const MAX_TOOL_ROUNDS = 5; // garde-fou — évite une boucle d'outils infinie en cas de réponse aberrante
 
@@ -93,7 +94,7 @@ export class IaService implements IIaService {
     this.rulesProvider = new RulesProvider(this.resolveRulesPath(), this.logger, this.haStructureRegistry, () => this.config.excludedQuoiIds);
     this.toolExecutor = new ToolExecutor(this.eventBus, this.logger, this.haStructureRegistry, this.config.toolExecuteTimeoutMs);
     this.structuredRouter = new StructuredRouter(this.eventBus, this.logger, this.config.commandTimeoutMs);
-    this.deployResponder = new DeployResponder(this.eventBus, this.logger, this.mistralClient, this.rulesProvider, this.config.defaultMistralModel);
+    this.deployResponder = new DeployResponder(this.eventBus, this.logger, this.mistralClient, this.rulesProvider, this.config.defaultMistralModel, this.haStructureRegistry);
   }
 
   private resolveRulesPath(): string {
@@ -228,9 +229,10 @@ export class IaService implements IIaService {
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
     let totalCachedTokens = 0;
-    // Un seul essai de rattrapage par échange (voir plus bas, détection "quoi_introuvable" non
-    // vérifié) — jamais plus, pour ne pas boucler indéfiniment si Mistral persiste malgré tout.
-    let quoiIntrouvableRetried = false;
+    // Un seul essai de rattrapage par échange (voir plus bas : détection "quoi_introuvable" non
+    // vérifié, OU référence quoi/lieux/entity_id non vérifiée dans un JSON structuré) — jamais
+    // plus, pour ne pas boucler indéfiniment si Mistral persiste malgré tout.
+    let verificationRetried = false;
     let forceToolChoice: 'any' | undefined;
 
     for (let round = 1; round <= MAX_TOOL_ROUNDS; round++) {
@@ -274,8 +276,8 @@ export class IaService implements IIaService {
       // texte/JSON dont ont besoin planification/gestion/macro, qui n'appellent jamais d'outil) —
       // un seul essai de rattrapage, ciblé sur ce motif précis, en relançant CE round avec
       // tool_choice forcé pour obliger une vraie vérification avant de conclure.
-      if (!quoiIntrouvableRetried && toolCallsUsed.length === 0 && isUnverifiedQuoiIntrouvable(assembled.text)) {
-        quoiIntrouvableRetried = true;
+      if (!verificationRetried && toolCallsUsed.length === 0 && isUnverifiedQuoiIntrouvable(assembled.text)) {
+        verificationRetried = true;
         forceToolChoice = 'any';
         this.logger.warn('IaService', `Round ${round}: "quoi_introuvable" sans vérification par outil — relance forcée (tool_choice=any)`);
         continue;
@@ -288,6 +290,34 @@ export class IaService implements IIaService {
         : (toolCallsUsed.length > 0 ? JSON.stringify(toolCallsUsed, null, 2) : undefined);
 
       if (structured) {
+        // ⭐ Vérification des références HA (quoi/lieux, entity_id de déclencheur state_change)
+        // AVANT tout dispatch — bug réel constaté (comparatif Claude/Mistral, 11/08/2026) : sans
+        // ce garde-fou, une condition (state_change) référençant une entité inventée était
+        // transmise telle quelle à planificateur, produisant une planification qui ne se déclenche
+        // jamais, en silence. Même principe qu'isUnverifiedQuoiIntrouvable ci-dessus : un seul
+        // essai de rattrapage forcé (tool_choice=any), sinon on refuse et on demande une correction
+        // plutôt que de créer/exécuter sur une référence non vérifiée.
+        const problems = validateReferences(structured, this.haStructureRegistry);
+        if (problems.length > 0 && !verificationRetried) {
+          verificationRetried = true;
+          forceToolChoice = 'any';
+          this.logger.warn('IaService', `Round ${round}: référence(s) non vérifiée(s) dans le JSON structuré (${problems.map((p) => p.detail).join(' | ')}) — relance forcée (tool_choice=any)`);
+          continue;
+        }
+        if (problems.length > 0) {
+          this.logger.warn('IaService', `Round ${round}: référence(s) toujours invalide(s) après vérification — demande de correction plutôt que création/exécution (${problems.map((p) => p.detail).join(' | ')})`);
+          return {
+            ok: true,
+            finalText: buildCorrectionRequestMessage(problems),
+            promptTokens: totalPromptTokens,
+            completionTokens: totalCompletionTokens,
+            cachedTokens: totalCachedTokens,
+            bufferedChunks,
+            wasStructured: false,
+            intermediateJson
+          };
+        }
+
         // dry-run (comparatif) : jamais transmis à planificateur, voir ToolExecutor.execute pour
         // le même principe côté executer_action.
         const reply = runOpts?.dryRun ? null : await this.structuredRouter.route(structured);
