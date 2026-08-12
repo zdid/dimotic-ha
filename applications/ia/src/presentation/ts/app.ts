@@ -28,12 +28,16 @@ interface ComparisonSide {
   label?: string;
   latencyMs: number;
   decision: Record<string, unknown>;
+  /** true si ce modèle a dû être relancé (vérification quoi/lieux/entity_id ratée au premier
+   *  essai) avant d'arriver à cette décision — voir IaService.handleCompareCommand. */
+  corrected: boolean;
 }
 
 interface CompareReply {
   question: string;
   sides: ComparisonSide[];
   match: boolean;
+  anyCorrected: boolean;
   diffsPerSide: { label: string; diffs: string[] }[];
 }
 
@@ -218,14 +222,17 @@ function showCompareResult(reply: CompareReply): void {
   const resultEl = $('test-result');
   if (!resultEl) return;
   const fmtSide = (s: ComparisonSide) =>
-    `<div>🧪 <strong>${escapeHtml(s.label ?? s.model)}</strong> (${escapeHtml(s.model)}, ${s.latencyMs} ms) — non exécuté (comparatif)</div>`
+    `<div>🧪 <strong>${escapeHtml(s.label ?? s.model)}</strong> (${escapeHtml(s.model)}, ${s.latencyMs} ms)${s.corrected ? ' — <span style="color:var(--color-warning)">⚠️ corrigé après vérification</span>' : ''} — non exécuté (comparatif)</div>`
     + `<pre class="intermediate-json">${escapeHtml(JSON.stringify(s.decision, null, 2))}</pre>`;
 
   const diffLines = reply.diffsPerSide.filter((d) => d.diffs.length > 0).map((d) => `${d.label}: ${d.diffs.join(' ; ')}`);
+  const matchLabel = reply.match
+    ? (reply.anyCorrected ? '⚠️ Décisions identiques, mais au moins un modèle a eu besoin d\'être corrigé (pas juste du premier coup)' : '✅ Décisions identiques, tous justes du premier coup')
+    : `⚠️ Décisions différentes : ${diffLines.map(escapeHtml).join(' | ')}`;
 
   resultEl.style.display = 'block';
-  resultEl.className = `test-result ${reply.match ? 'ok' : 'error'}`;
-  resultEl.innerHTML = `<div class="tokens-label">${reply.match ? '✅ Décisions identiques' : `⚠️ Décisions différentes : ${diffLines.map(escapeHtml).join(' | ')}`}</div>`
+  resultEl.className = `test-result ${reply.match && !reply.anyCorrected ? 'ok' : 'error'}`;
+  resultEl.innerHTML = `<div class="tokens-label">${matchLabel}</div>`
     + reply.sides.map(fmtSide).join('')
     + `<div class="tokens-label">Détail complet dans data/ia/comparatif.log</div>`;
 }

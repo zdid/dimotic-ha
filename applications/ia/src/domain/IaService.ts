@@ -31,7 +31,15 @@ import { validateReferences, buildCorrectionRequestMessage } from './referenceVa
 const MAX_TOOL_ROUNDS = 5; // garde-fou — évite une boucle d'outils infinie en cas de réponse aberrante
 
 type RunChatRoundsResult =
-  | { ok: true; finalText: string; promptTokens: number; completionTokens: number; cachedTokens: number; bufferedChunks: string[]; wasStructured: boolean; intermediateJson?: string; planificateurReply?: string }
+  | {
+      ok: true; finalText: string; promptTokens: number; completionTokens: number; cachedTokens: number; bufferedChunks: string[]; wasStructured: boolean; intermediateJson?: string; planificateurReply?: string;
+      // ⭐ true si la relance forcée (tool_choice) a dû intervenir au moins une fois dans cet
+      // échange — "quoi_introuvable" non vérifié OU référence quoi/lieux/entity_id invalide dans le
+      // JSON structuré (voir isUnverifiedQuoiIntrouvable / validateReferences ci-dessous). Demande
+      // utilisateur, 12/08/2026 : distinguer "juste du premier coup" de "corrigé après relance" au
+      // lieu de mélanger les deux sous un même verdict MATCH dans le comparatif.
+      verificationRetried: boolean;
+    }
   | { ok: false; errorMessage: string };
 
 /** Un "côté" du comparatif multi-modèles (handleCompareCommand) — voir extractDecision(). */
@@ -41,6 +49,9 @@ interface ComparisonSide {
   label?: string;
   latencyMs: number;
   decision: Record<string, unknown>;
+  /** true si ce modèle a dû être relancé (tool_choice forcé) suite à une vérification quoi/lieux/
+   *  entity_id ratée avant d'arriver à cette décision — voir RunChatRoundsResult.verificationRetried. */
+  corrected: boolean;
 }
 
 interface Exchange {
@@ -315,7 +326,8 @@ export class IaService implements IIaService {
             cachedTokens: totalCachedTokens,
             bufferedChunks,
             wasStructured: false,
-            intermediateJson
+            intermediateJson,
+            verificationRetried
           };
         }
 
@@ -331,7 +343,8 @@ export class IaService implements IIaService {
           bufferedChunks,
           wasStructured: true,
           intermediateJson,
-          planificateurReply: reply ? JSON.stringify(reply, null, 2) : undefined
+          planificateurReply: reply ? JSON.stringify(reply, null, 2) : undefined,
+          verificationRetried
         };
       }
 
@@ -343,7 +356,8 @@ export class IaService implements IIaService {
         cachedTokens: totalCachedTokens,
         bufferedChunks,
         wasStructured: false,
-        intermediateJson
+        intermediateJson,
+        verificationRetried
       };
     }
 
@@ -399,7 +413,17 @@ export class IaService implements IIaService {
       const startedAt = Date.now();
       const result = await this.runChatRounds(messages, candidate.model, {}, { providerOverride: candidate.provider, dryRun: true });
       const latencyMs = Date.now() - startedAt;
-      return { provider: candidate.provider, model: candidate.model, label: candidate.label, latencyMs, decision: extractDecision(result) };
+      return {
+        provider: candidate.provider,
+        model: candidate.model,
+        label: candidate.label,
+        latencyMs,
+        decision: extractDecision(result),
+        // ⭐ demande utilisateur, 12/08/2026 : distinguer un modèle juste du premier coup d'un
+        // modèle qui a dû être repris par la vérification quoi/lieux/entity_id — voir
+        // RunChatRoundsResult.verificationRetried.
+        corrected: result.ok && result.verificationRetried
+      };
     };
 
     // En parallèle : rate limiter séparé par modèle dans MistralClient, pas d'interférence entre
@@ -410,6 +434,10 @@ export class IaService implements IIaService {
     // résumé match/diff, mais la ligne de log conserve la décision complète de chaque côté.
     const [reference, ...rest] = sides;
     const diffsPerSide = rest.map((s) => ({ label: s.label ?? s.model, diffs: reference ? diffDecisions(reference.decision, s.decision) : [] }));
+    // ⭐ Un MATCH obtenu uniquement parce qu'un modèle a été rattrapé par la relance forcée n'est
+    // PAS un vrai match "du premier coup" — demande utilisateur : le faire vraiment peser dans le
+    // verdict, pas juste l'annoter en aparté. anyCorrected distingue ces deux cas dans le résumé.
+    const anyCorrected = sides.some((s) => s.corrected);
     const allMatch = diffsPerSide.every((d) => d.diffs.length === 0);
 
     this.logComparison(message, sides, diffsPerSide, allMatch);
@@ -418,15 +446,17 @@ export class IaService implements IIaService {
       question: message,
       sides,
       match: allMatch,
+      anyCorrected,
       diffsPerSide
     });
   }
 
   /** Une ligne par comparaison, format compact à plat — pensé pour `tail -f data/ia/comparatif.log`. */
   private logComparison(question: string, sides: ComparisonSide[], diffsPerSide: { label: string; diffs: string[] }[], allMatch: boolean): void {
-    const fmtSide = (s: ComparisonSide) => `${s.label ?? s.model}(${s.provider}:${s.model}) ${s.latencyMs}ms ${JSON.stringify(s.decision)}`;
+    const fmtSide = (s: ComparisonSide) => `${s.label ?? s.model}(${s.provider}:${s.model}) ${s.latencyMs}ms${s.corrected ? ' [corrigé après vérification]' : ''} ${JSON.stringify(s.decision)}`;
+    const anyCorrected = sides.some((s) => s.corrected);
     const verdict = allMatch
-      ? 'MATCH'
+      ? (anyCorrected ? `MATCH (mais ${sides.filter((s) => s.corrected).map((s) => s.label ?? s.model).join(', ')} corrigé après vérification — pas juste du premier coup)` : 'MATCH')
       : `DIFF(${diffsPerSide.filter((d) => d.diffs.length > 0).map((d) => `${d.label}: ${d.diffs.join('; ')}`).join(' || ')})`;
     const line = `${new Date().toISOString()} | "${question}" | ${sides.map(fmtSide).join(' | ')} | ${verdict}\n`;
     const logPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia', 'comparatif.log');
