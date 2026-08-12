@@ -118,7 +118,8 @@ export const planificationDefinitionSchema: z.ZodType<PlanificationDefinition> =
     id: z.number().optional(),
     next_fire_at: z.string().optional(),
     pending: z.record(z.string()).optional(),
-    missed: z.boolean().optional()
+    missed: z.boolean().optional(),
+    anomalie: z.object({ message: z.string(), at: z.string() }).optional()
   })
 );
 

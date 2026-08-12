@@ -22,6 +22,11 @@ interface DeployReply {
   success: boolean;
   message: string;
   steps?: ExecutionStep[];
+  // ⭐ Miroir de ia/src/domain/types.ts::DeployReply — true si le refus vient précisément de la
+  // vérification quoi/lieux/entity_id côté ia (referenceValidator.ts), pas d'un échec générique
+  // (timeout, JSON inexploitable). Voir handler.ts::handleTriggerFired pour l'usage (demande
+  // utilisateur, 12/08/2026).
+  invalidReferences?: boolean;
 }
 
 /** Une entrée du journal "ce qui a réellement été envoyé à HA" (demande utilisateur, voir
@@ -128,7 +133,7 @@ export class ExecutionEngine {
     triggeredEntityId?: string,
     signal?: AbortSignal,
     nextFireAt?: string
-  ): Promise<{ success: boolean; message: string }> {
+  ): Promise<{ success: boolean; message: string; invalidReferences?: boolean }> {
     const context = this.buildDeployContext(triggerName, phraseOriginale, macros);
     if (triggeredEntityId) context.triggered_entity_id = triggeredEntityId;
 
@@ -148,7 +153,7 @@ export class ExecutionEngine {
     if (!reply.success || !reply.steps) {
       const message = `Déploiement "${triggerName}" refusé par ia: ${reply.message}`;
       this.logger.warn('ExecutionEngine', message);
-      return { success: false, message };
+      return { success: false, message, invalidReferences: reply.invalidReferences };
     }
 
     try {

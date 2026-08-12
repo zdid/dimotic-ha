@@ -118,4 +118,8 @@ export interface DeployRequest {
 
 export interface DeployReply extends CorrelatedReponse {
   steps?: ExecutionStep[];
+  // ⭐ true si l'échec vient précisément de referenceValidator.ts (quoi/lieux/entity_id invalides)
+  // — distingue ce cas d'un échec générique (timeout, JSON inexploitable) pour que planificateur
+  // sache quand positionner un flag d'anomalie persistant (demande utilisateur, 12/08/2026).
+  invalidReferences?: boolean;
 }

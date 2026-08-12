@@ -221,12 +221,27 @@ export class CommandHandler {
    */
   async handleTriggerFired(plan: PlanificationDefinition, triggeredEntityId?: string, signal?: AbortSignal): Promise<void> {
     const result = await this.executionEngine.deployAndExecute(plan.name, plan.phrase_originale, this.listMacros(), triggeredEntityId, signal, plan.next_fire_at);
+    let dirty = false;
     // Une exécution RÉUSSIE efface l'indicateur "manqué" laissé par un rattrapage abandonné
     // précédent (demande utilisateur : disparaît à la prochaine exécution, s'il y en a une).
     if (result.success && plan.missed) {
       plan.missed = false;
-      this.persistPlanifications();
+      dirty = true;
     }
+    // ⭐ Anomalie quoi/lieux/entity_id (demande utilisateur, 12/08/2026) — positionnée uniquement
+    // quand l'échec vient précisément de la vérification référentielle côté ia
+    // (referenceValidator.ts, DeployReply.invalidReferences), pas de n'importe quel échec de
+    // déploiement (timeout, JSON inexploitable) : ceux-là restent un simple log, pas un état
+    // persistant de la planification — même lifecycle que `missed`, effacée à la prochaine
+    // exécution réussie.
+    if (result.invalidReferences) {
+      plan.anomalie = { message: result.message, at: new Date().toISOString() };
+      dirty = true;
+    } else if (result.success && plan.anomalie) {
+      plan.anomalie = undefined;
+      dirty = true;
+    }
+    if (dirty) this.persistPlanifications();
   }
 
   /** Déploiement déclenché par une macro dite directement (specs §6, deuxième cas). */

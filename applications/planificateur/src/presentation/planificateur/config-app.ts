@@ -25,6 +25,7 @@ interface PlanificationDefinition {
   phrase_originale: string;
   trigger: { type: string };
   missed?: boolean;
+  anomalie?: { message: string; at: string };
 }
 
 let socket: any | null = null;
@@ -81,8 +82,9 @@ function renderPlanifications(plans: PlanificationDefinition[]): void {
   el.innerHTML = plans.map((p) => `
     <div class="item-row">
       <div class="item-info">
-        <div class="name">${escapeHtml(p.name)} <span class="status-badge ${p.active ? 'active' : 'inactive'}">${p.active ? 'active' : 'inactive'}</span>${p.missed ? ' <span class="status-badge missed">manqué</span>' : ''}</div>
+        <div class="name">${escapeHtml(p.name)} <span class="status-badge ${p.active ? 'active' : 'inactive'}">${p.active ? 'active' : 'inactive'}</span>${p.missed ? ' <span class="status-badge missed">manqué</span>' : ''}${p.anomalie ? ` <span class="status-badge anomalie" title="${escapeHtml(p.anomalie.message)}">⚠️ anomalie</span>` : ''}</div>
         <div class="detail">"${escapeHtml(p.phrase_originale)}" — ${escapeHtml(p.trigger.type)}</div>
+        ${p.anomalie ? `<div class="detail" style="color:var(--color-error)">${escapeHtml(p.anomalie.message)}</div>` : ''}
       </div>
       <div class="item-actions">
         ${p.active

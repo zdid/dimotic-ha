@@ -24,6 +24,7 @@ interface PlanificationDefinition {
   trigger: { type: string };
   next_fire_at?: string;
   missed?: boolean;
+  anomalie?: { message: string; at: string };
 }
 
 interface IaTestReply {
@@ -162,8 +163,10 @@ function updatePlanificationsList(plans: PlanificationDefinition[]): void {
           ${p.name ? escapeHtml(p.name) : ''}
           <span class="status-badge ${p.active ? 'active' : 'inactive'}">${p.active ? 'active' : 'inactive'}</span>
           ${p.missed ? '<span class="status-badge missed">manqué</span>' : ''}
+          ${p.anomalie ? `<span class="status-badge anomalie" title="${escapeHtml(p.anomalie.message)}">⚠️ anomalie</span>` : ''}
         </div>
         <div class="plan-phrase">"${escapeHtml(p.phrase_originale)}"</div>
+        ${p.anomalie ? `<div class="plan-anomalie">${escapeHtml(p.anomalie.message)}</div>` : ''}
         <div class="plan-next">${escapeHtml(formatNextFireAt(p))}</div>
       </div>
       <div class="plan-actions">

@@ -98,7 +98,11 @@ export class DeployResponder {
     const problems = validateReferences(parsed, this.haStructureRegistry);
     if (problems.length > 0) {
       this.logger.warn('DeployResponder', `Référence(s) non vérifiée(s) dans la séquence produite (${problems.map((p) => p.detail).join(' | ')}) — refusée.`);
-      this.reply(req.correlation_id, false, buildCorrectionRequestMessage(problems));
+      // ⭐ invalidReferences=true (demande utilisateur, 12/08/2026) — distingue ce refus précis
+      // (quoi/lieux/entity_id invalides) d'un échec générique (timeout, JSON inexploitable) : côté
+      // planificateur, seul celui-ci doit positionner un flag d'anomalie persistant sur la
+      // planification (handler.ts::handleTriggerFired), pas n'importe quel échec de déploiement.
+      this.reply(req.correlation_id, false, buildCorrectionRequestMessage(problems), undefined, true);
       return;
     }
 
@@ -117,8 +121,8 @@ export class DeployResponder {
     return null;
   }
 
-  private reply(correlation_id: string, success: boolean, message: string, steps?: ExecutionStep[]): void {
-    const reply: DeployReply = { correlation_id, success, message, steps };
+  private reply(correlation_id: string, success: boolean, message: string, steps?: ExecutionStep[], invalidReferences?: boolean): void {
+    const reply: DeployReply = { correlation_id, success, message, steps, invalidReferences };
     this.eventBus.emitGeneric('planificateur:deploy:reply', reply);
   }
 }

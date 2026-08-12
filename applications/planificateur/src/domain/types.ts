@@ -102,6 +102,13 @@ export interface PlanificationDefinition {
   missed?: boolean;                 // déclenchement manqué au-delà de la fenêtre de rattrapage,
                                      // effacé au prochain déclenchement réussi (triggers temporels
                                      // uniquement pour l'instant, voir plan)
+  // ⭐ Anomalie de vérification quoi/lieux/entity_id (demande utilisateur, 12/08/2026) — positionné
+  // par handleTriggerFired quand la réinterprétation à l'exécution (ExecutionEngine.deployAndExecute)
+  // échoue précisément parce que referenceValidator.ts (côté ia, fonctionnelles-ia_specs §8.2) a
+  // rejeté une référence invalide (DeployReply.invalidReferences), pas pour tout autre type
+  // d'échec (timeout, JSON inexploitable) qui reste un simple log, pas un état persistant de la
+  // planification. Effacé au prochain déclenchement réussi, même principe que `missed`.
+  anomalie?: { message: string; at: string };
 }
 
 export interface GestionNode {
