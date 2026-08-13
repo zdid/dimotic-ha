@@ -69,6 +69,18 @@ export class ContextWindowManager {
     this.currentWindow = cwindow;
     console.log(`[TRACE] ContextWindowManager - Nouvelle fenêtre stockée`);
 
+    // Fermeture automatique après action pour les fenêtres "simples" (isSimple, voir
+    // ContextWindow.ts) — un seul geste (ex: éteindre/allumer un interrupteur) referme la
+    // fenêtre, plutôt que de forcer l'utilisateur à cliquer en dehors. Le flag isSimple existait
+    // déjà dans l'interface mais n'était jamais lu nulle part (voir mémoire projet).
+    if (cwindow.isSimple) {
+      const originalOnAction = cwindow.onAction.bind(cwindow);
+      cwindow.onAction = (action: string, value?: unknown) => {
+        originalOnAction(action, value);
+        setTimeout(() => this.hideWindow(), 400);
+      };
+    }
+
     // Positionner la fenêtre près de l'entité
     this.positionWindowNearEntity(entity, cwindow.element);
 

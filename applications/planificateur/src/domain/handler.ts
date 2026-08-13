@@ -20,7 +20,7 @@ import type { MacrosConfigFile, PlanificationsConfigFile } from './storage-schem
 import type { SchedulerRuntime } from './scheduler-runtime';
 import { isRecurring } from './scheduler';
 import type { StateWatcher } from './state-watcher';
-import type { ExecutionEngine } from './execution';
+import { AbortedExecutionError, type ExecutionEngine } from './execution';
 
 // ⭐ Rétention des planifications terminées (demande utilisateur, 12/08/2026) — voir
 // CommandHandler.cleanupCompletedPlanifications().
@@ -248,8 +248,37 @@ export class CommandHandler {
    * (StateWatcher) — voir execution.ts::deployAndExecute.
    */
   async handleTriggerFired(plan: PlanificationDefinition, triggeredEntityId?: string, signal?: AbortSignal): Promise<void> {
-    const result = await this.executionEngine.deployAndExecute(plan.name, plan.phrase_originale, this.listMacros(), triggeredEntityId, signal, plan.next_fire_at);
     let dirty = false;
+
+    // ⭐ Cache de résolution IA (demande utilisateur, 13/08/2026, voir types.ts::resolvedCache) —
+    // si une résolution précédente existe déjà, on rejoue directement ses étapes (resolution.ts
+    // reste appelé pour chacune, contre le référentiel HA COURANT — déterministe, s'adapte tout
+    // seul à un renommage d'entité, mais jamais à un changement de la phrase elle-même, effacé
+    // dans ce cas par handleGestion). Aucun aller-retour vers ia/Mistral dans ce chemin : plus
+    // aucune variabilité d'interprétation entre deux déclenchements de la même planification.
+    if (plan.resolvedCache) {
+      try {
+        await this.executionEngine.executeSteps(plan.resolvedCache.steps, plan.name, signal, triggeredEntityId, plan.next_fire_at);
+        if (plan.missed) { plan.missed = false; dirty = true; }
+        if (plan.anomalie) { plan.anomalie = undefined; dirty = true; }
+      } catch (error) {
+        // Redéclenchement "minuterie" (StateWatcher) pendant une attente — contrôle de flux normal,
+        // pas un échec de résolution : ne doit surtout pas invalider le cache ni relancer ia.
+        if (error instanceof AbortedExecutionError) return;
+        this.logger.warn('CommandHandler', `Rejeu du cache de résolution échoué pour "${plan.name}", repli sur une réinterprétation complète: ${error}`);
+        plan.resolvedCache = undefined;
+        await this.handleTriggerFired(plan, triggeredEntityId, signal);
+        return;
+      }
+      if (dirty) this.persistPlanifications();
+      return;
+    }
+
+    const result = await this.executionEngine.deployAndExecute(plan.name, plan.phrase_originale, this.listMacros(), triggeredEntityId, signal, plan.next_fire_at);
+    if (result.success && result.steps) {
+      plan.resolvedCache = { steps: result.steps, cachedAt: new Date().toISOString() };
+      dirty = true;
+    }
     // Une exécution RÉUSSIE efface l'indicateur "manqué" laissé par un rattrapage abandonné
     // précédent (demande utilisateur : disparaît à la prochaine exécution, s'il y en a une).
     if (result.success && plan.missed) {
@@ -353,6 +382,10 @@ export class CommandHandler {
         // Modification explicite (demande utilisateur, 12/08/2026) : même raisonnement que
         // "activer" ci-dessus — une planification modifiée doit pouvoir se redéclencher.
         plan.completed_at = undefined;
+        // ⭐ 13/08/2026 : une phrase modifiée invalide le cache de résolution (voir
+        // types.ts::resolvedCache) — sans ça, le prochain déclenchement rejouerait les étapes de
+        // l'ANCIENNE phrase.
+        plan.resolvedCache = undefined;
         this.persistPlanifications();
         this.armIfActive(plan);
         return ok(corr, `Planification "${plan.name}" modifiée.`);

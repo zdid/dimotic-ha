@@ -121,6 +121,18 @@ export interface PlanificationDefinition {
   // explicitement la planification (gestion "activer"/"modifier") — signal explicite qu'elle doit
   // pouvoir se redéclencher.
   completed_at?: string;
+  // ⭐ Cache de résolution IA (demande utilisateur, 13/08/2026) — même phrase, même contexte HA,
+  // mais Mistral peut produire un verbe/quoi/lieux légèrement différent d'un déclenchement à
+  // l'autre (non-déterminisme du modèle) : source d'incertitude identifiée par l'utilisateur pour
+  // une planification récurrente censée toujours faire la même chose. Peuplé par
+  // handler.ts::handleTriggerFired après la PREMIÈRE réinterprétation IA réussie ; les
+  // déclenchements suivants rejouent directement `steps` (resolution.ts reste appelé à chaque
+  // fois — déterministe, contre le référentiel HA courant, donc toujours à jour même si une
+  // entité a été renommée) sans repasser par ia/Mistral. Effacé sur "modifier" (gestion en langage
+  // naturel, voir handleGestion) — une phrase modifiée doit être réinterprétée à neuf. La
+  // modification via l'IHM (bouton "Modifier") ne pose pas ce problème : elle crée un nouvel objet
+  // planification, sans resolvedCache hérité.
+  resolvedCache?: { steps: ExecutionStep[]; cachedAt: string };
 }
 
 export interface GestionNode {

@@ -40,9 +40,8 @@ export class SwitchWindow implements ContextWindow {
     toggleBtn.className = 'toggle-button';
     toggleBtn.textContent = this.entity.getDisplayValue('status') === 'ON' ? 'Éteindre' : 'Allumer';
     toggleBtn.addEventListener('click', () => {
+      // Fermeture automatique gérée par ContextWindowManager (isSimple = true)
       this.onAction('toggle');
-      // Fermeture automatique après 500ms
-      setTimeout(() => this.close(), 500);
     });
     cwindow.appendChild(toggleBtn);
 
@@ -54,7 +53,7 @@ export class SwitchWindow implements ContextWindow {
   }
 
   close(): void {
-    // Cette fenêtre se ferme automatiquement
+    // Fermeture gérée par ContextWindowManager (isSimple = true)
   }
    // ✅ AJOUTER
   getElement(): HTMLElement {

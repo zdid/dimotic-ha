@@ -417,6 +417,20 @@ body {
     padding: 2px;
 }
 
+/* Style "minimal" (valeurs de capteurs : température, humidité, générique) — la boîte s'ajuste à
+   son contenu et grandit avec --plan-scale (min-width/padding) au lieu d'une taille fixe en
+   pixels posée par JS (BaseEntity.render()/applyScale() la sautent désormais pour ce style),
+   sans quoi le texte grandissait sans sa boîte et se retrouvait coupé sur tous les bords. */
+.base-entity.minimal-style {
+    width: auto;
+    height: auto;
+    min-width: calc(40px * var(--plan-scale, 1));
+    min-height: calc(24px * var(--plan-scale, 1));
+    padding: calc(4px * var(--plan-scale, 1)) calc(8px * var(--plan-scale, 1));
+    overflow: visible;
+    white-space: nowrap;
+}
+
 .base-entity.card-style {
     background: var(--entity-background-color);
     color: var(--entity-text-color);

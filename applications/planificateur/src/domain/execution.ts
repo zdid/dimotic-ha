@@ -133,7 +133,7 @@ export class ExecutionEngine {
     triggeredEntityId?: string,
     signal?: AbortSignal,
     nextFireAt?: string
-  ): Promise<{ success: boolean; message: string; invalidReferences?: boolean }> {
+  ): Promise<{ success: boolean; message: string; invalidReferences?: boolean; steps?: ExecutionStep[] }> {
     const context = this.buildDeployContext(triggerName, phraseOriginale, macros);
     if (triggeredEntityId) context.triggered_entity_id = triggeredEntityId;
 
@@ -164,7 +164,7 @@ export class ExecutionEngine {
       }
       throw error;
     }
-    return { success: true, message: `${reply.steps.length} étape(s) exécutée(s).` };
+    return { success: true, message: `${reply.steps.length} étape(s) exécutée(s).`, steps: reply.steps };
   }
 
   async executeSteps(

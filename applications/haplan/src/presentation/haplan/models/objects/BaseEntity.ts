@@ -84,7 +84,7 @@ export abstract class BaseEntity extends HAObject {
     const width = Math.round(this.baseDimensions.width * scale);
     const height = Math.round(this.baseDimensions.height * scale);
     this.dimensions = { width, height };
-    if (this.element) {
+    if (this.element && this.visualStyle !== 'minimal') {
       this.element.style.width = `${width}px`;
       this.element.style.height = `${height}px`;
     }
@@ -116,10 +116,17 @@ export abstract class BaseEntity extends HAObject {
     // S'assurer que l'élément a un ID stable
     this.ensureElementHasId(container);
     
-    // Appliquer les dimensions
-    container.style.width = `${this.dimensions.width}px`;
-    container.style.height = `${this.dimensions.height}px`;
-    
+    // Appliquer les dimensions — sauf en style "minimal" (valeurs de capteurs), où une taille
+    // fixée en pixels par JS entrait en conflit avec --plan-scale (qui ne redimensionne que la
+    // police en CSS) : le texte grandissait sans que sa boîte suive, d'où un contenu coupé sur
+    // tous les bords dès qu'on augmentait l'échelle. Cf. .base-entity.minimal-style dans
+    // styles.css, qui laisse la boîte s'ajuster à son contenu (et grandir avec --plan-scale via
+    // min-width/padding) plutôt que de lui imposer une taille figée.
+    if (this.visualStyle !== 'minimal') {
+      container.style.width = `${this.dimensions.width}px`;
+      container.style.height = `${this.dimensions.height}px`;
+    }
+
     // Appliquer le style visuel
     container.classList.add(`${this.visualStyle}-style`);
     

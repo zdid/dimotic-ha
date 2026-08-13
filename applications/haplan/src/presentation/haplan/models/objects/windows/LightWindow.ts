@@ -1,6 +1,7 @@
 import { ContextWindow, getFormattedWindowTitle, applyFontSizeToWindow } from './ContextWindow';
 import { EnhancedLightObject } from '../EnhancedLightObject';
 import { MinimalLightObject } from '../MinimalLightObject';
+import { ContextWindowManager } from './ContextWindowManager';
 
 export class LightWindow implements ContextWindow {
   entity: EnhancedLightObject | MinimalLightObject;
@@ -133,6 +134,12 @@ export class LightWindow implements ContextWindow {
 
     // Mettre à jour l'affichage
     this.updateDisplay();
+
+    // Fermeture automatique après un choix Allumer/Éteindre — pas après un ajustement de
+    // luminosité (le curseur reste utilisable en continu pendant qu'on le fait glisser).
+    if (action === 'toggle' || action === 'turn_on' || action === 'turn_off') {
+      setTimeout(() => ContextWindowManager.getInstance().hideWindow(), 400);
+    }
   }
 
   updateDisplay(): void {
