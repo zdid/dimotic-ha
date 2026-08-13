@@ -1,27 +1,37 @@
 # =============================================================================
-# haplan-display.yaml — écran mural 800x480 (carte Sunton ESP32-8048S070) affichant
-# un plan HAPLAN figé (image de fond) avec les icônes/valeurs des entités HA en direct.
-#
-# Pas de tactile/contrôle : lecture seule (cohérent avec "plan figé, états en direct").
+# haplan-display.yaml — écran mural 800x480 (carte Sunton ESP32-8048S070C, variante tactile
+# capacitive GT911) affichant TOUS les plans HAPLAN (navigation tactile, une page LVGL par plan)
+# avec les icônes/valeurs des entités HA en direct, et tactile pour basculer lumières/
+# interrupteurs/VMC/ballon/radiateur/volets directement sur l'écran (pas les thermostats —
+# contrôle plus fin, hors écran).
 #
 # Prérequis avant de compiler :
-# 1. Générer l'image + le fragment de widgets pour ton plan :
-#      cd applications/haplan/tools && python3 generate_esphome_floorplan.py original
-#    -> produit esphome/floorplan_original_800x480.png et esphome/floorplan_original.yaml
-# 2. Copier le bloc sous "lvgl_widgets_fragment:" de floorplan_<id>.yaml dans la section
-#    `lvgl: pages: - widgets:` ci-dessous (juste après `- image: ...`), et coller le bloc
-#    `text_sensor:`/`sensor:` du même fichier à la racine de CE fichier (fusion manuelle
-#    volontaire — évite un système d'include qui masquerait les erreurs de fusion).
-# 3. Adapter `image: file:` ci-dessous au nom réel généré (floorplan_<id>_800x480.png).
-#
-# ⚠️ Pinout de l'écran RGB (section display ci-dessous) : celui communément publié pour les
-# cartes Sunton ESP32-8048S0xx (7"/800x480, ESP32-S3) — À VÉRIFIER contre le sérigraphie/la
-# documentation de TA carte avant de flasher (des révisions existent). Compile d'abord avec
-# `esphome compile` pour repérer une éventuelle erreur avant de flasher.
+# 1. Générer l'image + le fragment de widgets pour tous les plans :
+#      cd applications/haplan/tools && python3 generate_esphome_floorplan.py --all
+#    -> produit esphome/floorplan_<page>_800x480.png (un par plan) et esphome/floorplan_pages.yaml
+# 2. Copier le bloc sous "pages_fragment:" de floorplan_pages.yaml comme valeur de `lvgl: pages:`
+#    ci-dessous (remplace le commentaire "COLLER ICI"), et coller les blocs `image:`/`text_sensor:`/
+#    `sensor:` du même fichier aux emplacements correspondants (fusion manuelle volontaire — évite
+#    un système d'include qui masquerait les erreurs de fusion).
 #
 # ⚠️ Syntaxe des widgets LVGL (composant ESPHome relativement récent, syntaxe qui évolue) :
 # vérifier contre la doc ESPHome de la version installée si `esphome compile` échoue sur le
 # bloc `lvgl:`.
+#
+# ⚠️ APRÈS le flash, l'écran affiche le plan mais AUCUNE pastille ne se met à jour tant que
+# l'appareil n'a pas été apparié comme intégration ESPHome dans Home Assistant lui-même (Paramètres
+# > Appareils et services > Ajouter une intégration > ESPHome, host = IP du device, clé = celle du
+# secret api_<nom> ci-dessous) — sans ce pairage, le serveur API du device tourne et répond au ping,
+# mais HA ne s'y connecte jamais comme client et ne pousse donc aucun état. Piège découvert le
+# 13/08/2026 après avoir déjà écarté pinout/logger UART comme causes (les deux étaient de vrais bugs
+# distincts, corrigés avant de trouver celui-ci — voir historique/mémoire du projet pour le détail).
+#
+# ⚠️ Le tactile (tap pour basculer une lumière/interrupteur/etc.) déclenche bien l'action côté
+# device (vérifié par log) mais HA la refuse SILENCIEUSEMENT tant que "Autoriser les appels de
+# service" (allow_service_calls) n'est pas activé sur l'intégration ESPHome du device — décoché par
+# défaut pour des raisons de sécurité. Paramètres > Appareils et services > Plan HAPLAN >
+# Configurer. Piège découvert le 13/08/2026 après avoir déjà écarté clickable:true (nécessaire
+# mais pas suffisant) et le pinout tactile (bon du premier coup, voir plus bas) comme causes.
 # =============================================================================
 
 esphome:
@@ -32,6 +42,12 @@ esp32:
   board: esp32-s3-devkitc-1
   framework:
     type: esp-idf
+  # Le board générique "esp32-s3-devkitc-1" suppose par défaut 4 Mo de flash — cette carte en a
+  # réellement 16, d'où flash_size explicite + table de partitions élargie (2 slots OTA à 6 Mo
+  # au lieu de ~1,8 Mo par défaut : nécessaire avec plusieurs plans embarqués à la fois — chaque
+  # image de fond pèse ~768 Ko brute, x3 plans + widgets/abonnements HA x3 aussi).
+  flash_size: 16MB
+  partitions: partitions-haplan.csv
 
 psram:
   mode: octal
@@ -48,36 +64,54 @@ api:
   encryption:
     key: !secret api_encryption_key
 
+# OTA (mise à jour par WiFi) — validé en direct le 13/08/2026 (upload réseau ~10s, sans câble USB).
+# Réutilise ota_password, déjà présent dans secrets.yaml pour les autres appareils de ce parc
+# ESPHome (hasat3/4/5). Seul le tout premier flash doit encore se faire par USB (pour embarquer la
+# capacité OTA elle-même) ; les mises à jour suivantes peuvent passer par
+# `esphome run haplan-display.yaml --device <ip-ou-nom.local>`.
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
 logger:
+  # Forcé sur l'UART matériel (broches câblées au CH340) — sur ESP32-S3 avec framework esp-idf,
+  # ESPHome peut par défaut router les logs vers USB_SERIAL_JTAG (USB natif interne, invisible sur
+  # le port CH340) plutôt que UART0 : découvert le 13/08/2026 après plusieurs captures série
+  # vides malgré un appareil qui tournait visiblement (rétroéclairage, image affichés).
+  hardware_uart: UART0
 
 # -----------------------------------------------------------------------------
-# Écran RGB parallèle 800x480 — pinout communément publié pour Sunton ESP32-8048S0xx.
+# Écran RGB parallèle 800x480 — pinout VÉRIFIÉ ET VALIDÉ sur carte physique le 13/08/2026, recoupé
+# avec 3 sources indépendantes qui s'accordent : espboards.dev, github.com/clowrey/
+# esphome-sunton-esp32-8048s070c, et une définition de carte PlatformIO ("esp32-8048S070C")
+# retrouvée dans un projet antérieur de l'utilisateur sur cette même carte physique — cette
+# dernière donne aussi le pinout tactile ci-dessous (i2c:/touchscreen:), donc jamais deviné.
 # -----------------------------------------------------------------------------
 display:
   - platform: rpi_dpi_rgb
     id: main_lcd
     update_interval: never  # LVGL pilote les rafraîchissements, pas de polling périodique
+    # auto_clear_enabled: true est REFUSÉ par ESPHome avec LVGL ("not compatible with LVGL") —
+    # LVGL gère lui-même l'effacement/redessin. false est donc obligatoire ici ; l'hypothèse
+    # d'un résidu PSRAM du flash précédent (testée le 13/08/2026) n'était pas la bonne piste,
+    # voir plus bas pour la vraie cause des anciennes icônes visibles derrière les nouvelles.
+    auto_clear_enabled: false
+    invert_colors: true
     dimensions:
       width: 800
       height: 480
     color_order: RGB
-    de_pin: 40
+    de_pin: 41
     hsync_pin: 39
-    vsync_pin: 41
+    vsync_pin: 40
     pclk_pin: 42
-    pclk_frequency: 16MHz
-    hsync_back_porch: 8
-    hsync_front_porch: 8
-    hsync_pulse_width: 4
-    vsync_back_porch: 8
-    vsync_front_porch: 8
-    vsync_pulse_width: 4
+    pclk_frequency: 12MHz
     data_pins:
-      red: [45, 48, 47, 21, 14]
-      green: [5, 6, 7, 15, 16, 17]
-      blue: [8, 3, 46, 9, 1]
+      red: [14, 21, 47, 48, 45]
+      green: [9, 46, 3, 8, 16, 1]
+      blue: [15, 7, 6, 5, 4]
 
-# Rétroéclairage — GPIO2 est la broche communément publiée pour ces cartes, à vérifier aussi.
+# Rétroéclairage — GPIO2, confirmé par la même définition de carte que le pinout RGB ci-dessus.
 output:
   - platform: ledc
     pin: 2
@@ -91,17 +125,58 @@ light:
     restore_mode: ALWAYS_ON
 
 # -----------------------------------------------------------------------------
-# Image de fond — généré par generate_esphome_floorplan.py, voir prérequis en en-tête.
-# Remplacer par le nom réel du fichier PNG produit.
+# Tactile — dalle capacitive GT911 (I2C), variante "C" de la carte 8048S070. Pinout issu de la
+# même définition de carte PlatformIO que le pinout RGB (voir plus haut), pas deviné.
 # -----------------------------------------------------------------------------
-image:
-  - file: "floorplan_original_800x480.png"
-    id: floorplan_bg
-    type: RGB565
+i2c:
+  sda: GPIO19
+  scl: GPIO20
+  frequency: 400kHz
+
+touchscreen:
+  # Sans interrupt_pin/reset_pin — CONFIRMÉ nécessaire et suffisant le 13/08/2026 (mode polling
+  # plutôt qu'interruption). Un premier essai avec interrupt_pin/reset_pin compilait et détectait
+  # bien le GT911 en I2C (bus scan OK), mais ne générait jamais aucun événement tactile — cohérent
+  # avec un bug d'init Reset/INT documenté sur le dépôt ESPHome (issue #15019). Repéré par analogie
+  # avec un exemple ESPHome réellement fonctionnel (github.com/jtenniswood/esphome-lvgl, carte
+  # GT911 différente mais même contrôleur), qui s'en passe et lie juste le composant à l'écran via
+  # `display:`. Une fois le tactile détecté, il fallait ENCORE deux choses pour qu'un tap agisse
+  # vraiment sur une entité HA (voir `clickable: true` sur les icônes plus bas, et l'avertissement
+  # allow_service_calls en en-tête de fichier) — trois causes distinctes, trouvées une par une.
+  platform: gt911
+  id: touch_gt911
+  display: main_lcd
+  # Repères de debug tactile demandés par l'utilisateur (13/08/2026) — gardés en PERMANENCE
+  # (décision utilisateur, pas juste temporaire) : le marqueur "X" rouge montre où le doigt a
+  # vraiment touché, ce qui explique visuellement pourquoi un tap "raté" (à côté d'une icône de
+  # 24px) ne déclenche rien. Seul le texte des coordonnées x/y sera retiré une fois l'appli au
+  # point ; le X reste. Widgets déclarés sur top_layer (pas par page) pour rester visibles/actifs
+  # quel que soit le plan affiché.
+  on_touch:
+    - lvgl.label.update:
+        id: touch_debug_label
+        text: !lambda |-
+          char buf[32];
+          snprintf(buf, sizeof(buf), "x=%d y=%d", touch.x, touch.y);
+          return std::string(buf);
+    - lvgl.widget.update:
+        id: touch_marker
+        x: !lambda return touch.x - 8;
+        y: !lambda return touch.y - 8;
+
+# -----------------------------------------------------------------------------
+# Images de fond (une par plan) + police d'icônes — générées par generate_esphome_floorplan.py,
+# voir prérequis en en-tête. Copier aussi fonts/fa-solid-900.ttf à côté de CE fichier.
+# -----------------------------------------------------------------------------
+# image:
+#   ...
+
+# font:
+#   ...
 
 # -----------------------------------------------------------------------------
 # text_sensor:/sensor: — COLLER ICI le contenu généré par generate_esphome_floorplan.py
-# (un homeassistant_sensor/homeassistant_text_sensor par entité positionnée sur le plan).
+# (un homeassistant_sensor/homeassistant_text_sensor par entité positionnée sur chaque plan).
 # -----------------------------------------------------------------------------
 # text_sensor:
 #   ...
@@ -112,14 +187,64 @@ image:
 lvgl:
   displays:
     - main_lcd
+  touchscreens:
+    - touch_gt911
+  # Couche toujours au-dessus de la page affichée, quelle qu'elle soit — sert pour les repères de
+  # debug tactile (permanents, voir touchscreen:on_touch: plus haut) et la navigation entre plans
+  # (flèches gauche/droite, circulaire : depuis le dernier plan, "suivant" revient au premier).
+  top_layer:
+    widgets:
+      - label:
+          id: touch_debug_label
+          x: 0
+          y: 0
+          width: 200
+          height: 20
+          text: "x=? y=?"
+          text_color: 0x00FF00
+          bg_color: 0x000000
+          bg_opa: COVER
+      - label:
+          id: touch_marker
+          x: -20
+          y: -20
+          width: 16
+          height: 16
+          text: "X"
+          text_color: 0xFF0000
+      - label:
+          # Taille x2,5 par rapport au premier essai ("4 fois trop petites", retour utilisateur
+          # 13/08/2026) — vraie flèche Font Awesome (font_nav, 40px) plutôt qu'un simple "<"/">"
+          # de police par défaut.
+          id: nav_prev
+          x: 0
+          y: 200
+          width: 60
+          height: 80
+          text_font: font_nav
+          text: ""
+          text_color: 0xFFFFFF
+          text_align: CENTER
+          bg_color: 0x000000
+          bg_opa: 50%
+          clickable: true
+          on_click:
+            - lvgl.page.previous:
+      - label:
+          id: nav_next
+          x: 740
+          y: 200
+          width: 60
+          height: 80
+          text_font: font_nav
+          text: ""
+          text_color: 0xFFFFFF
+          text_align: CENTER
+          bg_color: 0x000000
+          bg_opa: 50%
+          clickable: true
+          on_click:
+            - lvgl.page.next:
   pages:
-    - id: floorplan_page
-      widgets:
-        - image:
-            src: floorplan_bg
-            x: 0
-            y: 0
-            width: 800
-            height: 480
-        # COLLER ICI le contenu de "lvgl_widgets_fragment:" (généré par le script) —
-        # un rond (light/switch/cover/climate) ou une étiquette (sensor) par entité positionnée.
+    # COLLER ICI le contenu de "pages_fragment:" (généré par le script, --all) — une entrée de
+    # cette liste par plan (id + widgets), voir floorplan_pages.yaml.

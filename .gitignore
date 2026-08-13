@@ -49,4 +49,6 @@ backups/
 # Artefacts générés par generate_esphome_floorplan.py (reproductibles depuis data/haplan/, pas de source)
 applications/haplan/tools/esphome/floorplan_*.yaml
 applications/haplan/tools/esphome/floorplan_*.png
+# Fusion manuelle (voir en-tête haplan-display.yaml) — reproductible, pas de source non plus
+applications/haplan/tools/esphome/haplan-display-merged.yaml
 
