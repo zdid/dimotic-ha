@@ -231,6 +231,52 @@ function setupDeleteFloorplanButton(): void {
   });
 }
 
+/** Bouton "Déployer sur l'écran" — envoie le plan actuellement affiché à ESPDISPLAY (via
+ *  HaplanService, voir socket-events.ts) pour régénération+compilation+déploiement sur l'écran
+ *  ESP physique. Asynchrone (15-65s selon le cache de compilation ESPHome) : le bouton reste
+ *  désactivé entre le "started" et le "result" pour éviter les doubles clics — HaplanService a de
+ *  toute façon son propre verrou côté serveur (un seul déploiement à la fois), ceci n'est qu'un
+ *  retour visuel. */
+function setupDeployFloorplanButton(): void {
+  const btn = document.getElementById('btn-deploy-floorplan') as HTMLButtonElement | null;
+  if (!btn) return;
+  const originalLabel = btn.textContent ?? "🖥️ Déployer sur l'écran";
+
+  btn.addEventListener('click', () => {
+    const floorplanId = dataService.getCurrentFloorplanId();
+    if (!floorplanId) return;
+    btn.disabled = true;
+    btn.textContent = '⏳ Déploiement en cours…';
+    dataService.deployFloorplan(floorplanId);
+  });
+
+  dataService.onDeployStarted(() => {
+    btn.disabled = true;
+    btn.textContent = '⏳ Déploiement en cours…';
+  });
+
+  dataService.onDeployResult((result) => {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+    if (result.ok) {
+      alert(`Déploiement réussi (${Math.round(result.durationMs / 1000)}s).`);
+    } else {
+      alert(`Échec du déploiement : ${result.message}`);
+    }
+  });
+
+  const DEPLOY_ERROR_CODES = new Set(['HAPLAN_DEPLOY_BUSY', 'HAPLAN_DEPLOY_FAILED']);
+  dataService.onError((error) => {
+    // Filtré au code d'erreur — 'haplan:error' est un canal partagé par toutes les commandes
+    // HAPLAN (entités, plans...), pas seulement le déploiement écran ; ne pas réarmer le bouton
+    // sur une erreur sans rapport juste parce qu'il était désactivé au même moment.
+    if (!error.code || !DEPLOY_ERROR_CODES.has(error.code)) return;
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+    alert(`Déploiement refusé : ${error.message}`);
+  });
+}
+
 function updateConnectionStatus(): void {
   const status = document.getElementById('haplan-connection-status');
   if (status) {
@@ -258,6 +304,7 @@ setupEditModeToggle();
 setupEntityPickerToggle();
 setupNewFloorplanPanel();
 setupDeleteFloorplanButton();
+setupDeployFloorplanButton();
 setupMenuToggle();
 setupFloorplanArrows();
 setupPlanScaleControl();

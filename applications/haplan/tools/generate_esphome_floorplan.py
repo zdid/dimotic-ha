@@ -49,6 +49,8 @@ cet outil est volontairement hors du runtime applicatif).
 
 import argparse
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -59,16 +61,21 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 FLOORPLANS_CONFIG = REPO_ROOT / "data" / "haplan" / "config-haplan-floorplans-v1.0.yaml"
 IMAGES_DIR = REPO_ROOT / "data" / "haplan" / "images"
 FONT_FILENAME = "fa-solid-900.ttf"
+PARTITIONS_FILENAME = "partitions-haplan.csv"
+DEFAULT_TEMPLATE = Path(__file__).parent / "esphome" / "haplan-display.yaml"
+DEFAULT_ESPHOME_CONFIG_DIR = Path("/docker/esphome/config")
+DEFAULT_ESPHOME_CONTAINER = "esphome"
 
 # Couleurs — reprend l'esprit de fonctionnelles-haplan_specs §9.3 (état lu à la couleur/l'icône)
 COLOR_ON = "0xFFC107"   # ampoule dorée, allumé
 COLOR_OFF = "0x9E9E9E"  # gris clair, éteint (plus lisible qu'un gris-bleu foncé sur fond sombre)
 COLOR_SENSOR_TEXT = "0xFFFFFF"
 
-ICON_BG_DIAMETER = 24   # réduit depuis 28 (retour utilisateur "icônes trop grosses")
-ICON_FONT_SIZE = 14
-LABEL_WIDTH = 110        # élargi depuis 90 (valeurs type "1016.6 hPa" coupées)
-LABEL_HEIGHT = 26
+ICON_BG_DIAMETER = 32   # agrandi depuis 24 (retour utilisateur 13/08/2026 : icônes/textes un peu plus gros)
+ICON_FONT_SIZE = 20     # agrandi depuis 14, idem
+SENSOR_FONT_SIZE = 20   # texte des capteurs — auparavant sans police dédiée (taille par défaut LVGL ~14)
+LABEL_WIDTH = 130        # élargi depuis 110 pour accueillir le texte agrandi sans coupure
+LABEL_HEIGHT = 32        # élargi depuis 26, idem
 
 # Flèches de navigation entre plans (top_layer, voir haplan-display.yaml) — police et taille
 # séparées de font_icons (14px, pensée pour des pastilles de 24px) : "4 fois trop petites" au
@@ -257,6 +264,7 @@ def build_sensor_widget(page: str, entity_id: str, px: int, py: int, canvas_w: i
         f"      text: \"--\"",
         f"      text_align: CENTER",
         f"      text_color: {COLOR_SENSOR_TEXT}",
+        f"      text_font: font_sensor",
         # Boîte transparente — un fond opaque (essayé initialement) masquait des morceaux du plan
         # et des icônes voisines dès que la boîte, élargie pour ne plus couper le texte, débordait
         # sur des éléments proches. Le texte blanc seul reste lisible sur le plan sombre.
@@ -315,6 +323,104 @@ def process_floorplan(floorplan_id: str, floorplan: dict, args, out_dir: Path) -
     }
 
 
+def _extract_anchor(pattern: str, text: str, label: str) -> str:
+    m = re.search(pattern, text, re.S | re.M)
+    if not m:
+        sys.exit(f"Fusion : bloc '{label}' introuvable dans le fragment généré (format inattendu).")
+    return m.group(1)
+
+
+def _replace_anchor_once(template: str, anchor: str, replacement: str, label: str) -> str:
+    """Remplace `anchor` par `replacement`, en exigeant exactement une occurrence — évite une
+    fusion silencieusement no-op si le template a changé de forme depuis l'écriture des ancres."""
+    count = template.count(anchor)
+    if count != 1:
+        sys.exit(
+            f"Fusion : ancre '{label}' trouvée {count} fois dans le template (attendu 1). "
+            f"Le template esphome/haplan-display.yaml a probablement changé de forme — "
+            f"mettre à jour les ancres dans merge_config()."
+        )
+    return template.replace(anchor, replacement)
+
+
+def merge_config(template_text: str, fragment_text: str) -> str:
+    """Fusionne le fragment généré (image:/font:/text_sensor:/sensor:/pages_fragment:) dans le
+    template haplan-display.yaml, aux emplacements marqués par des ancres en commentaire.
+
+    Fusion textuelle (pas de parsing YAML réel) car le fragment et le template utilisent des tags
+    ESPHome non standard (!secret, !lambda) que PyYAML ne sait pas re-sérialiser fidèlement — même
+    approche que la fusion manuelle faite pendant les essais sur écran physique le 13/08/2026,
+    désormais stabilisée ici pour ne plus dépendre de heredocs tapés à la main à chaque itération.
+    """
+    image_block = _extract_anchor(r"^image:\n(.*?)\n\n", fragment_text, "image")
+    font_block = _extract_anchor(r"^font:\n(.*?)\n\n", fragment_text, "font")
+    text_sensor_block = _extract_anchor(r"^text_sensor:\n(.*?)^sensor:\n", fragment_text, "text_sensor")
+    sensor_block = _extract_anchor(r"^sensor:\n(.*?)\n\n#", fragment_text, "sensor")
+    pages_block = _extract_anchor(r"^pages_fragment:\n(.*)\Z", fragment_text, "pages_fragment")
+
+    out = template_text
+    out = _replace_anchor_once(out, "# image:\n#   ...\n", f"image:\n{image_block}\n", "image")
+    out = _replace_anchor_once(out, "# font:\n#   ...\n", f"font:\n{font_block}\n", "font")
+    out = _replace_anchor_once(
+        out, "# text_sensor:\n#   ...\n", f"text_sensor:\n{text_sensor_block}\n", "text_sensor"
+    )
+    out = _replace_anchor_once(out, "# sensor:\n#   ...\n", f"sensor:\n{sensor_block}\n", "sensor")
+
+    # Widgets de page indentés à 2 espaces dans le fragment ("  - id: page_x") ; il en faut 4 une
+    # fois placés sous `lvgl: pages:` (elle-même à 2 espaces) du template.
+    pages_reindented = "\n".join("  " + line if line.strip() else line for line in pages_block.splitlines())
+    pages_anchor = (
+        '    # COLLER ICI le contenu de "pages_fragment:" (généré par le script, --all) — une entrée de\n'
+        "    # cette liste par plan (id + widgets), voir floorplan_pages.yaml.\n"
+    )
+    out = _replace_anchor_once(out, pages_anchor, pages_reindented + "\n", "pages")
+
+    # Nom du secret API attendu par secrets.yaml (convention api_<nom-esphome>, voir
+    # data/esphome/secrets.yaml) — dérivé du nom de l'appareil déclaré dans le template plutôt que
+    # codé en dur, pour rester valable si ce script sert un jour à d'autres écrans ESP.
+    name_match = re.search(r"^esphome:\s*\n\s*name:\s*(\S+)", template_text, re.M)
+    device_name = name_match.group(1) if name_match else "esphome-display"
+    out = out.replace("api_encryption_key", f"api_{device_name}")
+
+    return out
+
+
+def run_compile_pipeline(merged_text: str, results: list[dict], out_dir: Path, args) -> None:
+    """Copie le YAML fusionné + les assets (images/police/partitions) dans le répertoire de config
+    du conteneur esphome déjà en service sur cette machine, puis lance `esphome compile` dedans."""
+    config_dir = Path(args.esphome_config_dir)
+    if not config_dir.is_dir():
+        sys.exit(f"Répertoire de config esphome introuvable : {config_dir}")
+
+    # Déployé sous le même nom que le template ("haplan-display.yaml") — c'est ce nom de fichier
+    # qui identifie l'appareil dans le registre HA/tableau de bord ESPHome (device "haplan-display-1"
+    # -> configuration "haplan-display.yaml"), pas un nom "-merged" distinct qui ne correspondrait à
+    # aucun appareil apparié. Redéfinissable via --esphome-deploy-filename si un jour plusieurs
+    # appareils partagent le même template avec des noms de fichiers différents.
+    merged_filename = args.esphome_deploy_filename or Path(args.template).name
+    (config_dir / merged_filename).write_text(merged_text, encoding="utf-8")
+
+    font_src = Path(__file__).parent / "esphome" / "fonts" / FONT_FILENAME
+    shutil.copy2(font_src, config_dir / FONT_FILENAME)
+
+    partitions_src = Path(__file__).parent / "esphome" / PARTITIONS_FILENAME
+    if partitions_src.exists():
+        shutil.copy2(partitions_src, config_dir / PARTITIONS_FILENAME)
+
+    for r in results:
+        shutil.copy2(out_dir / r["image_filename"], config_dir / r["image_filename"])
+
+    print(f"Assets copiés dans : {config_dir}")
+    print(f"Compilation : docker exec {args.esphome_container} esphome compile /config/{merged_filename}")
+
+    proc = subprocess.run(
+        ["docker", "exec", args.esphome_container, "esphome", "compile", f"/config/{merged_filename}"]
+    )
+    if proc.returncode != 0:
+        sys.exit(f"Échec de la compilation ESPHome (code {proc.returncode}).")
+    print("Compilation réussie.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("floorplan_ids", nargs="*", help="Clés des plans à générer (ex: original 'Rez de chaussée')")
@@ -322,6 +428,24 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=800)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--out-dir", default=str(Path(__file__).parent / "esphome"))
+    parser.add_argument(
+        "--merge", action="store_true",
+        help="Fusionne le fragment généré dans le template esphome/haplan-display.yaml "
+             "(produit <nom-template>-merged.yaml dans --out-dir)",
+    )
+    parser.add_argument(
+        "--compile", action="store_true",
+        help="Implique --merge ; copie aussi le YAML fusionné + les assets dans "
+             "--esphome-config-dir puis lance `esphome compile` dans le conteneur Docker",
+    )
+    parser.add_argument("--template", default=str(DEFAULT_TEMPLATE), help="Template ESPHome à fusionner")
+    parser.add_argument("--esphome-config-dir", default=str(DEFAULT_ESPHOME_CONFIG_DIR))
+    parser.add_argument("--esphome-container", default=DEFAULT_ESPHOME_CONTAINER)
+    parser.add_argument(
+        "--esphome-deploy-filename", default=None,
+        help="Nom de fichier sous lequel déployer le YAML fusionné dans --esphome-config-dir "
+             "(défaut : même nom que --template, pour matcher l'appareil déjà apparié dans HA)",
+    )
     args = parser.parse_args()
 
     if not FLOORPLANS_CONFIG.exists():
@@ -376,6 +500,13 @@ def main() -> None:
     lines.append(f"    size: {NAV_FONT_SIZE}")
     nav_glyphs = [ICON_CHEVRON_LEFT, ICON_CHEVRON_RIGHT]
     lines.append(f"    glyphs: [{', '.join(repr(g).replace(chr(39), chr(34)) for g in nav_glyphs)}]")
+    # Police texte des valeurs de capteurs (température/humidité/pression...) — auparavant sans
+    # police dédiée (taille par défaut LVGL, jugée trop petite). Jeu de glyphes restreint aux
+    # caractères réellement produits par build_sensor_widget ("%.1f" -> chiffres, point, signe -).
+    lines.append('  - file: "gfonts://Roboto"')
+    lines.append(f"    id: font_sensor")
+    lines.append(f"    size: {SENSOR_FONT_SIZE}")
+    lines.append('    glyphs: "0123456789.-"')
     lines.append("")
 
     all_text_sensor = [l for r in results for l in r["text_sensor_block"]]
@@ -423,6 +554,18 @@ def main() -> None:
     print(f"Fragment   : {out_yaml}")
     for r in results:
         print(f"  - {r['floorplan_id']!r:30} page={r['page']:20} image={r['image_filename']:35} {r['placed']} placées, {r['skipped']} hors cadre")
+
+    if args.merge or args.compile:
+        template_path = Path(args.template)
+        if not template_path.exists():
+            sys.exit(f"Template introuvable : {template_path}")
+        merged_text = merge_config(template_path.read_text(encoding="utf-8"), out_yaml.read_text(encoding="utf-8"))
+        merged_path = out_dir / (template_path.stem + "-merged.yaml")
+        merged_path.write_text(merged_text, encoding="utf-8")
+        print(f"Fusionné   : {merged_path}")
+
+        if args.compile:
+            run_compile_pipeline(merged_text, results, out_dir, args)
 
 
 if __name__ == "__main__":

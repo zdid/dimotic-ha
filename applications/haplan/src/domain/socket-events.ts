@@ -28,6 +28,12 @@ export const HAPLAN_SOCKET_EVENTS = {
   // Poussé en direct à chaque changement d'état d'une entité affichée sur un plan.
   ENTITY_STATE: 'haplan:entity:state',
 
+  // --- Déploiement sur écran ESP (voir applications/espdisplay) ---
+  // Ponctuels (pas dans HAPLAN_PERSISTENT_EVENTS) — un nouveau client n'a pas à recevoir le
+  // résultat d'un déploiement demandé par quelqu'un d'autre avant sa connexion.
+  FLOORPLAN_DEPLOY_STARTED: 'haplan:floorplan:deploy:started',
+  FLOORPLAN_DEPLOY_RESULT: 'haplan:floorplan:deploy:result',
+
   // --- Erreurs ---
   ERROR: 'haplan:error'
 } as const;
@@ -50,7 +56,11 @@ export const HAPLAN_CLIENT_EVENTS = {
 
   // --- Suppression de plan (Phase 3 — la création, elle, passe par POST /api/haplan/floorplans/
   // upload, hors Socket.io, voir PresentationServer.ts) ---
-  FLOORPLAN_DELETE: 'haplan:floorplan:delete'
+  FLOORPLAN_DELETE: 'haplan:floorplan:delete',
+
+  // --- Déploiement du plan affiché sur l'écran ESP physique (relayé à ESPDISPLAY via l'EventBus,
+  // voir HaplanService.handleFloorplanDeploy) ---
+  FLOORPLAN_DEPLOY: 'haplan:floorplan:deploy'
 } as const;
 
 // ============================================================================

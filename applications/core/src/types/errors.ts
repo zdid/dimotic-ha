@@ -67,7 +67,9 @@ export type HaplanErrorCode =
   | 'HAPLAN_HA_UNAVAILABLE'
   | 'HAPLAN_UNKNOWN_ENTITY'
   | 'HAPLAN_COMMAND_FAILED'
-  | 'HAPLAN_SAVE_FAILED';
+  | 'HAPLAN_SAVE_FAILED'
+  | 'HAPLAN_DEPLOY_BUSY'
+  | 'HAPLAN_DEPLOY_FAILED';
 
 /**
  * Codes d'erreur génériques (specs-erreurs-v1.0.md §6)

@@ -41,6 +41,9 @@ export class DataService {
   private floorplansReadyListeners: Set<() => void> = new Set();
   private floorplansReady = false;
   private taxonomyTreeListeners: Set<(areas: any[]) => void> = new Set();
+  private deployStartedListeners: Set<(data: { floorplanId: string }) => void> = new Set();
+  private deployResultListeners: Set<(data: { floorplanId?: string; ok: boolean; message: string; durationMs: number }) => void> = new Set();
+  private errorListeners: Set<(error: { code?: string; message: string }) => void> = new Set();
 
   constructor() {
     dataServiceInstance = this;
@@ -74,12 +77,21 @@ export class DataService {
       this.notifyStateListeners(data);
     });
 
-    this.socket.on('haplan:error', (error: { message: string }) => {
+    this.socket.on('haplan:error', (error: { code?: string; message: string }) => {
       console.error('[DataService] Erreur serveur:', error.message);
+      this.errorListeners.forEach((cb) => cb(error));
     });
 
     this.socket.on('haplan:taxonomy:tree', (data: { areas: any[] }) => {
       this.taxonomyTreeListeners.forEach((cb) => cb(data.areas || []));
+    });
+
+    this.socket.on('haplan:floorplan:deploy:started', (data: { floorplanId: string }) => {
+      this.deployStartedListeners.forEach((cb) => cb(data));
+    });
+
+    this.socket.on('haplan:floorplan:deploy:result', (data: { floorplanId?: string; ok: boolean; message: string; durationMs: number }) => {
+      this.deployResultListeners.forEach((cb) => cb(data));
     });
 
     this.socket.emit('haplan:floorplans:list:get');
@@ -261,6 +273,24 @@ export class DataService {
 
   async deleteFloorplan(floorplanId: string): Promise<void> {
     this.socket.emit('haplan:floorplan:delete', { floorplanId });
+  }
+
+  /** Déploiement du plan sur l'écran ESP physique (voir applications/espdisplay) — asynchrone,
+   *  résultat livré via onDeployResult() (compilation ESPHome : 15-65s selon le cache). */
+  deployFloorplan(floorplanId: string): void {
+    this.socket.emit('haplan:floorplan:deploy', { floorplanId });
+  }
+
+  onDeployStarted(callback: (data: { floorplanId: string }) => void): void {
+    this.deployStartedListeners.add(callback);
+  }
+
+  onDeployResult(callback: (data: { floorplanId?: string; ok: boolean; message: string; durationMs: number }) => void): void {
+    this.deployResultListeners.add(callback);
+  }
+
+  onError(callback: (error: { code?: string; message: string }) => void): void {
+    this.errorListeners.add(callback);
   }
 
   /** Ajout/déplacement/suppression d'icône — PositionManager.ts envoie toujours la liste COMPLÈTE

@@ -1,10 +1,12 @@
 # Spécifications Fonctionnelles - Module HAPLAN
 
-*Version 1.1 - 6 Août 2026*
-*Met à jour la v1.0 (première spécification formelle, écrite a posteriori) : échelle
-icônes/textes réglable par l'utilisateur (§12), navigation circulaire par flèches entre plans
-(§12), et affichage d'état simplifié (couleur seule, plus de libellé ON/OFF) pour
-VMC/chauffe-eau/radiateur (§9.3, §15.3).*
+*Version 1.2 - 13 Août 2026*
+*Met à jour la v1.1 : bouton "Déployer sur l'écran" (§3.6, §8.9, §13) qui envoie le plan affiché
+à la nouvelle application `applications/espdisplay` (voir
+`fonctionnelles-espdisplay_specs_v1.0.md`) pour régénération/compilation/déploiement sur un écran
+ESP physique — premier exemple de communication inter-applications initiée par HAPLAN via
+l'EventBus générique (`emitGeneric`/`onGeneric`, même pattern que
+`integration:bridge:register`).*
 
 ---
 
@@ -12,11 +14,13 @@ VMC/chauffe-eau/radiateur (§9.3, §15.3).*
 1. [Introduction](#1-introduction)
 2. [Architecture Générale](#2-architecture-générale)
 3. [Backend — `HaplanService`](#3-backend--haplanservice)
+    - 3.6 [Déploiement sur écran ESP (v1.2)](#36-déploiement-sur-écran-esp-v12)
 4. [Persistance des Plans et Positions](#4-persistance-des-plans-et-positions)
 5. [Upload de Plan (exception REST)](#5-upload-de-plan-exception-rest)
 6. [Arbre de Taxonomie pour le Sélecteur d'Entités](#6-arbre-de-taxonomie-pour-le-sélecteur-dentités)
 7. [Accès Externe et Page Dédiée](#7-accès-externe-et-page-dédiée)
 8. [Frontend — Bootstrap et Composants](#8-frontend--bootstrap-et-composants)
+    - 8.9 [Bouton de déploiement écran (v1.2)](#89-bouton-de-déploiement-écran-v12)
 9. [Modèle d'Objets HA (icônes du plan)](#9-modèle-dobjets-ha-icônes-du-plan)
 10. [Fenêtres Contextuelles (popups de contrôle)](#10-fenêtres-contextuelles-popups-de-contrôle)
 11. [Nom d'Entité Dérivé de la Taxonomie](#11-nom-dentité-dérivé-de-la-taxonomie)
@@ -152,7 +156,33 @@ plan peut recevoir une commande envoyée par un client.
 ### 3.5 Codes d'erreur
 
 `HaplanErrorCode` : `HAPLAN_HA_UNAVAILABLE` | `HAPLAN_UNKNOWN_ENTITY` | `HAPLAN_COMMAND_FAILED` |
-`HAPLAN_SAVE_FAILED` (`applications/core/src/types/errors.ts`).
+`HAPLAN_SAVE_FAILED` | `HAPLAN_DEPLOY_BUSY` | `HAPLAN_DEPLOY_FAILED` (v1.2, voir §3.6)
+(`applications/core/src/types/errors.ts`).
+
+### 3.6 Déploiement sur écran ESP (v1.2)
+
+`handleFloorplanDeploy({floorplanId})` — déclenché par l'événement client `haplan:floorplan:deploy`
+(§13), délègue **entièrement** la régénération/compilation/déploiement à la nouvelle application
+`applications/espdisplay` (voir `fonctionnelles-espdisplay_specs_v1.0.md`), via l'EventBus
+générique partagé — **aucune dépendance de compilation** entre les deux applications (même pattern
+que `ArexxService`/`Evoo7Service` → `IntegrationBridge`, `integration:bridge:register`) :
+
+1. **Verrou simple** (`deployInProgress: boolean`, un seul déploiement à la fois — ESPDISPLAY
+   partage un unique conteneur Docker `esphome`) : si un déploiement est déjà en cours, rejet
+   immédiat `HAPLAN_DEPLOY_BUSY`, aucun événement `espdisplay:deploy-floorplan` émis. Pas de file
+   d'attente (voir limitation §15).
+2. Plan inconnu → `HAPLAN_UNKNOWN_ENTITY` (même code que les autres opérations sur un
+   `floorplanId` absent, §3.4/§4.4).
+3. Sinon : pose le verrou, émet `haplan:floorplan:deploy:started` (accusé de réception immédiat
+   pour l'UI, §8.9), puis `espdisplay:deploy-floorplan({floorplanId})` sur l'EventBus générique.
+4. **Écouteur unique**, enregistré une seule fois dans `start()` (pas par requête) : sur
+   `espdisplay:deploy-result({floorplanId?, ok, message, durationMs})`, lève le verrou et
+   retransmet tel quel aux clients via `haplan:floorplan:deploy:result`. `message` contient les
+   dernières lignes de sortie du pipeline Python (généré par `applications/espdisplay`) — utile en
+   cas d'échec, volumineux en cas de succès (non tronqué côté HAPLAN).
+
+Durée observée en conditions réelles : ~15s (cache de compilation ESPHome chaud) à ~65s (cache
+froid, ex: après modification du template `haplan-display.yaml`).
 
 ---
 
@@ -374,6 +404,28 @@ Trois listes déroulantes en cascade (Pièce → Appareil → Entité, terminolo
 filtrant les entités déjà placées sur le plan courant et les entités `diagnostic.`/`config.`
 (entity_category techniques).
 
+### 8.9 Bouton de déploiement écran (v1.2)
+
+`#btn-deploy-floorplan` (`.haplan-header`, à côté du bouton de suppression) — `setupDeployFloorplanButton()`
+dans `dashboard-app.ts` :
+
+1. Au clic : désactive le bouton, texte "⏳ Déploiement en cours…", `dataService.deployFloorplan(floorplanId)`
+   (émet `haplan:floorplan:deploy` avec le plan **actuellement affiché**, pas un plan choisi séparément).
+2. `onDeployStarted()` : confirme le même état visuel (couvre le cas où un autre client aurait
+   déjà déclenché un déploiement — voir limitation ci-dessous).
+3. `onDeployResult()` : réactive le bouton, restaure son texte, `alert()` de succès (durée
+   arrondie à la seconde) ou d'échec (message brut du pipeline).
+4. `onError()`, **filtré au code** (`HAPLAN_DEPLOY_BUSY`/`HAPLAN_DEPLOY_FAILED` uniquement) : réarme
+   le bouton sur un rejet immédiat côté serveur (verrou déjà pris) — sans ce filtre, n'importe
+   quelle autre erreur HAPLAN survenant pendant un déploiement réarmerait le bouton à tort, le
+   canal `haplan:error` étant partagé par toutes les commandes (§15, bug #10 : toujours vrai que
+   seul ce bouton et les alertes d'upload donnent un retour visuel des erreurs, tout le reste
+   reste silencieux console-only).
+
+Contrairement aux autres actions du tableau de bord, **aucune confirmation native** avant l'envoi
+(à la différence de la suppression de plan) — déploiement non destructif pour les données HAPLAN
+elles-mêmes (il modifie un écran physique distant, pas la configuration des plans).
+
 ---
 
 ## 9. Modèle d'Objets HA (icônes du plan)
@@ -518,6 +570,8 @@ entité) :
 'haplan:entities:state:bulk'     // { states: [{entity_id, state, attributes}] }
 'haplan:entity:state'            // { entity_id, state, attributes }
 'haplan:error'                   // AppError
+'haplan:floorplan:deploy:started'  // { floorplanId } — v1.2, ponctuel, voir §3.6/§8.9
+'haplan:floorplan:deploy:result'   // { floorplanId?, ok, message, durationMs } — v1.2, ponctuel
 ```
 
 **Client → Server :**
@@ -528,7 +582,14 @@ entité) :
 'haplan:entity:command'                    // { entity_id, domain, service, serviceData? }
 'haplan:floorplan:positions:update'        // { floorplanId, positions: [...] } — liste complète, voir §4.2
 'haplan:floorplan:delete'                  // { floorplanId }
+'haplan:floorplan:deploy'                  // { floorplanId } — v1.2, voir §3.6
 ```
+
+> **v1.2 — Événements inter-applications (pas Socket.io, EventBus générique uniquement)** :
+> `espdisplay:deploy-floorplan` (émis par HAPLAN, écouté par `applications/espdisplay`) et
+> `espdisplay:deploy-result` (l'inverse) — voir §3.6 et `fonctionnelles-espdisplay_specs_v1.0.md`.
+> Noms **codés en dur des deux côtés**, volontairement (aucune dépendance de compilation entre les
+> deux applications), même convention que `integration:bridge:register`.
 
 > Événement interne, jamais exposé côté client : `haplan:internal:floorplan:create` (déclenché
 > uniquement par la route REST d'upload, §5).
@@ -592,6 +653,7 @@ actuel).
 | 14 | Aucun zoom/pan | Le plan est toujours entièrement contenu dans le conteneur |
 | 15 | Identifiants de plan non assainis comme clé de map | Seul le nom de fichier est assaini — deux identifiants distincts peuvent produire le même nom de fichier assaini et s'écraser silencieusement ; pas de renommage possible |
 | 16 | Aucune protection contre l'édition concurrente | La liste de positions est toujours remplacée en bloc ; deux navigateurs éditant le même plan simultanément s'écrasent l'un l'autre (dernier écrit gagne, fenêtre de 5s de debounce) |
+| 17 (v1.2) | Déploiement écran : verrou simple, pas de file d'attente | Une deuxième demande pendant qu'un déploiement est en cours est **rejetée** (`HAPLAN_DEPLOY_BUSY`), pas mise en attente — l'utilisateur doit réessayer manuellement une fois le premier terminé |
 
 ### 15.4 Autres constats
 
@@ -668,5 +730,6 @@ Données runtime : `data/haplan/config-haplan-floorplans-v1.0.yaml`, `data/hapla
 ### 17.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.2 | 2026-08-13 | Claude | Bouton "Déployer sur l'écran" (§3.6, §8.9) : premier exemple de communication inter-applications initiée par HAPLAN, vers la nouvelle application `applications/espdisplay` (`espdisplay:deploy-floorplan`/`espdisplay:deploy-result` sur l'EventBus générique, même pattern que `integration:bridge:register`). 3 nouveaux événements Socket.io (§13), 2 nouveaux codes d'erreur (§3.5). |
 | 1.1 | 2026-08-06 | Claude | Échelle icônes/textes réglable par l'utilisateur (§12.2, `--plan-scale`, curseur 60-120 %, mémorisé par écran via `localStorage`) et navigation circulaire par flèches entre plans (§12.1), tous deux ajoutés au dashboard depuis la v1.0. Affichage d'état simplifié pour VMC/chauffe-eau/radiateur (§9.3) : libellé ON/OFF retiré (au lieu d'être corrigé, voir bug #3 révisé en §15.3), état désormais lu uniquement à la couleur de l'icône. |
 | 1.0 | 2026-08-03 | Claude | Première spécification formelle, écrite a posteriori (application opérationnelle depuis fin juillet 2026 sans documentation dédiée). Couvre l'architecture, le backend (`HaplanService`), la persistance des plans/positions, l'upload (exception REST), l'arbre de taxonomie, l'accès externe/page dédiée, le frontend (bootstrap, `FloorPlan`, glisser-déposer), le modèle d'objets HA, les fenêtres contextuelles, le nom d'entité dérivé de la taxonomie, le menu escamotable, Socket.io, la configuration, et une liste consolidée de bugs fonctionnels et de code mort identifiés en lisant le code réel. |

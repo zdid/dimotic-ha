@@ -64,6 +64,9 @@ export class HaplanService implements IHaplanService {
   /** entity_id de toutes les entités présentes sur au moins un plan — seules celles-ci sont
    *  republiées/commandables (pas de firehose de tout HA). Recalculé à chaque chargement. */
   private trackedEntityIds: Set<string> = new Set();
+  /** Un seul déploiement écran à la fois — même conteneur Docker esphome côté ESPDISPLAY, pas de
+   *  file d'attente pour l'instant (voir specs/current/fonctionnelles-espdisplay_specs_v1.0.md). */
+  private deployInProgress = false;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -110,6 +113,21 @@ export class HaplanService implements IHaplanService {
     this.eventBus.onGeneric<{ floorplanId: string; imageBuffer: Buffer; imageMimeType: string }>(
       'haplan:internal:floorplan:create',
       (data) => this.handleFloorplanCreate(data)
+    );
+
+    // Résultat de déploiement écran, republié par ESPDISPLAY (voir handleFloorplanDeploy
+    // ci-dessus) — écouteur unique pour toute la durée de vie du service, pas par requête.
+    this.eventBus.onGeneric<{ floorplanId?: string; ok: boolean; message: string; durationMs: number }>(
+      'espdisplay:deploy-result',
+      (result) => {
+        this.deployInProgress = false;
+        if (result.ok) {
+          this.logger.info('HaplanService', `Déploiement réussi (${result.floorplanId}, ${result.durationMs}ms)`);
+        } else {
+          this.logger.error('HaplanService', `Échec du déploiement (${result.floorplanId}, ${result.durationMs}ms): ${result.message}`);
+        }
+        this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.FLOORPLAN_DEPLOY_RESULT, result);
+      }
     );
 
     if (this.haWsClient) {
@@ -234,6 +252,11 @@ export class HaplanService implements IHaplanService {
     this.eventBus.onGeneric<{ floorplanId: string }>(
       HAPLAN_CLIENT_EVENTS.FLOORPLAN_DELETE,
       (data) => this.handleFloorplanDelete(data)
+    );
+
+    this.eventBus.onGeneric<{ floorplanId: string }>(
+      HAPLAN_CLIENT_EVENTS.FLOORPLAN_DEPLOY,
+      (data) => this.handleFloorplanDeploy(data)
     );
   }
 
@@ -364,6 +387,31 @@ export class HaplanService implements IHaplanService {
     this.recomputeTrackedEntityIds();
     this.logger.info('HaplanService', `Plan supprimé: ${data.floorplanId}`);
     this.emitFloorplansList();
+  }
+
+  /**
+   * Déploiement du plan affiché sur l'écran ESP physique — délègue entièrement à ESPDISPLAY via
+   * l'EventBus partagé (même pattern que ArexxService/Evoo7Service -> IntegrationBridge :
+   * `emitGeneric`/`onGeneric` sur un nom d'événement convenu, aucune dépendance de compilation
+   * vers applications/espdisplay). Le résultat arrive de façon asynchrone (15-65s selon le cache
+   * de compilation ESPHome) via le listener enregistré une seule fois dans start().
+   */
+  private handleFloorplanDeploy(data: { floorplanId: string }): void {
+    if (this.deployInProgress) {
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_DEPLOY_BUSY', 'Un déploiement est déjà en cours, réessaie dans un instant', 'haplan:floorplan:deploy', { floorplanId: data.floorplanId }));
+      return;
+    }
+    if (!this.floorplansConfig.floorplans[data.floorplanId]) {
+      this.eventBus.emitGeneric('haplan:error',
+        createHaplanError('HAPLAN_UNKNOWN_ENTITY', `Plan inconnu: ${data.floorplanId}`, 'haplan:floorplan:deploy'));
+      return;
+    }
+
+    this.deployInProgress = true;
+    this.logger.info('HaplanService', `Déploiement demandé pour le plan ${data.floorplanId}`);
+    this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.FLOORPLAN_DEPLOY_STARTED, { floorplanId: data.floorplanId });
+    this.eventBus.emitGeneric('espdisplay:deploy-floorplan', { floorplanId: data.floorplanId });
   }
 
   private registerSocketEvents(): void {

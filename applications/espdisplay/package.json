@@ -1,0 +1,19 @@
+{
+  "name": "espdisplay",
+  "version": "1.0.0",
+  "description": "Orchestration des écrans ESP (ESPHome/LVGL) : reçoit une demande de déploiement (ex: depuis HAPLAN via l'EventBus) et exécute le pipeline génération+compilation Python correspondant.",
+  "main": "dist/domain/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "watch": "tsc -w"
+  },
+  "dependencies": {
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
