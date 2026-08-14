@@ -15,6 +15,14 @@ function $(id: string): HTMLElement | null {
   return moduleRoot().querySelector(`#${id}`);
 }
 
+interface RfxComHardwareInfo {
+  receiverType: string;
+  firmwareType: string;
+  firmwareVersion: number;
+  enabledProtocols: string[];
+  availableProtocols: string[];
+}
+
 interface RfxComStatus {
   connected: boolean;
   devicesCount: number;
@@ -22,6 +30,7 @@ interface RfxComStatus {
   lastDiscovery: string | null;
   scanInProgress: boolean;
   error?: string;
+  hardware?: RfxComHardwareInfo;
 }
 
 interface RfxComDiscoveredDevice {
@@ -128,6 +137,36 @@ function updateStatusDisplay(status: RfxComStatus): void {
       ? new Date(status.lastDiscovery).toLocaleString('fr-FR')
       : '--';
   }
+
+  updateHardwareDisplay(status.hardware);
+}
+
+/** Infos matérielles remontées par le transceiver (événement 'status' de la lib `rfxcom`) —
+ *  absentes tant qu'aucun statut matériel n'a encore été reçu (ex: transceiver jamais connecté),
+ *  la carte reste alors masquée plutôt que d'afficher des valeurs vides. */
+function updateHardwareDisplay(hardware: RfxComHardwareInfo | undefined): void {
+  const cardEl = $('hardware-card');
+  if (!cardEl) return;
+
+  if (!hardware) {
+    cardEl.style.display = 'none';
+    return;
+  }
+  cardEl.style.display = '';
+
+  const typeEl = $('hardware-type');
+  const firmwareEl = $('hardware-firmware');
+  const enabledEl = $('hardware-enabled-protocols');
+  const availableEl = $('hardware-available-protocols');
+
+  if (typeEl) typeEl.textContent = hardware.receiverType;
+  if (firmwareEl) firmwareEl.textContent = `${hardware.firmwareType} v${hardware.firmwareVersion}`;
+  if (enabledEl) {
+    enabledEl.textContent = hardware.enabledProtocols.length > 0
+      ? hardware.enabledProtocols.join(', ')
+      : 'Aucun';
+  }
+  if (availableEl) availableEl.textContent = hardware.availableProtocols.join(', ');
 }
 
 function updateRecentDevices(discovered: RfxComDiscoveredDevice[]): void {

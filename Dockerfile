@@ -73,8 +73,13 @@ RUN chmod +x docker/build-apps.sh && ./docker/build-apps.sh
 # ---------------------------------------------------------------------------
 FROM node:20-bookworm-slim AS runtime
 
+# openssh-client : requis par applications/espdisplay (EspDisplayService.runPipelineRemote) pour
+# déléguer le pipeline ESPHome à une machine distante (ex: falbala depuis ha2, qui n'a lui-même ni
+# python3 ni le conteneur Docker esphome — Pi4, RAM insuffisante pour ESP-IDF, voir
+# fonctionnelles-espdisplay_specs §6.2) — découvert absent en testant en conditions réelles le
+# 14/08/2026 (OCI runtime exec failed: "ssh": executable file not found in $PATH).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \

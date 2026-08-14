@@ -184,6 +184,18 @@ export interface RfxComDevicesConfig {
 // Statut / commandes exposés à l'UI et au socle
 // ============================================================================
 
+/** Statut matériel du transceiver — déjà récupéré via l'événement 'status' de la lib `rfxcom`
+ *  (voir RfxComTransceiver.onHardwareStatus) mais jusqu'ici jamais exposé à l'UI, seulement
+ *  utilisé en interne pour le filtre matériel des protocoles (§8.2). `undefined` avant la toute
+ *  première réception du statut matériel (ex: transceiver jamais connecté). */
+export interface RfxComHardwareInfo {
+  receiverType: string;
+  firmwareType: string;
+  firmwareVersion: number;
+  enabledProtocols: string[];
+  availableProtocols: string[];
+}
+
 export interface RfxComStatus {
   connected: boolean;
   devicesCount: number;
@@ -191,6 +203,7 @@ export interface RfxComStatus {
   lastDiscovery: string | null;
   scanInProgress: boolean;
   error?: string;
+  hardware?: RfxComHardwareInfo;
 }
 
 export interface RfxComCommand {

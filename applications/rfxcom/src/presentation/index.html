@@ -165,6 +165,28 @@
         </div>
       </div>
 
+      <div class="status-card" id="hardware-card" style="display: none;">
+        <h2>Matériel du Transceiver</h2>
+        <div class="status-grid">
+          <div class="status-item">
+            <span class="label">Type de récepteur</span>
+            <span class="value" id="hardware-type">--</span>
+          </div>
+          <div class="status-item">
+            <span class="label">Firmware</span>
+            <span class="value" id="hardware-firmware">--</span>
+          </div>
+          <div class="status-item">
+            <span class="label">Protocoles activés</span>
+            <span class="value" id="hardware-enabled-protocols">--</span>
+          </div>
+          <div class="status-item">
+            <span class="label">Protocoles disponibles</span>
+            <span class="value" id="hardware-available-protocols">--</span>
+          </div>
+        </div>
+      </div>
+
       <div class="recent-devices" id="recent-devices-card" style="display: none;">
         <h3>📋 Devices récemment détectés (non paramétrés)</h3>
         <div id="recent-devices-list"></div>

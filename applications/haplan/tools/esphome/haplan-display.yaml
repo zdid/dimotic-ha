@@ -146,19 +146,18 @@ touchscreen:
   platform: gt911
   id: touch_gt911
   display: main_lcd
-  # Repères de debug tactile demandés par l'utilisateur (13/08/2026) — gardés en PERMANENCE
-  # (décision utilisateur, pas juste temporaire) : le marqueur "X" rouge montre où le doigt a
-  # vraiment touché, ce qui explique visuellement pourquoi un tap "raté" (à côté d'une icône de
-  # 24px) ne déclenche rien. Seul le texte des coordonnées x/y sera retiré une fois l'appli au
-  # point ; le X reste. Widgets déclarés sur top_layer (pas par page) pour rester visibles/actifs
-  # quel que soit le plan affiché.
+  # Repère de debug tactile demandé par l'utilisateur (13/08/2026) — gardé en PERMANENCE (décision
+  # utilisateur, pas juste temporaire) : le marqueur "X" rouge montre où le doigt a vraiment
+  # touché, ce qui explique visuellement pourquoi un tap "raté" (à côté d'une icône de 24px) ne
+  # déclenche rien. Le texte des coordonnées x/y (touch_debug_label) a été retiré le 14/08/2026,
+  # l'appli étant jugée au point — seul le X reste. Widget déclaré sur top_layer (pas par page)
+  # pour rester visible/actif quel que soit le plan affiché.
   on_touch:
-    - lvgl.label.update:
-        id: touch_debug_label
-        text: !lambda |-
-          char buf[32];
-          snprintf(buf, sizeof(buf), "x=%d y=%d", touch.x, touch.y);
-          return std::string(buf);
+    # Rallume le rétroéclairage à chaque tap — sert aussi de "réveil" après extinction pour
+    # inactivité (voir lvgl:on_idle: plus bas). Le tout premier tap qui réveille l'écran agit
+    # AUSSI sur l'icône sous le doigt s'il y en a une (LVGL ne fait pas la distinction) — accepté
+    # pour cette première version, à revoir si ça pose un problème en usage réel.
+    - light.turn_on: backlight
     - lvgl.widget.update:
         id: touch_marker
         x: !lambda return touch.x - 8;
@@ -189,21 +188,21 @@ lvgl:
     - main_lcd
   touchscreens:
     - touch_gt911
-  # Couche toujours au-dessus de la page affichée, quelle qu'elle soit — sert pour les repères de
-  # debug tactile (permanents, voir touchscreen:on_touch: plus haut) et la navigation entre plans
+  # Rétroéclairage éteint après 30s d'inactivité tactile (pas une vraie veille ESP — le composant
+  # LVGL, le WiFi et les états HA continuent de tourner et de se mettre à jour en arrière-plan,
+  # seul le rétroéclairage s'éteint) ; rallumé au premier tap (voir touchscreen:on_touch: plus
+  # haut). Demande utilisateur 14/08/2026, même comportement qu'un petit écran précédent de
+  # l'utilisateur. Le minuteur d'inactivité LVGL se réarme automatiquement à chaque tap, donc
+  # aucune logique supplémentaire n'est nécessaire côté "on_wake".
+  on_idle:
+    - timeout: 30s
+      then:
+        - light.turn_off: backlight
+  # Couche toujours au-dessus de la page affichée, quelle qu'elle soit — sert pour le repère de
+  # debug tactile (permanent, voir touchscreen:on_touch: plus haut) et la navigation entre plans
   # (flèches gauche/droite, circulaire : depuis le dernier plan, "suivant" revient au premier).
   top_layer:
     widgets:
-      - label:
-          id: touch_debug_label
-          x: 0
-          y: 0
-          width: 200
-          height: 20
-          text: "x=? y=?"
-          text_color: 0x00FF00
-          bg_color: 0x000000
-          bg_opa: COVER
       - label:
           id: touch_marker
           x: -20

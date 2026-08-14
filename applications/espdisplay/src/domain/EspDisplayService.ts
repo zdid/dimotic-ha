@@ -3,12 +3,14 @@
  *
  * Écoute l'événement générique `espdisplay:deploy-floorplan` sur l'EventBus partagé (même pattern
  * que ArexxService/Evoo7Service -> IntegrationBridge, voir integration:bridge:register) et exécute
- * en sous-processus le pipeline Python qui génère les widgets, fusionne le YAML ESPHome et lance
- * la compilation dans le conteneur Docker `esphome` déjà en service sur cette machine.
+ * le pipeline Python qui génère les widgets, fusionne le YAML ESPHome et lance la compilation dans
+ * le conteneur Docker `esphome` — localement si ce service tourne sur la machine qui héberge ce
+ * conteneur (falbala), ou via SSH (clé dédiée, commande forcée côté cible) sinon — voir
+ * `config.remote` et §6.2 de fonctionnelles-espdisplay_specs. Cas découvert le 14/08/2026 : le
+ * bouton HAPLAN "Déployer sur l'écran" échouait depuis ha2 (ENOENT sur python3) — ha2 n'a
+ * volontairement ni Python ni le conteneur esphome (Pi4, RAM insuffisante pour ESP-IDF).
  *
- * Volontairement minimal pour l'instant (13/08/2026) : pas encore de déclenchement depuis l'UI
- * HAPLAN, pas encore d'OTA automatique après compilation — juste le mécanisme de base (écoute,
- * exécution, remontée du résultat), sur lequel brancher la suite une fois validé.
+ * Pas encore d'OTA automatique après compilation — le flash reste manuel.
  */
 
 import { spawn } from 'node:child_process';
@@ -77,7 +79,10 @@ export class EspDisplayService implements IEspDisplayService {
   }
 
   async start(): Promise<void> {
-    this.logger.info('EspDisplayService', `Démarrage — pipeline: ${this.pipelineScript}, conteneur: ${this.config.esphomeContainer}`);
+    const mode = this.config.remote.host
+      ? `distant via SSH vers ${this.config.remote.sshUser}@${this.config.remote.host}`
+      : `local (pipeline: ${this.pipelineScript})`;
+    this.logger.info('EspDisplayService', `Démarrage — exécution ${mode}, conteneur: ${this.config.esphomeContainer}`);
   }
 
   async stop(): Promise<void> {
@@ -87,17 +92,12 @@ export class EspDisplayService implements IEspDisplayService {
   private async handleDeployFloorplan(request: EspDisplayDeployRequest): Promise<void> {
     const start = Date.now();
     const label = request.floorplanId ?? 'tous les plans';
+    const planArg = request.floorplanId ?? '--all';
     this.logger.info('EspDisplayService', `Déploiement demandé : ${label}`);
 
-    const args = [
-      this.pipelineScript,
-      ...(request.floorplanId ? [request.floorplanId] : ['--all']),
-      '--compile',
-      '--esphome-container', this.config.esphomeContainer,
-      '--esphome-config-dir', this.config.esphomeConfigDir
-    ];
-
-    const result = await this.runPipeline(args);
+    const result = this.config.remote.host
+      ? await this.runPipelineRemote(planArg)
+      : await this.runPipelineLocal(planArg);
     const durationMs = Date.now() - start;
 
     const deployResult: EspDisplayDeployResult = {
@@ -116,9 +116,49 @@ export class EspDisplayService implements IEspDisplayService {
     this.eventBus.emitGeneric<EspDisplayDeployResult>(ESPDISPLAY_EVENTS.DEPLOY_RESULT, deployResult);
   }
 
-  private runPipeline(args: string[]): Promise<{ ok: boolean; message: string }> {
+  private runPipelineLocal(planArg: string): Promise<{ ok: boolean; message: string }> {
+    const args = [
+      this.pipelineScript,
+      planArg,
+      '--compile',
+      '--esphome-container', this.config.esphomeContainer,
+      '--esphome-config-dir', this.config.esphomeConfigDir
+    ];
+    return this.runProcess(this.config.pythonBin, args);
+  }
+
+  /**
+   * Exécution à distance (SSH, clé dédiée) — nécessaire quand ce service tourne sur une machine
+   * sans conteneur esphome ni python3 (ex: ha2, voir config-schema.ts). Un seul argument envoyé
+   * (l'identifiant de plan, ou "--all") : la cible fait tourner une COMMANDE FORCÉE
+   * (~/bin/espdisplay-agent-run.sh, voir en-tête du fichier) qui reconstruit elle-même l'appel
+   * complet du pipeline — cette clé ne permet donc rien d'autre que ce pipeline précis.
+   *
+   * `UserKnownHostsFile` pointé vers data/espdisplay/ (volume persisté, voir compose.yaml) plutôt
+   * que le défaut ($HOME, jamais persisté sur ce conteneur — voir Dockerfile "pas de volume nommé
+   * sur /app") : sans ça, la clé hôte de la cible ne serait jamais mémorisée d'un redémarrage de
+   * conteneur à l'autre. `accept-new` = confiance au premier contact (TOFU), mais rejette bien un
+   * changement ultérieur de clé hôte (utile si jamais compromis) — pas un simple désactivation de
+   * la vérification. Découvert en testant en conditions réelles le 14/08/2026 ("Host key
+   * verification failed" depuis le conteneur ha2 vers falbala).
+   */
+  private runPipelineRemote(planArg: string): Promise<{ ok: boolean; message: string }> {
+    const target = this.config.remote;
+    const knownHostsPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'espdisplay', 'known_hosts');
+    const args = [
+      '-o', 'BatchMode=yes',
+      '-o', 'ConnectTimeout=10',
+      '-o', 'StrictHostKeyChecking=accept-new',
+      '-o', `UserKnownHostsFile=${knownHostsPath}`
+    ];
+    if (target.sshKeyPath) args.push('-i', target.sshKeyPath);
+    args.push(`${target.sshUser}@${target.host}`, planArg);
+    return this.runProcess('ssh', args);
+  }
+
+  private runProcess(command: string, args: string[]): Promise<{ ok: boolean; message: string }> {
     return new Promise((resolve) => {
-      const proc = spawn(this.config.pythonBin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const proc = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
       let output = '';
 
       proc.stdout.on('data', (chunk) => {
@@ -129,7 +169,7 @@ export class EspDisplayService implements IEspDisplayService {
       });
 
       proc.on('error', (error) => {
-        resolve({ ok: false, message: `Impossible de lancer ${this.config.pythonBin} : ${error.message}` });
+        resolve({ ok: false, message: `Impossible de lancer ${command} : ${error.message}` });
       });
 
       proc.on('close', (code) => {

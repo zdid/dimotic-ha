@@ -183,6 +183,7 @@ export class RfxComService implements IRfxComService {
         });
       }
       this.emitProtocolsList();
+      this.emitStatus();
     });
 
     const port = this.resolvePort();
@@ -884,12 +885,22 @@ export class RfxComService implements IRfxComService {
   // ==========================================================================
 
   getStatus(): RfxComStatus {
+    const hardwareStatus = this.transceiver.getHardwareStatus();
     return {
       connected: this.transceiver.isConnected(),
       devicesCount: this.deviceManager.getConfiguredDevices().length,
       receiversCount: this.receiverManager.getAllReceivers().length,
       lastDiscovery: this.lastDiscovery,
-      scanInProgress: false
+      scanInProgress: false,
+      hardware: hardwareStatus
+        ? {
+            receiverType: hardwareStatus.receiverType,
+            firmwareType: hardwareStatus.firmwareType,
+            firmwareVersion: hardwareStatus.firmwareVersion,
+            enabledProtocols: hardwareStatus.enabledProtocols,
+            availableProtocols: hardwareStatus.availableProtocols
+          }
+        : undefined
     };
   }
 

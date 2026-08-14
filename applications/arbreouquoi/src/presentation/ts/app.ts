@@ -515,15 +515,13 @@ function renderQuoiCatalog(): void {
     <div class="quoi-icons">
       ${state.catalog.map(item => {
         const icon = getQuoiIcon(item.quoi.quoi_id);
-        // Icône ❓ = pas d'entrée dans getQuoiIcon() : l'icône seule ne dit pas de quel quoi il
-        // s'agit, contrairement aux autres — on affiche donc le nom à côté dans ce cas précis
-        // (demande utilisateur, 08/08/2026), pour ne pas alourdir la légende quand l'icône
-        // suffit déjà.
-        const unknown = icon === '❓';
+        // Libellé toujours affiché à côté de l'icône, même quand elle est reconnue (corrigé le
+        // 14/08/2026 — la légende ne l'affichait auparavant que pour les icônes "❓" inconnues,
+        // contrairement à la demande initiale du 08/08/2026).
         return `
         <div class="quoi-catalog-item" title="${item.quoi.label} (${item.entityCount} entités)">
           <span class="quoi-catalog-icon">${icon}</span>
-          ${unknown ? `<span class="quoi-catalog-name">${escapeHtml(item.quoi.label)}</span>` : ''}
+          <span class="quoi-catalog-name">${escapeHtml(item.quoi.label)}</span>
           <span class="quoi-catalog-count">${item.entityCount}</span>
         </div>
       `;
