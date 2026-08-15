@@ -88,7 +88,11 @@ describe('parseIncomingCommand', () => {
     expect(parseIncomingCommand(message)).toBeNull();
   });
 
-  it('retourne null si le payload JSON est invalide', () => {
+  // Corrigé (15/08/2026) : ce test attendait `null` sur un payload non-JSON, comportement
+  // abandonné le 30/07/2026 (voir stateCommand.ts) — HA envoie parfois des commandes en texte brut
+  // ("ON"/"OFF", schéma light/switch/cover par défaut sans command_template), qui étaient jusque-là
+  // silencieusement rejetées. Le test n'avait jamais été mis à jour après ce correctif.
+  it('retombe sur { state: payload brut } si le payload n\'est pas du JSON valide', () => {
     const message: MqttMessage = {
       topic: 'rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/set',
       payload: 'not json',
@@ -96,6 +100,11 @@ describe('parseIncomingCommand', () => {
       retain: false,
     };
 
-    expect(parseIncomingCommand(message)).toBeNull();
+    expect(parseIncomingCommand(message)).toEqual({
+      moduleName: 'rfxcom',
+      bridgeInstance: 'rfx_bridge_0001',
+      deviceId: 'rfxsensor_ac__0xa5b3',
+      command: { state: 'not json' },
+    });
   });
 });

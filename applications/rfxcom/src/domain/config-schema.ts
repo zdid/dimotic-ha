@@ -14,7 +14,10 @@ export const rfxcomConfigSchema = z.object({
   port: z.string().min(1).default('/dev/ttyUSB0'),
   baudRate: z.number().int().positive().default(38400),
 
-  // bridge_instance utilisé pour la connexion MQTT au socle (techniques-socle-ha-mqtt_specs §8.5.1)
+  // bridge_instance utilisé pour la connexion MQTT au socle (techniques-socle-ha-mqtt_specs §8.5.1).
+  // Ce défaut fixe n'est en pratique jamais appliqué : RfxComService.loadConfig() génère et
+  // persiste un tirage aléatoire au premier démarrage avant que ce schéma ne soit parsé (voir
+  // fonctionnelles-supervisor_specs v2.3 §9.2) — conservé ici comme filet, pas comme vrai défaut.
   bridgeInstance: z.string().min(1).default('rfx_bridge_0001'),
 
   // Fichier de configuration centralisé (devices/récepteurs/scènes), relatif à la racine du projet

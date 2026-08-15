@@ -27,7 +27,9 @@ const evoo7MqttConfigSchema = z.object({
 export const evoo7ConfigSchema = z.object({
   enabled: z.boolean().default(true),
 
-  // bridge_instance utilisé pour la connexion MQTT au socle (techniques-socle-ha-mqtt_specs §8.5.1)
+  // bridge_instance utilisé pour la connexion MQTT au socle (techniques-socle-ha-mqtt_specs §8.5.1).
+  // Ce défaut fixe n'est en pratique jamais appliqué : Evoo7Service.loadConfig() génère et persiste
+  // un tirage aléatoire au premier démarrage (voir fonctionnelles-supervisor_specs v2.3 §9.2).
   bridgeInstance: z.string().min(1).default('evoo7_bridge_0001'),
 
   // Connexion directe au broker EVOO7 (indépendante du broker HA du socle — voir plan EVOO7)

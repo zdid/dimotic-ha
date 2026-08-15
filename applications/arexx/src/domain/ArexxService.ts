@@ -12,6 +12,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
+import { generateRandomBridgeInstance } from '../../../core/dist/exports';
 import { arexxConfigSchema, type ArexxConfig } from './config-schema';
 import type { ArexxSensorsConfigFile } from './devices-config-schema';
 import type { ArexxRawReading, ArexxSensorInfo, ArexxStatus } from './types';
@@ -57,8 +58,20 @@ export class ArexxService implements IArexxService {
     this.sensorRegistry = new SensorRegistry(this.logger);
   }
 
+  /**
+   * ⭐ fonctionnelles-supervisor_specs v2.3 §9.2 : `bridgeInstance` absent de la config sur disque
+   * → tirage aléatoire généré et persisté immédiatement (pas juste un défaut Zod en mémoire).
+   * N'affecte pas une instance déjà en production (valeur déjà écrite en dur, jamais régénérée).
+   */
   private loadConfig(): ArexxConfig {
-    return arexxConfigSchema.parse(this.configProvider.getAppConfig());
+    const raw = this.configProvider.getAppConfig() as Partial<ArexxConfig>;
+    if (!raw.bridgeInstance) {
+      const parsed = arexxConfigSchema.parse({ ...raw, bridgeInstance: generateRandomBridgeInstance('arexx') });
+      this.configProvider.savePartialConfig(parsed);
+      this.logger.info('ArexxService', `bridgeInstance généré et persisté au premier démarrage: ${parsed.bridgeInstance}`);
+      return parsed;
+    }
+    return arexxConfigSchema.parse(raw);
   }
 
   private resolveSensorsConfigPath(): string {

@@ -11,6 +11,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
+import { generateRandomBridgeInstance } from '../../../core/dist/exports';
 import { rpigpioConfigSchema, type RpigpioConfig } from './config-schema';
 import { pinsConfigSchema, DEFAULT_PINS_CONFIG, type PinDefinition, type PinsConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
@@ -41,7 +42,7 @@ export class RpigpioService implements IRpigpioService {
     private readonly logger: Logger,
     private readonly configProvider: IAppConfigProvider<RpigpioConfig>
   ) {
-    this.config = rpigpioConfigSchema.parse(configProvider.getAppConfig());
+    this.config = this.loadConfig();
 
     const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'rpigpio');
     this.pinsManager = new ConfigFileManager<PinsConfigFile>(
@@ -60,6 +61,24 @@ export class RpigpioService implements IRpigpioService {
 
   static create(eventBus: IEventBus, logger: Logger, configProvider: IAppConfigProvider<RpigpioConfig>): RpigpioService {
     return new RpigpioService(eventBus, logger, configProvider);
+  }
+
+  /**
+   * ⭐ fonctionnelles-supervisor_specs v2.3 §9.2 : `bridgeInstance` absent de la config sur disque
+   * → tirage aléatoire généré et persisté immédiatement (pas juste un défaut Zod en mémoire).
+   * Contrairement à rfxcom/evoo7/arexx, rpigpio n'avait jusqu'ici AUCUN bridgeInstance — deux
+   * instances non reconfigurées à la main partageaient réellement le même topicPrefix/
+   * discoveryPrefix mqtt-io (voir generator.ts::generateMqttIoConfig).
+   */
+  private loadConfig(): RpigpioConfig {
+    const raw = this.configProvider.getAppConfig() as Partial<RpigpioConfig>;
+    if (!raw.bridgeInstance) {
+      const parsed = rpigpioConfigSchema.parse({ ...raw, bridgeInstance: generateRandomBridgeInstance('rpigpio') });
+      this.configProvider.savePartialConfig(parsed);
+      this.logger.info('RpigpioService', `bridgeInstance généré et persisté au premier démarrage: ${parsed.bridgeInstance}`);
+      return parsed;
+    }
+    return rpigpioConfigSchema.parse(raw);
   }
 
   private setupEventListeners(): void {

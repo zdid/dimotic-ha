@@ -11,7 +11,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
-import { createRfxComError, getCommandTopic } from '../../../core/dist/exports';
+import { createRfxComError, getCommandTopic, generateRandomBridgeInstance } from '../../../core/dist/exports';
 import { rfxcomConfigSchema, type RfxComConfig } from './config-schema';
 import type { RfxComDevicesConfigFile, ReceiverConfigEntry } from './devices-config-schema';
 import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult, RfxComOrderTrace } from './types';
@@ -56,6 +56,16 @@ export class RfxComService implements IRfxComService {
   private transceiver: RfxComTransceiver;
 
   private lastDiscovery: string | null = null;
+
+  // ⭐ fonctionnelles-supervisor_specs v2.3 §9.4 : recouvrement RF réel entre deux instances RFXCOM
+  // (deux dongles voient probablement le même appareil physique) — diffusion de la liste des
+  // devices enregistrés par bridgeInstance (topic rfxcom/{bridgeInstance}/registered-devices), pour
+  // qu'aucune instance ne publie de découverte pour un objectId déjà revendiqué par une autre.
+  // Pas une déduplication automatique : principe "une entité, un endroit, responsabilité du
+  // paramétreur" (§9.1) — avertissement visible côté UI plutôt qu'exclusion silencieuse.
+  private otherInstancesRegisteredDevices: Map<string, Set<string>> = new Map();
+  /** objectId → bridgeInstance qui le revendique déjà — alimente rfxcom:claimed-elsewhere:list. */
+  private claimedElsewhereWarnings: Map<string, string> = new Map();
   /** Scènes dont l'exécution séquentielle en cours doit s'arrêter à la prochaine étape. */
   private cancelledScenes: Set<string> = new Set();
   // ⚠️ configureRFX (RfxComTransceiver.pushEnabledProtocols) déclenche lui-même un nouvel
@@ -115,9 +125,23 @@ export class RfxComService implements IRfxComService {
    * Charge la config depuis le provider et applique les valeurs par défaut du schéma (le
    * provider retourne {} si la section 'rfxcom' n'existe pas encore dans config.yaml — première
    * installation, jamais configuré via l'UI).
+   *
+   * ⭐ fonctionnelles-supervisor_specs v2.3 §9.2 : si `bridgeInstance` est absent de la config sur
+   * disque (jamais configuré manuellement), un tirage aléatoire est généré et persisté
+   * IMMÉDIATEMENT (pas juste un défaut Zod en mémoire, qui serait réévalué à chaque redémarrage) —
+   * remplace l'ancien défaut fixe partagé ('rfx_bridge_0001'), vulnérable à une collision entre
+   * deux instances non reconfigurées. N'affecte pas une instance déjà en production : son
+   * `bridgeInstance` est déjà écrit en dur sur disque, jamais régénéré.
    */
   private loadConfig(): RfxComConfig {
-    return rfxcomConfigSchema.parse(this.configProvider.getAppConfig());
+    const raw = this.configProvider.getAppConfig() as Partial<RfxComConfig>;
+    if (!raw.bridgeInstance) {
+      const parsed = rfxcomConfigSchema.parse({ ...raw, bridgeInstance: generateRandomBridgeInstance('rfx') });
+      this.configProvider.savePartialConfig(parsed);
+      this.logger.info('RfxComService', `bridgeInstance généré et persisté au premier démarrage: ${parsed.bridgeInstance}`);
+      return parsed;
+    }
+    return rfxcomConfigSchema.parse(raw);
   }
 
   // ==========================================================================
@@ -250,6 +274,7 @@ export class RfxComService implements IRfxComService {
         // (publishReceiverStateAtStartup) — sur la même liaison série que le push des protocoles
         // activés, qui doit passer en premier (voir le commentaire sur protocolsPushGate).
         if (event.connected) {
+          this.subscribeRegisteredDevices();
           this.protocolsPushGate.then(() => this.publishInitialDiscoveries());
         }
         this.emitStatus();
@@ -265,6 +290,13 @@ export class RfxComService implements IRfxComService {
     this.eventBus.onGeneric<{ bridgeInstance: string }>(
       `integration:${MODULE_NAME}:ha:online`,
       () => this.publishInitialDiscoveries()
+    );
+
+    // ⭐ fonctionnelles-supervisor_specs v2.3 §9.4 : reçoit la liste des devices enregistrés par les
+    // AUTRES instances RFXCOM (abonnement passthrough posé dans start(), voir subscribeRegisteredDevices).
+    this.eventBus.onGeneric<{ bridgeInstance: string; topic: string; payload: string }>(
+      `integration:${MODULE_NAME}:passthrough:message`,
+      (event) => this.handleRegisteredDevicesMessage(event)
     );
 
     // Reconnecte le transceiver (port série) à chaud si sa config a réellement changé — même
@@ -425,6 +457,85 @@ export class RfxComService implements IRfxComService {
       }
     }
     this.lastDiscovery = new Date().toISOString();
+    this.publishRegisteredDevicesList();
+  }
+
+  // ==========================================================================
+  // Recouvrement RF réel entre instances — fonctionnelles-supervisor_specs v2.3 §9.4
+  // ==========================================================================
+
+  /** S'abonne, une fois, à la liste des devices enregistrés par TOUTES les instances RFXCOM. */
+  private subscribeRegisteredDevices(): void {
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:subscribe`, {
+      bridgeInstance: this.config.bridgeInstance,
+      topic: `${MODULE_NAME}/+/registered-devices`,
+      qos: 1
+    });
+  }
+
+  /** Republie la liste (retenue) des objectId actuellement publiés par CETTE instance. */
+  private publishRegisteredDevicesList(): void {
+    const objectIds: string[] = [
+      ...this.deviceManager.getConfiguredDevices().filter((d) => d.transmitToHa).map((d) => d.uniqueId),
+      ...this.receiverManager.getAllReceivers().filter((r) => r.config.transmitToHa).map((r) => r.config.receiverId),
+      ...this.sceneManager.getAllScenes().filter((s) => s.transmitToHa).map((s) => `${SCENE_DEVICE_ID_PREFIX}${s.receiverId}`)
+    ];
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:publish`, {
+      bridgeInstance: this.config.bridgeInstance,
+      topic: `${MODULE_NAME}/${this.config.bridgeInstance}/registered-devices`,
+      payload: objectIds,
+      qos: 1,
+      retain: true
+    });
+  }
+
+  private handleRegisteredDevicesMessage(event: { bridgeInstance: string; topic: string; payload: string }): void {
+    const match = event.topic.match(new RegExp(`^${MODULE_NAME}/([^/]+)/registered-devices$`));
+    if (!match) return;
+    const remoteBridgeInstance = match[1] as string;
+    if (remoteBridgeInstance === this.config.bridgeInstance) return; // écho de notre propre publication
+
+    let objectIds: string[];
+    try {
+      objectIds = event.payload ? (JSON.parse(event.payload) as string[]) : [];
+    } catch {
+      this.logger.warn('RfxComService', `Payload registered-devices invalide sur ${event.topic}`);
+      return;
+    }
+
+    this.otherInstancesRegisteredDevices.set(remoteBridgeInstance, new Set(objectIds));
+
+    // Recalcule les avertissements — un objectId publié ici ET revendiqué ailleurs.
+    this.claimedElsewhereWarnings.clear();
+    const myObjectIds = new Set([
+      ...this.deviceManager.getConfiguredDevices().filter((d) => d.transmitToHa).map((d) => d.uniqueId),
+      ...this.receiverManager.getAllReceivers().filter((r) => r.config.transmitToHa).map((r) => r.config.receiverId),
+      ...this.sceneManager.getAllScenes().filter((s) => s.transmitToHa).map((s) => `${SCENE_DEVICE_ID_PREFIX}${s.receiverId}`)
+    ]);
+    for (const [otherBridge, ids] of this.otherInstancesRegisteredDevices) {
+      for (const id of ids) {
+        if (myObjectIds.has(id)) this.claimedElsewhereWarnings.set(id, otherBridge);
+      }
+    }
+    this.emitClaimedElsewhereList();
+  }
+
+  /**
+   * Une entité, un seul endroit (§9.1) : ne bloque QUE si une AUTRE instance revendique déjà cet
+   * objectId — jamais de résolution automatique de qui a "raison", juste un refus de publier
+   * depuis ici + avertissement visible, laissant la décision au paramétreur.
+   */
+  private isClaimedByOtherInstance(objectId: string): string | null {
+    for (const [bridgeInstance, ids] of this.otherInstancesRegisteredDevices) {
+      if (ids.has(objectId)) return bridgeInstance;
+    }
+    return null;
+  }
+
+  private emitClaimedElsewhereList(): void {
+    this.eventBus.emitGeneric(`${MODULE_NAME}:claimed-elsewhere:list`,
+      Array.from(this.claimedElsewhereWarnings.entries()).map(([objectId, bridgeInstance]) => ({ objectId, bridgeInstance }))
+    );
   }
 
   private publishDeviceDiscovery(device: RfxComDeviceInfo): void {
@@ -464,6 +575,14 @@ export class RfxComService implements IRfxComService {
       },
       extra: isBouton ? { entity_category: 'diagnostic' } : undefined
     };
+
+    const claimedBy = this.isClaimedByOtherInstance(device.uniqueId);
+    if (claimedBy) {
+      this.claimedElsewhereWarnings.set(device.uniqueId, claimedBy);
+      this.emitClaimedElsewhereList();
+      this.logger.warn('RfxComService', `Device ${device.uniqueId} déjà revendiqué par l'instance ${claimedBy} — découverte non publiée depuis ici`);
+      return;
+    }
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
       bridgeInstance: this.config.bridgeInstance,
@@ -551,6 +670,14 @@ export class RfxComService implements IRfxComService {
     const receiver = this.receiverManager.getReceiver(receiverId);
     if (!receiver) return;
 
+    const claimedBy = this.isClaimedByOtherInstance(receiver.config.receiverId);
+    if (claimedBy) {
+      this.claimedElsewhereWarnings.set(receiver.config.receiverId, claimedBy);
+      this.emitClaimedElsewhereList();
+      this.logger.warn('RfxComService', `Récepteur ${receiver.config.receiverId} déjà revendiqué par l'instance ${claimedBy} — découverte non publiée depuis ici`);
+      return;
+    }
+
     const { component, essential } = receiver.getDiscoveryEssential();
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
       bridgeInstance: this.config.bridgeInstance,
@@ -618,6 +745,15 @@ export class RfxComService implements IRfxComService {
    * autres components — non vérifié contre une instance HA réelle (seul le broker MQTT l'a été).
    */
   private publishSceneDiscovery(scene: ReceiverSceneConfig): void {
+    const sceneObjectId = `rfxcom_scene_${scene.receiverId}`;
+    const claimedBy = this.isClaimedByOtherInstance(sceneObjectId);
+    if (claimedBy) {
+      this.claimedElsewhereWarnings.set(sceneObjectId, claimedBy);
+      this.emitClaimedElsewhereList();
+      this.logger.warn('RfxComService', `Scène ${sceneObjectId} déjà revendiquée par l'instance ${claimedBy} — découverte non publiée depuis ici`);
+      return;
+    }
+
     const taxonomy = extractTaxonomy(scene.name);
     const deviceId = `${SCENE_DEVICE_ID_PREFIX}${scene.receiverId}`;
     const commandTopic = getCommandTopic(MODULE_NAME, this.config.bridgeInstance, deviceId);
@@ -1023,6 +1159,7 @@ export class RfxComService implements IRfxComService {
     this.eventBus.onGeneric('rfxcom:receivers:list:get', () => this.emitReceiversList());
     this.eventBus.onGeneric('rfxcom:scenes:list:get', () => this.emitScenesList());
     this.eventBus.onGeneric('rfxcom:orders:list:get', () => this.eventBus.emitGeneric('rfxcom:orders:list', this.recentOrders));
+    this.eventBus.onGeneric('rfxcom:claimed-elsewhere:list:get', () => this.emitClaimedElsewhereList());
 
     this.eventBus.onGeneric('rfxcom:devices:refresh', () => this.emitDevicesList());
 
@@ -1054,6 +1191,7 @@ export class RfxComService implements IRfxComService {
         // visible dans HA indéfiniment (même correctif que EVOO7, voir TODO.md).
         this.removeDeviceDiscovery(device);
       }
+      this.publishRegisteredDevicesList();
       this.emitDevicesList();
     });
 
@@ -1068,6 +1206,7 @@ export class RfxComService implements IRfxComService {
       }
       this.deviceManager.deleteDevice(data.uniqueId);
       this.persistDevicesConfig();
+      this.publishRegisteredDevicesList();
       this.emitDevicesList();
       this.eventBus.emitGeneric('rfxcom:device:deleted', { uniqueId: data.uniqueId });
     });
@@ -1080,6 +1219,7 @@ export class RfxComService implements IRfxComService {
       this.receiverManager.addReceiver(data.config);
       this.persistDevicesConfig();
       if (data.config.transmitToHa) this.publishReceiverDiscovery(data.config.receiverId);
+      this.publishRegisteredDevicesList();
       this.emitReceiversList();
       this.eventBus.emitGeneric('rfxcom:receiver:created', { receiver: data.config });
     });
@@ -1103,6 +1243,7 @@ export class RfxComService implements IRfxComService {
       } else if (previousTransmit) {
         this.removeReceiverDiscovery(data.receiverId, previousComponent);
       }
+      this.publishRegisteredDevicesList();
       this.emitReceiversList();
       this.eventBus.emitGeneric('rfxcom:receiver:updated', { receiver: updated });
     });
@@ -1114,6 +1255,7 @@ export class RfxComService implements IRfxComService {
       }
       this.receiverManager.removeReceiver(data.receiverId);
       this.persistDevicesConfig();
+      this.publishRegisteredDevicesList();
       this.emitReceiversList();
       this.eventBus.emitGeneric('rfxcom:receiver:deleted', { receiverId: data.receiverId });
     });
@@ -1122,6 +1264,7 @@ export class RfxComService implements IRfxComService {
       this.sceneManager.addScene(data.config);
       this.persistDevicesConfig();
       if (data.config.transmitToHa) this.publishSceneDiscovery(data.config);
+      this.publishRegisteredDevicesList();
       this.emitScenesList();
       this.eventBus.emitGeneric('rfxcom:scene:created', { scene: data.config });
     });
@@ -1141,6 +1284,7 @@ export class RfxComService implements IRfxComService {
       } else if (wasPublished) {
         this.removeSceneDiscovery(data.sceneId);
       }
+      this.publishRegisteredDevicesList();
       this.emitScenesList();
       this.eventBus.emitGeneric('rfxcom:scene:updated', { scene: updated });
     });
@@ -1152,6 +1296,7 @@ export class RfxComService implements IRfxComService {
       }
       this.sceneManager.removeScene(data.sceneId);
       this.persistDevicesConfig();
+      this.publishRegisteredDevicesList();
       this.emitScenesList();
       this.eventBus.emitGeneric('rfxcom:scene:deleted', { sceneId: data.sceneId });
     });

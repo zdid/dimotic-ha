@@ -28,7 +28,9 @@ export const arexxConfigSchema = z.object({
   // Mode 'usb'
   usbDevicePath: z.string().optional(),
 
-  // bridge_instance utilisé pour la connexion MQTT au socle (via IntegrationBridge, comme RFXCOM)
+  // bridge_instance utilisé pour la connexion MQTT au socle (via IntegrationBridge, comme RFXCOM).
+  // Ce défaut fixe n'est en pratique jamais appliqué : ArexxService.loadConfig() génère et persiste
+  // un tirage aléatoire au premier démarrage (voir fonctionnelles-supervisor_specs v2.3 §9.2).
   bridgeInstance: z.string().min(1).default('arexx_bridge_0001'),
 
   // Fichier de configuration centralisé (capteurs), relatif à la racine du projet

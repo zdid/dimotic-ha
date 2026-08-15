@@ -253,8 +253,19 @@ describe('IntegrationBridge', () => {
         essential: { name: 'Température Salon', deviceClass: 'temperature', unitOfMeasurement: '°C' },
       });
 
-      expect(mockTransportInstances[0].publishSpy).toHaveBeenCalledWith(
+      // fonctionnelles-supervisor_specs v2.3 §9.3 : bridgeInstance en node_id du topic de découverte
+      // — l'ancien topic (sans node_id) est nettoyé (payload vide) à chaque publication, pour ne
+      // pas laisser de message retenu orphelin sur une instance déjà en production.
+      expect(mockTransportInstances[0].publishSpy).toHaveBeenNthCalledWith(
+        1,
         'homeassistant/sensor/rfxsensor_0xa5b3/config',
+        '',
+        1,
+        true
+      );
+      expect(mockTransportInstances[0].publishSpy).toHaveBeenNthCalledWith(
+        2,
+        'homeassistant/sensor/rfx_bridge_0001/rfxsensor_0xa5b3/config',
         expect.stringContaining('"state_topic":"rfxcom/rfx_bridge_0001/rfxsensor_ac__0xa5b3/state"'),
         1,
         true

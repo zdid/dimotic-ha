@@ -61,16 +61,21 @@ export function generateMqttIoConfig(config: RpigpioConfig, pins: PinDefinition[
   const digitalInputs = pins.filter((p) => p.direction === 'input').map(buildPinEntry);
   const digitalOutputs = pins.filter((p) => p.direction === 'output').map(buildPinEntry);
 
+  // ⭐ fonctionnelles-supervisor_specs v2.3 §9.2 : bridgeInstance injecté en segment final des deux
+  // préfixes — sans ça, deux instances rpigpio (deux machines) partagent réellement le même
+  // topicPrefix/discoveryPrefix mqtt-io par défaut (aucune convention de bridgeInstance ici avant
+  // ce correctif, contrairement à rfxcom/evoo7/arexx qui embarquent bridgeInstance dans leurs
+  // topics via getStateTopic()/getCommandTopic() du socle).
   const doc = {
     mqtt: {
       host: config.mqtt.host,
       port: config.mqtt.port,
       user: config.mqtt.user,
       password: config.mqtt.password,
-      topic_prefix: config.mqtt.topicPrefix,
+      topic_prefix: `${config.mqtt.topicPrefix}/${config.bridgeInstance}`,
       ha_discovery: {
         enabled: true,
-        prefix: config.mqtt.discoveryPrefix,
+        prefix: `${config.mqtt.discoveryPrefix}/${config.bridgeInstance}`,
         name: 'RPI GPIO'
       }
     },

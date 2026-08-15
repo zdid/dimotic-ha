@@ -59,6 +59,21 @@ export interface PassthroughPublishRequestEvent {
   retain?: boolean;
 }
 
+/** ⭐ fonctionnelles-supervisor_specs v2.3 §9.4 : demande d'abonnement à un topic arbitraire (RFXCOM
+ *  §9.4, wildcards MQTT supportés) sur la connexion déjà ouverte du bridge. */
+export interface PassthroughSubscribeRequestEvent {
+  bridgeInstance: string;
+  topic: string;
+  qos?: 0 | 1;
+}
+
+/** Message reçu sur un topic souscrit via integration:{module}:passthrough:subscribe. */
+export interface PassthroughMessageEvent {
+  bridgeInstance: string;
+  topic: string;
+  payload: string;
+}
+
 interface ConfigSaveResult {
   success: boolean;
   error?: string;
@@ -130,6 +145,17 @@ export class IntegrationBridge {
     // broker resté up).
     this.haMqttService.onHaOnline((moduleName, bridgeInstance) => {
       this.eventBus.emitGeneric(`integration:${moduleName}:ha:online`, { bridgeInstance });
+    });
+
+    // ⭐ fonctionnelles-supervisor_specs v2.3 §9.4 : redistribue tout message reçu sur un topic
+    // passthrough souscrit — le module d'origine (celui dont c'est la connexion) filtre lui-même
+    // les topics qui l'intéressent, voir RfxComService pour l'usage réel (registered-devices).
+    this.haMqttService.onPassthroughMessage((moduleName, bridgeInstance, topic, payload) => {
+      this.eventBus.emitGeneric(`integration:${moduleName}:passthrough:message`, {
+        bridgeInstance,
+        topic,
+        payload: Buffer.isBuffer(payload) ? payload.toString() : payload
+      });
     });
 
     this.logger.info('bridge', 'IntegrationBridge initialisé');
@@ -218,6 +244,11 @@ export class IntegrationBridge {
     this.eventBus.onGeneric<PassthroughPublishRequestEvent>(`integration:${moduleName}:passthrough:publish`, (data) => {
       if (!this.mqttEnabled) return;
       this.haMqttService.publishPassthrough(moduleName, data.bridgeInstance, data.topic, data.payload, data.qos, data.retain);
+    });
+
+    this.eventBus.onGeneric<PassthroughSubscribeRequestEvent>(`integration:${moduleName}:passthrough:subscribe`, (data) => {
+      if (!this.mqttEnabled) return;
+      this.haMqttService.subscribePassthrough(moduleName, data.bridgeInstance, data.topic, data.qos);
     });
   }
 

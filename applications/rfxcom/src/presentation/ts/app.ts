@@ -56,6 +56,11 @@ interface RfxComOrderTrace {
   error?: string;
 }
 
+interface RfxComClaimedElsewhere {
+  objectId: string;
+  bridgeInstance: string;
+}
+
 let socket: any | null = null;
 // ⭐ ModuleContainer rappelle init() à chaque réaffichage depuis son cache (revisite d'un module
 // déjà chargé, voir ModuleContainer.ts) pour rebrancher les écouteurs DOM sur les nouveaux nœuds —
@@ -103,6 +108,10 @@ function setupEventListeners(): void {
     updateOrdersList(orders);
   });
 
+  socket.on('rfxcom:claimed-elsewhere:list', (claims: RfxComClaimedElsewhere[]) => {
+    updateClaimedElsewhereList(claims);
+  });
+
   socket.on('connect', () => {
     console.log('[RFXCOM UI] Connecté au serveur Socket.io');
     requestInitialStatus();
@@ -118,6 +127,7 @@ function requestInitialStatus(): void {
   socket.emit('rfxcom:status:get');
   socket.emit('rfxcom:devices:list:get');
   socket.emit('rfxcom:orders:list:get');
+  socket.emit('rfxcom:claimed-elsewhere:list:get');
 }
 
 function updateStatusDisplay(status: RfxComStatus): void {
@@ -205,6 +215,26 @@ function updateOrdersList(orders: RfxComOrderTrace[]): void {
       <span>${escapeHtml(o.receiverId)} → ${escapeHtml(o.command)}${o.value !== undefined ? ` (${o.value})` : ''}</span>
       <span class="badge ${o.success ? 'ok' : 'error'}">${o.success ? 'OK' : 'Échec'}</span>
       ${o.error ? `<span class="error-msg">${escapeHtml(o.error)}</span>` : ''}
+    </div>
+  `).join('');
+}
+
+function updateClaimedElsewhereList(claims: RfxComClaimedElsewhere[]): void {
+  const cardEl = $('claimed-elsewhere-card');
+  const listEl = $('claimed-elsewhere-list');
+  if (!listEl) return;
+
+  if (claims.length === 0) {
+    if (cardEl) cardEl.style.display = 'none';
+    return;
+  }
+
+  if (cardEl) cardEl.style.display = 'block';
+  listEl.innerHTML = claims.map((c) => `
+    <div class="order-row">
+      <span>${escapeHtml(c.objectId)}</span>
+      <span>déjà revendiqué par</span>
+      <span class="badge error">${escapeHtml(c.bridgeInstance)}</span>
     </div>
   `).join('');
 }

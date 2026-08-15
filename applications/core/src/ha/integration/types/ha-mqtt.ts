@@ -188,10 +188,15 @@ export interface IntegrationModuleStatus {
 // =============================================================================
 
 /**
- * Construit le topic de découverte HA (standard, inchangé depuis techniques-socle-ha-mqtt_specs v4.6).
+ * Construit le topic de découverte HA. `bridgeInstance` optionnel : segment `node_id` du format
+ * standard HA (`homeassistant/{component}/[node_id/]object_id/config`) — fonctionnelles-supervisor_specs
+ * v2.3 §9.3, corrige l'écrasement silencieux du message de découverte quand deux bridges publient
+ * pour le même objectId. Absent = ancien format inchangé (compat, ex: appels sans bridgeInstance).
  */
-export function getDiscoveryTopic(component: string, objectId: string): string {
-  return `homeassistant/${component}/${objectId}/config`;
+export function getDiscoveryTopic(component: string, objectId: string, bridgeInstance?: string): string {
+  return bridgeInstance
+    ? `homeassistant/${component}/${bridgeInstance}/${objectId}/config`
+    : `homeassistant/${component}/${objectId}/config`;
 }
 
 /**
@@ -248,6 +253,19 @@ export const HA_STATUS_TOPIC = 'homeassistant/status';
  */
 export function getAvailabilityTopic(component: string, objectId: string): string {
   return `homeassistant/${component}/${objectId}/availability`;
+}
+
+/**
+ * Génère un `bridgeInstance` par défaut, unique avec très forte probabilité, sans dépendre d'une
+ * identité machine (`os.hostname()` pourrait lui-même ne pas être unique) — voir
+ * fonctionnelles-supervisor_specs v2.3 §9.2. À appeler UNE SEULE FOIS, au premier démarrage d'une
+ * application quand `bridgeInstance` est absent de sa config sur disque, puis à persister
+ * immédiatement (`configProvider.savePartialConfig()`) — ne jamais rappeler à chaque démarrage,
+ * la valeur doit rester stable pour ne pas casser l'identité des entités déjà connues de HA.
+ */
+export function generateRandomBridgeInstance(appId: string): string {
+  const suffix = Math.floor(100000 + Math.random() * 900000); // 6 chiffres, 100000-999999
+  return `${appId}_bridge_${suffix}`;
 }
 
 /**

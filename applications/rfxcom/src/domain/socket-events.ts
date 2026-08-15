@@ -50,6 +50,11 @@ export const RFXCOM_SOCKET_EVENTS = {
   // TODO.md "RFXCOM : journal des ordres reçus avec résultat d'exécution").
   ORDERS_LIST: 'rfxcom:orders:list',
 
+  // --- Recouvrement RF entre instances (fonctionnelles-supervisor_specs v2.3 §9.4) : objectId
+  // publiés ici mais déjà revendiqués par une autre instance RFXCOM (rfxcom/+/registered-devices)
+  // — avertissement visible, pas une exclusion silencieuse (§9.1).
+  CLAIMED_ELSEWHERE_LIST: 'rfxcom:claimed-elsewhere:list',
+
   // --- Erreurs ---
   ERROR: 'rfxcom:error'
 } as const;
@@ -65,6 +70,7 @@ export const RFXCOM_CLIENT_EVENTS = {
   GET_RECEIVERS: 'rfxcom:receivers:list:get',
   GET_SCENES: 'rfxcom:scenes:list:get',
   GET_ORDERS: 'rfxcom:orders:list:get',
+  GET_CLAIMED_ELSEWHERE: 'rfxcom:claimed-elsewhere:list:get',
 
   // --- Devices ---
   DEVICES_REFRESH: 'rfxcom:devices:refresh',
@@ -119,5 +125,6 @@ export const RFXCOM_PERSISTENT_EVENTS: string[] = [
   RFXCOM_SOCKET_EVENTS.RECEIVERS_LIST,
   RFXCOM_SOCKET_EVENTS.SCENES_LIST,
   RFXCOM_SOCKET_EVENTS.PROTOCOLS_LIST,
-  RFXCOM_SOCKET_EVENTS.ORDERS_LIST
+  RFXCOM_SOCKET_EVENTS.ORDERS_LIST,
+  RFXCOM_SOCKET_EVENTS.CLAIMED_ELSEWHERE_LIST
 ];

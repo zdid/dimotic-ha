@@ -29,6 +29,11 @@ export interface HaMqttBrokerConfig {
 type CommandCallback = (event: ParsedIncomingCommand) => void;
 type ConnectionCallback = (moduleName: string, bridgeInstance: string, connected: boolean) => void;
 type HaOnlineCallback = (moduleName: string, bridgeInstance: string) => void;
+/** ⭐ fonctionnelles-supervisor_specs v2.3 §9.4 : réception d'un message sur un topic arbitraire
+ *  souscrit via subscribePassthrough (ex: RFXCOM, `rfxcom/+/registered-devices`) — le module
+ *  appelant reste responsable de filtrer les topics qui l'intéressent, ce callback est notifié de
+ *  TOUT message reçu sur la connexion du bridge, y compris ceux déjà traités comme commande. */
+type PassthroughMessageCallback = (moduleName: string, bridgeInstance: string, topic: string, payload: Buffer | string) => void;
 
 function bridgeKey(moduleName: string, bridgeInstance: string): string {
   return `${moduleName}:${bridgeInstance}`;
@@ -39,6 +44,7 @@ export class HaMqttIntegrationService {
   private commandCallbacks: CommandCallback[] = [];
   private connectionCallbacks: ConnectionCallback[] = [];
   private haOnlineCallbacks: HaOnlineCallback[] = [];
+  private passthroughMessageCallbacks: PassthroughMessageCallback[] = [];
 
   constructor(private readonly logger: Logger) {}
 
@@ -144,7 +150,7 @@ export class HaMqttIntegrationService {
       component,
       objectId,
     });
-    publishDiscovery(transport, component, objectId, entity);
+    publishDiscovery(transport, component, objectId, entity, 1, true, bridgeInstance);
 
     if (essential.commandEnabled) {
       subscribeCommands(transport, moduleName, bridgeInstance, deviceId);
@@ -174,7 +180,10 @@ export class HaMqttIntegrationService {
   removeDiscoveryFor(moduleName: string, bridgeInstance: string, component: string, objectId: string): void {
     const transport = this.getBridgeOrWarn(moduleName, bridgeInstance);
     if (!transport) return;
-    unpublishDiscovery(transport, component, objectId);
+    unpublishDiscovery(transport, component, objectId, 1, bridgeInstance);
+    // Nettoie aussi l'ancien format (sans node_id), au cas où l'entité aurait été publiée avant la
+    // migration vers le nouveau format de topic (§9.3) — idempotent si jamais publié ainsi.
+    unpublishDiscovery(transport, component, objectId, 1);
   }
 
   publishState(moduleName: string, bridgeInstance: string, deviceId: string, state: HaMqttStateMessage): void {
@@ -208,8 +217,24 @@ export class HaMqttIntegrationService {
     publishPassthrough(transport, topic, payload, qos, retain);
   }
 
+  /**
+   * ⭐ fonctionnelles-supervisor_specs v2.3 §9.4 : s'abonne à un topic arbitraire (support des
+   * wildcards MQTT `+`/`#`) sur la connexion déjà ouverte pour ce bridge — pas une nouvelle
+   * connexion. Les messages reçus sont redistribués via onPassthroughMessage, quel que soit leur
+   * format (pas nécessairement le pattern `.../set` des commandes).
+   */
+  subscribePassthrough(moduleName: string, bridgeInstance: string, topic: string, qos: 0 | 1 = 0): void {
+    const transport = this.getBridgeOrWarn(moduleName, bridgeInstance);
+    if (!transport) return;
+    transport.subscribe(topic, qos);
+  }
+
   onCommand(callback: CommandCallback): void {
     this.commandCallbacks.push(callback);
+  }
+
+  onPassthroughMessage(callback: PassthroughMessageCallback): void {
+    this.passthroughMessageCallbacks.push(callback);
   }
 
   onConnectionChange(callback: ConnectionCallback): void {
@@ -238,6 +263,14 @@ export class HaMqttIntegrationService {
         }
       }
       return;
+    }
+
+    for (const callback of this.passthroughMessageCallbacks) {
+      try {
+        callback(moduleName, bridgeInstance, message.topic, message.payload);
+      } catch (error) {
+        this.logger.error('ha:mqtt', `Erreur dans callback passthrough: ${error}`);
+      }
     }
 
     const parsed = parseIncomingCommand(message);

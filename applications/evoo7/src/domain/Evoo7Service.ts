@@ -11,7 +11,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
-import { createEvoo7Error, getStateTopic, getCommandTopic } from '../../../core/dist/exports';
+import { createEvoo7Error, getStateTopic, getCommandTopic, generateRandomBridgeInstance } from '../../../core/dist/exports';
 import { evoo7ConfigSchema, type Evoo7Config } from './config-schema';
 import type { Evoo7DonneesConfigFile } from './donnees-config-schema';
 import type { Evoo7DataDefinition, Evoo7Status, Evoo7ThermostatConfig } from './types';
@@ -103,9 +103,20 @@ export class Evoo7Service implements IEvoo7Service {
   /**
    * Charge la config depuis le provider et applique les valeurs par défaut du schéma (le
    * provider retourne {} si la section 'evoo7' n'existe pas encore dans config.yaml).
+   *
+   * ⭐ fonctionnelles-supervisor_specs v2.3 §9.2 : `bridgeInstance` absent de la config sur disque
+   * → tirage aléatoire généré et persisté immédiatement (pas juste un défaut Zod en mémoire).
+   * N'affecte pas une instance déjà en production (valeur déjà écrite en dur, jamais régénérée).
    */
   private loadConfig(): Evoo7Config {
-    return evoo7ConfigSchema.parse(this.configProvider.getAppConfig());
+    const raw = this.configProvider.getAppConfig() as Partial<Evoo7Config>;
+    if (!raw.bridgeInstance) {
+      const parsed = evoo7ConfigSchema.parse({ ...raw, bridgeInstance: generateRandomBridgeInstance('evoo7') });
+      this.configProvider.savePartialConfig(parsed);
+      this.logger.info('Evoo7Service', `bridgeInstance généré et persisté au premier démarrage: ${parsed.bridgeInstance}`);
+      return parsed;
+    }
+    return evoo7ConfigSchema.parse(raw);
   }
 
   // ==========================================================================
