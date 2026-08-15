@@ -201,6 +201,8 @@ export interface RfxComStatus {
   devicesCount: number;
   receiversCount: number;
   lastDiscovery: string | null;
+  /** Dernier changement de valeur, tous devices confondus (pas rattaché à un device précis). */
+  lastAnyValueChangeAt: string | null;
   scanInProgress: boolean;
   error?: string;
   hardware?: RfxComHardwareInfo;

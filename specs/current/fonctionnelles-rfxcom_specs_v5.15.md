@@ -1,5 +1,29 @@
 # Spécifications Fonctionnelles - Module RFXCOM
 
+*Version 5.15 - 15 Août 2026*
+*Ferme le gap documenté en v5.14 §20 : `lastValue`/`commandDeviceId` ajoutés à `rfxComDeviceSchema`
+(§20) — ces deux champs survivent désormais au rechargement, comme `lastOn`/`lastLevel` des
+récepteurs depuis le 07/08/2026. Fenêtre de fraîcheur de 30 minutes retirée de
+`publishDeviceStateAtStartup()` (§9.2) — demande explicite de l'utilisateur : maintenant que
+`lastValue` persiste correctement, la dernière valeur connue doit toujours être republiée au
+démarrage, quel que soit son âge, plutôt que d'être arbitrairement filtrée. Nouveau champ
+`lastAnyValueChangeAt` (§9.2ter, nouvelle) : horodatage global, tous devices confondus, du dernier
+changement de valeur — pas rattaché à un device précis, persisté, exposé dans `RfxComStatus` et sur
+le tableau de bord ; pas de logique de fraîcheur/alerte dessus pour l'instant (juste stocké et
+affiché, demande explicite).*
+
+*Version 5.14 - 15 Août 2026*
+*⚠️ Correctif de sécurité réel, incident constaté par l'utilisateur ("parfois ces commandes
+arrivent à passer et m'éteignent toute la maison") : `publishReceiverStateAtStartup()` (§9.2bis,
+nouvelle) envoyait une vraie commande RF433 `turn_off` à chaque récepteur commandable dont l'état
+n'était pas connu au démarrage — un redémarrage pouvait donc réellement éteindre des lumières
+allumées dans la maison, de façon aléatoire selon que le transceiver était déjà connecté à ce
+moment précis. Corrigé : republication strictement passive de l'état à HA, plus aucune commande
+matérielle envoyée au démarrage. §20 corrigée au passage : la ligne "lastOn/lastLevel strippés au
+chargement" était stale — en réalité déjà corrigée le 07/08/2026 (`devices-config-schema.ts`
+déclare bien ces champs depuis cette date), seule la table de limitations n'avait jamais été mise à
+jour ; le vrai gap restant (device-level `lastValue`/`commandDeviceId`) est précisé séparément.*
+
 *Version 5.13 - 15 Août 2026*
 *§12.2/§12.3 : la page application affiche désormais le statut matériel du transceiver (type de
 récepteur, firmware, protocoles activés/disponibles) — déjà récupéré en interne (§8.2, filtre
@@ -726,23 +750,65 @@ QUOI/OÙ (règle en vigueur jusqu'à v5.3 seulement).
 Dès le démarrage, tous les devices/récepteurs avec `transmitToHa: true` sont publiés — sous réserve
 du verrou d'ordonnancement décrit en §8.3.
 
-### 9.2 Aucun état "inconnu" fictif publié (⭐ nouveau v5.9)
+### 9.2 Aucun état "inconnu" fictif publié (⭐ nouveau v5.9, fenêtre de fraîcheur retirée en v5.15)
 
-**Avant ce correctif**, un device sans valeur connue au démarrage (jamais reçu de message RF433
-depuis le dernier redémarrage) recevait tout de même un état publié, avec la valeur littérale
+**Avant le correctif v5.9**, un device sans valeur connue au démarrage (jamais reçu de message
+RF433 depuis le dernier redémarrage) recevait tout de même un état publié, avec la valeur littérale
 `"unknown"` — une entité HA affichant "Inconnu" en permanence tant qu'aucun message réel n'était
 reçu, y compris pour des capteurs qui n'émettent que rarement.
 
-**Comportement actuel** : un device n'est publié au démarrage que si une valeur **fraîche** est
-disponible — `lastSeen` de moins de **30 minutes** (`LAST_VALUE_MAX_AGE_MS`). Sinon, l'état est
-simplement **omis** de la publication initiale ; HA affichera l'entité comme "Indisponible" (état
-MQTT natif, pas une valeur fictive) jusqu'à la première réception réelle.
+**Comportement v5.9 à v5.14** : un device n'était publié au démarrage que si une valeur **fraîche**
+était disponible — `lastSeen` de moins de **30 minutes** (`LAST_VALUE_MAX_AGE_MS`). En pratique
+cette fenêtre ne se déclenchait jamais : `lastValue` n'était pas déclaré dans `rfxComDeviceSchema`
+et donc toujours perdu au rechargement (voir §20), rendant la condition de fraîcheur systématiquement
+fausse quel que soit son réglage.
 
-> ⚠️ **Limitation connue et documentée** (voir aussi §20) : la fenêtre de fraîcheur de 30 minutes
-> ne peut en pratique **jamais se déclencher côté device physique (`lastValue`)**, car ce champ
-> n'est actuellement jamais relu au redémarrage — voir §20 "Persistance silencieusement perdue au
-> redémarrage". Elle reste pleinement fonctionnelle et documentée ici pour la logique elle-même,
-> indépendamment de ce défaut de persistance.
+**Corrigé (v5.15, 15/08/2026)** : `lastValue` déclaré dans `rfxComDeviceSchema` (§20) — survit
+désormais au rechargement. Une fois ce vrai défaut corrigé, la fenêtre de 30 minutes n'avait plus de
+raison d'être (demande explicite de l'utilisateur) — **retirée** : un device est désormais publié au
+démarrage dès qu'une valeur est connue, quel que soit son âge. Un device n'ayant **jamais** eu de
+valeur connue (`lastValue` toujours absent) reste omis de la publication initiale ; HA affiche
+l'entité comme "Indisponible" (état MQTT natif) jusqu'à la première réception réelle.
+
+### 9.2bis État au démarrage des récepteurs commandables (light/switch) — ⭐ corrigé v5.14
+
+**Avant ce correctif**, `publishReceiverStateAtStartup()` distinguait deux cas pour un récepteur
+`light`/`switch` : si `lastOn` était connu, republication passive de l'état ; **sinon, envoi d'une
+vraie commande `turn_off` au matériel** ("pour initialiser l'état", comportement présent depuis
+l'origine de l'app). Un device/récepteur sans `lastOn` connu — par exemple parce qu'il n'a jamais
+reçu de commande individuelle depuis l'import de l'inventaire reconstitué (voir §22, historique de
+la perte de la machine d'origine) — déclenchait donc une vraie transmission RF433 OFF à chaque
+redémarrage.
+
+**Incident réel constaté par l'utilisateur** : selon que le transceiver était déjà connecté ou non
+au moment précis où cette rafale de commandes partait (course avec `protocolsPushGate`, voir §8.3),
+les commandes échouaient silencieusement (transceiver pas encore prêt, sans effet) ou **réussissaient
+réellement** — éteignant potentiellement toute une maison à chaque redémarrage du service, de façon
+imprévisible.
+
+**Corrigé (15/08/2026)** : `publishReceiverStateAtStartup()` republie désormais **toujours** l'état
+courant à HA de façon strictement passive (`publishReceiverState()`), qu'il soit connu ou non —
+plus aucune commande matérielle envoyée au démarrage, quel que soit l'état de `lastOn`. Si l'état
+est inconnu, `getState()` retombe sur son défaut interne (`this.on = config.lastOn ?? false`, voir
+`ReceiverLight`/`ReceiverSwitch`) : HA affiche cette valeur par défaut sans qu'elle soit jamais
+transmise physiquement au récepteur — au pire un affichage optimiste incorrect dans HA (le récepteur
+pourrait être réellement allumé), jamais une action physique non désirée.
+
+### 9.2ter Horodatage global du dernier changement de valeur (⭐ nouveau v5.15)
+
+Nouveau champ `lastAnyValueChangeAt` (niveau fichier, `config-rfxcom-devices-v1.0.yaml` — pas par
+device) : horodatage ISO8601 mis à jour à **chaque** changement de valeur d'**un** device, quel
+qu'il soit — distinct de `lastSeen`/`lastValue` (par device). Demande utilisateur explicite : un
+indicateur global, "quand ce module a-t-il vu passer une valeur pour la dernière fois", sans
+rattachement à un capteur précis (un capteur donné pouvant légitimement n'émettre que rarement sans
+que ça signifie un problème).
+
+Mis à jour dans `publishDeviceState()`, persisté immédiatement (même appel que `lastValue`),
+exposé dans `RfxComStatus.lastAnyValueChangeAt` et affiché sur le tableau de bord ("Dernier
+changement (tous devices)"). **Volontairement sans logique de fraîcheur/alerte pour l'instant** —
+juste stocké et affiché (demande explicite de l'utilisateur, "on supprime le contrôle par rapport à
+la date" en réponse à la question de son usage prévu) ; pourrait servir plus tard d'indicateur de
+vie du récepteur RF (détecter un transceiver qui ne capte plus rien), non implémenté à ce stade.
 
 ### 9.3 Auto-détermination du QUOI
 ```typescript
@@ -1302,7 +1368,8 @@ sans action corrective engagée à ce jour (voir Roadmap §21).
 
 | Limite | Impact | Solution / Statut |
 |--------|--------|----------|
-| **`lastOn`/`lastLevel`/`lastValue`/`commandDeviceId` écrits en YAML mais strippés au chargement** (schéma Zod ne les déclare pas, `z.object()` en mode `strip` par défaut) | Cause racine de la rafale de commandes OFF envoyée à **tous** les récepteurs à **chaque** redémarrage (l'état "dernier connu" est toujours relu comme `undefined`) ; la fenêtre de fraîcheur de 30 min (§9.2) ne peut jamais se déclencher pour `lastValue` en pratique | Non corrigé à ce jour — nécessiterait d'ajouter ces champs au schéma Zod des devices/récepteurs |
+| ~~`lastValue`/`commandDeviceId` (devices physiques) strippés au chargement~~ | ~~Fenêtre de fraîcheur de 30 min jamais déclenchée, capteurs "Indisponible" après chaque redémarrage~~ | **Corrigé le 15/08/2026** (v5.15) — `rfxComDeviceSchema` déclare désormais les deux champs. La fenêtre de fraîcheur elle-même a été retirée au passage (§9.2, demande utilisateur) : la dernière valeur connue est toujours republiée, quel que soit son âge |
+| ~~`lastOn`/`lastLevel` (récepteurs) strippés au chargement~~ | ~~Rafale de commandes OFF à chaque redémarrage~~ | **Corrigé le 07/08/2026** (`receiverSwitchSchema`/`receiverLightSchema` déclarent ces champs) — cette ligne était restée stale dans le tableau jusqu'au 15/08/2026 malgré le correctif déjà en place. Le risque résiduel (récepteur n'ayant jamais eu de `lastOn` connu) est traité séparément — voir §9.2bis (v5.14) : aucune commande matérielle n'est plus jamais envoyée au démarrage |
 | `autoDiscovery` (config.yaml) déclaré mais jamais lu par le code | Le champ n'a aucun effet, quelle que soit sa valeur ; la détection RF433 est en réalité toujours active | Non corrigé — champ à retirer ou à réellement implémenter |
 | `rfxcom:scan:start`/`:complete`/`:failed` déclarés côté UI/Socket.io sans gestionnaire serveur | Le bouton "Scanner RF433" de la toolbar (§12.2) ne produit aucun effet observable côté serveur | Non corrigé — détection RF433 purement passive/continue en pratique |
 | QUOI auto-déterminé | Peut ne pas correspondre au cas réel | Modifiable via l'UI/fichier YAML |
@@ -1388,6 +1455,8 @@ Capacités Request/Reply envisagées : `rfxcom:devices:list`, `rfxcom:device:get
 | 5.11 | 2026-08-10 | Claude | **Second déclencheur de republication de découverte** (§17.1) — `integration:rfxcom:ha:online`, alimenté par le birth message MQTT natif de HA, en plus du démarrage/de la reconnexion du bridge propre à RFXCOM. Voir `techniques-socle-ha-mqtt_specs` §8.5.4bis pour le mécanisme complet. Ancienne version v5.10 archivée. |
 | 5.12 | 2026-08-10 | Claude | **Trois correctifs suite à une anomalie constatée en direct** (transceiver débranché, commande "réussie" sans transmission RF) : reconnexion automatique du transceiver (§8.6, boucle 5s), publication optimiste d'état corrigée (§8.7, vérification `isConnected()` avant tout envoi), journal des ordres reçus avec résultat d'exécution réel (§8.8, `rfxcom:orders:list`, 100 max). Ancienne version v5.11 archivée. |
 | 5.13 | 2026-08-15 | Claude | **Statut matériel affiché sur la page application** (§12.2/§12.3, nouvelle carte "Matériel du Transceiver") : type de récepteur, firmware, protocoles activés/disponibles — déjà récupéré en interne (§8.2) mais jamais exposé à l'UI. Vérifié en conditions réelles sur transceiver physique (RFXtrx433 XL, firmware ProXL 2 v1047). Ancienne version v5.12 archivée. |
+| 5.14 | 2026-08-15 | Claude | **⚠️ Correctif de sécurité réel** (§9.2bis, nouvelle) : `publishReceiverStateAtStartup()` envoyait une vraie commande RF433 `turn_off` à tout récepteur commandable sans `lastOn` connu au démarrage — incident constaté par l'utilisateur (maison éteinte de façon imprévisible à certains redémarrages, selon l'état de connexion du transceiver à ce moment précis). Corrigé : republication strictement passive de l'état, plus aucune commande matérielle au démarrage. §20 corrigée au passage (la ligne "lastOn/lastLevel strippés" était stale — déjà corrigée le 07/08/2026, jamais reflété dans le tableau ; le vrai gap restant, `lastValue`/`commandDeviceId` niveau devices, reste documenté séparément). Ancienne version v5.13 archivée. |
+| 5.15 | 2026-08-15 | Claude | Ferme le gap restant de v5.14 §20 : `lastValue`/`commandDeviceId` ajoutés à `rfxComDeviceSchema` — survivent désormais au rechargement. Fenêtre de fraîcheur de 30 min retirée de `publishDeviceStateAtStartup()` (§9.2, demande utilisateur) — devenue sans objet une fois `lastValue` persisté correctement, la dernière valeur connue est toujours republiée au démarrage. Nouveau `lastAnyValueChangeAt` (§9.2ter) : horodatage global (tous devices confondus, pas par device), persisté, exposé dans `RfxComStatus` et sur le tableau de bord — demande utilisateur explicite, sans logique de fraîcheur/alerte dessus pour l'instant. Ancienne version v5.14 archivée. |
 
 ---
 

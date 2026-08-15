@@ -28,6 +28,7 @@ interface RfxComStatus {
   devicesCount: number;
   receiversCount: number;
   lastDiscovery: string | null;
+  lastAnyValueChangeAt: string | null;
   scanInProgress: boolean;
   error?: string;
   hardware?: RfxComHardwareInfo;
@@ -135,6 +136,7 @@ function updateStatusDisplay(status: RfxComStatus): void {
   const devicesCountEl = $('devices-count');
   const receiversCountEl = $('receivers-count');
   const lastDiscoveryEl = $('last-discovery');
+  const lastAnyValueChangeEl = $('last-any-value-change');
 
   if (badgeEl) {
     badgeEl.textContent = status.connected ? 'Connecté' : 'Déconnecté';
@@ -145,6 +147,11 @@ function updateStatusDisplay(status: RfxComStatus): void {
   if (lastDiscoveryEl) {
     lastDiscoveryEl.textContent = status.lastDiscovery
       ? new Date(status.lastDiscovery).toLocaleString('fr-FR')
+      : '--';
+  }
+  if (lastAnyValueChangeEl) {
+    lastAnyValueChangeEl.textContent = status.lastAnyValueChangeAt
+      ? new Date(status.lastAnyValueChangeAt).toLocaleString('fr-FR')
       : '--';
   }
 

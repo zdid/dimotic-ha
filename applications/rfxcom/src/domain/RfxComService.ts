@@ -37,8 +37,6 @@ export interface IRfxComService {
 }
 
 export class RfxComService implements IRfxComService {
-  /** Au-delà de cet âge, une dernière valeur persistée n'est plus republiée au démarrage (§ voir publishDeviceStateAtStartup). */
-  private static readonly LAST_VALUE_MAX_AGE_MS = 30 * 60 * 1000;
   /** Filet de sécurité de protocolsPushGate (voir le champ) — mesuré en conditions réelles :
    *  connexion série + réception du statut matériel prend ~6 à 6,5s sur cette machine. 20s laisse
    *  une marge large plutôt que de risquer de gagner la course contre la séquence normale (déjà
@@ -598,8 +596,11 @@ export class RfxComService implements IRfxComService {
     const stateValue = this.extractStateValue(device.subType, message);
 
     // Persisté pour être rejoué au démarrage/reconnexion (publishDeviceStateAtStartup), sans
-    // attendre une nouvelle réception RF433 — voir aussi lastSeen ci-dessous (fraîcheur).
+    // attendre une nouvelle réception RF433.
     device.lastValue = stateValue;
+    // ⭐ Horodatage global (15/08/2026, demande utilisateur) : dernier changement de valeur, tous
+    // devices confondus — pas rattaché à un device précis, voir devices-config-schema.ts.
+    this.devicesConfig.lastAnyValueChangeAt = new Date().toISOString();
     this.persistDevicesConfig();
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
@@ -617,15 +618,16 @@ export class RfxComService implements IRfxComService {
 
   /**
    * Republie la dernière valeur connue (persistée) d'un device brut (sensor ET binary_sensor) au
-   * démarrage/reconnexion, sans attendre une nouvelle réception RF433. Si cette valeur date de
-   * plus de 30 minutes (ou est absente), ne publie rien plutôt qu'un état "unknown" factice —
-   * l'entité reste dans l'état "unknown" natif de HA (silence radio, discovery+attributs déjà
-   * publiés) jusqu'à la prochaine réception RF433 réelle.
+   * démarrage/reconnexion, sans attendre une nouvelle réception RF433 — sans condition de fraîcheur
+   * (⭐ retirée le 15/08/2026, demande explicite de l'utilisateur : maintenant que `lastValue`
+   * survit correctement au rechargement — voir devices-config-schema.ts —, filtrer sur une fenêtre
+   * de 30 min n'a plus de raison d'être, la dernière valeur connue doit toujours être republiée,
+   * quel que soit son âge). Si aucune valeur n'a jamais été connue (`lastValue` absent), ne publie
+   * rien — l'entité reste dans l'état "unknown" natif de HA (discovery+attributs déjà publiés)
+   * jusqu'à la prochaine réception RF433 réelle.
    */
   private publishDeviceStateAtStartup(device: RfxComDeviceInfo): void {
-    const ageMs = device.lastSeen ? Date.now() - new Date(device.lastSeen).getTime() : Infinity;
-    const isFresh = device.lastValue !== undefined && ageMs <= RfxComService.LAST_VALUE_MAX_AGE_MS;
-    if (!isFresh) return;
+    if (device.lastValue === undefined) return;
 
     const deviceId = buildStateDeviceId(device.protocole, device.subType, device.sensorId, device.unitCode);
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
@@ -698,26 +700,26 @@ export class RfxComService implements IRfxComService {
   }
 
   /**
-   * Au démarrage/reconnexion : republie l'état persisté d'un récepteur commandable (light/switch)
-   * s'il en existe un, sinon envoie une commande OFF réelle — qui aura pour effet, via le
-   * mécanisme d'écho RF433 déjà utilisé pour toute commande HA (voir applyReceiverCommand), de
-   * publier l'état ET de le persister pour la prochaine fois. Scènes et volets non concernés :
+   * Au démarrage/reconnexion : republie l'état d'un récepteur commandable (light/switch) à HA,
+   * de façon strictement passive — ne commande JAMAIS le matériel. Scènes et volets non concernés :
    * pas de notion d'état "off" déterministe pour un volet, et une scène n'a pas d'état propre.
+   *
+   * ⚠️ Corrigé (15/08/2026) — incident réel constaté par l'utilisateur : quand `lastOn` était
+   * inconnu (jamais persisté, ex: une bonne partie de l'inventaire reconstitué après la perte de
+   * la machine d'origine — voir TODO.md — n'a jamais reçu de commande individuelle depuis),
+   * l'ancien code envoyait une vraie commande `turn_off` RF433 "pour initialiser l'état" — un
+   * redémarrage pouvait ainsi réellement éteindre des lumières allumées dans la maison, de façon
+   * aléatoire selon que le transceiver était déjà connecté ou non à ce moment précis (constaté :
+   * "parfois ces commandes arrivent à passer et m'éteignent toute la maison"). `receiver.getState()`
+   * retombe déjà sur un défaut interne (`this.on = config.lastOn ?? false`, voir ReceiverLight/
+   * ReceiverSwitch) si l'état est inconnu — HA affiche cette valeur par défaut sans qu'elle soit
+   * jamais transmise physiquement au récepteur.
    */
   private publishReceiverStateAtStartup(receiver: ReturnType<ReceiverManager['getReceiver']>): void {
     if (!receiver) return;
     if (receiver.config.type !== 'light' && receiver.config.type !== 'switch') return;
 
-    if (receiver.config.lastOn !== undefined) {
-      this.publishReceiverState(receiver);
-      return;
-    }
-
-    const result = this.applyReceiverCommand(receiver.config.receiverId, 'turn_off');
-    if (!result.success) {
-      this.logger.warn('RfxComService',
-        `Échec de l'envoi OFF initial pour ${receiver.config.receiverId} (aucun état connu): ${result.error}`);
-    }
+    this.publishReceiverState(receiver);
   }
 
   /**
@@ -1027,6 +1029,7 @@ export class RfxComService implements IRfxComService {
       devicesCount: this.deviceManager.getConfiguredDevices().length,
       receiversCount: this.receiverManager.getAllReceivers().length,
       lastDiscovery: this.lastDiscovery,
+      lastAnyValueChangeAt: this.devicesConfig.lastAnyValueChangeAt ?? null,
       scanInProgress: false,
       hardware: hardwareStatus
         ? {
@@ -1336,7 +1339,8 @@ export class RfxComService implements IRfxComService {
     }
     const result = this.configFileManager.save({
       rfxcom_devices: this.deviceManager.getConfiguredDevicesRecord(),
-      rfxcom_receivers: receivers
+      rfxcom_receivers: receivers,
+      lastAnyValueChangeAt: this.devicesConfig.lastAnyValueChangeAt
     });
     if (!result.success) {
       this.logger.error('RfxComService', `Échec de sauvegarde de la configuration RFXCOM: ${result.error}`);

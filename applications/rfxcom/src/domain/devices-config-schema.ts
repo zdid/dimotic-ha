@@ -32,7 +32,15 @@ export const rfxComDeviceSchema = z.object({
   defaultQuoi: z.string().min(1),
   transmitToHa: z.boolean().default(false),
   unitCode: z.number().int().optional(),
-  lastSeen: z.string().optional()
+  lastSeen: z.string().optional(),
+  // ⭐ Corrigé (15/08/2026) : ces deux champs étaient écrits en YAML par RfxComService mais jamais
+  // déclarés ici — strippés au rechargement (z.object() en mode `strip` par défaut), voir
+  // fonctionnelles-rfxcom_specs v5.14 §20. Effet concret : `lastValue` toujours undefined après un
+  // redémarrage, empêchant toute republication de la dernière valeur connue à HA (capteurs affichés
+  // "Indisponible" jusqu'à la prochaine trame RF433 réelle). `commandDeviceId` compensé jusqu'ici
+  // par resolveCommandDeviceId() (reconstruction déterministe), donc sans impact fonctionnel connu.
+  commandDeviceId: z.string().optional(),
+  lastValue: z.union([z.string(), z.number()]).optional()
 });
 
 // ============================================================================
@@ -119,7 +127,12 @@ export const receiverConfigSchema = z.discriminatedUnion('type', [
 export const rfxComDevicesConfigSchema = z
   .object({
     rfxcom_devices: z.record(rfxComDeviceSchema).default({}),
-    rfxcom_receivers: z.record(receiverConfigSchema).default({})
+    rfxcom_receivers: z.record(receiverConfigSchema).default({}),
+    // ⭐ Nouveau (15/08/2026, demande utilisateur) : horodatage global — dernier changement de
+    // valeur, tous devices confondus, sans rattachement à un device précis (distinct de
+    // `lastSeen`/`lastValue`, qui restent par device). Persisté, pas de logique de fraîcheur
+    // dessus pour l'instant (juste stocké et exposé, voir RfxComService.getStatus()).
+    lastAnyValueChangeAt: z.string().optional()
   })
   .refine(
     (config) => {
