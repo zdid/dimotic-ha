@@ -1,7 +1,7 @@
 # Spécifications Fonctionnelles — Application ARBREOUQUOI
 
-**Version :** 1.3  
-**Date :** 9 Août 2026  
+**Version :** 1.4  
+**Date :** 15 Août 2026  
 **Auteur :** Mistral Vibe / Claude  
 **Statut :** En développement  
 **Type :** Application standalone  
@@ -405,11 +405,14 @@ graph TD
 - Cliquer sur un type filtre l'arbre pour n'afficher que ce type
 
 > **⭐ v1.3** : **Légende OÙ affichée au-dessus de la Légende QUOI** (demande utilisateur, nombre de
-> niveaux OÙ fixe — 4 — contrairement au nombre de types QUOI qui varie). **Types QUOI sans icône
-> dédiée** (repli `❓` dans `getQuoiIcon()`) : le libellé du QUOI est désormais affiché à côté de
-> l'icône, pour rester identifiable sans dépendre du seul tooltip. **ID technique de l'entité**
-> (ex: `binary_sensor.chambre_bouton_...`) retiré de l'affichage sous chaque entité dans la liste
-> (n'apportait rien d'utile en usage courant, `showEntityIds` supprimé).
+> niveaux OÙ fixe — 4 — contrairement au nombre de types QUOI qui varie). **ID technique de
+> l'entité** (ex: `binary_sensor.chambre_bouton_...`) retiré de l'affichage sous chaque entité dans
+> la liste (n'apportait rien d'utile en usage courant, `showEntityIds` supprimé).
+>
+> **⭐ v1.4 (15/08/2026)** : **libellé du QUOI toujours affiché à côté de l'icône**, y compris
+> quand l'icône est reconnue — la v1.3 ne l'affichait qu'en repli pour les types sans icône dédiée
+> (`❓` dans `getQuoiIcon()`), contrairement à la demande initiale du 08/08/2026 qui voulait le
+> libellé visible dans tous les cas, pas seulement en dépannage.
 
 ---
 

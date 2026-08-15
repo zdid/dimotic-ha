@@ -1,5 +1,10 @@
 # Spécifications Fonctionnelles - Module HAPLAN
 
+*Version 1.3 - 15 Août 2026*
+*Met à jour la v1.2 : nouvelle §8.10 "Écran mural physique (ESP32-S3)" — veille du rétroéclairage
+après 30s d'inactivité tactile (rallumé au premier tap) et retrait du texte des coordonnées x/y
+(le marqueur "X" rouge reste, en permanence).*
+
 *Version 1.2 - 13 Août 2026*
 *Met à jour la v1.1 : bouton "Déployer sur l'écran" (§3.6, §8.9, §13) qui envoie le plan affiché
 à la nouvelle application `applications/espdisplay` (voir
@@ -21,6 +26,7 @@ l'EventBus générique (`emitGeneric`/`onGeneric`, même pattern que
 7. [Accès Externe et Page Dédiée](#7-accès-externe-et-page-dédiée)
 8. [Frontend — Bootstrap et Composants](#8-frontend--bootstrap-et-composants)
     - 8.9 [Bouton de déploiement écran (v1.2)](#89-bouton-de-déploiement-écran-v12)
+    - 8.10 [Écran mural physique (ESP32-S3, v1.3)](#810-écran-mural-physique-esp32-s3-v13)
 9. [Modèle d'Objets HA (icônes du plan)](#9-modèle-dobjets-ha-icônes-du-plan)
 10. [Fenêtres Contextuelles (popups de contrôle)](#10-fenêtres-contextuelles-popups-de-contrôle)
 11. [Nom d'Entité Dérivé de la Taxonomie](#11-nom-dentité-dérivé-de-la-taxonomie)
@@ -426,6 +432,27 @@ Contrairement aux autres actions du tableau de bord, **aucune confirmation nativ
 (à la différence de la suppression de plan) — déploiement non destructif pour les données HAPLAN
 elles-mêmes (il modifie un écran physique distant, pas la configuration des plans).
 
+### 8.10 Écran mural physique (ESP32-S3, v1.3)
+
+Le firmware déployé par le bouton ci-dessus (`applications/haplan/tools/esphome/haplan-display.yaml`,
+propriété de HAPLAN — voir `fonctionnelles-espdisplay_specs` §4.1) affiche les plans sur un écran
+tactile mural (Sunton ESP32-8048S070C, ESP32-S3, tactile capacitif GT911). Détail matériel complet
+en mémoire de session (`project_haplan_esphome_s3_display`), pas dupliqué ici — cette section ne
+couvre que le comportement fonctionnel pertinent pour la maintenance.
+
+**Veille du rétroéclairage** (demande utilisateur 14/08/2026, reproduit le comportement d'un écran
+précédent) : rétroéclairage éteint après 30s d'inactivité tactile (`lvgl: on_idle:`), rallumé au
+premier tap (`touchscreen: on_touch: - light.turn_on: backlight`, en tête de liste des actions). Ce
+n'est **pas** une veille ESP réelle — LVGL, le WiFi et les états HA continuent de tourner et de se
+mettre à jour en arrière-plan, seul le rétroéclairage physique s'éteint. Point accepté par
+l'utilisateur : le tout premier tap qui réveille l'écran peut aussi déclencher l'icône sous le
+doigt (LVGL ne distingue pas réveil et clic) — pas de logique de suppression du premier tap.
+
+**Marqueur tactile permanent** : un marqueur "X" rouge reste affiché en permanence à l'endroit du
+dernier tap (décision utilisateur explicite, pas temporaire) — aide à diagnostiquer un tap "raté"
+à côté d'une icône de 24px. Le texte des coordonnées x/y qui l'accompagnait a été retiré le
+14/08/2026 (prévu depuis la mise en place initiale, "une fois l'appli au point").
+
 ---
 
 ## 9. Modèle d'Objets HA (icônes du plan)
@@ -730,6 +757,7 @@ Données runtime : `data/haplan/config-haplan-floorplans-v1.0.yaml`, `data/hapla
 ### 17.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.3 | 2026-08-15 | Claude | **Écran mural physique (ESP32-S3)** (§8.10, nouvelle) : veille du rétroéclairage après 30s d'inactivité tactile (rallumé au premier tap), retrait du texte des coordonnées x/y (le marqueur "X" rouge reste, décision utilisateur permanente). |
 | 1.2 | 2026-08-13 | Claude | Bouton "Déployer sur l'écran" (§3.6, §8.9) : premier exemple de communication inter-applications initiée par HAPLAN, vers la nouvelle application `applications/espdisplay` (`espdisplay:deploy-floorplan`/`espdisplay:deploy-result` sur l'EventBus générique, même pattern que `integration:bridge:register`). 3 nouveaux événements Socket.io (§13), 2 nouveaux codes d'erreur (§3.5). |
 | 1.1 | 2026-08-06 | Claude | Échelle icônes/textes réglable par l'utilisateur (§12.2, `--plan-scale`, curseur 60-120 %, mémorisé par écran via `localStorage`) et navigation circulaire par flèches entre plans (§12.1), tous deux ajoutés au dashboard depuis la v1.0. Affichage d'état simplifié pour VMC/chauffe-eau/radiateur (§9.3) : libellé ON/OFF retiré (au lieu d'être corrigé, voir bug #3 révisé en §15.3), état désormais lu uniquement à la couleur de l'icône. |
 | 1.0 | 2026-08-03 | Claude | Première spécification formelle, écrite a posteriori (application opérationnelle depuis fin juillet 2026 sans documentation dédiée). Couvre l'architecture, le backend (`HaplanService`), la persistance des plans/positions, l'upload (exception REST), l'arbre de taxonomie, l'accès externe/page dédiée, le frontend (bootstrap, `FloorPlan`, glisser-déposer), le modèle d'objets HA, les fenêtres contextuelles, le nom d'entité dérivé de la taxonomie, le menu escamotable, Socket.io, la configuration, et une liste consolidée de bugs fonctionnels et de code mort identifiés en lisant le code réel. |

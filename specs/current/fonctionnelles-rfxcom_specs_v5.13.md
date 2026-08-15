@@ -1,5 +1,10 @@
 # Spécifications Fonctionnelles - Module RFXCOM
 
+*Version 5.13 - 15 Août 2026*
+*§12.2/§12.3 : la page application affiche désormais le statut matériel du transceiver (type de
+récepteur, firmware, protocoles activés/disponibles) — déjà récupéré en interne (§8.2, filtre
+matériel des protocoles) mais jamais exposé à l'UI jusqu'ici.*
+
 *Version 5.12 - 10 Août 2026*
 *§8.6/§8.7/§8.8 : reconnexion automatique du transceiver (boucle 5s), correction de la publication
 optimiste d'état sur transceiver déconnecté, journal des ordres reçus avec résultat d'exécution
@@ -865,6 +870,11 @@ Ordre réel au démarrage :
 - **Appairages intégrés aux Récepteurs** (pas d'onglet séparé)
 - **Indicateur de connexion RFX433** : badge dans l'en-tête (🟢 Connecté / 🔴 Déconnecté), mis à
   jour dès réception de `rfxcom:status`.
+- **Carte "Matériel du Transceiver"** (v5.13, 14/08/2026) : type de récepteur, firmware,
+  protocoles activés/disponibles — déjà récupérés en interne depuis l'événement `status` de la lib
+  `rfxcom` (`RfxComTransceiver.onHardwareStatus`, utilisé jusque-là uniquement pour le filtre
+  matériel des protocoles, §8.2) mais jamais exposés à l'UI avant cette version. Masquée tant
+  qu'aucun statut matériel n'a encore été reçu (ex: transceiver jamais connecté).
 - **Trois formulaires en fenêtre modale** (Devices, Récepteurs, Scènes) — pas de formulaire intégré
   à la page ; pas de bouton "Sauvegarder" global.
 
@@ -904,7 +914,9 @@ Ordre réel au démarrage :
 
 **Server → Client :**
 ```typescript
-'rfxcom:status': { connected, devicesCount, receiversCount, lastDiscovery }
+'rfxcom:status': { connected, devicesCount, receiversCount, lastDiscovery, scanInProgress, error?,
+                    hardware?: { receiverType, firmwareType, firmwareVersion, enabledProtocols, availableProtocols } }
+                  // hardware absent tant qu'aucun statut matériel n'a été reçu (v5.13, 14/08/2026)
 'rfxcom:devices:list': { devices: RfxComDeviceInfo[] }
 'rfxcom:receivers:list': { receivers: ReceiverConfig[] }
 'rfxcom:scenes:list': { scenes: ReceiverSceneConfig[] }
@@ -1375,6 +1387,7 @@ Capacités Request/Reply envisagées : `rfxcom:devices:list`, `rfxcom:device:get
 | 5.10 | 2026-08-09 | Claude | `essential.name` passe à `null` partout (5 endroits, §5.5) — corrige un doublon de nom réel ("Lumière lumière"), voir `techniques-socle-ha-mqtt_specs` §8.5.4 pour `has_entity_name`. |
 | 5.11 | 2026-08-10 | Claude | **Second déclencheur de republication de découverte** (§17.1) — `integration:rfxcom:ha:online`, alimenté par le birth message MQTT natif de HA, en plus du démarrage/de la reconnexion du bridge propre à RFXCOM. Voir `techniques-socle-ha-mqtt_specs` §8.5.4bis pour le mécanisme complet. Ancienne version v5.10 archivée. |
 | 5.12 | 2026-08-10 | Claude | **Trois correctifs suite à une anomalie constatée en direct** (transceiver débranché, commande "réussie" sans transmission RF) : reconnexion automatique du transceiver (§8.6, boucle 5s), publication optimiste d'état corrigée (§8.7, vérification `isConnected()` avant tout envoi), journal des ordres reçus avec résultat d'exécution réel (§8.8, `rfxcom:orders:list`, 100 max). Ancienne version v5.11 archivée. |
+| 5.13 | 2026-08-15 | Claude | **Statut matériel affiché sur la page application** (§12.2/§12.3, nouvelle carte "Matériel du Transceiver") : type de récepteur, firmware, protocoles activés/disponibles — déjà récupéré en interne (§8.2) mais jamais exposé à l'UI. Vérifié en conditions réelles sur transceiver physique (RFXtrx433 XL, firmware ProXL 2 v1047). Ancienne version v5.12 archivée. |
 
 ---
 

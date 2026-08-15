@@ -1,10 +1,10 @@
 # Spécifications Fonctionnelles - Module ESPDISPLAY
 
-*Version 1.0 - 13 Août 2026*
-*Première spécification, écrite en même temps que le code — application créée et testée en
-conditions réelles (compilation ESPHome effective via Docker, déploiement OTA sur un écran ESP32-S3
-physique) au cours de la session du 13/08/2026, dans la foulée du travail sur l'écran mural HAPLAN
-(voir `fonctionnelles-haplan_specs_v1.2.md` §3.6/§8.9).*
+*Version 1.1 - 15 Août 2026*
+*Met à jour la v1.0 : exécution à distance par SSH (§6.3) — nécessaire depuis que le bouton HAPLAN
+"Déployer sur l'écran" est utilisé en production sur `ha2`, qui n'a ni python3 ni le conteneur
+`esphome` (Pi4, RAM insuffisante, voir §6.2 déjà existant). Gagne aussi une configuration UI (§5.2)
+et une entrée de menu, absentes jusque-là.*
 
 ---
 
@@ -15,6 +15,7 @@ physique) au cours de la session du 13/08/2026, dans la foulée du travail sur l
 4. [Pipeline Python](#4-pipeline-python)
 5. [Configuration](#5-configuration)
 6. [Choix d'Infrastructure Docker](#6-choix-dinfrastructure-docker)
+    - 6.3 [Exécution distante par SSH (v1.1)](#63-exécution-distante-par-ssh-v11--bug-de-production-corrigé-le-14082026)
 7. [Limites et Contraintes Connues](#7-limites-et-contraintes-connues)
 8. [Arborescence des Programmes](#8-arborescence-des-programmes)
 9. [Annexes](#9-annexes)
@@ -183,11 +184,18 @@ compilé qui ne correspond à aucun appareil apparié.
 | `esphomeConfigDir` | string | `/docker/esphome/config` | Répertoire monté dans ce conteneur |
 | `pipelineScriptPath` | string | `''` | Vide = résolu vers `applications/haplan/tools/generate_esphome_floorplan.py` (relatif à `PROJECT_ROOT`) |
 | `pythonBin` | string | `python3` | Doit avoir PyYAML + Pillow installés (dépendances du script, hors runtime Node) |
+| `remote.host` | string | `''` (v1.1) | Vide = exécution locale ; sinon délégation SSH, voir §6.3 |
+| `remote.sshUser` | string | `didier` (v1.1) | |
+| `remote.sshKeyPath` | string | `''` (v1.1) | Chemin de la clé privée dédiée, monté en volume dans le conteneur (voir §6.3) |
 
-Aucun formulaire générique dédié (`configurable: false`) — ces valeurs par défaut couvrent
-l'installation actuelle (une seule machine de développement hébergeant le conteneur `esphome`, voir
-§6.2) ; à revoir si un jour plusieurs machines hébergent des conteneurs ESPHome distincts pour des
-appareils différents.
+### 5.2 Configuration UI (v1.1)
+
+`configurable: true`, `configUi: ESPDISPLAY_UI_METADATA` — menu "Paramètres Techniques > Écrans
+ESP" (absent en v1.0). Deux groupes de champs : "Conteneur ESPHome" (les 4 premiers champs du
+tableau ci-dessus) et "Machine distante (optionnel)" (les 3 champs `remote.*`). Ajouté après avoir
+constaté que la configuration `remote.*`, mise en place à la main via SSH pour contourner
+l'incident ha2 (§6.3), n'était consultable ni modifiable que par un accès direct à
+`data/espdisplay/config.yaml` — aucune UI, pas même une entrée de menu.
 
 ---
 
@@ -224,6 +232,43 @@ flash OTA réel validé sur écran physique). `esphomeContainer`/`esphomeConfigD
 configurables (§5) si cet hébergement devait un jour changer, mais **aucun mécanisme de bascule
 automatique n'existe** — un changement de machine hôte est une reconfiguration manuelle.
 
+### 6.3 Exécution distante par SSH (v1.1) — bug de production corrigé le 14/08/2026
+
+**Symptôme constaté** : une fois le bouton HAPLAN "Déployer sur l'écran" (voir
+`fonctionnelles-haplan_specs_v1.2.md` §8.9) utilisé depuis l'instance `ha2` réelle (pas seulement en
+test local sur falbala), échec immédiat : *"impossible de lancer python3 : spawn python3 ENOENT"*.
+Cause directe : `ha2` n'a, volontairement, ni `python3` ni le conteneur `esphome` (décision §6.2 —
+Pi4, RAM insuffisante pour ESP-IDF). Le pipeline ne peut physiquement pas s'exécuter sur cette
+machine.
+
+**Correctif** : `EspDisplayService.runPipelineRemote()` — si `remote.host` (§5.1) est renseigné,
+délègue l'exécution par SSH à la machine désignée plutôt que de lancer `python3` localement.
+
+- **Un seul argument transmis** (l'identifiant de plan, ou `--all`) : la machine cible fait tourner
+  une **commande SSH forcée** (`command="..."` dans `authorized_keys`, script
+  `~/bin/espdisplay-agent-run.sh` côté cible) qui reconstruit elle-même l'appel complet du pipeline
+  à partir de `$SSH_ORIGINAL_COMMAND` — la clé dédiée ne permet donc **rien d'autre** que ce
+  pipeline précis, pas un accès shell général. Même niveau de restriction que le principe de
+  moindre privilège déjà appliqué ailleurs dans ce projet (comptes de déploiement `claude-*`).
+- Pas d'injection possible même sans validation de charset côté script : l'argument reçu est passé
+  en un seul token `argv` à `python3` (jamais réinterprété par un shell), et
+  `generate_esphome_floorplan.py` valide lui-même l'identifiant de plan (sort en erreur si inconnu).
+- `StrictHostKeyChecking=accept-new` + `UserKnownHostsFile` pointé vers `data/espdisplay/` (volume
+  persisté) plutôt que le défaut (`$HOME`, jamais persisté sur ce conteneur — voir Dockerfile,
+  "pas de volume nommé sur /app") : confiance au premier contact (TOFU), mais rejette bien un
+  changement ultérieur de clé hôte. Sans ce réglage explicite, la clé hôte ne serait jamais
+  mémorisée d'un redémarrage de conteneur à l'autre — deuxième bug trouvé en testant en conditions
+  réelles (*"Host key verification failed"*).
+- **`openssh-client` ajouté à l'image Docker runtime** (`Dockerfile`) — absent par défaut de l'image
+  `node:20-bookworm-slim`, troisième bug trouvé en conditions réelles (*"ssh": executable file not
+  found in $PATH*).
+
+**Déploiement réel (ha2 → falbala)** : clé `~/.ssh/espdisplay-agent/id_ed25519` générée sur
+falbala, montée en lecture seule dans le conteneur `dimotic-ha` de ha2
+(`./secrets/espdisplay-agent_id_ed25519:/app/secrets/espdisplay-agent_id_ed25519:ro`, propriétaire
+uid/gid 1000 pour correspondre à l'utilisateur `node` du conteneur). Testé de bout en bout avec une
+vraie compilation ESPHome déclenchée depuis le conteneur ha2.
+
 ---
 
 ## 7. Limites et Contraintes Connues
@@ -232,7 +277,7 @@ automatique n'existe** — un changement de machine hôte est une reconfiguratio
 |--------|--------|--------|
 | Pas de verrou propre (§3.3) | Deux déploiements concurrents non coordonnés par ESPDISPLAY lui-même, risque de conflit sur le conteneur Docker partagé | Accepté (verrou porté par l'appelant, HAPLAN) |
 | Pas d'OTA automatique | Une compilation réussie ne flashe pas l'écran — flash manuel (`esphome run --device ...`) | Accepté (périmètre v1.0) |
-| Pas de configuration UI | `configurable: false`, aucun champ modifiable sans éditer `data/espdisplay/config.yaml` à la main | Accepté (périmètre v1.0) |
+| Un seul hôte distant configurable (v1.1) | `remote.host` unique, pas de sélection dynamique par appareil — voir la conception (non implémentée) d'un registre multi-machines dans `fonctionnelles-supervisor_specs_v1.0.md` §6.2, qui remplacerait ce SSH point-à-point par un relais MQTT générique | Connu, différé |
 | Hébergement Docker non généralisé | Un seul conteneur/machine supposé (§6.1) — plusieurs appareils ESP futurs partageraient le même conteneur, pas de sélection par appareil | Connu, non généralisé |
 | Chemin du script Python en dur par défaut vers `applications/haplan/tools/` | Un appareil ESP sans rapport avec HAPLAN (ex: futur thermostat de poêle) devra soit un autre script, soit une généralisation de celui-ci | Connu, différé |
 | Aucun test automatisé | Vérifié uniquement manuellement (EventBus simulé + vrai sous-processus + vraie compilation Docker, voir session du 13/08/2026) | Accepté |
@@ -282,4 +327,5 @@ applications/haplan/tools/
 ### 9.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.1 | 2026-08-15 | Claude | **Exécution distante par SSH** (§6.3) — corrige un échec réel en production (`ha2`, ni python3 ni conteneur esphome) : commande forcée, clé dédiée, `UserKnownHostsFile` persisté, `openssh-client` ajouté à l'image Docker (3 bugs distincts trouvés en conditions réelles). **Configuration UI** (§5.2) — menu "Écrans ESP", jusque-là absent. |
 | 1.0 | 2026-08-13 | Claude | Première spécification. Nouvelle application, créée en même temps que le code — orchestration du déploiement d'écrans ESP via EventBus générique (pattern `integration:bridge:register`), appel du pipeline Python existant côté HAPLAN, choix d'hébergement Docker documenté avec l'essai réel (et l'échec réel) sur ha2/Pi4. Testée en conditions quasi réelles : EventBus simulé + vrai sous-processus + vraie compilation Docker + vrai flash OTA sur écran physique. |
