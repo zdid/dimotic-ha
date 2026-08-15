@@ -1,9 +1,19 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.28  
-**Date :** 11 Août 2026  
+**Version :** 4.29  
+**Date :** 15 Août 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
 
+> **v4.29** : **Deux correctifs distincts**, tous deux issus de bugs réels constatés par
+> l'utilisateur le 15/08/2026, tous deux en creusant "la navigation entre applications pose des
+> problèmes". (1) **`arbreouquoi` rejoint la convention `window.{id}App.init()`** (§6.1) — laissé
+> de côté par le correctif v4.28, symptôme identique (écran figé après revisite) désormais corrigé,
+> avec scission écouteurs socket (une fois)/écouteurs DOM (à chaque revisite). (2) **Bug réel dans
+> `Sidebar.ts`** (§6.2) : un module sans `menu.pages` (ex: `ESPDISPLAY`, `HAPLAN`) était rendu avec
+> `href="#moduleId"` au lieu de `entry.path`, alors que l'attachement de l'écouteur de clic cherchait
+> ce dernier — clic strictement sans effet. Corrigé : `entry.path` utilisé comme `href` dès qu'il
+> existe, indépendamment de la présence de `pages`.
+>
 > **v4.28** : **Deux correctifs distincts**, tous deux issus de bugs réels constatés par
 > l'utilisateur le 11/08/2026. (1) **`ModuleContainer` rappelle `window.{moduleId}App.init()`
 > après réaffichage depuis le cache** (§6.1) — revisiter un module (IA, Planificateur, etc.) depuis
@@ -1099,9 +1109,17 @@ désormais une exigence supplémentaire, à respecter par toute application qui 
 
 Testé en direct : IA (le formulaire de test répond de nouveau après une deuxième visite, vérifié
 côté serveur) et Planificateur (statut, onglets, liste, tous fonctionnels après revisite).
-**`arbreouquoi` n'a pas été touché** — il n'utilise pas la convention `window.{id}App` et n'a donc
-rien à réexécuter ici ; potentiellement affecté par le même symptôme sous une autre forme, mais hors
-périmètre de ce correctif.
+
+**⭐ v4.29 (15/08/2026) — `arbreouquoi` rejoint la convention.** Non touché par le correctif
+v4.28 (n'exposait alors aucun `window.arbreouquoiApp`), symptôme confirmé en conditions réelles par
+l'utilisateur : l'écran restait figé après une revisite, rechargement complet nécessaire. Corrigé
+selon la même convention, avec une nuance propre à cette application : `initEventListeners()`
+mélangeait abonnements socket (à ne poser qu'une fois) **et** écouteurs DOM sur les boutons (à
+reposer à chaque revisite, nœuds fraîchement injectés) — scindé en `setupSocketListeners()` (gardé
+par `listenersReady`) et `setupDomListeners()` (rejoué à chaque appel). `initUI()` redessine
+désormais l'arbre/la légende depuis l'état déjà en mémoire (`state.tree`) plutôt que d'attendre un
+nouvel aller-retour socket qui ne se reproduira pas, et reflète l'état de connexion réel au lieu
+d'afficher "Connexion..." indéfiniment à la revisite.
 
 ### 6.2 ⭐ `Sidebar` — routage réel pour les applications à page dédiée (nouveau v4.19)
 
@@ -1115,6 +1133,20 @@ périmètre de ce correctif.
   désormais la même règle pour l'entrée de menu principale de l'application.
 - **Tout autre chemin** (convention SPA, `presentation/index.html` implicite) → embarquement dans
   le Shadow DOM via `ModuleContainer` (§6.1), comme avant.
+
+**⭐ v4.29 — Bug réel corrigé : entrée de menu sans `pages` = clic sans effet.**
+`renderAppParamsSubmenu()` (sous-menu "Paramètres Techniques") a **deux façons de rendre** l'entrée
+principale d'un module selon que `menu.pages` est renseigné ou non : avec `pages`, l'ancre est
+rendue avec `href="${entry.path}"` ; sans `pages` ("ancienne méthode"), elle l'était jusqu'ici
+**toujours** avec `href="#${moduleId}"`, **quel que soit `entry.path`**. Le code qui attache
+l'écouteur de clic, lui, cherchait dans les deux cas `a[href="${entry.path}"]` dès que `entry`
+existait — sélecteur qui ne correspondait donc **jamais** au lien réellement rendu pour un module
+sans `pages`, aucun écouteur jamais attaché, le clic se limitant au comportement natif du navigateur
+(changement du hash de l'URL, rien d'autre). Constaté en conditions réelles sur `ESPDISPLAY` et
+`HAPLAN` (aucun des deux ne déclare `pages`) : clic strictement sans effet dans les deux cas.
+**Correction** : la branche "ancienne méthode" utilise désormais `entry.path` comme `href` quand il
+existe, `#${moduleId}` seulement en repli — les deux branches de rendu produisent désormais un
+`href` cohérent avec ce que le sélecteur d'attachement des écouteurs recherche.
 
 ---
 
@@ -2427,6 +2459,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.29** | 15/08/2026 | Claude | **Deux correctifs distincts, "navigation entre applications" (§6.1/§6.2)** : (1) `arbreouquoi` rejoint la convention `window.{id}App.init()` (laissé de côté en v4.28), écouteurs socket/DOM scindés (une fois vs à chaque revisite). (2) Bug réel `Sidebar.ts` : un module sans `menu.pages` (ESPDISPLAY, HAPLAN) était rendu avec `href="#moduleId"` au lieu de `entry.path`, désynchronisé du sélecteur d'attachement du clic — clic sans effet, corrigé. Toutes deux issues de bugs réels constatés par l'utilisateur. Ancienne version v4.28 archivée. |
 | **4.28** | 11/08/2026 | Claude | **Deux correctifs distincts, tous deux issus de bugs réels constatés par l'utilisateur** (1) `ModuleContainer` rappelle désormais `window.{moduleId}App.init()` après réaffichage d'un module depuis son cache (§6.1) — corrige des dashboards inertes après revisite (formulaire "Tester une commande" de IA sans effet, Planificateur bloqué sur "Chargement") : le HTML réinjecté par `innerHTML` ne rebranchait plus aucun écouteur pour les apps vanilla TS (`Alpine.initTree()` sans effet pour elles). `init()` rendu idempotent côté `setupEventListeners()` (drapeau `listenersReady`) dans `ia`/`planificateur`/`evoo7`/`arexx`/`rfxcom`/`nommage` — `arbreouquoi` non touché, hors périmètre. (2) **`HaStructureRegistry.getLieuCatalog()`** (§8.3.3 nouvelle) — catalogue de lieux statique (tous niveaux confondus), complément de `getQuoiCatalog()`, exposé côté `ia` (voir `fonctionnelles-ia_specs` v1.8) pour réduire les faux refus "quoi_introuvable" en fournissant une vérité de terrain stable, propice au cache de prompt côté fournisseur LLM. Toutes demandes utilisateur, session du 11/08/2026. Ancienne version v4.27 archivée. |
 | **4.27** | 11/08/2026 | Claude | **Graphe de lieux centralisé dans `HaStructureRegistry`** (§8.3.2 nouvelle, `getEntitiesByQuoiAndLieux()`) — remplace la résolution `quoi`/`lieux` dupliquée et divergente entre `planificateur/resolution.ts` et `ia/ToolExecutor.ts`. Résolution indépendante du niveau taxonomique (area/`lieu_pere`/`lieu_grand_pere`/`lieu_precis`) via un graphe de containment construit paresseusement, plus un repli tokenisé pour les phrases composées ("plafonnier de la chambre"). Bug réel corrigé en cours de route : `lieu_precis` exclu du graphe de containment (des labels comme "plafonnier" sont réutilisés par de nombreuses pièces sans rapport, les y inclure faisait converger toutes ces pièces vers le même nœud — constaté en testant "éteins les toilettes du haut" en direct, qui éteignait aussi cuisine/chambre/bureau). Toutes demandes utilisateur, session du 10-11/08/2026. Ancienne version v4.26 archivée. |
 | **4.26** | 10/08/2026 | Claude | **Trois correctifs de l'affectation automatique des areas HA** (§8.5.4/§8.5.4bis) : nouveau second déclencheur de republication de découverte sur `homeassistant/status` (birth message HA, indépendant de notre propre connexion MQTT — `HA_STATUS_TOPIC`, `onHaOnline()`, événement `integration:{module}:ha:online`), retrait d'un nettoyage d'areas vides dans `HaStructureRegistry` qui supprimait à tort des areas fraîchement créées, réarmement du verrou `registryReady` d'`AreaEnsureService` sur `ha:disconnected` (ne se réarmait jamais après une reconnexion WS, causant 191 échecs "already in use" sur une seule reconnexion). Trouvé en creusant un bug remonté par l'utilisateur ("à chaque redémarrage il y a plein de zigbee mal pris en compte, pas forcément les mêmes"). Vérifié en conditions réelles : 127 devices, 0 device physique sans pièce. Ancienne version v4.25 archivée. |

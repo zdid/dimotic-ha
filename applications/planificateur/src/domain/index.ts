@@ -81,6 +81,9 @@ export const PLANIFICATEUR_MENU_CONFIG: ApplicationMenuConfig = {
     order: 30,
     badge: 'IA'
   },
+  // "Macros" (id: gestion) retiré de cette liste le 15/08/2026 (demande utilisateur) — déjà
+  // atteignable depuis l'application elle-même (bouton "📋 Macros" dans index.html, vers
+  // planificateur/config.html), inutile de la dupliquer dans le sous-menu Paramètres Techniques.
   pages: [
     {
       id: 'dashboard',
@@ -88,13 +91,6 @@ export const PLANIFICATEUR_MENU_CONFIG: ApplicationMenuConfig = {
       icon: '📊',
       path: '/applications/planificateur/presentation/index.html',
       order: 1
-    },
-    {
-      id: 'gestion',
-      label: 'Macros',
-      icon: '🗓️',
-      path: '/applications/planificateur/presentation/planificateur/config.html',
-      order: 2
     }
   ]
 };

@@ -1,9 +1,14 @@
 # Spécifications Fonctionnelles — Application PLANIFICATEUR
 
-**Version :** 1.7
-**Date :** 11 Août 2026
+**Version :** 1.8
+**Date :** 15 Août 2026
 **Statut :** Document de référence pour l'application `applications/planificateur`
 
+> **v1.8** : Retrait de l'entrée "Macros" du sous-menu Paramètres Techniques (§11) — redondante
+> avec le bouton "📋 Macros" déjà présent dans le tableau de bord, seul accès conservé. Corrige au
+> passage une description périmée de `config.html` (annonçait encore "macros + planifications
+> (mêmes actions)", alors que la page a été recentrée aux macros seules dès le 12/08/2026).
+>
 > **v1.7** : **Écran principal du tableau de bord refondu** en liste numérotée de planifications
 > (§11) — indicateur actif/inactif, nom facultatif, phrase, prochaine exécution ; création par
 > boîte de dialogue (phrase soumise à `ia` pour validation, aucune saisie structurée) ; journaux
@@ -360,10 +365,13 @@ rattrapage après coupure (`catchUpWindowSeconds`, §5.1 — défaut 300s).
   compterait sinon à tort comme un succès de création). Liste et statut rafraîchis automatiquement
   après une création réussie.
 
-Page dédiée (`config.html`, inchangée depuis v1.0) : gestion complète macros + planifications
-(mêmes actions), toujours accessible via le lien "📋 Macros & planifications" du tableau de bord —
-l'affichage du contenu JSON complet (étapes d'une macro, détail d'un déclencheur) y reste à
-concevoir en détail, hors périmètre de cette version.
+Page dédiée (`config.html`) : gestion des **macros seules** — recentrée le 12/08/2026 (commit
+`cc62069`), ne montre plus les planifications en double avec le tableau de bord comme avant cette
+date. Accessible via le bouton "📋 Macros" du tableau de bord (`index.html`) — **uniquement** depuis
+là depuis le 15/08/2026 : l'entrée équivalente sous Paramètres Techniques (`PLANIFICATEUR_MENU_CONFIG.pages`,
+page `gestion`) a été retirée à la demande de l'utilisateur, jugée redondante avec cet accès
+applicatif. L'affichage du contenu JSON complet (étapes d'une macro, détail d'un déclencheur) y
+reste à concevoir en détail, hors périmètre de cette version.
 
 **⭐ v1.7 — Mise à jour live des dashboards déjà ouverts** : une planification créée ou gérée par
 conversation (`ia:command` — voix, ou la boîte de dialogue de création qui emprunte le même canal)

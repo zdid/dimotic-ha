@@ -1,5 +1,11 @@
 # Spécifications Fonctionnelles - Supervision Multi-Machines (SUPERVISOR)
 
+*Version 2.2 - 15 Août 2026*
+*Ajoute la politique de redémarrage en cas de crash (§8.4) : backoff exponentiel plafonné à 30s,
+réarmement du compteur après 60s de fonctionnement stable, abandon après 5 tentatives rapprochées
+(état terminal `crashed`, redémarrage manuel requis) — discutée puis validée avec l'utilisateur
+avant rédaction.*
+
 *Version 2.1 - 15 Août 2026*
 *Corrige et complète la v2.0 (même jour) : §7 réécrite en réponse à une question directe de
 l'utilisateur ("comment voir toutes les applis de toutes les machines sur la même interface web ?").
@@ -29,6 +35,7 @@ ne tient pas face aux chiffres réels mesurés sur `ha2`.*
     - 7.1 [Événements Socket.io — déjà global par construction](#71-événements-socketio--déjà-global-par-construction)
     - 7.2 [Assets statiques (HTML/CSS/JS) cross-machine](#72-assets-statiques-htmlcssjs--la-pièce-manquante-ajoutée-en-v21)
 8. [Cycle de Vie et Activation/Désactivation en Direct](#8-cycle-de-vie-et-activationdésactivation-en-direct)
+    - 8.4 [Politique de redémarrage en cas de crash](#84-politique-de-redémarrage-en-cas-de-crash-v22)
 9. [Redondances Multi-Instances (rpigpio/rfxcom)](#9-redondances-multi-instances-rpigpiorfxcom)
 10. [Sécurité — Broker MQTT Anonyme](#10-sécurité--broker-mqtt-anonyme)
 11. [Idées Complémentaires et Hors Scope](#11-idées-complémentaires-et-hors-scope)
@@ -375,6 +382,40 @@ Reste pertinent pour les changements qui affectent réellement `core` lui-même 
 la config `ha.ws`/`ha.mqtt` du socle) — plus nécessaire pour une simple activation/désactivation
 d'application, qui devient une opération locale à `supervisor/`.
 
+### 8.4 Politique de redémarrage en cas de crash (v2.2)
+
+Distinct d'une désactivation volontaire (§8.2, `supervisor/` connaît son intention avant d'envoyer
+le signal) : un **crash** est une sortie du process qu'il n'a **pas** demandée, quel que soit le
+code de sortie.
+
+**Backoff exponentiel, pas de boucle serrée** — redémarrer immédiatement une application qui crashe
+en boucle (config cassée, dépendance manquante) brûlerait du CPU et spammerait les journaux sans
+jamais réussir. Délai avant chaque nouvelle tentative : `min(1s × 2^tentative, 30s)` — 1s, 2s, 4s,
+8s, 16s, puis plafonné à 30s. **Réarmement** : si l'application a tourné plus de **60s** sans
+incident avant de recrasher, le compteur de tentatives repart à zéro — un crash après 2h de
+fonctionnement normal n'a pas le même degré d'urgence qu'un crash en boucle au démarrage, et ne doit
+pas hériter d'un historique d'échecs déjà ancien.
+
+**Abandon après 5 tentatives rapprochées** (sans franchir le seuil de stabilité de 60s ci-dessus) :
+`supervisor/` arrête d'insister et passe l'application dans un état terminal `crashed` — pas de
+nouvelle tentative automatique, redémarrage **manuel** requis (l'utilisateur ré-active l'application
+depuis l'UI, ce qui repart de `starting` avec un compteur de tentatives neuf).
+
+**Machine à états** :
+```
+stopped ──[enable]──► starting ──► running
+running ──[crash]──► attente (backoff) ──► starting ──► running        (boucle, compteur += 1)
+running ──[crash après >60s stable]──► attente (backoff, compteur remis à 0) ──► starting ──► running
+running ──[disable]──► stopping (SIGTERM) ──► stopped                  (jamais de redémarrage auto)
+attente ──[5 tentatives dépassées]──► crashed (terminal, visible UI, ré-activation manuelle requise)
+```
+
+**Visibilité** : le registre (§6.2, topic `.../apps`) porte, en plus de `activated`/`disabled`, un
+état par application (`running`/`restarting`/`crashed`) — remonté dans `ApplicationsManager.ts`
+(§5.3 de la v1.0, déjà prévu pour la visibilité cross-machine) plutôt que de laisser une application
+en échec silencieux comme c'est implicitement le cas aujourd'hui (un `stop()`/crash imparfait dans
+le process partagé actuel n'est pas forcément visible tant que tout le reste continue de tourner).
+
 ---
 
 ## 9. Redondances Multi-Instances (rpigpio/rfxcom)
@@ -403,11 +444,8 @@ périmètre.
 
 - Capacités machine dans le registre (inchangé, v1.0 §9.1).
 - Heartbeat/santé au-delà du online/offline binaire (inchangé, v1.0 §9.1).
-- **Politique de redémarrage par application** (nouveau, v2.0) : si un process d'application crashe
-  seul (pas une désactivation volontaire), `supervisor/` pourrait le relancer automatiquement
-  (backoff, comme `restart: unless-stopped` de Docker mais au niveau process) — désormais possible
-  puisque chaque application est individuellement supervisable, alors qu'aujourd'hui un crash
-  logique dans une app peut potentiellement affecter tout le process partagé.
+- ~~Politique de redémarrage par application~~ — **formalisée en §8.4 (v2.2)**, n'est plus une idée
+  ouverte.
 - **Limites de ressources par process** (nouveau, v2.0) : `child_process.spawn` permet en principe
   de contraindre chaque application (ex: cgroups) — non nécessaire vu les chiffres §2.4, mais
   disponible si un jour une application spécifique consomme anormalement.
@@ -455,6 +493,7 @@ que de renoncer au modèle.
 ### 13.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 2.2 | 2026-08-15 | Claude | **Politique de redémarrage en cas de crash** (§8.4, nouvelle) : backoff exponentiel (1s→30s plafond), réarmement du compteur de tentatives après 60s de fonctionnement stable, abandon après 5 tentatives rapprochées (état terminal `crashed`, redémarrage manuel). Machine à états explicite, registre étendu d'un statut par application (`running`/`restarting`/`crashed`). Discutée puis validée avec l'utilisateur avant rédaction. Ancienne version v2.1 archivée. |
 | 2.1 | 2026-08-15 | Claude | **§7 réécrite** en réponse à une question directe de l'utilisateur ("voir toutes les applis de toutes les machines sur la même interface web ?"). Corrige une incohérence de la v2.0 (pontage Socket.io limité à sa propre machine, alors que le bus MQTT lui-même était déjà global) — §7.1. Ajoute le proxy HTTP de repli pour les fichiers statiques d'une application distante — §7.2, seule pièce manquante puisque le service de fichiers ne passe jamais par le process de l'application. Registre étendu (`address`/`webPort` dans le payload de présence, §6.2). Ancienne version v2.0 archivée. |
 | 2.0 | 2026-08-15 | Claude | **Refonte complète** : une application = un process OS (au lieu d'un seul process partagé), MQTT comme bus unifié intra+inter-machine (au lieu de cross-machine seulement), activation/désactivation d'application en direct par signal (résout le redémarrage complet actuel, jusque-là hors scope), interface web unique préservée (§7, Express/Socket.io restent dans `core`, seule la source du pontage change). Motivé par une mesure réelle sur `ha2` écartant la crainte de surcoût mémoire par process (§2.4). Ancienne version v1.0 archivée. |
 | 1.0 | 2026-08-15 | Claude | Première spécification — conception validée avec l'utilisateur, aucun code écrit. Couvre l'identité machine, la visibilité décentralisée (présence + registre d'apps par MQTT), le relais de commandes inter-machines (cas cible : migration d'espdisplay hors SSH), le traitement des redondances rpigpio/rfxcom, et un constat de sécurité explicite sur l'absence d'authentification des brokers MQTT observés. |

@@ -718,11 +718,17 @@ export class Sidebar extends HTMLElement {
               }
             });
           } else {
-            // Ancienne méthode : un lien par module
+            // Ancienne méthode : un lien par module. Utilise entry.path comme href quand il
+            // existe (pas seulement "#{moduleId}") — sans ça, le sélecteur qui attache l'écouteur
+            // de clic plus bas (`entry ? a[href="${entry.path}"] : ...`) ne trouve jamais le lien
+            // réellement rendu, et le clic ne fait rien (bug réel constaté sur ESPDISPLAY/HAPLAN,
+            // qui n'ont pas de `pages` donc tombent dans cette branche : 15/08/2026).
             modules.forEach(module => {
+              const moduleMenuConfig = this.getAppMenuConfig(module.id);
+              const href = moduleMenuConfig?.entry?.path || `#${module.id}`;
               html += `
                 <li class="nav-item app-param-item">
-                  <a href="#${module.id}" class="nav-link" data-section="${module.id}">
+                  <a href="${href}" class="nav-link" data-section="${module.id}">
                     <span class="nav-icon">${module.icon}</span>
                     <span class="nav-label">${module.name}</span>
                     <span class="nav-status">

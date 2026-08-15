@@ -148,8 +148,24 @@ function $(id: string): HTMLElement | null {
   return moduleRoot().querySelector(`#${id}`);
 }
 
+// ⭐ ModuleContainer rappelle window.arbreouquoiApp.init() à chaque réaffichage depuis son cache
+// (revisite d'un module déjà chargé, voir ModuleContainer.ts) pour rebrancher les écouteurs DOM
+// sur les nouveaux nœuds — cette exposition était absente jusqu'ici (contrairement à
+// rfxcom/teleinfo/rpigpio/etc.), donc l'appel de ModuleContainer était un no-op silencieux : les
+// écouteurs restaient posés sur les nœuds de la visite précédente, désormais orphelins, l'écran
+// restait figé jusqu'à un rechargement complet de la page (bug remonté par l'utilisateur, 15/08/2026).
+// La connexion socket, elle, persiste — se réabonner à chaque appel empilerait un écouteur
+// supplémentaire par visite (rejeu en double des événements persistants). Ce drapeau garantit que
+// setupSocketListeners() ne s'exécute qu'une seule fois par cycle de vie de la page ; les
+// écouteurs DOM (boutons), eux, DOIVENT être réattachés à chaque revisite (nouveaux nœuds).
+let listenersReady = false;
+
 function initApp(): void {
-  initEventListeners();
+  if (!listenersReady) {
+    setupSocketListeners();
+    listenersReady = true;
+  }
+  setupDomListeners();
   initUI();
 }
 
@@ -159,7 +175,9 @@ if (document.readyState === 'loading') {
   initApp();
 }
 
-function initEventListeners(): void {
+(window as unknown as Record<string, { init: () => void }>).arbreouquoiApp = { init: initApp };
+
+function setupSocketListeners(): void {
   const handleConnected = () => {
     state.isConnected = true;
     state.isLoading = true;
@@ -244,8 +262,13 @@ function initEventListeners(): void {
   }) => {
     renderEntityDetails(payload);
   });
+}
 
-  // Événements UI
+// Écouteurs DOM (boutons, champs) — séparés de setupSocketListeners() ci-dessus à dessein : ceux-ci
+// DOIVENT être réattachés à chaque revisite du module (ModuleContainer injecte de nouveaux nœuds
+// DOM à chaque réaffichage depuis son cache), contrairement aux écouteurs socket qui ne doivent
+// s'abonner qu'une seule fois. Voir initApp().
+function setupDomListeners(): void {
   $('refresh-btn')?.addEventListener('click', () => {
     triggerRefresh();
   });
@@ -309,8 +332,19 @@ function initUI(): void {
   hideLoading();
   hideError();
   hideDetailsPanel();
-  updateConnectionStatus('connecting');
+  // 'connecting' n'est correct qu'au tout premier chargement — à la revisite, la connexion socket
+  // partagée est déjà établie depuis longtemps (setupSocketListeners ne se réexécute pas, voir
+  // listenersReady) : refléter l'état réel plutôt que d'afficher "Connexion..." indéfiniment.
+  updateConnectionStatus(state.isConnected ? 'connected' : 'connecting');
   updateViewModeButton();
+  // Revisite : les données sont déjà en mémoire (state.tree, jamais réinitialisé), mais les nœuds
+  // DOM qui les affichaient ont été remplacés par ModuleContainer — redessiner dessus sans
+  // attendre un nouvel aller-retour socket, qui ne se reproduira pas (voir setupSocketListeners).
+  if (state.tree) {
+    renderTree();
+    renderQuoiCatalog();
+    updateStats();
+  }
 }
 
 function updateViewModeButton(): void {
