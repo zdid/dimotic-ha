@@ -1,8 +1,8 @@
 # PROMPT PROJET - Règles de Développement
 
-**Version : 1.9**
+**Version : 1.10**
 **Date : 15 Août 2026**
-**Dernière mise à jour : Table §11 "Pour Applications Spécifiques" — référence de version dans la ligne "Supervision multi-machines (SUPERVISOR)" mise à jour v2.0→v2.2 (politique de redémarrage en cas de crash ajoutée à la spec). Toujours pas implémenté. Aucun autre changement. Ancienne version v1.8 archivée dans `specs/archives/PROMPT_PROJET_v1.8-20260815.md`.**
+**Dernière mise à jour : Table §11 "Pour Applications Spécifiques" — référence de version dans la ligne "Supervision multi-machines (SUPERVISOR)" mise à jour v2.2→v2.3 (conception détaillée des redondances rpigpio/rfxcom, décision de sécurité par signature HMAC, agent minimal pour machines contraintes). Toujours pas implémenté. Aucun autre changement. Ancienne version v1.9 archivée dans `specs/archives/PROMPT_PROJET_v1.9-20260815.md`.**
 
 ## 📚 Table des Matières
 1. [Règles Fondamentales](#-règles-fondamentales)
@@ -371,7 +371,7 @@ projet/
 | **Application RPIGPIO** | `fonctionnelles-rpigpio_specs` | **Maintenance et développement** spécifique RPIGPIO (paramétrage de pins GPIO via mqtt-io, déploiement Docker) |
 | **Application TELEINFO** | `fonctionnelles-teleinfo_specs` | **Maintenance et développement** spécifique TELEINFO (compteurs EDF mode historique, agent RPi1 déployé par SSH+systemd) |
 | **Application ESPDISPLAY** | `fonctionnelles-espdisplay_specs` + `inter-app-communication_specs` | **Maintenance et développement** spécifique ESPDISPLAY (orchestration du déploiement de firmware sur les écrans ESP/ESPHome, déclenchée par HAPLAN via EventBus générique — voir `fonctionnelles-haplan_specs` §3.6/§8.9) |
-| **Supervision multi-machines (SUPERVISOR)** | `fonctionnelles-supervisor_specs` + `techniques-socle-ha-mqtt_specs` §8.5 | Module du **socle** (`applications/core/src/supervisor/`, pas une application sous `applications/`), pas encore implémenté à ce jour (spec de conception v2.2 le 15/08/2026 — voir le document pour le détail) — identité machine, une application = un process OS, MQTT comme bus unifié intra+inter-machine, activation/désactivation en direct sans redémarrage du core, interface web unique préservée |
+| **Supervision multi-machines (SUPERVISOR)** | `fonctionnelles-supervisor_specs` + `techniques-socle-ha-mqtt_specs` §8.5 | Module du **socle** (`applications/core/src/supervisor/`, pas une application sous `applications/`), pas encore implémenté à ce jour (spec de conception v2.3 le 15/08/2026 — voir le document pour le détail) — identité machine, une application = un process OS, MQTT comme bus unifié intra+inter-machine, activation/désactivation en direct sans redémarrage du core, interface web unique préservée |
 | **UI Avancée** | `presentation_specs` | Applications avec interface complexe |
 | **Gestion d'erreurs fine** | `erreurs_specs` | Applications nécessitant une gestion d'erreur spécifique |
 | **Patterns Architecturaux** | `architectural-patterns_specs` | Pour comprendre les patterns MQTT/WS globaux |
