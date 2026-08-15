@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Build multi-arch (amd64+arm64) + publication Docker Hub + déploiement sur les
+# Build multi-arch (amd64+arm64+arm/v7 32 bits, ajouté le 15/08/2026) + publication Docker Hub + déploiement sur les
 # deux machines cibles (ha2, orangepi) — le cycle complet utilisé pendant la
 # session du 08/08/2026 pour chaque correctif : commit/push déjà faits à part
 # (git), ce script prend le relais à partir du build.
@@ -62,7 +62,7 @@ CONTAINER_NAME="dimotic-ha"
 echo "=== 1/2 Build + push ${DOCKER_IMAGE}:${VERSION} (+ :latest) ==="
 docker buildx build \
   --builder dimotic-builder \
-  --platform linux/amd64,linux/arm64 \
+  --platform linux/amd64,linux/arm64,linux/arm/v7 \
   -t "${DOCKER_IMAGE}:${VERSION}" \
   -t "${DOCKER_IMAGE}:latest" \
   --push \
