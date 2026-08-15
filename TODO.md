@@ -2,15 +2,15 @@
 
 ## Problèmes prioritaires
 
-### 🟡 IA : coût/latence des appels Mistral — pistes de réduction, non tranchées (discussion)
+### 🟢 IA : coût/latence des appels Mistral — Piste 1 (cache de prompt) faite, Pistes 2/3 non tranchées
 - **Constat (10/08/2026)**, en testant en direct la résolution des lieux : les appels Mistral observés tournent entre 11k et 35k tokens de prompt (`RateLimiter` a atteint son budget 100k tokens/min pendant les tests). Cause principale identifiée : `RulesProvider.inject()` (`rules.ts`) préfixe **l'intégralité** de `regles_mistral.txt` (739 lignes) comme message system à **chaque** appel Mistral — que ce soit un ordre direct ou une réinterprétation de planification —, et `entities_snapshot` (394 entités) est reconstruit et renvoyé en entier à chaque fois. Aucune mémoire ni réduction entre deux appels, même successifs et quasi identiques (`DeployResponder.handle()` : un appel HTTP entièrement autonome à chaque déclenchement).
-- **Piste 1 — cache de prompt Mistral** : vérifié dans leur doc officielle (https://docs.mistral.ai/studio-api/conversations/advanced/prompt-caching), disponible sur le même endpoint déjà utilisé (`/v1/chat/completions`, `MistralClient.ts`). Paramètre `prompt_cache_key` (identifiant stable côté appli) à ajouter sur les requêtes partageant un préfixe — tokens en cache facturés à 10% du tarif normal, blocs de 64 tokens, correspondance stricte du préfixe. Le contenu de `regles_mistral.txt` est déjà identique octet pour octet entre appels (chargé une fois en mémoire par `RulesProvider`) — bon candidat immédiat. Pas de garantie de hit documentée (dépend du routage/charge côté Mistral), mais **aucun scénario où l'activer coûterait plus cher ou serait plus lent qu'aujourd'hui** — modification ciblée, faible risque, à essayer.
+- **Piste 1 — cache de prompt Mistral — Fait (2026-08-11, commit `6056a68`)** : `prompt_cache_key` (identifiant stable côté appli) ajouté sur tous les appels Mistral partageant un préfixe (`MistralClient.ts`), jamais transmis en mode Anthropic (pas de cache côté compatibilité OpenAI). Vérifié en direct contre l'API Mistral réelle : premier appel `cached_tokens: 0`, second appel (même contenu, même clé) ~99% du prompt system servi depuis le cache (11232/11263 tokens), facturé à 10% du tarif normal. `cachedTokens` remonté de bout en bout (`streaming.ts` → `IaService.ts`) et affiché dans le journal des échanges. Documenté dans `fonctionnelles-ia_specs_v1.9.md`.
 - **Piste 2 — séparer prompt "ordre direct" et prompt "planification"** : `regles_mistral.txt` contient ~300 lignes sur 739 (§1.G assistance guidée, §2 macro/sequence/gestion, §3 types de déclencheurs) qui ne servent jamais pour un ordre direct type "allume le salon" (estimé 80% des cas), uniquement pour créer/gérer une planification. Deux approches envisagées :
   - (A) un premier appel dédié à la classification, puis un second avec le prompt adapté — fiable mais ajoute un aller-retour Mistral **même pour les 80% d'ordres directs**, donc plus de latence sur le cas le plus sensible à la réactivité.
   - (B, préférée) prompt allégé par défaut (sans §1.G/§3/macro-sequence-gestion), avec échappatoire : si Mistral détecte qu'il lui manque la machinerie de planification, il le signale explicitement (ex. `{"type":"besoin_planification"}`) et on relance une seule fois avec le prompt complet. Aucun surcoût sur les 80% d'ordres directs, un aller-retour supplémentaire seulement sur les 20% de planifications (cas moins sensible à la latence). Nécessite un vrai travail de prompt engineering (apprendre à Mistral à détecter fiablement ce besoin plutôt que d'halluciner une réponse bancale) et des tests en direct, comme pour lieu_precis/lieu_pere.
 - **Piste 3 — restructurer `entities_snapshot`** : actuellement une ligne plate par entité avec `area_id`/`lieu_precis`/`lieu_pere` répétés à chaque ligne (394 lignes). Regrouper par area/hiérarchie réduirait la répétition (donc les tokens) et pourrait aussi aider Mistral à repérer plus fiablement des cas comme "deux toilettes, étages différents" d'un coup d'œil plutôt qu'en scannant 394 lignes. Reste de la présentation de données, la résolution réelle reste entièrement côté `core` (`HaStructureRegistry`).
-- **Non traité** : aucune des trois pistes codée — discussion seulement, à activer/prioriser plus tard.
-- **Statut** : Non traité (discussion)
+- **Non traité** : Pistes 2 et 3, toujours à l'état de discussion.
+- **Statut** : Piste 1 faite (2026-08-11) — Pistes 2/3 non traitées (discussion)
 - **Priorité** : Moyenne (pas de gêne fonctionnelle actuelle, optimisation de coût/latence)
 
 ### 🔴 Socle : bridgeInstance absent du topic de découverte MQTT (collision entre deux instances)
@@ -176,11 +176,6 @@
 - **Statut** : Corrigé (2026-07-23)
 - **Priorité** : Basse (résolu)
 
-### 🟡 Mock ConfigService incomplet dans AppService.test.ts — Corrigé
-- **Problème** : `mockConfigService` (test) n'implémentait pas `ensureModuleSections`, une méthode pourtant appelée par `AppService.start()` — 5 tests plantaient sur ce mannequin de test incomplet, sans rapport avec un bug réel de l'application (même famille que le mock du logger, `getLevel`/`setLevel` manquants, corrigé plus tôt dans la session).
-- **Correctif** : `ensureModuleSections: vi.fn()` ajouté au mock.
-- **Statut** : Corrigé (2026-07-22)
-
 ### 🟢 Classification QUOI jamais implémentée (HaStructureRegistry) — Corrigé
 - **Problème** : `HaStructureRegistry.test.ts` (11 tests) attend un classifieur qui assigne des QUOI (`eclairage`, `temperature`...) aux entités selon domaine/device_class — jamais implémenté en pratique. Confirmé par le test ET par l'instantané réel du référentiel HA (`ha-structure-debug.yaml`, toutes les `area.quoi` vides). Les tests sont corrects, c'est la fonctionnalité qui manque.
 - **Corrigé (2026-07-23)**, dans le cadre de l'implémentation des applications `ia`/`planificateur` (qui en avaient besoin pour résoudre des entités par QUOI/OÙ) : nouveau `TaxonomyHaClassifier` (`applications/core/src/ha/sync/TaxonomyHaClassifier.ts`), branché à la place du stub `DefaultHaClassifier` dans `core/src/index.ts`. Priorité à `attributs_taxonomie` déjà posé par RFXCOM/AREXX/EVOO7/Nommage, repli sur domain/device_class HA sinon, avec synthèse d'une taxonomie "virtuelle" (lieu par défaut "maison") pour les entités qui n'en auront jamais.
@@ -196,7 +191,7 @@
 - **Vérifié en direct** : arbre QUOI-first affiché et correctement mis en page (469 entités, 18 chemins OÙ, 16 types QUOI), expansion d'un groupe (`Lumière`, 31 entités réparties par lieu) fonctionnelle, aucune erreur console.
 - **Statut** : Corrigé (2026-07-24)
 
-### 🔴 Les attributs de taxonomie n'atteignent jamais HA (attributs_taxonomie)
+### 🟢 Les attributs de taxonomie n'atteignaient jamais HA (attributs_taxonomie) — Corrigé
 - **Problème** : `rfxcom`/`evoo7`/`nommage` injectent tous `attributs_taxonomie` via `extra: {attributs_taxonomie: buildAttributsTaxonomie(...)}`, fusionné par `buildDiscoveryPayload()` (`applications/core/src/ha/integration/discovery.ts` ligne 77) comme clé de premier niveau dans le message de découverte MQTT (`homeassistant/{component}/{object_id}/config`). Confirmé en direct sur l'instance HA réelle (script de diagnostic jetable, `get_states` sur les 469 entités) : **aucune** n'a `attributs_taxonomie` dans ses attributs réels — HA valide le message de découverte contre un schéma strict par plateforme et ignore silencieusement les clés non reconnues. La fonctionnalité "injecter les attributs de taxonomie" (réglage `ha.injectTaxonomyAttributes` de Nommage, et l'équivalent RFXCOM/EVOO7) n'a donc jamais fonctionné, depuis le début — pas de régression récente, un problème de conception initiale.
 - **Cause** : mauvais mécanisme MQTT utilisé. Le mécanisme HA officiel pour attacher des attributs libres à une entité via découverte MQTT est `json_attributes_topic` (+ `json_attributes_template` optionnel) — un champ de découverte qui indique à HA un topic à écouter, dont le JSON reçu est fusionné dans `entity.attributes`. Rien d'équivalent n'existe pour des clés glissées directement dans le message de découverte.
 - **À faire** : **pas besoin d'un topic supplémentaire** — le topic d'état (`state_topic`) publie déjà `JSON.stringify({state, attributes})` (`stateCommand.ts::publishState`, `HaMqttStateMessage.attributes` déjà présent dans le type) et `value_template` extrait déjà `{{ value_json.state }}` (convention existante, `evoo7/classification.ts::buildValueTemplate`). Il suffit de : (1) faire pointer `json_attributes_topic` vers ce même `state_topic` dans `buildDiscoveryPayload()` (`discovery.ts`), avec `json_attributes_template: '{{ value_json.attributes | tojson }}'` ; (2) faire porter `attributs_taxonomie` par `HaMqttStateMessage.attributes` au moment de `publishState()`, au lieu du bloc `extra` de la découverte (qui reste utile pour les vraies clés de config reconnues par HA, mais plus pour des attributs libres).
@@ -300,14 +295,6 @@
 - **Problème** : `evoo7`, `rfxcom`, `arbreouquoi`, `nommage` ne compilaient plus du tout depuis le remplacement du client WebSocket HA par `home-assistant-js-websocket` (session précédente) — jamais détecté car aucune de ces apps n'avait été rebuild depuis. Cause : ce package tiers n'expose pas de condition `types` dans son `package.json` `exports`, invisible sous `moduleResolution: node` (utilisé par `core`) mais bloquant sous `moduleResolution: NodeNext` (utilisé par les 4 apps métier).
 - **Correctif** : mapping `paths` vers `applications/core/node_modules/home-assistant-js-websocket/dist/index.d.ts` ajouté dans les 4 `tsconfig.json`.
 - **Statut** : Corrigé (2026-07-22)
-
-### 🟡 Sauvegarde de configuration
-- **Problème** : Modification des champs sans clic sur "Sauvegarder" envoyait les données
-- **Statut** : Corrigé (commit 1e84707 et 9ba5658)
-
-### 🟡 Injection IAppConfigProvider
-- **Problème** : `this.configService.getAppConfig is not a function`
-- **Statut** : Corrigé (commit 32543ab)
 
 ### 🟡 Sauvegarde configuration avec anciennes données (module) — Corrigé
 - **Problème** : Sur un module (testé EVOO7 et RFXCOM), modifier un champ (ex: `bridgeInstance`) et cliquer Sauvegarder réaffiche l'ancienne valeur à l'écran. Un arrêt/relance de l'application affiche bien la dernière valeur modifiée — donc la donnée envoyée et persistée en disque est correcte, seul l'affichage post-sauvegarde dans la même session reste faux.
@@ -448,19 +435,6 @@
 - **Statut** : Corrigé (2026-07-24)
 - **Priorité** : Était Basse — résolu
 
-### 🟢 Architecture RFXCOM — Entrée périmée, déjà largement fait
-- **Problème d'origine** : `RfxComService` faisait ~1800 lignes (chiffre jamais mis à jour depuis).
-- **Constat (2026-07-24)**, en relisant le code avant de commencer ce chantier : le module est déjà décomposé, probablement progressivement au fil de la construction de l'app (commits `b704e26` "Ajoute l'application RFXCOM" et `6dd16c2` "Implémente les scènes RFXCOM") — `RfxComService.ts` ne fait plus que **651 lignes**, un orchestrateur (cycle de vie, discovery/état MQTT↔HA, routage de commande, câblage Socket.io) qui délègue déjà à :
-  - `transceiver/RfxComTransceiver.ts` (360 l.) — cycle de vie du transceiver
-  - `devices/DeviceManager.ts` (136 l.) — détection/stockage des devices
-  - `receivers/` (446 l.) — `ReceiverManager` + `BaseReceiver`/`ReceiverCover`/`ReceiverLight`/`ReceiverSwitch`
-  - `scenes/` (134 l.) — `SceneManager` + `SceneExecutor`
-  - `yaml/ConfigFileManager.ts` (96 l.) — persistance
-- Seul `RfxComProtocolManager` (gestion des protocoles activés) de la proposition d'origine n'existe pas encore — couvert par l'entrée dédiée "Gestion des protocoles RFXCOM" ci-dessous.
-- **Décision** : pas d'éclatement supplémentaire pour l'instant (le HA-bridge restant dans `RfxComService.ts` n'est plus disproportionné à 651 lignes) — on attaque directement les vrais items RFXCOM restants.
-- **Statut** : Entrée périmée — le principal (le "~1800 lignes") était déjà résolu, non annoncé
-- **Priorité** : Était Basse
-
 ### 🟡 Définir et mettre en place l'interface web des applications IA et Planificateur
 - **Constat actuel** :
   - IA (`applications/ia/src/presentation/`) : dashboard (`index.html`) avec statut Mistral/Ollama, outil de test conversationnel, historique des derniers échanges — mais aucune page de configuration dédiée ; les réglages (`mistralApiKey`, `mistralBaseUrl`, `ollamaHttpPort`, `rulesFile`, fournisseurs généralistes, voir `fonctionnelles-ia_specs` §12) passent uniquement par le formulaire générique de "Paramètres Techniques" (`ModuleManager`).
@@ -469,13 +443,6 @@
 - **À faire** : une fois le périmètre défini avec l'utilisateur, implémenter les pages manquantes selon le pipeline de build navigateur commun (`tsconfig.ui.json` dédié + Shadow DOM `ModuleContainer`, voir "Pipeline de build navigateur pour arbreouquoi" ci-dessus).
 - **Statut** : Non défini
 - **Priorité** : Moyenne
-
-### 🟢 Reconstitution des équipements RFXCOM — machine d'origine perdue — Classée sans suite
-- **Contexte (2026-07-24)** : la machine qui exécutait RFXCOM a été perdue (carte SIM avalée par un aspirateur — pas de lien avec ws-ha, la config RFXCOM n'a simplement jamais été recréée sur la nouvelle machine). `equipements.json` (racine du projet, ancien format non lié à ws-ha) reste la seule trace des récepteurs/télécommandes réels.
-- **Fait** : analyse complète de `equipements.json` en session avec l'utilisateur — structure comprise (un récepteur porte le code de son émetteur principal, `equivalences` liste les autres télécommandes), 21 récepteurs + 61 boutons protocole `ac`/lighting2, plus `arc`/lighting1, `th9`, `elec3`. Corrections identifiées et validées avec l'utilisateur : 3 boutons obsolètes retirés, 3 codes reclassés en scènes virtuelles (marche/arrêt rez-de-chaussée, 1er étage, extinction générale maison), `k9` reclassé en `octoprint`, récepteur dressing reconstitué (ancien récepteur zigbee disparu, remplacé par le bouton AC existant). Résultat sauvegardé dans **`equipements-rfxcom-inventaire.json`** (racine du projet) — 85 équipements, avec `quoi`/`lieu`/`lieuprecis`/`friendlyname`/`identifiant` (`protocole-code`, ex: `th9-0x0501`) et pour les récepteurs un id `recept#` + émetteur principal + émetteurs associés.
-- **Points restés en suspens** (voir `points_a_trancher` dans le fichier) : `bureau1` (0x01570f52/12) et `dressing` (0x0026aad7/2) sont les 2 seuls codes dont le binôme attendu (paire `11`/`12` ou `1`/`2`) est absent du fichier source — bouton manquant probable, jamais confirmé physiquement.
-- **Statut** : Classée sans suite (précision utilisateur, 2026-08-07) — rien à reprendre sur ce sujet, `config-rfxcom-devices-v1.0.yaml` (racine du projet) est déjà le registre RFXCOM réel en usage courant.
-- **Priorité** : Résolu
 
 ### 🟢 EVOO7 : entité `climate` composite (plusieurs données combinées) — Corrigé (entrée stale mise à jour)
 - **Demande utilisateur (2026-07-26)**, en marge de l'ajout de `binary_sensor` (type HA forcé par donnée) : élargir aussi au type `climate`.
