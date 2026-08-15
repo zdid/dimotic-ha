@@ -1,8 +1,8 @@
 # PROMPT PROJET - Règles de Développement
 
-**Version : 1.7**
+**Version : 1.8**
 **Date : 15 Août 2026**
-**Dernière mise à jour : Table §11 "Pour Applications Spécifiques" — ajout de la ligne "Supervision multi-machines (SUPERVISOR)", module du socle (pas une application), spec de conception validée le 15/08/2026 mais pas encore implémentée. Aucun autre changement. Ancienne version v1.6 archivée dans `specs/archives/PROMPT_PROJET_v1.6-20260815.md`.**
+**Dernière mise à jour : Table §11 "Pour Applications Spécifiques" — description de la ligne "Supervision multi-machines (SUPERVISOR)" mise à jour suite à la refonte v2.0 de sa spec (une application = un process OS, MQTT comme bus unifié intra+inter-machine, activation/désactivation en direct). Toujours pas implémenté. Aucun autre changement. Ancienne version v1.7 archivée dans `specs/archives/PROMPT_PROJET_v1.7-20260815.md`.**
 
 ## 📚 Table des Matières
 1. [Règles Fondamentales](#-règles-fondamentales)
@@ -371,7 +371,7 @@ projet/
 | **Application RPIGPIO** | `fonctionnelles-rpigpio_specs` | **Maintenance et développement** spécifique RPIGPIO (paramétrage de pins GPIO via mqtt-io, déploiement Docker) |
 | **Application TELEINFO** | `fonctionnelles-teleinfo_specs` | **Maintenance et développement** spécifique TELEINFO (compteurs EDF mode historique, agent RPi1 déployé par SSH+systemd) |
 | **Application ESPDISPLAY** | `fonctionnelles-espdisplay_specs` + `inter-app-communication_specs` | **Maintenance et développement** spécifique ESPDISPLAY (orchestration du déploiement de firmware sur les écrans ESP/ESPHome, déclenchée par HAPLAN via EventBus générique — voir `fonctionnelles-haplan_specs` §3.6/§8.9) |
-| **Supervision multi-machines (SUPERVISOR)** | `fonctionnelles-supervisor_specs` + `techniques-socle-ha-mqtt_specs` §8.5 | Module du **socle** (`applications/core/src/supervisor/`, pas une application sous `applications/`), pas encore implémenté à ce jour (spec de conception validée le 15/08/2026 — voir le document pour le détail) — identité machine, présence/registre d'applications décentralisé par MQTT, relais de commandes inter-machines |
+| **Supervision multi-machines (SUPERVISOR)** | `fonctionnelles-supervisor_specs` + `techniques-socle-ha-mqtt_specs` §8.5 | Module du **socle** (`applications/core/src/supervisor/`, pas une application sous `applications/`), pas encore implémenté à ce jour (spec de conception v2.0 validée le 15/08/2026 — voir le document pour le détail) — identité machine, une application = un process OS, MQTT comme bus unifié intra+inter-machine, activation/désactivation en direct sans redémarrage du core, interface web unique préservée |
 | **UI Avancée** | `presentation_specs` | Applications avec interface complexe |
 | **Gestion d'erreurs fine** | `erreurs_specs` | Applications nécessitant une gestion d'erreur spécifique |
 | **Patterns Architecturaux** | `architectural-patterns_specs` | Pour comprendre les patterns MQTT/WS globaux |
