@@ -48,7 +48,7 @@ interface NommageStatus {
 }
 
 interface DiscoveryParsedEvent {
-  rawMessage: {
+  discoveryMessage: {
     rawName: string;
     topic: string;
     timestamp: Date;
@@ -144,7 +144,7 @@ function setupEventListeners(): void {
       appStatus.lastParsedAt = data.timestamp;
     }
     
-    console.log('[NOMMAGE UI] Message parsed:', data.rawMessage.rawName);
+    console.log('[NOMMAGE UI] Message parsed:', data.discoveryMessage.rawName);
   });
   
   // Structure taxonomique
@@ -172,7 +172,8 @@ function setupEventListeners(): void {
   // le rejeu à la reconnexion (événement persistant côté socle) passe par ce même listener.
   socket.on('nommage:taxonomy:structure', (data: TaxonomyStructure) => {
     if (data.count > 0) {
-      $('messages-counter')!.textContent = String(data.count);
+      const el = $('messages-counter');
+      if (el) el.textContent = String(data.count);
     }
   });
 }

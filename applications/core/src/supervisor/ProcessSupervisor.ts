@@ -2,7 +2,7 @@
 //
 // Démarre/arrête/redémarre les applications marquées `runsAsSeparateProcess` comme des process OS
 // indépendants (child_process.spawn), avec backoff exponentiel en cas de crash — conforme à
-// fonctionnelles-supervisor_specs_v2.4 §5.3/§8.4. Phase 1 : un seul enfant possible (espdisplay),
+// fonctionnelles-supervisor_specs_v2.6 §5.3/§8.4. Phase 1 : un seul enfant possible (espdisplay),
 // conçu pour en superviser plusieurs sans changement structurel.
 //
 // Distinct de `applications/core/scripts/supervisor.js` (qui supervise le process `core` entier
@@ -13,6 +13,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Logger } from '../infrastructure/logger/index';
 import { MqttTransport, type MqttTransportConfig } from '../infrastructure/transport/MqttTransport';
+import type { SupervisorEventBridge } from './SupervisorEventBridge';
 
 export type ManagedAppState = 'stopped' | 'starting' | 'running' | 'crashed';
 
@@ -50,7 +51,14 @@ export class ProcessSupervisor {
   private readonly apps: Map<string, ManagedApp> = new Map();
   private commandTransport: MqttTransport | null = null;
 
-  constructor(private readonly logger: Logger, private readonly coreDir: string) {
+  constructor(
+    private readonly logger: Logger,
+    private readonly coreDir: string,
+    /** Pont EventBus local ↔ IPC (16/08/2026) — attaché/détaché à chaque (re)spawn/sortie
+     *  d'enfant, voir spawnChild()/handleExit(). Optionnel pour ne pas casser un usage minimal
+     *  (tests) sans pont réel. */
+    private readonly eventBridge?: SupervisorEventBridge
+  ) {
     // ⭐ Filet de sécurité, en plus de l'arrêt propre (AppService.stopAllSeparateProcesses(), appelé
     // par ApplicationBootstrap.stop() sur SIGTERM/SIGINT) — si ce process core se termine par un
     // autre chemin (SIGKILL externe, tsx watch selon sa configuration, crash non intercepté),
@@ -126,7 +134,7 @@ export class ProcessSupervisor {
   }
 
   /**
-   * Écoute les commandes start/stop/restart via MQTT (fonctionnelles-supervisor_specs v2.4 §7,
+   * Écoute les commandes start/stop/restart via MQTT (fonctionnelles-supervisor_specs v2.6 §7,
    * demande utilisateur explicite — pas seulement pilotable localement depuis l'UI). Une seule
    * connexion, un seul abonnement wildcard sur `appId` couvre toutes les applications déjà
    * enregistrées via register(). ⚠️ Aucune signature/authentification sur ce canal pour cette
@@ -208,8 +216,15 @@ export class ProcessSupervisor {
 
     app.state = 'starting';
     const startedAt = Date.now();
-    const child = spawn(entry.command, entry.args, { stdio: 'inherit', cwd: app.appDir });
+    // 4e canal 'ipc' (16/08/2026) : stdin/stdout/stderr toujours hérités (logs visibles dans ceux
+    // de core), plus un tuyau IPC dédié — voir SupervisorEventBridge, qui remplace MQTT pour la
+    // communication EventBus avec cet enfant.
+    const child = spawn(entry.command, entry.args, {
+      stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+      cwd: app.appDir
+    });
     app.child = child;
+    this.eventBridge?.attachChild(app.appId, child);
 
     child.on('spawn', () => {
       app.state = 'running';
@@ -224,6 +239,7 @@ export class ProcessSupervisor {
 
   private handleExit(app: ManagedApp, code: number | null, signal: NodeJS.Signals | null, startedAt: number): void {
     app.child = null;
+    this.eventBridge?.detachChild(app.appId);
     const ranMs = Date.now() - startedAt;
 
     if (app.stopRequested) {

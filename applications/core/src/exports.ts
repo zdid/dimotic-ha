@@ -87,11 +87,17 @@ export {
 // Interface EventBus
 export type { IEventBus, DefaultAppEvents } from './application/IEventBus';
 
-// MqttEventBus - Implémentation de IEventBus backée par MQTT (fonctionnelles-supervisor_specs v2.4 §6.3)
+// MqttEventBus - Implémentation de IEventBus backée par MQTT, non utilisée par le pont supervisor
+// actuel (voir IpcEventBus ci-dessous) — disponible pour un futur besoin cross-machine
 export { MqttEventBus } from './application/MqttEventBus';
 export type { MqttEventBusConfig, MqttEventBusBrokerConfig } from './application/MqttEventBus';
 
-// Superviseur multi-process (fonctionnelles-supervisor_specs v2.4 §3/§5/§6.3/§8.4)
+// IpcEventBus - Implémentation de IEventBus backée par IPC (process.send/on('message')), pour une
+// app séparée restant sur la même machine que core (16/08/2026, remplace MqttEventBus pour ce cas)
+export { IpcEventBus } from './application/IpcEventBus';
+export type { IpcEnvelope } from './application/IpcEventBus';
+
+// Superviseur multi-process (fonctionnelles-supervisor_specs v2.6 §3/§5/§6.3/§8.4)
 export * from './supervisor';
 
 // SocketBridge - Pont entre EventBus et Socket.io

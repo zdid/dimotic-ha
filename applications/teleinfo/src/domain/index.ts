@@ -127,7 +127,13 @@ export const TELEINFO_APP: ApplicationModule & { menu?: ApplicationMenuConfig } 
   requiredHaWs: false,
   configSection: 'teleinfo',
   configUi: TELEINFO_UI_METADATA,
-  socketEvents: TELEINFO_SOCKET_EVENTS
+  socketEvents: TELEINFO_SOCKET_EVENTS,
+
+  // Migration superviseur (fonctionnelles-supervisor_specs v2.6) — process séparé sur cette même
+  // machine, même profil que rpigpio : événements UI (TELEINFO_ALL_EVENTS) pontés automatiquement
+  // (§7.1), aucune dépendance haStructureRegistry/haWsClient/integration:* (l'app ne parle jamais
+  // HA/MQTT directement — le vrai accès matériel est sur le RPi1 distant).
+  runsAsSeparateProcess: true
 };
 
 export function createTeleinfoService(

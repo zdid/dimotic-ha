@@ -3,8 +3,11 @@
 // application de tourner dans son propre process OS tout en restant un remplacement transparent
 // de EventBus pour le code métier existant (create*Service(eventBus, ...) ne change pas).
 //
-// Conforme à fonctionnelles-supervisor_specs_v2.4 §6.3. Phase 1 (espdisplay) : voir le module
-// applications/core/src/supervisor/ pour le pont symétrique côté core (EventBus local ↔ MQTT).
+// Depuis le 16/08/2026 (fonctionnelles-supervisor_specs v2.6), le pont côté core
+// (SupervisorEventBridge, applications/core/src/supervisor/) utilise IPC — pas cette classe — pour
+// toute application séparée restant sur la même machine que core (spawn() direct, canal
+// process.send()/'message'). Cette classe reste disponible comme implémentation IEventBus pour un
+// futur besoin réellement cross-machine (aucun appelant actuel dans ce dépôt — grep confirmé).
 
 import type { AppEvents } from '../types/events';
 import type { IEventBus } from './IEventBus';
@@ -47,9 +50,8 @@ export class MqttEventBus implements IEventBus<AppEvents> {
   private readonly appId: string;
   private readonly machineId: string;
   private readonly transport: MqttTransport;
-  /** Un Set de listeners par nom d'événement — un seul abonnement MQTT par événement, jamais un
-   *  wildcard générique `#` (voir fonctionnelles-supervisor_specs v2.4 §6.3, "abonnement précis
-   *  par événement réellement écouté"). */
+  /** Un Set de listeners par nom d'événement — un seul abonnement MQTT par événement pour l'usage
+   *  normal (code métier d'une app, voir onGeneric()). */
   private readonly listeners: Map<string, Set<(data: unknown) => void>> = new Map();
   /** Événements déjà souscrits côté MQTT (évite un `subscribe()` redondant à chaque nouveau listener). */
   private readonly subscribedEvents: Set<string> = new Set();

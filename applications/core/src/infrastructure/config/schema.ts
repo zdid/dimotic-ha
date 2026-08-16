@@ -38,7 +38,7 @@ const haConfigSchema = z.object({
 
 // Porte d'authentification OAuth2 HA (accès externe, désactivée par défaut) — absente du fichier
 // tant qu'elle n'est pas explicitement configurée, voir infrastructure/auth/AuthService.
-// ⭐ fonctionnelles-supervisor_specs v2.4 §4 : identité de cette machine pour le futur registre de
+// ⭐ fonctionnelles-supervisor_specs v2.6 §4 : identité de cette machine pour le futur registre de
 // présence multi-machines (superviseur) — os.hostname() est stable d'un démarrage à l'autre sur une
 // même machine, contrairement au tirage aléatoire utilisé pour bridgeInstance (voir ha-mqtt.ts
 // generateRandomBridgeInstance) : pas besoin de générer une fois puis persister, un défaut Zod

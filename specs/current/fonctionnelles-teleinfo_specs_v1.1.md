@@ -1,5 +1,12 @@
 # Spécifications Fonctionnelles - Module TELEINFO
 
+*Version 1.1 - 16 Août 2026*
+*Migration en process séparé (`fonctionnelles-supervisor_specs` v2.6, IPC — §2.4, nouvelle) +
+présence de l'agent RPi1 : LWT + battement de cœur ajoutés à `ha-publisher.js` (§6.5, nouvelle) —
+seule implémentation de présence/heartbeat de cette session **vérifiée en conditions réelles** sur
+le matériel physique (redéploiement réel, service systemd actif, battement reçu toutes les 30s).
+Ancienne version v1.0 archivée.*
+
 *Version 1.0 - 12 Août 2026*
 *Première spécification, écrite en même temps que le code — application créée, déployée et
 déboguée en conditions réelles (RPi1 physique, 2 compteurs EDF réels) au cours de la session du
@@ -10,10 +17,12 @@ déboguée en conditions réelles (RPi1 physique, 2 compteurs EDF réels) au cou
 ## 📌 Table des Matières
 1. [Introduction](#1-introduction)
 2. [Architecture](#2-architecture)
+    - 2.4 [Process séparé (v1.1)](#24-process-séparé-nouveau-v11-16082026)
 3. [Modèle de données](#3-modèle-de-données)
 4. [Protocole Téléinformation Mode Historique](#4-protocole-téléinformation-mode-historique)
 5. [Bascule GPIO entre les 2 compteurs](#5-bascule-gpio-entre-les-2-compteurs)
 6. [Publication MQTT et Découverte HA](#6-publication-mqtt-et-découverte-ha)
+    - 6.5 [Présence de l'agent (LWT + battement de cœur)](#65-présence-de-lagent-lwt--battement-de-cœur--nouveau-v11-16082026)
 7. [Déploiement SSH + systemd](#7-déploiement-ssh--systemd)
 8. [Configuration](#8-configuration)
 9. [Interface Web et Socket.io](#9-interface-web-et-socketio)
@@ -105,6 +114,17 @@ ha-publisher.js : découverte + état MQTT sur homeassist/
     v
 nommage (pipeline taxonomie existant, aucune modification requise) → homeassistant/ → HA
 ```
+
+### 2.4 Process séparé (⭐ nouveau v1.1, 16/08/2026)
+
+`TELEINFO_APP.runsAsSeparateProcess = true` — même mécanisme générique qu'`rpigpio` (voir
+`fonctionnelles-rpigpio_specs` §2.4) : `TeleinfoService.ts` (composant dimotic-ha, §2.1) tourne dans
+son propre process OS (`applications/teleinfo/src/standalone.ts`), démarré par `ProcessSupervisor`.
+**Ne concerne que le composant dimotic-ha** — l'agent RPi1 (§2.2, `device-agent/`) reste, comme
+avant, un déploiement entièrement séparé (SSH + systemd, §7), sans rapport avec ce mécanisme de
+process séparé côté `core` (deux notions de "process séparé" distinctes, à ne pas confondre — voir
+`fonctionnelles-supervisor_specs` §11.4, "migrer teleinfo/rpigpio déployés en Docker/systemd séparé
+vers l'architecture standalone du socle reste hors scope").
 
 ---
 
@@ -247,6 +267,41 @@ capteurs groupés dessous. État publié en un seul message JSON combiné par le
 `discoveryPrefix`) et republie la découverte de tous les compteurs déclarés à chaque passage à
 `online` — même mécanisme que RFXCOM/nommage (`techniques-socle-ha-mqtt_specs` §8.5.4bis).
 
+### 6.5 ⭐ Présence de l'agent (LWT + battement de cœur) — nouveau v1.1, 16/08/2026
+
+Contrairement à `rpigpio` (dont l'agent mqtt-io publie déjà nativement un LWT réutilisable, voir
+`fonctionnelles-rpigpio_specs` §7.3), l'agent RPi1 (`device-agent/ha-publisher.js`, JS brut, pas de
+build — ARMv6/Node12) n'avait **aucun** mécanisme de présence — ajouté de toutes pièces :
+- **LWT** : option `will` posée à la connexion MQTT (`mqtt.connect(url, { will: {...} })`), topic
+  `teleinfo/agent/status`, payload JSON `{status: 'offline', timestamp}`, retenu (`retain: true`,
+  QoS 1).
+- **Battement de cœur** : `publishPresence()` (payload `{status: 'online', timestamp}`, même topic,
+  retenu) appelée immédiatement à la connexion puis toutes les **30s** (`setInterval`). Choix d'un
+  payload JSON avec timestamp plutôt qu'un simple `"online"`/`"offline"` : un LWT seul ne donne
+  qu'un état binaire, jamais de "dernier contact" récent tant que l'agent reste connecté longtemps
+  sans redémarrer — le timestamp du battement permet de le calculer côté consommateur.
+  ⚠️ Le timestamp du LWT **lui-même** reste figé au moment de l'enregistrement (`connect()`), pas
+  du déclenchement réel du LWT par le broker — limite MQTT connue, sans effet pratique ici puisque
+  c'est le battement de cœur, pas le LWT, qui porte l'information "dernier contact" exploitée.
+- **Anti-empilement** : l'intervalle précédent est explicitement nettoyé (`clearInterval`) avant
+  d'en reposer un nouveau à chaque reconnexion — évite d'empiler des battements en cas de
+  coupures/reconnexions répétées du broker.
+
+**Côté dimotic-ha** : `TeleinfoService.connectAgentPresence()` — même patron que `RpigpioService`
+(`fonctionnelles-rpigpio_specs` §7.3), s'abonne en lecture seule à `teleinfo/agent/status`, parse le
+JSON, met à jour `agentOnline`/`agentLastSeenAt`. Dashboard : champs "Agent RPi1" (En ligne/Hors
+ligne/Inconnu) et "Dernier contact".
+
+**⭐ Vérifié en conditions réelles (16/08/2026, accord explicite utilisateur — RFXCOM déjà branché
+sur cette machine, seul le RPi1 restait à toucher)** : redéployé via le bouton "Générer et déployer"
+existant (`DeployService.ts`, aucun nouveau mécanisme de déploiement — copie tous les fichiers
+`device-agent/`, dont le `ha-publisher.js` modifié), service systemd redémarré avec succès (`statut:
+active`), lecture réelle des 2 compteurs confirmée (`journalctl` sur le RPi1). Battement de cœur
+reçu et exploité de bout en bout : `agentOnline: true`, `agentLastSeenAt` se met à jour toutes les
+30s pile, observé en direct sur le tableau de bord — la seule implémentation de présence/heartbeat
+de cette session vérifiée avec du vrai matériel (contrairement à `rpigpio`/`ha2`, voir
+`fonctionnelles-rpigpio_specs` §7.3).
+
 ---
 
 ## 7. Déploiement SSH + systemd
@@ -339,7 +394,7 @@ Trois groupes : "Machine cible (RPi1)" (6 champs), "Câblage" (4 champs, dont `c
 
 **Server → Client** (persistants : `teleinfo:status`, `teleinfo:compteurs:list`) :
 ```typescript
-'teleinfo:status'          // { compteursCount, target: { host, serviceName } }
+'teleinfo:status'          // { compteursCount, target: { host, serviceName }, agentOnline, agentLastSeenAt } — ⭐ v1.1
 'teleinfo:compteurs:list'  // CompteurDefinition[]
 'teleinfo:compteur:saved'
 'teleinfo:compteur:deleted'
@@ -370,6 +425,7 @@ Trois groupes : "Machine cible (RPi1)" (6 champs), "Câblage" (4 champs, dont `c
 | Aucun retrait de découverte MQTT si un compteur est modifié/supprimé | L'entité HA reste orpheline sous l'ancien ADCO — même limite qu'AREXX/rpigpio | Non corrigé |
 | Aucune vérification que l'ADCO saisi correspond au compteur physiquement câblé | Seule la lecture réelle après déploiement valide/infirme la saisie | Accepté (contrôle a posteriori) |
 | Seuls Base/HC-HP sont exploités | Autres champs TIC (IMAX, PTEC, MOTDETAT...) reçus mais ignorés | Accepté (hors périmètre demandé) |
+| Timestamp du LWT figé à la connexion, pas au déclenchement réel (§6.5) | Sans effet pratique — c'est le battement de cœur, pas le LWT, qui porte "dernier contact" | Accepté (limite MQTT connue) |
 
 ---
 
@@ -404,9 +460,11 @@ applications/teleinfo/
 
 ### 12.1 Références
 - [Spécification de Nommage **OBLIGATOIRE**](nommage_specs_v1.0.md) ⭐
-- [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.28.md) ⭐
-- [Spécifications Fonctionnelles RPIGPIO](fonctionnelles-rpigpio_specs_v1.0.md) (application sœur,
-  même principe de paramétrage/déploiement, cible Docker)
+- [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.30.md) ⭐
+- [Spécifications Fonctionnelles Supervision Multi-Machines](fonctionnelles-supervisor_specs_v2.6.md)
+  (§2.4 — architecture process séparé côté dimotic-ha, §11.5/§14.8 — présence de l'agent)
+- [Spécifications Fonctionnelles RPIGPIO](fonctionnelles-rpigpio_specs_v1.1.md) (application sœur,
+  même principe de paramétrage/déploiement, cible Docker, même mécanisme de présence d'agent §7.3)
 - Code source d'origine : `/home/didier/ownCloud/workspace6/zdidnodeteleinfo/` (hors dépôt git,
   propriété de l'utilisateur)
 
@@ -418,8 +476,10 @@ applications/teleinfo/
 | ADCO | Adresse du compteur — numéro de série unique, présent dans chaque trame |
 | Trame longue | Trame contenant `OPTARIF` (option tarifaire), la seule exploitée par cette application |
 | Carte de commutation ("carte CAN") | Matériel maison routant l'une des 2 lignes téléinfo vers l'UART unique du RPi1, selon l'état de 2 pins GPIO |
+| LWT + battement de cœur (agent) | Présence de `ha-publisher.js` sur `teleinfo/agent/status`, ajoutée en v1.1 (§6.5) — LWT + republication JSON toutes les 30s |
 
 ### 12.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.1 | 2026-08-16 | Claude | Migration du composant dimotic-ha en process séparé (§2.4, `runsAsSeparateProcess`/`standalone.ts` — l'agent RPi1 lui-même reste un déploiement SSH+systemd distinct, sans rapport). Présence de l'agent RPi1 : LWT + battement de cœur ajoutés à `ha-publisher.js` (§6.5, nouveau) — **seule implémentation de présence/heartbeat de cette session vérifiée en conditions réelles** avec du matériel physique (redéploiement réel confirmé, `agentOnline`/`agentLastSeenAt` mis à jour toutes les 30s). Référence croisée techniques-socle mise à jour (v4.28→v4.30). Ancienne version v1.0 archivée. |
 | 1.0 | 2026-08-12 | Claude | Première spécification. Application créée, déployée et déboguée en conditions réelles (2 compteurs EDF physiques, RPi1 réel) au cours de la session — couvre l'architecture, le protocole téléinformation, la bascule GPIO, la publication MQTT/découverte HA, le déploiement SSH+systemd (dont la leçon sur la résolution de dépendances natives), la configuration, l'UI/Socket.io. Deux bugs réels trouvés et corrigés documentés en détail (§4.3 découpage de trame, §5.4 throttling). |

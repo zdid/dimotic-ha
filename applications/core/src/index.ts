@@ -319,7 +319,7 @@ class ApplicationBootstrap {
 
     // Arrêter dans l'ordre inverse
     if (this.appService) {
-      // ⭐ fonctionnelles-supervisor_specs v2.4 — arrête les applications en process séparé
+      // ⭐ fonctionnelles-supervisor_specs v2.6 — arrête les applications en process séparé
       // (espdisplay) AVANT que ce process core lui-même ne se termine, sinon elles deviennent
       // orphelines (voir AppService.stopAllSeparateProcesses()).
       this.appService.stopAllSeparateProcesses();

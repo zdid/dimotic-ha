@@ -25,6 +25,8 @@ interface PinDefinition {
 interface RpigpioStatus {
   pinsCount: number;
   target: { host: string; containerName: string };
+  agentOnline: boolean | null;
+  agentLastSeenAt: string | null;
 }
 
 interface DeployResult {
@@ -88,9 +90,17 @@ function updateStatusDisplay(status: RpigpioStatus): void {
   const countEl = $('pins-count');
   const hostEl = $('target-host');
   const serviceEl = $('target-service');
+  const agentEl = $('agent-status');
+  const lastSeenEl = $('agent-last-seen');
   if (countEl) countEl.textContent = String(status.pinsCount);
   if (hostEl) hostEl.textContent = status.target.host || '—';
   if (serviceEl) serviceEl.textContent = status.target.containerName || '—';
+  if (agentEl) {
+    agentEl.textContent = status.agentOnline === null ? 'Inconnu' : status.agentOnline ? 'En ligne' : 'Hors ligne';
+  }
+  if (lastSeenEl) {
+    lastSeenEl.textContent = status.agentLastSeenAt ? new Date(status.agentLastSeenAt).toLocaleString('fr-FR') : '—';
+  }
 
   const statusCard = $('status-card');
   const actions = $('actions');

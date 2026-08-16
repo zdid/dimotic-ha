@@ -1,5 +1,22 @@
 # Spécifications Fonctionnelles - Supervision Multi-Machines (SUPERVISOR)
 
+*Version 2.6 - 16 Août 2026*
+*⭐ Phase 2 — migration terminée pour toutes les applications prévues (`rpigpio`, `teleinfo`,
+`arexx`, `evoo7`, `nommage`, `rfxcom` — en plus d'`espdisplay`, Phase 1) + révision d'architecture
+en cours de route sur le pont EventBus↔app. Nouvelle §14.5 à §14.11 : décision de remplacer MQTT
+par IPC pour ce pont (les apps migrées restent, en pratique, toujours sur la même machine que
+`core`, qui les lance lui-même — un tuyau `child_process` privé suffit, pas besoin d'un broker),
+pont générique éliminant le besoin de recopier `bridgedEvents` à la main pour chaque app (3
+mécanismes automatiques), correctif du bug préexistant `app:menu:register` jamais relayé (trouvé en
+Phase 1, corrigé en Phase 2), présence/heartbeat implémentée pour les agents distants rpigpio/
+teleinfo (§11, passe de la conception à une implémentation partiellement vérifiée), décision
+explicite de différer la migration d'`ia`/`planificateur`/`haplan`/`arbreouquoi` (dépendance à des
+objets vivants `haWsClient`/`haStructureRegistry`, non transportables tels quels). `MqttEventBus`
+et le pont MQTT générique construits en Phase 1 restent dans le code (testés, fonctionnels) mais ne
+sont plus utilisés par aucune application aujourd'hui — conservés pour un besoin réellement
+cross-machine futur, non requis par aucune migration réalisée à ce jour (toutes restent sur la
+machine qui les a spawnées). Ancienne version v2.5 archivée.*
+
 *Version 2.5 - 16 Août 2026*
 *⭐ Phase 1 implémentée et vérifiée en conditions réelles — première application migrée
 (`espdisplay`) en process séparé, communiquant par MQTT (`MqttEventBus`) avec `core` resté
@@ -70,7 +87,15 @@ ne tient pas face aux chiffres réels mesurés sur `ha2`.*
 12. [Idées Complémentaires et Hors Scope](#12-idées-complémentaires-et-hors-scope)
 13. [Plan de Mise en Œuvre](#13-plan-de-mise-en-œuvre)
     - 13.1 [Prérequis avant implémentation](#131-prérequis-avant-le-passage-à-cette-architecture-v23-15082026)
-14. [Phase 1 — Bilan d'implémentation](#14-phase-1--bilan-dimplémentation--nouveau-v25-16082026)
+14. [Phase 1 et 2 — Bilan d'implémentation](#14-phase-1-et-2--bilan-dimplémentation)
+    - 14.1-14.4 [Phase 1 (espdisplay, MQTT) — v2.5](#141-ce-qui-a-été-construit)
+    - 14.5 [Pivot MQTT → IPC pour le pont local (v2.6)](#145-pivot-mqtt--ipc-pour-le-pont-local-nouveau-v26-16082026)
+    - 14.6 [Pont générique EventBus↔app — fin des `bridgedEvents` manuels (v2.6)](#146-pont-générique-eventbusapp--fin-des-bridgedevents-manuels-nouveau-v26-16082026)
+    - 14.7 [Phase 2 — rollout à 6 applications (v2.6)](#147-phase-2--rollout-à-6-applications-nouveau-v26-16082026)
+    - 14.8 [Présence/heartbeat des agents distants rpigpio/teleinfo (v2.6)](#148-présenceheartbeat-des-agents-distants-rpigpioteleinfo-nouveau-v26-16082026)
+    - 14.9 [Correctif `app:menu:register` jamais relayé (v2.6)](#149-correctif-appmenuregister-jamais-relayé-nouveau-v26-16082026)
+    - 14.10 [Migration différée : ia/planificateur/haplan/arbreouquoi (v2.6)](#1410-migration-différée--iaplanificateurhaplanarbreouquoi-nouveau-v26-16082026)
+    - 14.11 [Vérifié en conditions réelles (v2.6)](#1411-vérifié-en-conditions-réelles-v26)
 15. [Annexes](#15-annexes)
 
 ---
@@ -304,6 +329,12 @@ sur `.../app/{soi-même}/event/{event}` ; `onGeneric(event, cb)` s'abonne à
 quelle machine, peut être à l'origine de l'événement, comme c'était implicitement le cas en
 in-process).
 
+> ⚠️ **Note v2.6** : ce mécanisme (`MqttEventBus`) reste valide et testé, mais n'est **plus utilisé
+> par aucune application migrée aujourd'hui** — voir §14.5. Toutes les applications migrées à ce
+> jour restent sur la même machine que le `core` qui les a spawnées ; le pont réel utilise IPC
+> (`IpcEventBus`), pas MQTT. `MqttEventBus` redeviendrait pertinent le jour où une application
+> migrée devrait tourner sur une machine différente de son `core` — cas non rencontré à ce jour.
+
 ### 6.4 Registre de présence — vue live + historique local persisté (v2.3)
 
 Chaque machine s'abonne à `dimotic/supervisor/+/status` et `dimotic/supervisor/+/apps` pour
@@ -377,6 +408,14 @@ Conséquence directe : **n'importe quel `core`, sur n'importe quelle machine, vo
 événements de toutes les applications de toutes les machines** — c'est un sous-produit naturel du bus
 MQTT unifié (§6), pas un mécanisme séparé à construire. Le pontage dynamique par convention de
 nommage (§2.2) reste inchangé dans son principe.
+
+> ⚠️ **Note v2.6** : ce tableau décrit le modèle conçu pour un pont MQTT (pertinent le jour où une
+> application tournera réellement sur une autre machine). Le pont **effectivement en service**
+> aujourd'hui (`SupervisorEventBridge`, IPC) reproduit la même intention par un mécanisme différent,
+> forcé par la nature point-à-point de l'IPC (pas de wildcard) : réception (app→core) générique par
+> construction (un `ChildProcess` ne parle qu'à son enfant, tout ce qu'il envoie arrive), émission
+> (core→app) routée explicitement via une table `interestedApps: Map<eventName, Set<appId>>` — voir
+> §14.5/§14.6 pour le détail.
 
 ### 7.2 Assets statiques (HTML/CSS/JS) — la pièce manquante, ajoutée en v2.1
 
@@ -633,6 +672,34 @@ périmètre limité aux commandes (pas à la présence).
   (§5) — reste un modèle de déploiement distinct, cette section ne fait qu'ajouter de la visibilité
   par-dessus, sans rien changer à leur fonctionnement interne.
 
+### 11.5 ⭐ Point 1 (Présence) implémenté pour rpigpio/teleinfo (v2.6, 16/08/2026)
+
+Différence par rapport à la conception initiale de ce point (§11.2.1) : plutôt que d'ajouter une
+publication de présence générique au format `dimotic/supervisor/{machineId}/status`, l'implémentation
+réelle **réutilise le mécanisme de présence déjà natif de chaque agent** — plus simple, sans nouveau
+protocole à faire respecter par du code tiers (mqtt-io) ou du JS embarqué déjà minimal (RPi1) :
+
+- **`rpigpio`** : `RpigpioService` (dans `core`, PAS un agent séparé) ouvre une connexion MQTT en
+  **lecture seule**, uniquement pour s'abonner au LWT **déjà publié nativement par mqtt-io**
+  (`<topicPrefix>/<bridgeInstance>/status`, payload `"running"`/`"dead"`) — rien à ajouter côté
+  agent, mqtt-io le fait déjà. Champs `agentOnline`/`agentLastSeenAt` exposés sur
+  `RpigpioStatus`/dashboard. **Non vérifié en conditions réelles** : le conteneur mqtt-io réel sur
+  `ha2` n'a pas été redéployé avec le nouveau format de topic (contrainte "pas de contact avec
+  ha2/orangepi" en vigueur cette session) — affiche "Inconnu" en l'état, cohérent avec l'absence de
+  redéploiement.
+- **`teleinfo`** : l'agent RPi1 (`device-agent/ha-publisher.js`, JS brut, pas de build — ARMv6/
+  Node12) n'avait, lui, aucun mécanisme de présence natif à réutiliser — ajouté : LWT (`will` MQTT à
+  la connexion, topic `teleinfo/agent/status`) **et** un battement de cœur explicite toutes les 30s
+  (payload JSON `{status, timestamp}` — un simple LWT binaire ne donne jamais de "dernier contact"
+  récent tant que l'agent reste connecté). `TeleinfoService` (core) s'abonne en lecture seule, même
+  patron que rpigpio. **Vérifié en conditions réelles** : redéployé sur le RPi1 réel (bouton
+  "Générer et déployer" existant, aucun nouveau mécanisme de déploiement), service systemd actif,
+  `agentOnline: true` et `agentLastSeenAt` se mettant à jour toutes les 30s pile, observé en direct
+  sur le tableau de bord.
+
+Le **point 2** (commandes nommées, liste fermée) de cette section reste non implémenté pour ces deux
+agents — seule la présence (point 1) a été construite à ce stade.
+
 ---
 
 ## 12. Idées Complémentaires et Hors Scope
@@ -696,7 +763,17 @@ MQTT bridge loopback court-circuité) plutôt que de renoncer au modèle.
 
 ---
 
-## 14. Phase 1 — Bilan d'implémentation (⭐ nouveau v2.5, 16/08/2026)
+## 14. Phase 1 et 2 — Bilan d'implémentation
+
+**§14.1 à §14.4 : Phase 1 (16/08/2026, v2.5)** — première application migrée, `espdisplay`, sous
+MQTT (`MqttEventBus`). Conservé tel quel ci-dessous comme trace historique fidèle : c'est l'état
+réel du code à ce moment-là, avant le pivot vers IPC documenté en §14.5 (même jour, plus tard dans
+la session).
+
+**§14.5 et suivants : Phase 2 (16/08/2026, v2.6)** — pivot du pont EventBus↔app de MQTT vers IPC
+(§14.5), généralisation du pontage (§14.6), puis migration des 6 applications restantes prévues
+(§14.7), présence/heartbeat rpigpio/teleinfo (§14.8), correctif `app:menu:register` (§14.9),
+décision de différer 4 applications (§14.10).
 
 Première application migrée : `espdisplay`. Implémenté et vérifié en conditions réelles (broker
 MQTT de production, `falbala`) — pas un test isolé. Ce qui suit documente ce qui a réellement été
@@ -770,6 +847,180 @@ conditions réelles (un arrêt externe non voulu classé crash, tentative avec d
 Commandes MQTT `stop`/`start` testées individuellement, effet confirmé sur le process réel à chaque
 fois. Plus aucun orphelin après plusieurs cycles de redémarrage de `core`.
 
+### 14.5 Pivot MQTT → IPC pour le pont local (⭐ nouveau v2.6, 16/08/2026)
+
+**Décision utilisateur**, prise en cours de session en préparant la migration des 6 applications
+suivantes : les applications migrées restent, dans tous les cas rencontrés jusqu'ici, sur la **même
+machine** que le `core` qui les a lui-même lancées (`child_process.spawn()`) — la relation
+parent-enfant existe donc déjà physiquement. Passer par un broker MQTT pour ce saut strictement
+local (§6.3 supposait MQTT nécessaire par défaut, y compris intra-machine) ajoute une dépendance à
+`ha.mqtt` et un aller-retour réseau (même en loopback) sans bénéfice pour ce cas précis.
+
+**Remplacement** : IPC (`process.send()`/`process.on('message')`), via le canal `stdio: [...,
+'ipc']` que `child_process.spawn()` établit gratuitement dès qu'on le demande — aucun protocole,
+aucun broker, aucune configuration réseau. **Validé avant de tout reconstruire** : test isolé
+(parent/enfant minimal, à travers `tsx spawn()` exactement comme en dev) — canal IPC fonctionnel de
+bout en bout, y compris à travers le PID différent que crée le wrapper `tsx`.
+
+**Construit** :
+- **`IpcEventBus`** (`application/IpcEventBus.ts`, nouvelle classe) — remplace `MqttEventBus` dans
+  chaque `standalone.ts`. Implémente `IEventBus` à l'identique (typé + générique). Contrairement à
+  MQTT, l'IPC n'a ni topic ni wildcard : chaque message arrive directement et uniquement au process
+  en face — toute la mécanique de parsing de topic/anti-écho self-origin de `MqttEventBus`
+  disparaît. `deliverLocally()` conservé (même raison qu'en §14.1 : un process qui émet et écoute
+  son propre événement doit se comporter comme `EventBus.ts`).
+- **`SupervisorEventBridge` réécrit** (pas une nouvelle classe — même rôle, mécanisme interne
+  différent) : `attachChild(appId, child)`/`detachChild(appId)`, appelés par `ProcessSupervisor` à
+  chaque (re)spawn/sortie d'un enfant — un `ChildProcess` respawné est un nouvel objet, avec un
+  nouveau canal IPC, il faut donc réattacher à chaque fois (contrairement à MQTT, pas de
+  reconnexion automatique à gérer : le tuyau est recréé par construction à chaque `spawn()`).
+  Réception (app → core) **générique par nature avec l'IPC** — un `ChildProcess` est un tuyau
+  point-à-point, tout ce qu'un enfant envoie via `process.send()` arrive forcément au pont, sans
+  abonnement ni nom à déclarer à l'avance (contrairement à MQTT, où il fallait un abonnement
+  wildcard générique pour obtenir cette même propriété). Émission (core → app) reste ciblée par
+  `(appId, eventName)` via une table interne `interestedApps: Map<eventName, Set<appId>>` — un
+  `ChildProcess` ne parle qu'à SON enfant, pas de diffusion native comme un topic MQTT partagé.
+- **`ProcessSupervisor.spawnChild()`** : `stdio` étendu à `['inherit', 'inherit', 'inherit',
+  'ipc']` (logs toujours hérités, canal IPC en plus) ; appelle `eventBridge.attachChild()`/
+  `detachChild()` au spawn/à la sortie.
+- **`espdisplay` re-migrée sous IPC** (`standalone.ts`) — plus besoin de lire `ha.mqtt` du tout
+  pour son propre `eventBus` ; `bridgedEvents` réduit à un seul événement
+  (`espdisplay:deploy-floorplan`, HAPLAN→espdisplay — voir §14.6 pour pourquoi l'autre sens n'a
+  plus besoin d'être déclaré).
+
+**Non supprimé** : `MqttEventBus` et le pont MQTT générique construits en Phase 1 restent dans le
+code, testés (suite de contrat étendue, voir §14.11), simplement plus utilisés par aucun
+`standalone.ts` aujourd'hui — voir note v2.6 en §6.3. Les connexions MQTT **métier** propres à
+certaines apps (broker dédié evoo7 avant sa propre migration vers Socket.IO, sources nommage,
+présence des agents rpigpio/teleinfo §14.8) sont un sujet totalement indépendant, inchangées par ce
+pivot.
+
+**Vérifié en conditions réelles** : les 7 apps séparées redémarrées sous IPC, les 4 bridges
+`integration:*` connectés, comptes d'événements Socket.io identiques à la version MQTT, suite de
+tests de contrat `IEventBus` étendue à `IpcEventBus` (21/21 verts), suite complète core sans
+régression (131 tests).
+
+### 14.6 Pont générique EventBus↔app — fin des `bridgedEvents` manuels (⭐ nouveau v2.6, 16/08/2026)
+
+**Problème rencontré en migrant les 6 applications suivantes** (§14.7) : énumérer `bridgedEvents` à
+la main pour chaque app s'est révélé fragile — un événement UI ajouté sans être répercuté dans
+`bridgedEvents` reste silencieusement mort (aucune erreur, juste rien ne se passe côté navigateur),
+rencontré plusieurs fois pendant la session (`rpigpio` en particulier, voir §14.7). Décision
+utilisateur explicite : passer à un relais générique plutôt que de continuer à lister les
+événements un par un.
+
+**Réception (app → core)** : générique par construction avec l'IPC (§14.5) — rien à déclarer,
+c'était déjà le principal problème corrigé par le pivot lui-même.
+
+**Émission (core → app)** : reste ciblée par nom (l'`EventBus` local est un simple `EventEmitter`,
+aucun concept de wildcard côté réception d'un abonnement local) — mais l'essentiel n'exige plus de
+déclaration manuelle par app, via **trois mécanismes génériques**, tous appliqués automatiquement
+par `AppService.detectApplicationModules()` dès qu'une app est `runsAsSeparateProcess` :
+1. **`SupervisorEventBridge.autoBridgeSocketEvents(appId)`** — dérive directement la liste des
+   événements UI du **payload** d'`app:socket-events:registered` (que chaque app envoie déjà avec sa
+   liste complète, `XXX_ALL_EVENTS` + événements persistants), au lieu de recopier
+   `Object.values(XXX_ALL_EVENTS)` dans `bridgedEvents`.
+2. **Les 4 motifs `integration:{module}:command/bridge:connection/ha:online/passthrough:message`**
+   émis par `IntegrationBridge` (in-process) vers un module — bridgés automatiquement pour toute app
+   `type: 'integration'`, paramétrés par `appModule.id`. `integration:bridge:register`/`unregister`
+   (noms **partagés**, non préfixés par moduleId — utilisés par toute app `type: 'integration'` pour
+   s'annoncer auprès d'`IntegrationBridge`) bridgés de la même façon, dès que
+   `runsAsSeparateProcess && type === 'integration'` — trouvé nécessaire en migrant `arexx` (§14.7),
+   première app `type: 'integration'` migrée après `rpigpio`/`teleinfo`.
+3. **`app:module:config:saved`** bridgé automatiquement pour toute app séparée — rechargement à
+   chaud de connexion après sauvegarde config (utilisé par `evoo7`/`nommage`), inoffensif pour les
+   autres.
+
+**Résultat** : `bridgedEvents` retiré de `rpigpio`/`teleinfo`/`arexx`/`evoo7`/`nommage`/`rfxcom`
+(plus aucune entrée). `espdisplay` garde une seule entrée (`espdisplay:deploy-floorplan`), le seul
+cas resté vraiment bespoke, non couvert par les 3 mécanismes ci-dessus. Le champ
+`ApplicationModule.bridgedEvents` reste dans le type comme échappatoire pour un futur cas non
+générique.
+
+**Vérifié en conditions réelles** : les 7 apps séparées démarrées simultanément (`arexx`/`evoo7`/
+`nommage` réactivées temporairement pour le test), tous les bridges `integration:*` connectés,
+comptes d'événements Socket.io cohérents avec avant, round-trip client→serveur retesté sur
+`arexx`/`evoo7`/`nommage`/`rfxcom` (dashboards fonctionnels, aucune erreur console). `arexx`/
+`evoo7`/`nommage` redésactivées ensuite (état restauré, elles n'étaient pas actives avant ce
+chantier).
+
+### 14.7 Phase 2 — rollout à 6 applications (⭐ nouveau v2.6, 16/08/2026)
+
+Migration progressive, une app à la fois, comme pour la Phase 1 — ordre choisi avec l'utilisateur :
+`rpigpio` (premier test grandeur nature du pontage UI, aucune dépendance `integration:*`),
+`teleinfo` (même profil), `arexx` (premier `type: 'integration'`), `evoo7`, `nommage` (dernier
+`type: 'integration'`), puis `rfxcom` en tout dernier — utilisateur prévenu explicitement avant de
+commencer, le temps de rebrancher physiquement le récepteur RFXCOM sur cette machine.
+
+**Écueil trouvé sur `rpigpio` (pas rencontré avec `espdisplay`, qui n'a aucune UI Socket.io)** :
+`SocketBridge` ne relaie rien automatiquement pour une app séparée avec interface — chaque nom
+d'événement `*_ALL_EVENTS` devait être explicitement listé dans `bridgedEvents` pour traverser la
+frontière process, sans quoi le tableau de bord restait figé. Généralisé dès `rpigpio` : le ponte
+automatique d'`app:socket-events:registered` (§14.6 point 1) — remplacé ensuite par le mécanisme
+générique définitif en fin de Phase 2 (§14.6).
+
+**Prérequis découvert en préparant `rfxcom`** : `data/rfxcom/config.yaml` pointait encore sur
+`/dev/ttyUSB0` — le récepteur RFXtrx433XL fraîchement rebranché est apparu sur `/dev/ttyUSB1`
+(confirmé `udevadm`, `idVendor=0403`/`RFXtrx433XL` ; `/dev/ttyUSB0` est un adaptateur CH340
+générique sans rapport). Corrigé avant de démarrer — configuration locale (`data/`), pas un
+changement de code.
+
+**`rfxcom`, vigilance particulière** : vérifié explicitement dans les logs qu'**aucune commande
+n'est envoyée au démarrage** — les correctifs de sécurité de cette même session (voir
+`techniques-socle-ha-mqtt_specs` §8.5.4ter et l'entrée TODO.md dédiée) tiennent sous la migration,
+inchangés. Le mécanisme d'exclusion inter-instances (§9.4) fonctionne à travers le pont mosquitto
+local↔ha2 mis en place plus tôt cette session (hors périmètre de cette spec) : ce process de test
+local voit bien la production (`rfx_bridge_0001` sur `ha2`) déjà propriétaire de tous ses devices
+réels et s'abstient de republier leur découverte. **`rfxcom` laissée activée après le test**
+(contrairement à `arexx`/`evoo7`/`nommage`, redésactivées) — c'est l'objectif même de cette
+migration : que les futurs tests RFXCOM se fassent sur cette machine, matériel branché ici.
+
+**Statut final** : les 7 applications prévues sont migrées (`espdisplay`, `rpigpio`, `teleinfo`,
+`arexx`, `evoo7`, `nommage`, `rfxcom`). Restent en in-process, par décision explicite — voir §14.10.
+
+### 14.8 Présence/heartbeat des agents distants rpigpio/teleinfo (⭐ nouveau v2.6, 16/08/2026)
+
+Voir §11.5 pour le détail — implémentation du point 1 (Présence) de l'Agent Minimal (§11) pour les
+deux agents MQTT distants existants. `teleinfo` vérifié en conditions réelles sur le RPi1 physique ;
+`rpigpio` non vérifié (redéploiement du conteneur mqtt-io sur `ha2` non autorisé cette session).
+
+### 14.9 Correctif `app:menu:register` jamais relayé (⭐ nouveau v2.6, 16/08/2026)
+
+Bug **trouvé en Phase 1** (§14.2 point 2, "préexistant, non corrigé à l'époque") — **corrigé en
+Phase 2** : `SocketBridge.ts` ne déclarait `app:menu:register` dans aucun `*_SOCKET_EVENTS`, pour
+aucune application, alors que `Sidebar.ts` attend cet événement pour permettre à une app de mettre
+à jour son menu dynamiquement après démarrage, sans redémarrage de `core`. Ajouté à
+`ServerToClientEvents` (`types/events.ts`) et câblé dans `SocketBridge.ts` — même patron que
+`app:module:ui:register` déjà existant (`onGeneric` + `broadcast` + cache `customMenus` par appId +
+rejeu aux nouvelles connexions). Vérifié en direct : le client reçoit désormais l'événement pour
+chaque app qui l'émet, aucune régression visuelle du menu.
+
+### 14.10 Migration différée : ia/planificateur/haplan/arbreouquoi (⭐ nouveau v2.6, 16/08/2026)
+
+**Décision explicite**, discutée avec l'utilisateur avant d'attaquer ces 4 applications : elles
+dépendent de `haStructureRegistry`/`haWsClient`, objets vivants (connexion WebSocket HA réelle,
+méthodes `.sendCommand()`/`.onStateChanged()`) construits par `core`, non transportables tels quels
+par IPC ni MQTT. Les migrer exigerait de concevoir un proxy de commandes HA (`planificateur`/
+`haplan` exécutent réellement des actions HA — même classe de risque que les incidents de sécurité
+RFXCOM traités cette session) pour un bénéfice nul tant que ces apps restent sur la même machine que
+`core` : tout l'intérêt de la séparation MQTT/multi-machine est l'isolement/le déploiement
+cross-machine — aucun des deux n'est utile ici aujourd'hui, ces 4 apps n'ayant pas vocation à tourner
+ailleurs dans l'immédiat.
+
+**Décision** : pas de migration pour l'instant, ni de conception de proxy. Option explicitement
+laissée ouverte (pas fermée dans les specs) pour le jour où l'une de ces apps devrait tourner sur
+une autre machine.
+
+### 14.11 Vérifié en conditions réelles (v2.6)
+
+Synthèse, en plus des vérifications détaillées par section ci-dessus : les 7 apps séparées démarrées
+simultanément sous IPC sans régression, build + suite de tests core propres (131 tests, suite de
+contrat `IEventBus` à 21/21 dont `IpcEventBus`), aucune commande matérielle non désirée envoyée au
+démarrage d'aucune app (vigilance particulière pour `rfxcom`/`evoo7`, historique d'incidents réels
+cette session), `teleinfo` vérifié de bout en bout sur le RPi1 physique réel (présence + lecture des
+2 compteurs), `nommage` vérifié de bout en bout à travers le pont mosquitto local↔ha2 avec du trafic
+réel continu.
+
 ## 15. Annexes
 
 ### 15.1 Références
@@ -786,21 +1037,30 @@ fois. Plus aucun orphelin après plusieurs cycles de redémarrage de `core`.
   individuellement supervisables) est repris en v2.0, jamais le code lui-même.
 - `TODO.md` — chantiers dérivés de cette discussion suivis en dehors de cette spec (sauvegarde HA,
   bridgeInstance/rpigpio, diffusion RFXCOM).
+- [Spécifications Fonctionnelles RPIGPIO](fonctionnelles-rpigpio_specs_v1.1.md) (§7.3, présence de
+  l'agent mqtt-io — implémentation réelle du point 1 de §11)
+- [Spécifications Fonctionnelles TELEINFO](fonctionnelles-teleinfo_specs_v1.1.md) (§6.5, présence
+  de l'agent RPi1, seule implémentation vérifiée en conditions réelles à ce jour)
+- `fonctionnelles-supervisor_specs_v2.5.md` (archivée) — Phase 1 (`espdisplay`, sous MQTT), avant le
+  pivot IPC et la Phase 2
 
 ### 15.2 Glossaire
 | Terme | Définition |
 |-------|------------|
 | `machineId` | Identité d'une instance de la plateforme (une par machine physique), défaut = hostname |
-| `MqttEventBus` | Implémentation de `IEventBus` backée par MQTT plutôt qu'un `EventEmitter` local — même interface, apps inchangées |
-| `standalone.ts` | Nouveau point d'entrée par application (à côté de `domain/index.ts`), auto-suffisant : lit sa config, construit son `MqttEventBus`, appelle `create*Service()` |
-| Registre agrégé | Vue locale, reconstruite par abonnement MQTT wildcard, de toutes les machines/applications/événements disponibles, complétée (v2.3) d'une copie locale persistée horodatée |
-| Agent minimal | Publication du contrat de présence + un jeu fermé de commandes nommées, sans porter le reste de la stack — pour machines contraintes (§11) |
+| `MqttEventBus` | Implémentation de `IEventBus` backée par MQTT plutôt qu'un `EventEmitter` local — même interface, apps inchangées. Testée et fonctionnelle mais non utilisée par aucune app migrée depuis le pivot IPC (v2.6, §14.5) |
+| `IpcEventBus` | ⭐ v2.6 — implémentation de `IEventBus` backée par IPC (`process.send()`/`'message'`), utilisée côté enfant par chaque `standalone.ts` depuis le pivot §14.5 — remplace `MqttEventBus` pour toute app restant sur la machine de son `core` |
+| `SupervisorEventBridge` | ⭐ v2.6 — pont côté `core` (parent), pendant symétrique d'`IpcEventBus` : `attachChild()`/`detachChild()` à chaque (re)spawn/sortie d'enfant, `bridgeEvent()` pour le sens core→app, réception app→core automatique par nature (IPC) |
+| `standalone.ts` | Nouveau point d'entrée par application (à côté de `domain/index.ts`), auto-suffisant : lit sa config, construit son `IpcEventBus` (v2.6, `MqttEventBus` en Phase 1/v2.5), appelle `create*Service()` |
+| Registre agrégé | Vue locale, reconstruite par abonnement MQTT wildcard, de toutes les machines/applications/événements disponibles, complétée (v2.3) d'une copie locale persistée horodatée — concerne le cas cross-machine (§7), pas le pont local IPC (§14.5) |
+| Agent minimal | Publication du contrat de présence + un jeu fermé de commandes nommées, sans porter le reste de la stack — pour machines contraintes (§11). Point 1 (présence) implémenté pour rpigpio/teleinfo en v2.6 (§11.5/§14.8) |
 
 ### 15.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
-| 2.4 | 2026-08-16 | Claude | Correction de référence croisée uniquement (`techniques-socle-ha-mqtt_specs` v4.29→v4.30, §8.5.4ter rejet des commandes MQTT retenues). Aucun changement de contenu propre à cette spec. Ancienne version v2.3 archivée. |
+| 2.6 | 2026-08-16 | Claude | **⭐ Phase 2 — migration terminée pour les 6 applications restantes prévues** (`rpigpio`, `teleinfo`, `arexx`, `evoo7`, `nommage`, `rfxcom`) et révision d'architecture en cours de route, §14.5-§14.11 (nouvelles) : pivot du pont EventBus↔app de MQTT (`MqttEventBus`) vers IPC (`IpcEventBus`) — les apps migrées restent sur la même machine que `core`, qui les spawn lui-même, un tuyau `child_process` suffit (§14.5) ; pont générique éliminant `bridgedEvents` manuel via 3 mécanismes automatiques (§14.6) ; rollout des 6 apps avec les écueils rencontrés par app (§14.7) ; présence/heartbeat rpigpio/teleinfo, du point 1 de l'Agent Minimal §11 passé de la conception à une implémentation réelle, teleinfo vérifiée en conditions réelles (§11.5/§14.8) ; correctif du bug préexistant `app:menu:register` trouvé en Phase 1 (§14.9) ; migration différée d'`ia`/`planificateur`/`haplan`/`arbreouquoi`, décision explicite documentée (§14.10). `MqttEventBus`/le pont MQTT générique non supprimés, juste plus utilisés par aucune app (§6.3/§7.1 annotées d'une note v2.6). Ancienne version v2.5 archivée. |
 | 2.5 | 2026-08-16 | Claude | **⭐ Phase 1 implémentée et vérifiée en conditions réelles** (§14, nouvelle) : `espdisplay` migrée en process séparé (`MqttEventBus`, `ProcessSupervisor`, `SupervisorEventBridge`, `standalone.ts`). Deux problèmes réels trouvés en testant : process orphelins au redémarrage de `core` (corrigé, `stopAllSeparateProcesses()` + filet `process.on('exit')`), `app:menu:register` jamais relayé côté socle pour aucune app (préexistant, non corrigé ici, signalé dans `TODO.md`). Deux décisions prises en cours de route : commandes MQTT start/stop/restart généralisées à toute app séparée (pas réservées à l'agent minimal §11), aucune signature sur ce canal pour cette phase (authentification prévue au niveau du broker mosquitto, sujet séparé). Ancienne version v2.4 archivée. |
+| 2.4 | 2026-08-16 | Claude | Correction de référence croisée uniquement (`techniques-socle-ha-mqtt_specs` v4.29→v4.30, §8.5.4ter rejet des commandes MQTT retenues). Aucun changement de contenu propre à cette spec. Ancienne version v2.3 archivée. |
 | 2.3 | 2026-08-15 | Claude | Discussion approfondie, point par point, avant implémentation. **§6.4 étendue** : persistance locale horodatée du registre par machine (résilience si le broker perd son retain), horodatage source fait foi. **§9 entièrement réécrite** : principe "une entité, un endroit, responsabilité du paramétreur" ; `bridgeInstance` par défaut passe de "dérivé du machineId" à un tirage aléatoire persisté, généralisé à tous les modules à bridge ; `rpigpio` découvert sans aucun `bridgeInstance` (passe par mqtt-io externe, collision réelle aujourd'hui) ; `node_id`=`bridgeInstance` tranché pour le topic de découverte (rejoint l'item 🔴 Haute de `TODO.md`) ; nouveau mécanisme RFXCOM de diffusion des devices enregistrés + avertissement UI pour le recouvrement RF réel. **§10 réécrite** : décision concrète de signature HMAC du canal de commandes (clé partagée), authentification broker/TLS explicitement écartée. **§11 nouvelle** : Agent Minimal pour Machines Contraintes (ARMv6/teleinfo) — referme le hors-scope de la v2.2, scope délibérément modeste (présence + commandes nommées fermées, même principe que la commande forcée SSH d'espdisplay). **§13.1 nouvelle** : liste consolidée de 7 prérequis avant implémentation. Ancienne version v2.2 archivée. |
 | 2.2 | 2026-08-15 | Claude | **Politique de redémarrage en cas de crash** (§8.4, nouvelle) : backoff exponentiel (1s→30s plafond), réarmement du compteur de tentatives après 60s de fonctionnement stable, abandon après 5 tentatives rapprochées (état terminal `crashed`, redémarrage manuel). Machine à états explicite, registre étendu d'un statut par application (`running`/`restarting`/`crashed`). Discutée puis validée avec l'utilisateur avant rédaction. Ancienne version v2.1 archivée. |
 | 2.1 | 2026-08-15 | Claude | **§7 réécrite** en réponse à une question directe de l'utilisateur ("voir toutes les applis de toutes les machines sur la même interface web ?"). Corrige une incohérence de la v2.0 (pontage Socket.io limité à sa propre machine, alors que le bus MQTT lui-même était déjà global) — §7.1. Ajoute le proxy HTTP de repli pour les fichiers statiques d'une application distante — §7.2, seule pièce manquante puisque le service de fichiers ne passe jamais par le process de l'application. Registre étendu (`address`/`webPort` dans le payload de présence, §6.2). Ancienne version v2.0 archivée. |

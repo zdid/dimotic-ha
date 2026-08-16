@@ -1,14 +1,16 @@
 /**
- * Bootstrap autonome d'espdisplay en process séparé — fonctionnelles-supervisor_specs v2.6 §5.2,
- * Phase 1 (première application migrée). Lancé par ProcessSupervisor (applications/core/src/
- * supervisor/), jamais directement par AppService.startApplicationService() (voir le flag
- * `runsAsSeparateProcess` sur ESPDISPLAY_APP).
+ * Bootstrap autonome de nommage en process séparé — fonctionnelles-supervisor_specs v2.6 §5.2,
+ * même patron que applications/evoo7/src/standalone.ts. Lancé par ProcessSupervisor
+ * (applications/core/src/supervisor/), jamais directement par AppService.startApplicationService()
+ * (voir le flag `runsAsSeparateProcess` sur NOMMAGE_APP).
  *
  * Se bootstrap intégralement lui-même — lit sa propre config, construit son propre IpcEventBus
  * (16/08/2026 : IPC via le canal `stdio: [...,'ipc']` que ProcessSupervisor établit au spawn,
- * remplace MqttEventBus — plus besoin de `ha.mqtt` pour ce canal, l'app reste sur cette machine).
- * `createEspDisplayService()` (domain/index.ts) reste inchangée : c'est ce contrat de factory
- * identique qui permet à ce fichier d'être le seul changement nécessaire pour la migration.
+ * remplace MqttEventBus — plus besoin de `ha.mqtt` pour ce canal, l'app reste sur cette machine ;
+ * ses propres connexions aux sources MQTT configurées (zigbee2mqtt, etc.) restent inchangées,
+ * usage MQTT totalement indépendant de ce canal EventBus). `createNommageServiceWithConfig()`
+ * (domain/index.ts) reste inchangée : c'est ce contrat de factory identique qui permet à ce
+ * fichier d'être le seul changement nécessaire pour la migration.
  */
 
 import * as path from 'node:path';
@@ -19,7 +21,7 @@ import {
   createLogger,
   IpcEventBus
 } from '../../core/dist/exports';
-import { createEspDisplayServiceWithConfig } from './domain';
+import { createNommageServiceWithConfig } from './domain';
 
 async function main(): Promise<void> {
   const logger = createLogger({
@@ -30,8 +32,8 @@ async function main(): Promise<void> {
   });
 
   // Même racine de config que core (data/core/config.yaml + data/{app}/config.yaml) — c'est ce qui
-  // permet de lire à la fois core.machineId (juste informatif ici) et sa propre section
-  // `espdisplay`, en cohérence avec ce que core lui-même voit.
+  // permet de lire à la fois core.machineId (juste informatif ici) et sa propre section `nommage`,
+  // en cohérence avec ce que core lui-même voit.
   const dataRoot = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data');
   const configPath = process.env.CONFIG_PATH || path.join(dataRoot, 'core', 'config.yaml');
   const configLoader = new ConfigLoader(configPath, undefined, dataRoot);
@@ -41,16 +43,16 @@ async function main(): Promise<void> {
   const machineId = configService.getConfig().core.machineId;
   const eventBus = new IpcEventBus();
 
-  const service = createEspDisplayServiceWithConfig(eventBus, logger, configService);
+  const service = createNommageServiceWithConfig(eventBus, logger, configService);
 
   await service.start();
-  logger.info('espdisplay:standalone', `espdisplay démarré en process séparé (pid ${process.pid}, machine ${machineId})`);
+  logger.info('nommage:standalone', `nommage démarré en process séparé (pid ${process.pid}, machine ${machineId})`);
 
   let stopping = false;
   const shutdown = async (signal: string): Promise<void> => {
     if (stopping) return;
     stopping = true;
-    logger.info('espdisplay:standalone', `Signal ${signal} reçu — arrêt`);
+    logger.info('nommage:standalone', `Signal ${signal} reçu — arrêt`);
     try {
       await service.stop();
     } finally {
@@ -63,6 +65,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error('[espdisplay:standalone] Échec du démarrage:', error);
+  console.error('[nommage:standalone] Échec du démarrage:', error);
   process.exit(1);
 });

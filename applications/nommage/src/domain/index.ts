@@ -233,7 +233,17 @@ export const NOMMAGE_APP: ApplicationModule & { menu?: ApplicationMenuConfig } =
   requiredHaWs: false,
   configSection: 'nommage',
   configUi: NOMMAGE_UI_METADATA,
-  socketEvents: NOMMAGE_SOCKET_EVENTS
+  socketEvents: NOMMAGE_SOCKET_EVENTS,
+
+  // Migration superviseur (fonctionnelles-supervisor_specs v2.6) — process séparé sur cette même
+  // machine. Tout ponté automatiquement par AppService/SupervisorEventBridge (§7.1) : NOMMAGE_ALL_EVENTS
+  // (UI), integration:bridge:register/unregister, integration:nommage:ha:online (republication de
+  // la découverte au retour HA — un des 4 motifs génériques émis par IntegrationBridge), le chemin
+  // passthrough propre à nommage (passthrough:publish/discovery, émis PAR nommage — voir
+  // NommageMqttIntegrationService, reçu par le pont générique côté MQTT→local) et
+  // app:module:config:saved (rechargement à chaud des connexions MQTT après sauvegarde config,
+  // même mécanisme qu'evoo7).
+  runsAsSeparateProcess: true
 };
 
 // ============================================================================

@@ -102,12 +102,14 @@ export const ESPDISPLAY_APP: ApplicationModule & { menu?: ApplicationMenuConfig 
   configSection: 'espdisplay',
   configUi: ESPDISPLAY_UI_METADATA,
 
-  // ⭐ fonctionnelles-supervisor_specs v2.4, Phase 1 (16/08/2026) — première application migrée en
-  // process séparé. bridgedEvents reprend ESPDISPLAY_EVENTS (EspDisplayService.ts) : les deux
-  // événements génériques EventBus qui traversent la frontière process avec HAPLAN (resté
-  // in-process), voir SupervisorEventBridge.
+  // ⭐ fonctionnelles-supervisor_specs v2.6, Phase 1 (16/08/2026) — première application migrée en
+  // process séparé. bridgedEvents ne garde que le sens local → MQTT, non couvert par le pont
+  // générique (§7.1) : espdisplay:deploy-floorplan, émis par HAPLAN (resté in-process) sur le bus
+  // local de core, doit être explicitement relayé vers espdisplay. L'autre sens
+  // (espdisplay:deploy-result, émis PAR espdisplay) est reçu automatiquement par le pont MQTT→local
+  // générique, plus besoin de le déclarer ici.
   runsAsSeparateProcess: true,
-  bridgedEvents: ['espdisplay:deploy-floorplan', 'espdisplay:deploy-result']
+  bridgedEvents: ['espdisplay:deploy-floorplan']
 };
 
 export function createEspDisplayService(

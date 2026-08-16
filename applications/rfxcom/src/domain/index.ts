@@ -144,7 +144,18 @@ export const RFXCOM_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = 
   requiredHaWs: false,
   configSection: 'rfxcom',
   configUi: RFXCOM_UI_METADATA,
-  socketEvents: RFXCOM_SOCKET_EVENTS
+  socketEvents: RFXCOM_SOCKET_EVENTS,
+
+  // Migration superviseur (fonctionnelles-supervisor_specs v2.6) — process séparé sur cette même
+  // machine, dernière app migrée (après arexx/evoo7/nommage, même chantier). Tout ponté
+  // automatiquement par AppService/SupervisorEventBridge (§7.1) : RFXCOM_ALL_EVENTS (UI),
+  // integration:bridge:register/unregister, la famille integration:rfxcom:* complète — command/
+  // bridge:connection/ha:online/passthrough:message (les 4 motifs génériques émis par
+  // IntegrationBridge vers le module) ; discovery/discovery:remove/state et
+  // passthrough:subscribe/publish (émis PAR rfxcom — dont le canal du relais inter-instances
+  // "registered-devices", voir IntegrationBridge.ts) reçus par le pont générique côté MQTT→local ;
+  // et app:module:config:saved (même mécanisme qu'evoo7/nommage).
+  runsAsSeparateProcess: true
 };
 
 // ============================================================================

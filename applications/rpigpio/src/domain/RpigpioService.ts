@@ -4,14 +4,19 @@
  * Rôle strictement limité au paramétrage (demande utilisateur, 12/08/2026) : stocke les
  * définitions de pins (QUOI/OÙ, numéro de pin, inversion, direction), génère le config.yaml de
  * mqtt-io (generator.ts) et le déploie sur la machine cible (DeployService, SSH + systemctl).
- * Ne lit ni n'écrit jamais de GPIO directement, ne parle pas MQTT — c'est le rôle du process
- * mqtt-io lui-même, sur la machine cible, qui publiera sa découverte sur homeassist/ (repris par
- * le pipeline nommage, comme n'importe quelle source zigbee2mqtt).
+ * Ne lit ni n'écrit jamais de GPIO directement — c'est le rôle du process mqtt-io lui-même, sur la
+ * machine cible, qui publie sa découverte sur homeassist/ (repris par le pipeline nommage, comme
+ * n'importe quelle source zigbee2mqtt).
+ *
+ * ⭐ 16/08/2026 : seule connexion MQTT de ce service — en LECTURE SEULE, uniquement pour suivre la
+ * présence de l'agent mqtt-io distant (son propre LWT natif, `<topic_prefix>/status`,
+ * "running"/"dead" — voir generator.ts). Toujours pas d'écriture MQTT ni de logique métier via ce
+ * canal, qui reste le rôle exclusif de mqtt-io lui-même.
  */
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
-import { generateRandomBridgeInstance } from '../../../core/dist/exports';
+import { generateRandomBridgeInstance, MqttTransport } from '../../../core/dist/exports';
 import { rpigpioConfigSchema, type RpigpioConfig } from './config-schema';
 import { pinsConfigSchema, DEFAULT_PINS_CONFIG, type PinDefinition, type PinsConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
@@ -22,6 +27,12 @@ import { RPIGPIO_SOCKET_EVENTS, RPIGPIO_CLIENT_EVENTS } from './socket-events';
 export interface RpigpioStatus {
   pinsCount: number;
   target: { host: string; containerName: string };
+  /** Présence de l'agent mqtt-io distant — null tant qu'aucun message n'a encore été reçu du
+   *  topic status (ni "running" ni "dead" retenu). */
+  agentOnline: boolean | null;
+  /** Horodatage ISO de la dernière fois qu'un message de présence a été reçu (quel que soit son
+   *  contenu) — permet d'afficher "dernier contact" même si l'agent est actuellement hors ligne. */
+  agentLastSeenAt: string | null;
 }
 
 export interface IRpigpioService {
@@ -36,6 +47,9 @@ export class RpigpioService implements IRpigpioService {
   private readonly pinsManager: ConfigFileManager<PinsConfigFile>;
   private pins: PinDefinition[];
   private readonly deployService: DeployService;
+  private agentTransport: MqttTransport | null = null;
+  private agentOnline: boolean | null = null;
+  private agentLastSeenAt: string | null = null;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -91,6 +105,7 @@ export class RpigpioService implements IRpigpioService {
 
   async start(): Promise<void> {
     this.logger.info('RpigpioService', 'Démarrage du service rpigpio...');
+    this.connectAgentPresence();
     this.emitStatus();
     this.emitPins();
     this.logger.info('RpigpioService', 'Service rpigpio démarré');
@@ -98,6 +113,37 @@ export class RpigpioService implements IRpigpioService {
 
   async stop(): Promise<void> {
     this.logger.info('RpigpioService', 'Arrêt du service rpigpio');
+    this.agentTransport?.disconnect();
+    this.agentTransport = null;
+  }
+
+  // ==========================================================================
+  // Présence de l'agent mqtt-io distant (LWT natif mqtt-io, lecture seule)
+  // ==========================================================================
+
+  private connectAgentPresence(): void {
+    const statusTopic = `${this.config.mqtt.topicPrefix}/${this.config.bridgeInstance}/status`;
+    this.agentTransport = new MqttTransport(
+      {
+        host: this.config.mqtt.host,
+        port: this.config.mqtt.port,
+        clientId: `rpigpio-presence-${this.config.bridgeInstance}`,
+        username: this.config.mqtt.user || '',
+        password: this.config.mqtt.password || '',
+        keepalive: 60,
+        reconnectDelay: 5
+      },
+      this.logger
+    );
+    this.agentTransport.onMessage((message) => {
+      const payload = Buffer.isBuffer(message.payload) ? message.payload.toString() : message.payload;
+      this.agentOnline = payload === 'running';
+      this.agentLastSeenAt = new Date().toISOString();
+      this.logger.debug('RpigpioService', `Présence agent mqtt-io: ${payload} (${statusTopic})`);
+      this.emitStatus();
+    });
+    this.agentTransport.subscribe(statusTopic, 1);
+    this.agentTransport.connect();
   }
 
   // ==========================================================================
@@ -205,7 +251,9 @@ export class RpigpioService implements IRpigpioService {
   private emitStatus(): void {
     const status: RpigpioStatus = {
       pinsCount: this.pins.length,
-      target: { host: this.config.target.host, containerName: this.config.target.containerName }
+      target: { host: this.config.target.host, containerName: this.config.target.containerName },
+      agentOnline: this.agentOnline,
+      agentLastSeenAt: this.agentLastSeenAt
     };
     this.eventBus.emit(RPIGPIO_SOCKET_EVENTS.STATUS, status);
   }

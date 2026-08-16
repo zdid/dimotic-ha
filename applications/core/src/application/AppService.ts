@@ -49,9 +49,9 @@ export class AppService {
   
   // Gestion des applications
   public applicationManager: ApplicationManager;
-  // ⭐ fonctionnelles-supervisor_specs v2.4 — applications tournant en process séparé (Phase 1 : espdisplay)
+  // ⭐ fonctionnelles-supervisor_specs v2.6 — applications tournant en process séparé (Phase 1 : espdisplay)
   private processSupervisor: ProcessSupervisor;
-  private supervisorBridge?: SupervisorEventBridge;
+  private supervisorBridge: SupervisorEventBridge;
   
   // Instances des services d'application
   private appServiceInstances: Map<string, { service: any; moduleId: string }> = new Map();
@@ -108,13 +108,18 @@ export class AppService {
     this.haRegistryTracer = new HaRegistryTracer(this.logger);
     this.haRegistryTracer.resetChangeLog();
 
-    // ⭐ fonctionnelles-supervisor_specs v2.4 — superviseur des applications en process séparé,
-    // construit avant ApplicationManager (qui en a besoin pour enable()/disable()). MQTT requis
-    // pour ces applications (leur seul canal de communication) — indépendant de `ha.mqtt_enable`
-    // (qui gouverne les bridges d'intégration HA, pas cet usage interne du même broker).
+    // ⭐ fonctionnelles-supervisor_specs v2.6 — superviseur des applications en process séparé,
+    // construit avant ApplicationManager (qui en a besoin pour enable()/disable()). Le pont
+    // EventBus↔app (SupervisorEventBridge) utilise IPC (16/08/2026, décision utilisateur) — les
+    // apps séparées restent sur cette machine, spawn()'ées directement par ProcessSupervisor, plus
+    // besoin de MQTT/`ha.mqtt` pour ce canal. MQTT reste utilisé UNIQUEMENT pour la fonctionnalité
+    // séparée "commandes start/stop/restart à distance" (attachMqttCommandListener ci-dessous),
+    // qui a besoin d'un canal réseau par nature (un opérateur externe doit pouvoir publier sur ce
+    // topic depuis n'importe où) — indépendant de `ha.mqtt_enable` (bridges d'intégration HA).
     const projectRoot = process.env.PROJECT_ROOT || path.resolve(path.join(__dirname, '../../../'));
     const coreDir = path.join(projectRoot, 'applications', 'core');
-    this.processSupervisor = new ProcessSupervisor(logger, coreDir);
+    this.supervisorBridge = new SupervisorEventBridge(this.eventBus, logger);
+    this.processSupervisor = new ProcessSupervisor(logger, coreDir, this.supervisorBridge);
 
     const bootConfig = configService.getConfig();
     const machineId = bootConfig.core.machineId;
@@ -128,10 +133,9 @@ export class AppService {
         keepalive: mqttConfig.keepalive,
         reconnectDelay: mqttConfig.reconnect_delay
       };
-      this.supervisorBridge = new SupervisorEventBridge(this.eventBus, { machineId, mqttConfig: brokerConfig, logger });
       this.processSupervisor.attachMqttCommandListener(machineId, brokerConfig);
     } else {
-      this.logger.warn('AppService', 'ha.mqtt non configuré — les applications en process séparé (runsAsSeparateProcess) ne pourront pas démarrer');
+      this.logger.debug('AppService', 'ha.mqtt non configuré — commandes MQTT start/stop/restart à distance désactivées (le pont EventBus des apps séparées utilise IPC, indépendant de ha.mqtt)');
     }
 
     // Initialiser le gestionnaire d'applications
@@ -387,20 +391,37 @@ export class AppService {
               status: configStatus,
             });
 
-            // ⭐ fonctionnelles-supervisor_specs v2.4 §5 — application en process séparé : enregistre
-            // le spawn (ProcessSupervisor) et ponte ses événements déclarés vers MQTT
-            // (SupervisorEventBridge), en plus de app:menu:register (toujours nécessaire, pour
-            // qu'une app migrée obtienne quand même son entrée de menu — voir handleMenuRegister).
+            // ⭐ fonctionnelles-supervisor_specs v2.6 §5/§7.1 — application en process séparé :
+            // enregistre le spawn (ProcessSupervisor, qui attache le canal IPC à chaque démarrage)
+            // et ponte ses événements sens core → app (SupervisorEventBridge). Réception (app →
+            // core, ex: app:menu:register, integration:bridge:register, tout événement métier émis
+            // par l'app) déjà générique par construction avec l'IPC — un ChildProcess ne parle
+            // qu'à SON enfant, tout ce qu'il envoie arrive forcément au pont (voir attachChild()),
+            // rien à déclarer pour ce sens. Il ne reste à déclarer explicitement que le sens
+            // core → app, couvert par 3 mécanismes génériques (aucune énumération manuelle par app
+            // nécessaire) : autoBridgeSocketEvents (dérive les événements UI du payload d'app:
+            // socket-events:registered, déjà reçu automatiquement), app:module:config:saved (méta-
+            // événement partagé, toute app séparée), la famille integration:{module}:* émise par
+            // IntegrationBridge (toute app type: 'integration'). Seul un événement vraiment propre
+            // à une app (ex: espdisplay:deploy-floorplan, HAPLAN→espdisplay) reste à déclarer dans
+            // ApplicationModule.bridgedEvents.
             if (appModule.runsAsSeparateProcess) {
               const appDir = path.join(appsDir, dir.name);
               this.processSupervisor.register(appModule.id, appDir);
-              if (this.supervisorBridge) {
-                this.supervisorBridge.bridgeEvent('app:menu:register');
-                for (const eventName of appModule.bridgedEvents ?? []) {
-                  this.supervisorBridge.bridgeEvent(eventName);
-                }
-              } else {
-                this.logger.warn('AppService', `${appModule.id} est runsAsSeparateProcess mais ha.mqtt n'est pas configuré — ne démarrera jamais`);
+              this.supervisorBridge.autoBridgeSocketEvents(appModule.id);
+              this.supervisorBridge.bridgeEvent(appModule.id, 'app:module:config:saved');
+              if (appModule.type === 'integration') {
+                // Émis par IntegrationBridge (core, in-process) vers le module enregistré —
+                // toujours ces 4 mêmes noms, paramétrés par moduleId, quel que soit le module
+                // (voir IntegrationBridge.ts) ; harmless si un module donné n'en écoute qu'une
+                // partie (arexx par ex. n'écoute jamais :command, sensor uniquement).
+                this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:command`);
+                this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:bridge:connection`);
+                this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:ha:online`);
+                this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:passthrough:message`);
+              }
+              for (const eventName of appModule.bridgedEvents ?? []) {
+                this.supervisorBridge.bridgeEvent(appModule.id, eventName);
               }
             }
 
@@ -558,7 +579,7 @@ export class AppService {
       persistentEvents: persistentCoreEvents
     });
 
-    // ⭐ fonctionnelles-supervisor_specs v2.4 — identité de cette machine, une seule fois (valeur
+    // ⭐ fonctionnelles-supervisor_specs v2.6 — identité de cette machine, une seule fois (valeur
     // stable pour toute la durée de vie du process, voir schema.ts::coreSchema).
     this.eventBus.emitGeneric(SOCLE_SOCKET_EVENTS.MACHINE_ID, { machineId: this.configService.getConfig().core.machineId });
 
@@ -677,7 +698,7 @@ export class AppService {
     // haStructureRegistry potentiellement undefined).
     const metadata = this.modules.find((m) => m.id === moduleId);
 
-    // ⭐ fonctionnelles-supervisor_specs v2.4 §5 — application en process séparé : spawn au lieu
+    // ⭐ fonctionnelles-supervisor_specs v2.6 §5 — application en process séparé : spawn au lieu
     // d'instancier la factory in-process. Le gate WS ci-dessous ne s'applique pas (l'app gère sa
     // propre attente, dans son propre process — voir standalone.ts).
     if (metadata?.runsAsSeparateProcess) {
@@ -1331,7 +1352,7 @@ export class AppService {
   }
 
   /**
-   * ⭐ fonctionnelles-supervisor_specs v2.4 §5 — arrête tous les process séparés (espdisplay en
+   * ⭐ fonctionnelles-supervisor_specs v2.6 §5 — arrête tous les process séparés (espdisplay en
    * Phase 1) à l'arrêt de core lui-même (voir index.ts::ApplicationBootstrap.stop()). Sans ça, un
    * enfant spawné devient orphelin à chaque redémarrage de core (SIGKILL/SIGTERM de tsx watch ou
    * RestartManager sur le PARENT n'arrête jamais ses propres enfants automatiquement) —

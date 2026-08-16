@@ -67,6 +67,7 @@ export interface ServerToClientEvents {
   'app:modules:list': (data: { modules: ApplicationModule[] }) => void;
   'app:modules:config': (data: { moduleId: string; config: Record<string, unknown> }) => void;
   'app:module:ui:register': (data: { moduleId: string; metadata: unknown }) => void;
+  'app:menu:register': (data: { appId: string; menuConfig: unknown }) => void;
   'app:module:config': (data: { moduleId: string; config: Record<string, unknown> }) => void;
   'app:module:config:saved': (data: { moduleId: string; success: boolean; error?: string }) => void;
 
@@ -231,7 +232,7 @@ export const SOCLE_SOCKET_EVENTS = {
   MQTT_DISCONNECTED: 'mqtt:disconnected',
   MODULES_LIST: 'app:modules:list',
   MODULES_CONFIG: 'app:modules:config',
-  // ⭐ fonctionnelles-supervisor_specs v2.4 — identité de cette machine (core.machineId), exposée
+  // ⭐ fonctionnelles-supervisor_specs v2.6 — identité de cette machine (core.machineId), exposée
   // côté client pour un futur affichage par écran d'application (Phase 1, minimal : juste exposé).
   MACHINE_ID: 'app:machine-id',
 } as const;

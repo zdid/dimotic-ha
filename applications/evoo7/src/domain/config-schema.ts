@@ -1,27 +1,26 @@
 /**
  * Schéma de configuration EVOO7 — section `evoo7` de data/config.yaml.
- * Paramètres généraux uniquement (connexion au broker MQTT propre à EVOO7, topic/format de
- * commande global, bridge socle) — les 43 données sont dans config-evoo7-donnees-v1.0.yaml
- * (voir donnees-config-schema.ts).
+ * Paramètres généraux uniquement (connexion directe Socket.IO au boîtier EVOO7, bridge socle) —
+ * les 43 données sont dans config-evoo7-donnees-v1.0.yaml (voir donnees-config-schema.ts).
+ *
+ * ⭐ 16/08/2026 — connexion directe en Socket.IO au boîtier lui-même (son protocole natif),
+ * remplace l'ancien passage par un broker MQTT dédié + traducteur externe (`mqtt`/`topicCommand`/
+ * `formatMessageCommand`, retirés) — voir Evoo7SocketIoClient.ts. Vérifié en conditions réelles
+ * avant ce changement : `socket.io-client` doit être en v2.x précisément, la v4 ne se connecte pas
+ * au boîtier (erreur de poignée de main Engine.IO, le firmware est trop ancien pour EIO4).
  */
 
 import { z } from 'zod';
 
-const evoo7MqttConfigSchema = z.object({
-  // Défaut = adresse réelle du broker EVOO7 de ce déploiement (vue dans l'onglet Paramétrage
-  // d'EVOO7 lui-même) — pas un placeholder générique, même convention que le port série par
-  // défaut de RFXCOM (/dev/ttyUSB0, également l'appareil réel de ce déploiement).
-  host: z.string().default('192.168.1.53'),
-  port: z.number().min(1).max(65535).default(1883),
-  username: z.string().optional(),
-  password: z.string().optional(),
-  clientId: z.string().default('evoo7-app'),
-  keepalive: z.number().min(0).max(300).default(60),
-  reconnectPeriod: z.number().min(1000).max(300000).default(5000),
-  cleanSession: z.boolean().default(true),
-  qos: z.number().min(0).max(2).default(0),
-  useTls: z.boolean().default(false),
-  rejectUnauthorized: z.boolean().default(true)
+const evoo7BoxConfigSchema = z.object({
+  // Défauts = adresse/identifiants réels du boîtier de ce déploiement (même convention que le
+  // port série par défaut de RFXCOM) — confirmés en conditions réelles le 16/08/2026.
+  address: z.string().default('192.168.1.55'),
+  port: z.number().min(1).max(65535).default(80),
+  user: z.string().default('domotique'),
+  // Le boîtier attend le mot de passe encodé en MD5 (voir Evoo7SocketIoClient.ts) — stocké ici en
+  // clair comme les autres secrets de ce projet (ex: token HA), le hachage se fait à l'envoi.
+  password: z.string().default('')
 });
 
 export const evoo7ConfigSchema = z.object({
@@ -32,36 +31,25 @@ export const evoo7ConfigSchema = z.object({
   // un tirage aléatoire au premier démarrage (voir fonctionnelles-supervisor_specs v2.3 §9.2).
   bridgeInstance: z.string().min(1).default('evoo7_bridge_0001'),
 
-  // Connexion directe au broker EVOO7 (indépendante du broker HA du socle — voir plan EVOO7)
-  mqtt: evoo7MqttConfigSchema.default({}),
-
-  // Topic + format du message de commande EVOO7 (unique, partagé par toutes les données —
-  // désambiguïsé par le champ "num" dans le payload). $name$/$value$ substitués par l'app.
-  topicCommand: z.string().min(1).default('domitic/command/evoo7'),
-  formatMessageCommand: z.string().min(1).default('{ "num" : "$name$", "status" : "$value$" }'),
+  // Connexion directe Socket.IO au boîtier EVOO7 (protocole natif — indépendante du broker HA du
+  // socle, voir Evoo7SocketIoClient.ts).
+  box: evoo7BoxConfigSchema.default({}),
 
   // Fichier de configuration centralisé (données), relatif à la racine du projet
   donneesConfigFile: z.string().min(1).default('config-evoo7-donnees-v1.0.yaml')
 });
 
 export type Evoo7Config = z.infer<typeof evoo7ConfigSchema>;
-export type Evoo7MqttConfig = z.infer<typeof evoo7MqttConfigSchema>;
+export type Evoo7BoxConfig = z.infer<typeof evoo7BoxConfigSchema>;
 
 export const DEFAULT_EVOO7_CONFIG: Evoo7Config = {
   enabled: true,
   bridgeInstance: 'evoo7_bridge_0001',
-  mqtt: {
-    host: '192.168.1.53',
-    port: 1883,
-    clientId: 'evoo7-app',
-    keepalive: 60,
-    reconnectPeriod: 5000,
-    cleanSession: true,
-    qos: 0,
-    useTls: false,
-    rejectUnauthorized: true
+  box: {
+    address: '192.168.1.55',
+    port: 80,
+    user: 'domotique',
+    password: ''
   },
-  topicCommand: 'domitic/command/evoo7',
-  formatMessageCommand: '{ "num" : "$name$", "status" : "$value$" }',
   donneesConfigFile: 'config-evoo7-donnees-v1.0.yaml'
 };

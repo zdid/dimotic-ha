@@ -38,6 +38,10 @@ export class SocketBridge {
   private moduleUiMetadata: Record<string, ModuleUiMetadata> = {};
   private modulesList: ApplicationModule[] = [];
   private appSocketEvents: Map<string, Record<string, string>> = new Map();
+  /** Dernier menu enregistré par chaque application via app:menu:register — rejoué aux nouvelles
+   *  connexions, même principe que moduleUiMetadata (voir TODO.md, mécanisme resté sans relais
+   *  jusqu'ici : émis par chaque app depuis l'origine, jamais câblé côté SocketBridge). */
+  private customMenus: Record<string, unknown> = {};
   private persistentEvents: Map<string, { appId: string; eventName: string; lastData: unknown }> = new Map();
   /** Listeners EventBus posés par registerAppSocketEvents(), par appId — permet de les retirer
    *  avant un ré-enregistrement (ex: AppService.detectModules() ET Service.start() enregistrent
@@ -166,6 +170,14 @@ export class SocketBridge {
       this.logger.info('SocketBridge', `Métadonnées UI relayées pour module: ${typedData.moduleId}, metadata: ${JSON.stringify(typedData.metadata)}`);
     });
 
+    // Menu dynamique des applications - Relay vers l'UI (Sidebar.ts, registerCustomMenu())
+    this.eventBus.onGeneric('app:menu:register', (data) => {
+      const typedData = data as { appId: string; menuConfig: unknown };
+      this.logger.info('SocketBridge', `EventBus → Socket.io: app:menu:register pour application: ${typedData.appId}`);
+      this.customMenus[typedData.appId] = typedData.menuConfig;
+      this.broadcast('app:menu:register', typedData);
+    });
+
     // Configuration des modules - Demande de config
     this.eventBus.onGeneric('app:modules:config:get', (data) => {
       // Ce handler est déjà géré par SocketBridge dans setupSocketIOHandlers
@@ -246,6 +258,12 @@ export class SocketBridge {
       for (const [moduleId, metadata] of Object.entries(this.moduleUiMetadata)) {
         this.logger.info('SocketBridge', `Envoi des métadonnées UI stockées pour ${moduleId} à ${socket.id}`);
         socket.emit('app:module:ui:register', { moduleId, metadata });
+      }
+
+      // Envoyer tous les menus dynamiques enregistrés à la nouvelle connexion
+      for (const [appId, menuConfig] of Object.entries(this.customMenus)) {
+        this.logger.info('SocketBridge', `Envoi du menu enregistré pour ${appId} à ${socket.id}`);
+        socket.emit('app:menu:register', { appId, menuConfig });
       }
 
       // Envoyer les événements persistants à la nouvelle connexion

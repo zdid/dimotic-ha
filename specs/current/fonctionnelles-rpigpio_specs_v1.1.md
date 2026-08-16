@@ -1,5 +1,12 @@
 # Spécifications Fonctionnelles - Module RPIGPIO
 
+*Version 1.1 - 16 Août 2026*
+*Migration en process séparé (`fonctionnelles-supervisor_specs` v2.6, IPC — §2.4, nouvelle) +
+présence de l'agent mqtt-io distant, lecture seule (§7.3, nouvelle) : `RpigpioService` s'abonne au
+LWT natif de mqtt-io. Non vérifié en conditions réelles sur `ha2` (redéploiement du conteneur
+mqtt-io non autorisé cette session — contrainte "pas de contact ha2/orangepi" en vigueur). Ancienne
+version v1.0 archivée.*
+
 *Version 1.0 - 12 Août 2026*
 *Première spécification, écrite en même temps que le code (contrairement à AREXX/RFXCOM, pas a
 posteriori) — application créée et déployée en conditions réelles au cours de la session du
@@ -10,11 +17,13 @@ posteriori) — application créée et déployée en conditions réelles au cour
 ## 📌 Table des Matières
 1. [Introduction](#1-introduction)
 2. [Architecture](#2-architecture)
+    - 2.4 [Process séparé (v1.1)](#24-process-séparé-nouveau-v11-16082026)
 3. [Modèle de données](#3-modèle-de-données)
 4. [Génération de la configuration mqtt-io](#4-génération-de-la-configuration-mqtt-io)
 5. [Déploiement Docker](#5-déploiement-docker)
 6. [Configuration](#6-configuration)
 7. [Interface Web et Socket.io](#7-interface-web-et-socketio)
+    - 7.3 [Présence de l'agent mqtt-io (v1.1)](#73-présence-de-lagent-mqtt-io-lwt-lecture-seule--nouveau-v11-16082026)
 8. [Limites et Contraintes Connues](#8-limites-et-contraintes-connues)
 9. [Arborescence des Programmes](#9-arborescence-des-programmes)
 10. [Annexes](#10-annexes)
@@ -111,6 +120,17 @@ ha_discovery:
 ```
 mqtt-io fait un `dict.update()` (fusion non profonde) sur ce bloc — l'override **remplace**
 entièrement le device par défaut pour cette pin, sans affecter les autres.
+
+### 2.4 Process séparé (⭐ nouveau v1.1, 16/08/2026)
+
+`RPIGPIO_APP.runsAsSeparateProcess = true` — l'application tourne dans son propre process OS,
+démarré par `ProcessSupervisor` (`applications/rpigpio/src/standalone.ts`), plutôt qu'in-process
+avec `core`. Architecture générique détaillée dans `fonctionnelles-supervisor_specs` (pas dupliquée
+ici) — aucun changement du code métier propre à `RpigpioService.ts`, le contrat de factory
+(`createRpigpioServiceWithConfig(eventBus, logger, configProvider)`) reste identique, seul
+l'`eventBus` injecté change de nature (`IpcEventBus` au lieu de l'`EventBus` in-process). Premier
+test grandeur nature du pontage UI Socket.io d'une app séparée (avant `rpigpio`, seule `espdisplay`
+avait été migrée, sans interface Socket.io) — voir `fonctionnelles-supervisor_specs` §14.7.
 
 ---
 
@@ -228,7 +248,7 @@ sauf structure interne (`target`/`mqtt` aplatis en `target.xxx`/`mqtt.xxx`).
 
 **Server → Client** (persistants : `rpigpio:status`, `rpigpio:pins:list`) :
 ```typescript
-'rpigpio:status'        // { pinsCount, target: { host, containerName } }
+'rpigpio:status'        // { pinsCount, target: { host, containerName }, agentOnline, agentLastSeenAt } — ⭐ v1.1
 'rpigpio:pins:list'     // PinDefinition[]
 'rpigpio:pin:saved'     // PinDefinition
 'rpigpio:pin:deleted'   // { id }
@@ -245,6 +265,29 @@ sauf structure interne (`target`/`mqtt` aplatis en `target.xxx`/`mqtt.xxx`).
 'rpigpio:deploy'
 ```
 
+### 7.3 Présence de l'agent mqtt-io (LWT, lecture seule) — ⭐ nouveau v1.1, 16/08/2026
+
+`RpigpioService` ouvre sa **première** connexion MQTT — strictement en lecture seule, uniquement
+pour suivre la présence de l'agent mqtt-io distant. Invariant conservé (§1.1) : l'application ne
+lit/n'écrit toujours jamais de GPIO ni ne publie jamais elle-même sur MQTT — mqtt-io reste seul
+responsable du pilotage matériel et de toute publication.
+
+Le LWT suivi est **celui déjà natif de mqtt-io** (`<mqtt.topicPrefix>/<bridgeInstance>/status`,
+payload `"running"`/`"dead"`) — rien de nouveau à publier côté agent, mqtt-io le fait déjà de
+lui-même. `connectAgentPresence()` s'y abonne au démarrage du service ; chaque message reçu met à
+jour `agentOnline` (`payload === 'running'`) et `agentLastSeenAt` (horodatage de réception, pas de
+timestamp porté par le payload mqtt-io lui-même).
+
+`RpigpioStatus` étendu : `agentOnline: boolean | null` (`null` tant qu'aucun message n'a encore été
+reçu), `agentLastSeenAt: string | null`. Dashboard : champs "Agent mqtt-io" (En ligne/Hors
+ligne/Inconnu) et "Dernier contact".
+
+⚠️ **Non vérifié en conditions réelles** : le conteneur mqtt-io réel sur `ha2` n'a pas été
+redéployé avec le nouveau format de topic incluant `bridgeInstance` (contrainte "pas de contact
+ha2/orangepi" en vigueur cette session) — affiche "Inconnu" en pratique aujourd'hui, cohérent avec
+l'absence de redéploiement, pas un défaut du mécanisme. À vérifier au prochain redéploiement
+autorisé de mqtt-io sur `ha2`.
+
 ---
 
 ## 8. Limites et Contraintes Connues
@@ -258,6 +301,7 @@ sauf structure interne (`target`/`mqtt` aplatis en `target.xxx`/`mqtt.xxx`).
 | `docker restart` à chaque déploiement | Coupure de service de quelques secondes (acceptable en usage domestique, pas de rolling update) | Accepté |
 | `pullup`/`pulldown`/`initial`/`timed_set_ms` de mqtt-io non exposés | Fonctionnalités mqtt-io disponibles mais non paramétrables depuis l'IHM | Non implémenté |
 | Identifiants MQTT en clair dans `data/rpigpio/config.yaml` | Cohérent avec le reste du projet (aucun secret manager) | Accepté |
+| Présence de l'agent (§7.3) non vérifiée sur `ha2` réel | Conteneur mqtt-io non redéployé cette session (contrainte "pas de contact ha2/orangepi") — affiche "Inconnu" | Connu, à vérifier au prochain redéploiement autorisé |
 
 ---
 
@@ -284,9 +328,12 @@ applications/rpigpio/
 
 ### 10.1 Références
 - [Spécification de Nommage **OBLIGATOIRE**](nommage_specs_v1.0.md) ⭐
-- [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.28.md) ⭐
-- [Spécifications Fonctionnelles TELEINFO](fonctionnelles-teleinfo_specs_v1.0.md) (application
-  sœur, même principe de paramétrage/déploiement, cible non-Docker)
+- [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.30.md) ⭐
+- [Spécifications Fonctionnelles Supervision Multi-Machines](fonctionnelles-supervisor_specs_v2.6.md)
+  (§2.4/§7.3 — architecture process séparé, §11.5/§14.8 — présence de l'agent)
+- [Spécifications Fonctionnelles TELEINFO](fonctionnelles-teleinfo_specs_v1.1.md) (application
+  sœur, même principe de paramétrage/déploiement, cible non-Docker, même mécanisme de présence
+  d'agent §6.5)
 - Dépôt source de mqtt-io : `github.com/flyte/mqtt-io` (schéma vérifié le 12/08/2026)
 
 ### 10.2 Glossaire
@@ -295,8 +342,10 @@ applications/rpigpio/
 | mqtt-io | Outil tiers (Python) exposant des GPIO sur MQTT, avec découverte HA intégrée — anciennement `pi-mqtt-gpio` |
 | Pin | Une entrée ou sortie GPIO paramétrée (quoi/où, numéro, direction, inversion) |
 | `hostDir` | Répertoire sur la machine cible contenant `compose.yaml` + `config.yml` déployés |
+| LWT (agent) | Last Will and Testament MQTT natif de mqtt-io (`.../status`, `running`/`dead`) — suivi en lecture seule par `RpigpioService` depuis la v1.1 (§7.3) |
 
 ### 10.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.1 | 2026-08-16 | Claude | Migration en process séparé (§2.4, `runsAsSeparateProcess`/`standalone.ts`, architecture détaillée dans `fonctionnelles-supervisor_specs` v2.6) — premier test grandeur nature du pontage UI Socket.io d'une app séparée. Présence de l'agent mqtt-io distant, lecture seule (§7.3, nouveau) : `RpigpioStatus` étendu (`agentOnline`/`agentLastSeenAt`), dashboard mis à jour. Non vérifié en conditions réelles sur `ha2` (redéploiement du conteneur mqtt-io non autorisé cette session). Référence croisée techniques-socle mise à jour (v4.28→v4.30). Ancienne version v1.0 archivée. |
 | 1.0 | 2026-08-12 | Claude | Première spécification, application créée et déployée en conditions réelles (ha2) au cours de la session. Couvre l'architecture, le modèle de données, la génération de la configuration mqtt-io (device par pin), le déploiement Docker (bug `user:'0:0'` trouvé en conditions réelles), la configuration, l'UI/Socket.io, et les limites connues. |

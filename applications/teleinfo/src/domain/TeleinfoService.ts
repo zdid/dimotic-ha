@@ -4,10 +4,15 @@
  * Rôle limité au paramétrage (mêmes principes que rpigpio, 12/08/2026) : stocke les 2 compteurs
  * (ADCO, QUOI/OÙ), génère le config.yaml de l'agent (generator.ts) et déploie l'agent + ce config
  * sur le RPi1 cible (DeployService, SSH + systemd — pas de Docker, voir config-schema.ts).
+ *
+ * ⭐ 16/08/2026 : seule connexion MQTT de ce service — en LECTURE SEULE, uniquement pour suivre la
+ * présence de l'agent RPi1 distant (LWT + battement de cœur ajoutés côté agent, voir
+ * device-agent/ha-publisher.js, topic `teleinfo/agent/status`, payload JSON {status, timestamp}).
  */
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
+import { MqttTransport } from '../../../core/dist/exports';
 import { teleinfoConfigSchema, type TeleinfoConfig } from './config-schema';
 import { compteursConfigSchema, DEFAULT_COMPTEURS_CONFIG, type CompteurDefinition, type CompteursConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
@@ -15,9 +20,16 @@ import { generateAgentConfig } from './generator';
 import { DeployService } from './DeployService';
 import { TELEINFO_SOCKET_EVENTS, TELEINFO_CLIENT_EVENTS } from './socket-events';
 
+const AGENT_PRESENCE_TOPIC = 'teleinfo/agent/status';
+
 export interface TeleinfoStatus {
   compteursCount: number;
   target: { host: string; serviceName: string };
+  /** Présence de l'agent RPi1 distant — null tant qu'aucun message n'a encore été reçu. */
+  agentOnline: boolean | null;
+  /** Horodatage ISO de la dernière fois qu'un message de présence a été reçu (quel que soit son
+   *  contenu) — permet d'afficher "dernier contact" même si l'agent est actuellement hors ligne. */
+  agentLastSeenAt: string | null;
 }
 
 export interface ITeleinfoService {
@@ -32,6 +44,9 @@ export class TeleinfoService implements ITeleinfoService {
   private readonly compteursManager: ConfigFileManager<CompteursConfigFile>;
   private compteurs: CompteurDefinition[];
   private readonly deployService: DeployService;
+  private agentTransport: MqttTransport | null = null;
+  private agentOnline: boolean | null = null;
+  private agentLastSeenAt: string | null = null;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -69,6 +84,7 @@ export class TeleinfoService implements ITeleinfoService {
 
   async start(): Promise<void> {
     this.logger.info('TeleinfoService', 'Démarrage du service teleinfo...');
+    this.connectAgentPresence();
     this.emitStatus();
     this.emitCompteurs();
     this.logger.info('TeleinfoService', 'Service teleinfo démarré');
@@ -76,6 +92,43 @@ export class TeleinfoService implements ITeleinfoService {
 
   async stop(): Promise<void> {
     this.logger.info('TeleinfoService', 'Arrêt du service teleinfo');
+    this.agentTransport?.disconnect();
+    this.agentTransport = null;
+  }
+
+  // ==========================================================================
+  // Présence de l'agent RPi1 distant (LWT + battement de cœur côté agent, lecture seule ici)
+  // ==========================================================================
+
+  private connectAgentPresence(): void {
+    this.agentTransport = new MqttTransport(
+      {
+        host: this.config.mqtt.host,
+        port: this.config.mqtt.port,
+        clientId: `teleinfo-presence-${this.config.target.host}`,
+        username: this.config.mqtt.user || '',
+        password: this.config.mqtt.password || '',
+        keepalive: 60,
+        reconnectDelay: 5
+      },
+      this.logger
+    );
+    this.agentTransport.onMessage((message) => {
+      const payloadString = Buffer.isBuffer(message.payload) ? message.payload.toString() : message.payload;
+      let parsed: { status?: string } | null = null;
+      try {
+        parsed = JSON.parse(payloadString);
+      } catch {
+        this.logger.warn('TeleinfoService', `Message de présence agent illisible: ${payloadString}`);
+        return;
+      }
+      this.agentOnline = parsed?.status === 'online';
+      this.agentLastSeenAt = new Date().toISOString();
+      this.logger.debug('TeleinfoService', `Présence agent RPi1: ${parsed?.status} (${AGENT_PRESENCE_TOPIC})`);
+      this.emitStatus();
+    });
+    this.agentTransport.subscribe(AGENT_PRESENCE_TOPIC, 1);
+    this.agentTransport.connect();
   }
 
   // ==========================================================================
@@ -167,7 +220,9 @@ export class TeleinfoService implements ITeleinfoService {
   private emitStatus(): void {
     const status: TeleinfoStatus = {
       compteursCount: this.compteurs.length,
-      target: { host: this.config.target.host, serviceName: this.config.target.serviceName }
+      target: { host: this.config.target.host, serviceName: this.config.target.serviceName },
+      agentOnline: this.agentOnline,
+      agentLastSeenAt: this.agentLastSeenAt
     };
     this.eventBus.emit(TELEINFO_SOCKET_EVENTS.STATUS, status);
   }

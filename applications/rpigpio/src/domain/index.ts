@@ -135,7 +135,14 @@ export const RPIGPIO_APP: ApplicationModule & { menu?: ApplicationMenuConfig } =
   requiredHaWs: false,
   configSection: 'rpigpio',
   configUi: RPIGPIO_UI_METADATA,
-  socketEvents: RPIGPIO_SOCKET_EVENTS
+  socketEvents: RPIGPIO_SOCKET_EVENTS,
+
+  // Migration superviseur (fonctionnelles-supervisor_specs v2.6) — process séparé sur cette même
+  // machine. Événements UI (RPIGPIO_ALL_EVENTS) pontés automatiquement par AppService/
+  // SupervisorEventBridge (§7.1 : dérivés du payload d'app:socket-events:registered, aucune
+  // déclaration manuelle nécessaire ici) — aucune dépendance vers haStructureRegistry/haWsClient
+  // ni integration:*, l'app ne parle jamais HA/MQTT directement (voir commentaire en tête de fichier).
+  runsAsSeparateProcess: true
 };
 
 // ============================================================================

@@ -22,6 +22,8 @@ interface CompteurDefinition {
 interface TeleinfoStatus {
   compteursCount: number;
   target: { host: string; serviceName: string };
+  agentOnline: boolean | null;
+  agentLastSeenAt: string | null;
 }
 
 interface DeployResult {
@@ -85,9 +87,17 @@ function updateStatusDisplay(status: TeleinfoStatus): void {
   const countEl = $('compteurs-count');
   const hostEl = $('target-host');
   const serviceEl = $('target-service');
+  const agentEl = $('agent-status');
+  const lastSeenEl = $('agent-last-seen');
   if (countEl) countEl.textContent = String(status.compteursCount);
   if (hostEl) hostEl.textContent = status.target.host || '—';
   if (serviceEl) serviceEl.textContent = status.target.serviceName || '—';
+  if (agentEl) {
+    agentEl.textContent = status.agentOnline === null ? 'Inconnu' : status.agentOnline ? 'En ligne' : 'Hors ligne';
+  }
+  if (lastSeenEl) {
+    lastSeenEl.textContent = status.agentLastSeenAt ? new Date(status.agentLastSeenAt).toLocaleString('fr-FR') : '—';
+  }
 
   const statusCard = $('status-card');
   const actions = $('actions');

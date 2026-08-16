@@ -103,7 +103,7 @@ export interface ApplicationModule {
   configUi?: ModuleUiMetadata;    // Métadonnées pour l'interface utilisateur
   configSection?: string;          // Nom de la section dans la config (par défaut = id)
   /**
-   * ⭐ fonctionnelles-supervisor_specs v2.4 §5 (Phase 1, 16/08/2026) : tourne comme un process OS
+   * ⭐ fonctionnelles-supervisor_specs v2.6 §5 (Phase 1, 16/08/2026) : tourne comme un process OS
    * séparé (spawn/kill via ProcessSupervisor, communication via MqttEventBus) plutôt qu'in-process
    * via AppService.startApplicationService(). Distinct de `type` (qui décrit "a sa propre page de
    * config" — sens existant, sans rapport) : plusieurs apps ont déjà `type: 'standalone'` dans ce

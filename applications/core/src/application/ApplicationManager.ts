@@ -48,7 +48,7 @@ export class ApplicationManager {
 
   /**
    * Crée un nouveau ApplicationManager
-   * @param processSupervisor - ⭐ fonctionnelles-supervisor_specs v2.4 §8.2, optionnel : si une
+   * @param processSupervisor - ⭐ fonctionnelles-supervisor_specs v2.6 §8.2, optionnel : si une
    *   application activée/désactivée est enregistrée auprès de lui (runsAsSeparateProcess), enable/
    *   disable délèguent au spawn/kill ciblé au lieu de redémarrer tout le process core.
    */
@@ -209,7 +209,7 @@ export class ApplicationManager {
         return { success: false, error: result.error };
       }
 
-      // ⭐ fonctionnelles-supervisor_specs v2.4 §8.2 : une app en process séparé se démarre seule,
+      // ⭐ fonctionnelles-supervisor_specs v2.6 §8.2 : une app en process séparé se démarre seule,
       // sans redémarrer tout core (objectif même de la migration) — contrairement au comportement
       // par défaut ci-dessous (§8.1, redémarrage complet du process, toujours utilisé pour les
       // apps in-process tant qu'elles n'ont pas été migrées).
@@ -255,7 +255,7 @@ export class ApplicationManager {
         return { success: false, error: result.error };
       }
 
-      // ⭐ fonctionnelles-supervisor_specs v2.4 §8.2 — voir enable() ci-dessus.
+      // ⭐ fonctionnelles-supervisor_specs v2.6 §8.2 — voir enable() ci-dessus.
       if (this.processSupervisor?.isRegistered(appId)) {
         this.processSupervisor.stop(appId);
       } else {

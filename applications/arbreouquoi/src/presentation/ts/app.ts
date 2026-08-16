@@ -380,12 +380,18 @@ function updateLastUpdate(timestamp: string): void {
 
 function showLoading(): void {
   state.isLoading = true;
-  $('loading-indicator')!.style.display = 'flex';
+  const el = $('loading-indicator');
+  if (el) el.style.display = 'flex';
 }
 
+// Pas de garde superflue : les handlers socket de ce module restent actifs même après avoir
+// quitté sa page (ModuleContainer ne les désabonne jamais, voir TODO.md "ModuleContainer :
+// loadModuleContent s'exécute plusieurs fois...") — un événement arrivant après navigation vers
+// un autre module trouve un DOM déjà remplacé par innerHTML, d'où ce null bien réel.
 function hideLoading(): void {
   state.isLoading = false;
-  $('loading-indicator')!.style.display = 'none';
+  const el = $('loading-indicator');
+  if (el) el.style.display = 'none';
 }
 
 function showError(message: string): void {
@@ -585,9 +591,11 @@ function updateStats(): void {
 
 function showEntityDetails(entityId: string): void {
   socket.emit(ARBREOUQUOI_SOCKET_EVENTS.ENTITY_GET, entityId);
-  const panel = $('details-panel')!;
+  const panel = $('details-panel');
+  if (!panel) return;
   panel.style.display = 'block';
-  $('details-content')!.innerHTML = '<div class="loading-small"><div class="spinner-small"></div><p>Chargement...</p></div>';
+  const content = $('details-content');
+  if (content) content.innerHTML = '<div class="loading-small"><div class="spinner-small"></div><p>Chargement...</p></div>';
 }
 
 function renderEntityDetails(payload: {
@@ -712,7 +720,8 @@ function renderEntityDetails(payload: {
 }
 
 function hideDetailsPanel(): void {
-  $('details-panel')!.style.display = 'none';
+  const panel = $('details-panel');
+  if (panel) panel.style.display = 'none';
 }
 
 function getOuIcon(level: string): string {

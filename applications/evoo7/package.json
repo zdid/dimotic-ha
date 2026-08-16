@@ -9,13 +9,13 @@
     "watch": "tsc -w"
   },
   "dependencies": {
-    "mqtt": "^5.0.0",
     "js-yaml": "^4.1.0",
+    "socket.io-client": "^2.5.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@types/mqtt": "^2.0.0",
     "@types/js-yaml": "^4.0.9",
+    "@types/socket.io-client": "^1.4.36",
     "typescript": "^5.0.0"
   },
   "engines": {

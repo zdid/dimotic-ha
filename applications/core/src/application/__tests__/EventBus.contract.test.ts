@@ -1,21 +1,30 @@
 // EventBus.contract.test.ts
 //
-// Suite de tests de contrat pour IEventBus — exécutée à la fois contre EventBus (in-process,
-// EventEmitter) et MqttEventBus (broker MQTT local, fonctionnelles-supervisor_specs v2.4 §6.3) pour
-// garantir l'équivalence de comportement avant de faire tourner une application (espdisplay) sur
-// MqttEventBus en production. Aucune suite de ce type n'existait pour IEventBus avant Phase 1 du
-// superviseur.
+// Suite de tests de contrat pour IEventBus — exécutée contre EventBus (in-process, EventEmitter),
+// MqttEventBus (broker MQTT local, fonctionnelles-supervisor_specs v2.6 §6.3) et IpcEventBus
+// (process.send()/'message', v2.5, remplace MqttEventBus pour les apps séparées restant sur cette
+// machine depuis le 16/08/2026 — MqttEventBus n'est plus instancié par aucun standalone.ts mais
+// reste testé, code toujours valide) pour garantir l'équivalence de comportement avant de faire
+// tourner une application en process séparé dessus.
 //
 // MqttEventBus dépend d'un vrai broker MQTT accessible en local (127.0.0.1:1883, sans
 // authentification — confirmé disponible sur cette machine de développement, déjà utilisé pour la
 // mesure de latence loopback de cette session). Contrairement à EventBus (synchrone), la livraison
 // via MqttEventBus est asynchrone (aller-retour réseau réel, même en loopback) — chaque assertion de
 // livraison utilise `waitFor()` plutôt qu'une vérification immédiate.
+//
+// IpcEventBus, comme EventBus, est testé ici en instance unique (émet et écoute sur lui-même) — ce
+// que ces tests exercent réellement est deliverLocally() (livraison locale synchrone), pas un vrai
+// aller-retour parent↔enfant : `process.send` est absent dans le process de test (pas un enfant
+// réel), emitGeneric() s'en accommode (garde `if (process.send)`) sans lever d'erreur. La livraison
+// IPC réellement inter-process (via SupervisorEventBridge.attachChild()) est couverte par les tests
+// d'intégration live de chaque application migrée (voir TODO.md), pas par cette suite.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { IEventBus } from '../IEventBus';
 import { EventBus } from '../EventBus';
 import { MqttEventBus } from '../MqttEventBus';
+import { IpcEventBus } from '../IpcEventBus';
 
 /** Attend qu'une condition devienne vraie, ou échoue au-delà du timeout — nécessaire pour
  *  MqttEventBus (livraison asynchrone), sans effet notable pour EventBus (déjà vrai immédiatement). */
@@ -56,6 +65,13 @@ const factories: EventBusFactory[] = [
     },
     destroy: async () => {
       /* pas de disconnect() dans IEventBus — connexion fermée avec le process de test */
+    }
+  },
+  {
+    name: 'IpcEventBus (process.send/on message, self-delivery)',
+    create: async () => new IpcEventBus(),
+    destroy: async () => {
+      /* rien à nettoyer — pas de connexion, juste un listener process.on('message') */
     }
   }
 ];

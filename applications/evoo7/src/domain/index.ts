@@ -25,78 +25,56 @@ import type { Evoo7Config } from './config-schema';
 
 export const EVOO7_UI_METADATA: ModuleUiMetadata = {
   title: 'EVOO7 - Intégration EVOO7 Control',
-  description: "Intégration EVOO7 Control (VR Electronique) pour Home Assistant via MQTT : régulation chauffage/PAC.",
+  description: "Intégration EVOO7 Control (VR Electronique) pour Home Assistant : connexion Socket.IO directe au boîtier (protocole natif), régulation chauffage/PAC.",
   icon: '🌡️',
   category: 'EVOO7',
   menuLabel: 'EVOO7',
   menuIcon: '🌡️',
   menuOrder: 40,
   menuPath: '/evoo7/config',
-  badge: 'MQTT',
+  badge: 'Socket.IO',
 
   fields: [
     {
-      title: 'Broker EVOO7',
-      description: 'Connexion MQTT dédiée au broker EVOO7 Control (indépendante du broker HA)',
+      // ⭐ 16/08/2026 : connexion directe Socket.IO au boîtier (son protocole natif) — remplace
+      // l'ancien passage par un broker MQTT dédié + traducteur externe. Voir Evoo7SocketIoClient.ts.
+      title: 'Boîtier EVOO7',
+      description: 'Connexion Socket.IO directe au boîtier EVOO7 Control (protocole natif du matériel — indépendante du broker HA).',
       icon: '🔌',
       fields: [
         {
-          name: 'mqtt.host',
-          label: 'Hôte',
+          name: 'box.address',
+          label: 'Adresse IP',
           type: 'string',
-          placeholder: '192.168.1.53',
+          placeholder: '192.168.1.55',
           required: true
         },
         {
-          name: 'mqtt.port',
+          name: 'box.port',
           label: 'Port',
           type: 'number',
-          default: 1883,
+          default: 80,
           required: true
         },
         {
-          name: 'mqtt.username',
+          name: 'box.user',
           label: 'Utilisateur',
-          type: 'string'
+          type: 'string',
+          default: 'domotique',
+          required: true
         },
         {
-          name: 'mqtt.password',
+          name: 'box.password',
           label: 'Mot de passe',
-          type: 'password'
-        },
-        {
-          name: 'mqtt.qos',
-          label: 'QoS',
-          type: 'number',
-          default: 0,
-          min: 0,
-          max: 2
+          type: 'password',
+          description: 'Encodé en MD5 avant envoi au boîtier (fait automatiquement) — jamais transmis en clair.'
         },
         {
           name: 'bridgeInstance',
           label: 'Identifiant du bridge MQTT (côté HA)',
           type: 'string',
           default: 'evoo7_bridge_0001',
-          description: 'Identifie cette instance EVOO7 dans les topics MQTT du socle (LWT)'
-        }
-      ]
-    },
-    {
-      title: 'Commande EVOO7 (topic global, partagé par toutes les données)',
-      description: 'Topic et format du message de commande — $name$/$value$ substitués par l\'application.',
-      icon: '📤',
-      fields: [
-        {
-          name: 'topicCommand',
-          label: 'Topic Commande',
-          type: 'string',
-          default: 'domitic/command/evoo7'
-        },
-        {
-          name: 'formatMessageCommand',
-          label: 'Format du message Commande',
-          type: 'string',
-          default: '{ "num" : "$name$", "status" : "$value$" }'
+          description: 'Identifie cette instance EVOO7 dans les topics MQTT du socle (LWT) — sans rapport avec la connexion au boîtier lui-même.'
         }
       ]
     }
@@ -131,7 +109,7 @@ export const EVOO7_MENU_CONFIG: ApplicationMenuConfig = {
     icon: '🌡️',
     path: '/evoo7/config',
     order: 40,
-    badge: 'MQTT'
+    badge: 'Socket.IO'
   },
   pages: [
     {
@@ -164,7 +142,7 @@ export const EVOO7_MENU_CONFIG: ApplicationMenuConfig = {
 export const EVOO7_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   id: 'evoo7',
   name: 'EVOO7',
-  description: "Intégration EVOO7 Control (VR Electronique) : régulation chauffage/PAC via MQTT, publication MQTT Discovery vers Home Assistant.",
+  description: "Intégration EVOO7 Control (VR Electronique) : régulation chauffage/PAC via connexion Socket.IO directe au boîtier, publication MQTT Discovery vers Home Assistant.",
   icon: '🌡️',
 
   menu: EVOO7_MENU_CONFIG,
@@ -176,7 +154,16 @@ export const EVOO7_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   requiredHaWs: false,
   configSection: 'evoo7',
   configUi: EVOO7_UI_METADATA,
-  socketEvents: EVOO7_SOCKET_EVENTS
+  socketEvents: EVOO7_SOCKET_EVENTS,
+
+  // Migration superviseur (fonctionnelles-supervisor_specs v2.6) — process séparé sur cette même
+  // machine. Tout ponté automatiquement par AppService/SupervisorEventBridge (§7.1) : EVOO7_ALL_EVENTS
+  // (UI), integration:bridge:register/unregister, la famille integration:evoo7:* (command/
+  // bridge:connection — evoo7 écoute réellement les deux, contrairement à arexx, c'est un
+  // actionneur ; state/discovery/discovery:remove émis PAR evoo7, reçus par le pont générique côté
+  // MQTT→local), et app:module:config:saved (Evoo7Service.ts, recharge la connexion MQTT à chaud
+  // après sauvegarde config via l'UI).
+  runsAsSeparateProcess: true
 };
 
 // ============================================================================

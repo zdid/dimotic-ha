@@ -162,7 +162,15 @@ export const AREXX_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   requiredHaWs: false,
   configSection: 'arexx',
   configUi: AREXX_UI_METADATA,
-  socketEvents: AREXX_SOCKET_EVENTS
+  socketEvents: AREXX_SOCKET_EVENTS,
+
+  // Migration superviseur (fonctionnelles-supervisor_specs v2.6) — process séparé sur cette même
+  // machine. Tout ponté automatiquement par AppService/SupervisorEventBridge (§7.1) : AREXX_ALL_EVENTS
+  // (UI), integration:bridge:register/unregister (partagés, tout type: 'integration'), la famille
+  // integration:arexx:* (command/bridge:connection/ha:online/passthrough:message émis vers arexx —
+  // sans effet ici, arexx n'écoute que ses capteurs, jamais de commande HA→device ; discovery/state
+  // émis PAR arexx, reçus par le pont générique côté MQTT→local, aucune déclaration nécessaire).
+  runsAsSeparateProcess: true
 };
 
 // ============================================================================

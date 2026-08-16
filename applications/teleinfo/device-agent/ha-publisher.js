@@ -16,6 +16,17 @@ const mqtt = require('mqtt');
 
 const HA_STATUS_TOPIC = 'homeassistant/status'; // topic réel de HA, indépendant de discoveryPrefix
 
+// ⭐ 16/08/2026 — présence de l'agent (LWT + battement de cœur), lu par TeleinfoService côté
+// dimotic-ha pour afficher "en ligne"/"dernier contact" dans le tableau de bord. Payload JSON
+// {status, timestamp} plutôt qu'une simple chaîne "online"/"offline" : le timestamp donne un vrai
+// "dernier contact" même quand l'agent reste en ligne longtemps sans redémarrer (le LWT seul ne
+// donne qu'un état binaire, jamais d'horodatage récent). Le timestamp du LWT lui-même est figé au
+// moment de l'enregistrement (connect()), pas au moment du déclenchement réel — limite MQTT connue,
+// le consommateur doit calculer "temps depuis le dernier battement reçu" plutôt que se fier à ce
+// timestamp-là pour l'état "offline".
+const PRESENCE_TOPIC = 'teleinfo/agent/status';
+const PRESENCE_HEARTBEAT_MS = 30000;
+
 const SENSORS = [
   { key: 'IINST', label: 'Intensité', unit: 'A', device_class: 'current', state_class: 'measurement' },
   { key: 'PAPP', label: 'Puissance apparente', unit: 'VA', device_class: 'apparent_power', state_class: 'measurement' },
@@ -37,6 +48,7 @@ function buildQuoiOuName(compteur) {
 function createHaPublisher(mqttConfig, discoveryPrefix) {
   const compteursByAdco = {}; // adco (number) -> {quoi, lieu..., quoiOuName}
   const autodiscoverySent = {};
+  let heartbeatTimer = null;
   let client = null;
 
   function declareCompteurs(compteurs) {
@@ -96,15 +108,32 @@ function createHaPublisher(mqttConfig, discoveryPrefix) {
     client.publish(baseTopicFor(adco) + '/state', JSON.stringify(payload));
   }
 
+  function publishPresence() {
+    client.publish(
+      PRESENCE_TOPIC,
+      JSON.stringify({ status: 'online', timestamp: new Date().toISOString() }),
+      { qos: 1, retain: true }
+    );
+  }
+
   function connect() {
     client = mqtt.connect(mqttConfig.url, {
       username: mqttConfig.user || undefined,
-      password: mqttConfig.password || undefined
+      password: mqttConfig.password || undefined,
+      will: {
+        topic: PRESENCE_TOPIC,
+        payload: JSON.stringify({ status: 'offline', timestamp: new Date().toISOString() }),
+        qos: 1,
+        retain: true
+      }
     });
     client.on('error', (err) => console.error('[ha-publisher] Erreur MQTT:', err.message));
     client.on('connect', () => {
       console.log('[ha-publisher] Connecté au broker MQTT');
       client.subscribe(HA_STATUS_TOPIC);
+      publishPresence();
+      if (heartbeatTimer) clearInterval(heartbeatTimer); // reconnexion : ne pas empiler les intervalles
+      heartbeatTimer = setInterval(publishPresence, PRESENCE_HEARTBEAT_MS);
     });
     client.on('message', (topic, message) => {
       if (topic === HA_STATUS_TOPIC && message.toString() === 'online') {

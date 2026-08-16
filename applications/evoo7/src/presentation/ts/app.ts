@@ -83,7 +83,7 @@ function updateStatusDisplay(status: Evoo7Status): void {
   const lastMessageEl = $('last-message');
 
   if (evoo7BadgeEl) {
-    evoo7BadgeEl.textContent = `Broker EVOO7: ${status.evoo7Connected ? 'Connecté' : 'Déconnecté'}`;
+    evoo7BadgeEl.textContent = `Boîtier EVOO7: ${status.evoo7Connected ? 'Connecté' : 'Déconnecté'}`;
     evoo7BadgeEl.className = `status-badge ${status.evoo7Connected ? 'connected' : 'disconnected'}`;
   }
   if (bridgeBadgeEl) {
