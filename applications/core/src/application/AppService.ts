@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EventBus } from './EventBus';
 import { ApplicationManager } from './ApplicationManager';
+import { ProcessSupervisor, SupervisorEventBridge } from '../supervisor';
 import type { RestartManager } from './RestartManager';
 import type { SocketBridge } from './SocketBridge';
 import type { ConfigService } from '../infrastructure/config/ConfigService';
@@ -48,6 +49,9 @@ export class AppService {
   
   // Gestion des applications
   public applicationManager: ApplicationManager;
+  // ⭐ fonctionnelles-supervisor_specs v2.4 — applications tournant en process séparé (Phase 1 : espdisplay)
+  private processSupervisor: ProcessSupervisor;
+  private supervisorBridge?: SupervisorEventBridge;
   
   // Instances des services d'application
   private appServiceInstances: Map<string, { service: any; moduleId: string }> = new Map();
@@ -104,9 +108,35 @@ export class AppService {
     this.haRegistryTracer = new HaRegistryTracer(this.logger);
     this.haRegistryTracer.resetChangeLog();
 
+    // ⭐ fonctionnelles-supervisor_specs v2.4 — superviseur des applications en process séparé,
+    // construit avant ApplicationManager (qui en a besoin pour enable()/disable()). MQTT requis
+    // pour ces applications (leur seul canal de communication) — indépendant de `ha.mqtt_enable`
+    // (qui gouverne les bridges d'intégration HA, pas cet usage interne du même broker).
+    const projectRoot = process.env.PROJECT_ROOT || path.resolve(path.join(__dirname, '../../../'));
+    const coreDir = path.join(projectRoot, 'applications', 'core');
+    this.processSupervisor = new ProcessSupervisor(logger, coreDir);
+
+    const bootConfig = configService.getConfig();
+    const machineId = bootConfig.core.machineId;
+    const mqttConfig = bootConfig.ha?.mqtt;
+    if (mqttConfig) {
+      const brokerConfig = {
+        host: mqttConfig.host,
+        port: mqttConfig.port,
+        username: mqttConfig.username,
+        password: mqttConfig.password,
+        keepalive: mqttConfig.keepalive,
+        reconnectDelay: mqttConfig.reconnect_delay
+      };
+      this.supervisorBridge = new SupervisorEventBridge(this.eventBus, { machineId, mqttConfig: brokerConfig, logger });
+      this.processSupervisor.attachMqttCommandListener(machineId, brokerConfig);
+    } else {
+      this.logger.warn('AppService', 'ha.mqtt non configuré — les applications en process séparé (runsAsSeparateProcess) ne pourront pas démarrer');
+    }
+
     // Initialiser le gestionnaire d'applications
-    this.applicationManager = new ApplicationManager(restartManager, logger, configService);
-    
+    this.applicationManager = new ApplicationManager(restartManager, logger, configService, this.processSupervisor);
+
     // Initialiser l'état WS depuis la config
     this.initializeWsState();
     
@@ -357,6 +387,23 @@ export class AppService {
               status: configStatus,
             });
 
+            // ⭐ fonctionnelles-supervisor_specs v2.4 §5 — application en process séparé : enregistre
+            // le spawn (ProcessSupervisor) et ponte ses événements déclarés vers MQTT
+            // (SupervisorEventBridge), en plus de app:menu:register (toujours nécessaire, pour
+            // qu'une app migrée obtienne quand même son entrée de menu — voir handleMenuRegister).
+            if (appModule.runsAsSeparateProcess) {
+              const appDir = path.join(appsDir, dir.name);
+              this.processSupervisor.register(appModule.id, appDir);
+              if (this.supervisorBridge) {
+                this.supervisorBridge.bridgeEvent('app:menu:register');
+                for (const eventName of appModule.bridgedEvents ?? []) {
+                  this.supervisorBridge.bridgeEvent(eventName);
+                }
+              } else {
+                this.logger.warn('AppService', `${appModule.id} est runsAsSeparateProcess mais ha.mqtt n'est pas configuré — ne démarrera jamais`);
+              }
+            }
+
             // Détecter le schéma Zod du module (convention {moduleId}ConfigSchema, ex:
             // nommageConfigSchema) — permet à ConfigService.saveModuleConfig() de valider avant
             // écriture plutôt que de tout accepter via le .passthrough() de configSchema.
@@ -502,14 +549,19 @@ export class AppService {
       SOCLE_SOCKET_EVENTS.MQTT_DISCONNECTED,
       SOCLE_SOCKET_EVENTS.MODULES_LIST,
       SOCLE_SOCKET_EVENTS.HA_STATUS,
+      SOCLE_SOCKET_EVENTS.MACHINE_ID,
     ];
-    
+
     this.eventBus.emit('app:socket-events:registered', {
       appId: 'core',
       socketEvents: SOCLE_SOCKET_EVENTS,
       persistentEvents: persistentCoreEvents
     });
-    
+
+    // ⭐ fonctionnelles-supervisor_specs v2.4 — identité de cette machine, une seule fois (valeur
+    // stable pour toute la durée de vie du process, voir schema.ts::coreSchema).
+    this.eventBus.emitGeneric(SOCLE_SOCKET_EVENTS.MACHINE_ID, { machineId: this.configService.getConfig().core.machineId });
+
     this.logger.info('AppService', `Événements Socket.io du socle enregistrés: ${Object.keys(SOCLE_SOCKET_EVENTS).length} événements, ${persistentCoreEvents.length} persistants`);
   }
 
@@ -624,6 +676,15 @@ export class AppService {
     // déjà tolérer l'absence de WS, comportement inchangé — voir le commentaire plus bas sur
     // haStructureRegistry potentiellement undefined).
     const metadata = this.modules.find((m) => m.id === moduleId);
+
+    // ⭐ fonctionnelles-supervisor_specs v2.4 §5 — application en process séparé : spawn au lieu
+    // d'instancier la factory in-process. Le gate WS ci-dessous ne s'applique pas (l'app gère sa
+    // propre attente, dans son propre process — voir standalone.ts).
+    if (metadata?.runsAsSeparateProcess) {
+      this.processSupervisor.start(moduleId);
+      return;
+    }
+
     if (metadata?.requiredHaWs && this.wsEnabled) {
       if (!this.wsRegistryReady) {
         this.logger.info('AppService', `${moduleId} attend la synchronisation HA WebSocket avant de démarrer (requiredHaWs)...`);
@@ -703,8 +764,14 @@ export class AppService {
    * @param moduleId - ID du module/application
    */
   private async stopApplicationService(moduleId: string): Promise<void> {
+    const metadata = this.modules.find((m) => m.id === moduleId);
+    if (metadata?.runsAsSeparateProcess) {
+      this.processSupervisor.stop(moduleId);
+      return;
+    }
+
     const instance = this.appServiceInstances.get(moduleId);
-    
+
     if (!instance) {
       this.logger.debug('AppService', `Aucun service à arrêter pour ${moduleId}`);
       return;
@@ -734,7 +801,17 @@ export class AppService {
    */
   private async restartApplicationService(moduleId: string): Promise<void> {
     this.logger.info('AppService', `Redémarrage du service ${moduleId}...`);
-    
+
+    const metadata = this.modules.find((m) => m.id === moduleId);
+    if (metadata?.runsAsSeparateProcess) {
+      // ⚠️ Pas stop() puis start() séparément : processSupervisor.stop() envoie SIGTERM sans
+      // attendre la sortie réelle du process — un start() immédiatement après trouverait l'ancien
+      // enfant encore présent et n'en relancerait pas de nouveau. restart() de ProcessSupervisor
+      // enchaîne correctement (attend la sortie avant de respawn).
+      this.processSupervisor.restart(moduleId);
+      return;
+    }
+
     try {
       await this.stopApplicationService(moduleId);
       await this.startApplicationService(moduleId);
@@ -1251,6 +1328,22 @@ export class AppService {
    */
   getModules(): ApplicationModule[] {
     return [...this.modules];
+  }
+
+  /**
+   * ⭐ fonctionnelles-supervisor_specs v2.4 §5 — arrête tous les process séparés (espdisplay en
+   * Phase 1) à l'arrêt de core lui-même (voir index.ts::ApplicationBootstrap.stop()). Sans ça, un
+   * enfant spawné devient orphelin à chaque redémarrage de core (SIGKILL/SIGTERM de tsx watch ou
+   * RestartManager sur le PARENT n'arrête jamais ses propres enfants automatiquement) —
+   * accumulation constatée en conditions réelles (plusieurs process espdisplay/dist/standalone.js
+   * vivants simultanément après quelques redémarrages de core en dev).
+   */
+  stopAllSeparateProcesses(): void {
+    for (const module of this.modules) {
+      if (module.runsAsSeparateProcess) {
+        this.processSupervisor.stop(module.id);
+      }
+    }
   }
 
   /**

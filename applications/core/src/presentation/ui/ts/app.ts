@@ -25,6 +25,11 @@ declare global {
       moduleManager: ModuleManager;
       appManager: ApplicationManager;
       eventBus: EventBus;
+      /** ⭐ fonctionnelles-supervisor_specs v2.4 — identité de la machine visitée (core.machineId),
+       *  reçue une fois via 'app:machine-id' (événement persistant, voir AppService.registerCoreSocketEvents).
+       *  undefined jusqu'à réception — chaque écran d'application qui veut l'afficher doit tolérer
+       *  cette absence initiale. */
+      machineId?: string;
     };
   }
 }
@@ -60,6 +65,12 @@ window.addEventListener('DOMContentLoaded', () => {
   
   // Les Web Components s'initialisent automatiquement
   // via customElements.define() dans leurs fichiers respectifs
+});
+
+// ⭐ fonctionnelles-supervisor_specs v2.4 — identité de la machine, persistant (rejoué à la
+// reconnexion, voir AppService.registerCoreSocketEvents).
+socket.on('app:machine-id', (data: { machineId: string }) => {
+  window.app.machineId = data.machineId;
 });
 
 // Écouter les erreurs Socket.io

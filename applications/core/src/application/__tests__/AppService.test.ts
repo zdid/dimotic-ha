@@ -19,6 +19,7 @@ const mockEventBus = {
   emit: vi.fn(),
   onAll: vi.fn(),
   onGeneric: vi.fn(),
+  emitGeneric: vi.fn(),
 } as unknown as EventBus;
 
 // Mock fs/promises
@@ -88,6 +89,9 @@ const mockHaStructureRegistry = {
 
 // Configuration de test
 const baseConfig: TechnicalConfig = {
+  core: {
+    machineId: 'test-machine'
+  },
   ha: {
     ws_enable: true,
     mqtt_enable: true,

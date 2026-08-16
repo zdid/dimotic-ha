@@ -1,3 +1,4 @@
+import * as os from 'node:os';
 import { z } from 'zod';
 
 // =============================================================================
@@ -37,6 +38,15 @@ const haConfigSchema = z.object({
 
 // Porte d'authentification OAuth2 HA (accès externe, désactivée par défaut) — absente du fichier
 // tant qu'elle n'est pas explicitement configurée, voir infrastructure/auth/AuthService.
+// ⭐ fonctionnelles-supervisor_specs v2.4 §4 : identité de cette machine pour le futur registre de
+// présence multi-machines (superviseur) — os.hostname() est stable d'un démarrage à l'autre sur une
+// même machine, contrairement au tirage aléatoire utilisé pour bridgeInstance (voir ha-mqtt.ts
+// generateRandomBridgeInstance) : pas besoin de générer une fois puis persister, un défaut Zod
+// simple suffit ici.
+const coreSchema = z.object({
+  machineId: z.string().min(1).default(() => os.hostname())
+});
+
 const authSchema = z.object({
   enabled: z.boolean(),
   ha_base_url: z.string(),
@@ -69,6 +79,7 @@ const loggingSchema = z.object({
  * par les modules eux-mêmes lors de leur enregistrement.
  */
 export const configSchema = z.object({
+  core: coreSchema.default({ machineId: os.hostname() }),
   ha: haConfigSchema.optional(),
   web: webSchema,
   logging: loggingSchema,
@@ -90,6 +101,7 @@ export const configSchema = z.object({
 // Types TypeScript (générés à partir du schéma)
 // =============================================================================
 
+export type CoreConfig = z.infer<typeof coreSchema>;
 export type HaWsConfig = z.infer<typeof haWsSchema>;
 export type HaStructureConfig = z.infer<typeof haStructureSchema>;
 export type HaConfig = z.infer<typeof haConfigSchema>;
@@ -98,4 +110,4 @@ export type WebConfig = z.infer<typeof webSchema>;
 export type LoggingConfig = z.infer<typeof loggingSchema>;
 export type AppConfig = z.infer<typeof configSchema>;
 
-export { haWsSchema, haStructureSchema, haConfigSchema, mqttSchema, webSchema, loggingSchema };
+export { coreSchema, haWsSchema, haStructureSchema, haConfigSchema, mqttSchema, webSchema, loggingSchema };

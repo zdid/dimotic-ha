@@ -319,7 +319,10 @@ class ApplicationBootstrap {
 
     // Arrêter dans l'ordre inverse
     if (this.appService) {
-      // L'AppService gère l'arrêt des services HA
+      // ⭐ fonctionnelles-supervisor_specs v2.4 — arrête les applications en process séparé
+      // (espdisplay) AVANT que ce process core lui-même ne se termine, sinon elles deviennent
+      // orphelines (voir AppService.stopAllSeparateProcesses()).
+      this.appService.stopAllSeparateProcesses();
     }
 
     // Note: socketBridge.close() est appelé par presentationServer.close()

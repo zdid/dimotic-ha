@@ -1,5 +1,15 @@
 # Spécifications Fonctionnelles - Supervision Multi-Machines (SUPERVISOR)
 
+*Version 2.5 - 16 Août 2026*
+*⭐ Phase 1 implémentée et vérifiée en conditions réelles — première application migrée
+(`espdisplay`) en process séparé, communiquant par MQTT (`MqttEventBus`) avec `core` resté
+in-process. Nouvelle §14 "Phase 1 — Bilan d'implémentation" : ce qui a été construit, deux
+problèmes réels découverts et corrigés en testant (process orphelins au redémarrage de core,
+`app:menu:register` jamais relayé côté socle — préexistant, sans rapport avec cette migration),
+deux décisions prises en cours de route (aucune signature/auth sur le canal de commandes,
+commandes start/stop/restart génériques par MQTT plutôt que réservées aux machines contraintes).
+Ancienne version v2.4 archivée.*
+
 *Version 2.4 - 16 Août 2026*
 *Correction de référence croisée uniquement — `techniques-socle-ha-mqtt_specs` v4.29 → v4.30
 (§8.5.4ter, rejet des commandes MQTT retenues). Aucun changement de contenu propre à cette spec.*
@@ -60,7 +70,8 @@ ne tient pas face aux chiffres réels mesurés sur `ha2`.*
 12. [Idées Complémentaires et Hors Scope](#12-idées-complémentaires-et-hors-scope)
 13. [Plan de Mise en Œuvre](#13-plan-de-mise-en-œuvre)
     - 13.1 [Prérequis avant implémentation](#131-prérequis-avant-le-passage-à-cette-architecture-v23-15082026)
-14. [Annexes](#14-annexes)
+14. [Phase 1 — Bilan d'implémentation](#14-phase-1--bilan-dimplémentation--nouveau-v25-16082026)
+15. [Annexes](#15-annexes)
 
 ---
 
@@ -685,9 +696,83 @@ MQTT bridge loopback court-circuité) plutôt que de renoncer au modèle.
 
 ---
 
-## 14. Annexes
+## 14. Phase 1 — Bilan d'implémentation (⭐ nouveau v2.5, 16/08/2026)
 
-### 14.1 Références
+Première application migrée : `espdisplay`. Implémenté et vérifié en conditions réelles (broker
+MQTT de production, `falbala`) — pas un test isolé. Ce qui suit documente ce qui a réellement été
+construit, deux vrais problèmes trouvés en testant (pas anticipés en conception), et deux
+décisions prises pendant l'implémentation, absentes de la conception v2.3/v2.4.
+
+### 14.1 Ce qui a été construit
+
+- **`core.machineId`** : nouveau champ Zod (`infrastructure/config/schema.ts`), défaut
+  `os.hostname()`.
+- **`MqttEventBus`** (`application/MqttEventBus.ts`) : implémente `IEventBus` intégralement (typé +
+  générique), sur une connexion `MqttTransport` dédiée. Topics conformes à §6.2. **Livraison locale
+  synchrone en plus de la publication MQTT** (`emitGeneric()`) — nécessaire pour qu'un process qui
+  émet et écoute son propre événement se comporte comme `EventBus` (`EventEmitter`), trouvé en
+  écrivant la suite de tests de contrat (voir plus bas), pas anticipé en conception.
+- **Suite de tests de contrat** (`EventBus.contract.test.ts`, nouvelle — aucune n'existait pour
+  `IEventBus` avant) : même jeu de tests exécuté contre `EventBus` et `MqttEventBus`. A trouvé le
+  défaut de livraison locale ci-dessus avant tout test manuel.
+- **`applications/core/src/supervisor/`** : `ProcessSupervisor` (spawn/kill/backoff, §8.4 codé pour
+  la première fois) + `SupervisorEventBridge` (pont EventBus local ↔ MQTT, anti-boucle structurel —
+  un registre interne "en cours d'injection", pas un flag sur le payload).
+- **`runsAsSeparateProcess`** (nouveau champ `ApplicationModule`, distinct de `type`) +
+  **`bridgedEvents`** (nouveau champ, liste des événements génériques à ponter — `ESPDISPLAY_APP`
+  n'a pas de `socketEvents` Socket.io, ces deux mécanismes sont distincts).
+- **`applications/espdisplay/src/standalone.ts`** : bootstrap autonome, factory `createEspDisplayServiceWithConfig`
+  existante réutilisée telle quelle.
+- **Commandes MQTT start/stop/restart** (§14.3 ci-dessous — décision prise en cours de route, hors
+  conception initiale).
+- **`machineId` exposé côté client** (`app:machine-id`, événement persistant) — juste exposé, pas
+  encore affiché sur chaque écran d'application (reste à faire au fil de l'eau, comme prévu).
+
+### 14.2 Deux problèmes réels trouvés en testant
+
+1. **Process orphelins au redémarrage de `core`** — `child_process.spawn()` ne meurt pas
+   automatiquement avec son parent ; `core` (sous `tsx watch`, qui redémarre à chaque modification
+   de fichier) laissait un `espdisplay` orphelin à chaque cycle — jusqu'à 5 process accumulés
+   constatés en conditions réelles. Corrigé à deux niveaux : `AppService.stopAllSeparateProcesses()`
+   appelée par `ApplicationBootstrap.stop()` (arrêt propre, SIGTERM/SIGINT) + un filet `process.on('exit', ...)`
+   dans `ProcessSupervisor` lui-même (arrêt moins propre, ex. signal externe). Aucune trace de ce
+   problème dans la conception v2.0-v2.4 — le "un process par app" n'avait jamais été poussé jusqu'à
+   ce détail de cycle de vie.
+2. **`app:menu:register` n'a jamais été relayé côté socle** — découvert en cherchant comment ponter
+   cet événement : `SocketBridge.ts` ne le déclare dans aucun `*_SOCKET_EVENTS`, pour **aucune**
+   application (pas seulement `espdisplay`) — le mécanisme "menu dynamique" de `Sidebar.ts` (event
+   `app:menu:register` sur le socket) semble mort depuis l'origine, le menu réel provenant de
+   `app:modules:list` (scan statique, indépendant du démarrage du service). **Préexistant, sans
+   rapport avec cette migration** — non corrigé ici (hors périmètre), signalé dans `TODO.md`.
+   L'événement reste ponté par précaution (inoffensif), mais ne doit pas servir de test de bout en
+   bout pour une future migration : utiliser `app:modules:list`, qui fonctionne réellement.
+
+### 14.3 Deux décisions prises pendant l'implémentation
+
+- **Commandes MQTT start/stop/restart généralisées à toute app `runsAsSeparateProcess`**, pas
+  réservées à l'agent minimal des machines contraintes (§11) — demande explicite reformulée en
+  cours de route : "chaque machine pourrait recevoir des commandes de start/stop/restart". Topic
+  `dimotic/supervisor/{machineId}/app/{appId}/command/lifecycle`, `{action: 'start'|'stop'|'restart'}`.
+  Testé en direct via `mosquitto_pub` — fonctionne dans les deux sens.
+- **Aucune signature/authentification sur ce canal de commandes pour cette phase** — clarifié en
+  cours de route : l'authentification obligatoire viendra du broker mosquitto lui-même (sujet
+  séparé, pas une signature applicative comme le proposait §10). §10 de cette spec reste donc à
+  jour comme *décision*, mais son *implémentation* n'a pas eu lieu dans cette phase et le sujet
+  broker reste ouvert.
+
+### 14.4 Vérifié en conditions réelles
+
+Build + suite de tests core propres (124/125, 1 échec préexistant sans rapport). Événement
+cross-process réel testé (simulation d'un ordre HAPLAN via `mosquitto_pub` directement sur le topic
+`event/espdisplay:deploy-floorplan`) — reçu et traité par `EspDisplayService` dans le process séparé
+(déclenchement réel du pipeline de déploiement, confirmé par les logs). Backoff de crash observé en
+conditions réelles (un arrêt externe non voulu classé crash, tentative avec délai, réussie).
+Commandes MQTT `stop`/`start` testées individuellement, effet confirmé sur le process réel à chaque
+fois. Plus aucun orphelin après plusieurs cycles de redémarrage de `core`.
+
+## 15. Annexes
+
+### 15.1 Références
 - [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.30.md) ⭐
 - [Spécifications Fonctionnelles ESPDISPLAY](fonctionnelles-espdisplay_specs_v1.1.md) (§6.3, cas
   d'usage cible de la migration SSH → bus MQTT unifié, et précédent pour la commande forcée
@@ -702,7 +787,7 @@ MQTT bridge loopback court-circuité) plutôt que de renoncer au modèle.
 - `TODO.md` — chantiers dérivés de cette discussion suivis en dehors de cette spec (sauvegarde HA,
   bridgeInstance/rpigpio, diffusion RFXCOM).
 
-### 14.2 Glossaire
+### 15.2 Glossaire
 | Terme | Définition |
 |-------|------------|
 | `machineId` | Identité d'une instance de la plateforme (une par machine physique), défaut = hostname |
@@ -711,10 +796,11 @@ MQTT bridge loopback court-circuité) plutôt que de renoncer au modèle.
 | Registre agrégé | Vue locale, reconstruite par abonnement MQTT wildcard, de toutes les machines/applications/événements disponibles, complétée (v2.3) d'une copie locale persistée horodatée |
 | Agent minimal | Publication du contrat de présence + un jeu fermé de commandes nommées, sans porter le reste de la stack — pour machines contraintes (§11) |
 
-### 14.3 Historique
+### 15.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
 | 2.4 | 2026-08-16 | Claude | Correction de référence croisée uniquement (`techniques-socle-ha-mqtt_specs` v4.29→v4.30, §8.5.4ter rejet des commandes MQTT retenues). Aucun changement de contenu propre à cette spec. Ancienne version v2.3 archivée. |
+| 2.5 | 2026-08-16 | Claude | **⭐ Phase 1 implémentée et vérifiée en conditions réelles** (§14, nouvelle) : `espdisplay` migrée en process séparé (`MqttEventBus`, `ProcessSupervisor`, `SupervisorEventBridge`, `standalone.ts`). Deux problèmes réels trouvés en testant : process orphelins au redémarrage de `core` (corrigé, `stopAllSeparateProcesses()` + filet `process.on('exit')`), `app:menu:register` jamais relayé côté socle pour aucune app (préexistant, non corrigé ici, signalé dans `TODO.md`). Deux décisions prises en cours de route : commandes MQTT start/stop/restart généralisées à toute app séparée (pas réservées à l'agent minimal §11), aucune signature sur ce canal pour cette phase (authentification prévue au niveau du broker mosquitto, sujet séparé). Ancienne version v2.4 archivée. |
 | 2.3 | 2026-08-15 | Claude | Discussion approfondie, point par point, avant implémentation. **§6.4 étendue** : persistance locale horodatée du registre par machine (résilience si le broker perd son retain), horodatage source fait foi. **§9 entièrement réécrite** : principe "une entité, un endroit, responsabilité du paramétreur" ; `bridgeInstance` par défaut passe de "dérivé du machineId" à un tirage aléatoire persisté, généralisé à tous les modules à bridge ; `rpigpio` découvert sans aucun `bridgeInstance` (passe par mqtt-io externe, collision réelle aujourd'hui) ; `node_id`=`bridgeInstance` tranché pour le topic de découverte (rejoint l'item 🔴 Haute de `TODO.md`) ; nouveau mécanisme RFXCOM de diffusion des devices enregistrés + avertissement UI pour le recouvrement RF réel. **§10 réécrite** : décision concrète de signature HMAC du canal de commandes (clé partagée), authentification broker/TLS explicitement écartée. **§11 nouvelle** : Agent Minimal pour Machines Contraintes (ARMv6/teleinfo) — referme le hors-scope de la v2.2, scope délibérément modeste (présence + commandes nommées fermées, même principe que la commande forcée SSH d'espdisplay). **§13.1 nouvelle** : liste consolidée de 7 prérequis avant implémentation. Ancienne version v2.2 archivée. |
 | 2.2 | 2026-08-15 | Claude | **Politique de redémarrage en cas de crash** (§8.4, nouvelle) : backoff exponentiel (1s→30s plafond), réarmement du compteur de tentatives après 60s de fonctionnement stable, abandon après 5 tentatives rapprochées (état terminal `crashed`, redémarrage manuel). Machine à états explicite, registre étendu d'un statut par application (`running`/`restarting`/`crashed`). Discutée puis validée avec l'utilisateur avant rédaction. Ancienne version v2.1 archivée. |
 | 2.1 | 2026-08-15 | Claude | **§7 réécrite** en réponse à une question directe de l'utilisateur ("voir toutes les applis de toutes les machines sur la même interface web ?"). Corrige une incohérence de la v2.0 (pontage Socket.io limité à sa propre machine, alors que le bus MQTT lui-même était déjà global) — §7.1. Ajoute le proxy HTTP de repli pour les fichiers statiques d'une application distante — §7.2, seule pièce manquante puisque le service de fichiers ne passe jamais par le process de l'application. Registre étendu (`address`/`webPort` dans le payload de présence, §6.2). Ancienne version v2.0 archivée. |

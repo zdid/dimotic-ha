@@ -7,6 +7,7 @@ import * as path from 'node:path';
 import { Logger } from '../infrastructure/logger';
 import type { RestartManager } from './RestartManager';
 import type { ConfigService } from '../infrastructure/config/ConfigService';
+import type { ProcessSupervisor } from '../supervisor';
 
 /** Fenêtre glissante avant redémarrage après une activation/désactivation — voir
  *  RestartManager.scheduleRestart() : chaque nouvel appel pendant ce délai le réinitialise à
@@ -43,11 +44,15 @@ export class ApplicationManager {
   private logger: Logger;
   private restartManager: RestartManager;
   private configService: ConfigService;
+  private processSupervisor?: ProcessSupervisor;
 
   /**
    * Crée un nouveau ApplicationManager
+   * @param processSupervisor - ⭐ fonctionnelles-supervisor_specs v2.4 §8.2, optionnel : si une
+   *   application activée/désactivée est enregistrée auprès de lui (runsAsSeparateProcess), enable/
+   *   disable délèguent au spawn/kill ciblé au lieu de redémarrer tout le process core.
    */
-  constructor(restartManager: RestartManager, logger: Logger, configService: ConfigService) {
+  constructor(restartManager: RestartManager, logger: Logger, configService: ConfigService, processSupervisor?: ProcessSupervisor) {
     // Chemin vers la racine du projet
     this.projectRoot = process.env.PROJECT_ROOT || path.resolve(path.join(__dirname, '../../../../'));
 
@@ -60,6 +65,7 @@ export class ApplicationManager {
     this.restartManager = restartManager;
     this.logger = logger;
     this.configService = configService;
+    this.processSupervisor = processSupervisor;
 
     if (!existsSync(this.appsDir)) {
       mkdirSync(this.appsDir, { recursive: true });
@@ -203,7 +209,15 @@ export class ApplicationManager {
         return { success: false, error: result.error };
       }
 
-      this.restartManager.scheduleRestart(APPLICATION_TOGGLE_RESTART_DELAY_MS, `Application ${appId} activée`);
+      // ⭐ fonctionnelles-supervisor_specs v2.4 §8.2 : une app en process séparé se démarre seule,
+      // sans redémarrer tout core (objectif même de la migration) — contrairement au comportement
+      // par défaut ci-dessous (§8.1, redémarrage complet du process, toujours utilisé pour les
+      // apps in-process tant qu'elles n'ont pas été migrées).
+      if (this.processSupervisor?.isRegistered(appId)) {
+        this.processSupervisor.start(appId);
+      } else {
+        this.restartManager.scheduleRestart(APPLICATION_TOGGLE_RESTART_DELAY_MS, `Application ${appId} activée`);
+      }
       this.logger.info('ApplicationManager', `Application ${appId} activée`);
 
       return { success: true };
@@ -241,7 +255,12 @@ export class ApplicationManager {
         return { success: false, error: result.error };
       }
 
-      this.restartManager.scheduleRestart(APPLICATION_TOGGLE_RESTART_DELAY_MS, `Application ${appId} désactivée`);
+      // ⭐ fonctionnelles-supervisor_specs v2.4 §8.2 — voir enable() ci-dessus.
+      if (this.processSupervisor?.isRegistered(appId)) {
+        this.processSupervisor.stop(appId);
+      } else {
+        this.restartManager.scheduleRestart(APPLICATION_TOGGLE_RESTART_DELAY_MS, `Application ${appId} désactivée`);
+      }
       this.logger.info('ApplicationManager', `Application ${appId} désactivée`);
 
       return { success: true };

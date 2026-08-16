@@ -100,7 +100,14 @@ export const ESPDISPLAY_APP: ApplicationModule & { menu?: ApplicationMenuConfig 
   requiredMqtt: false,
   requiredHaWs: false,
   configSection: 'espdisplay',
-  configUi: ESPDISPLAY_UI_METADATA
+  configUi: ESPDISPLAY_UI_METADATA,
+
+  // ⭐ fonctionnelles-supervisor_specs v2.4, Phase 1 (16/08/2026) — première application migrée en
+  // process séparé. bridgedEvents reprend ESPDISPLAY_EVENTS (EspDisplayService.ts) : les deux
+  // événements génériques EventBus qui traversent la frontière process avec HAPLAN (resté
+  // in-process), voir SupervisorEventBridge.
+  runsAsSeparateProcess: true,
+  bridgedEvents: ['espdisplay:deploy-floorplan', 'espdisplay:deploy-result']
 };
 
 export function createEspDisplayService(

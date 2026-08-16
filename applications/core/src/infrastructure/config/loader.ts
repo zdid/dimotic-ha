@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import { z } from 'zod';
@@ -8,6 +9,9 @@ import { AppConfig, configSchema } from './schema';
  * Valeurs par défaut complètes pour la configuration
  */
 const DEFAULT_CONFIG: AppConfig = {
+  core: {
+    machineId: os.hostname()
+  },
   disabledApps: [],
   ha: {
     ws_enable: false,

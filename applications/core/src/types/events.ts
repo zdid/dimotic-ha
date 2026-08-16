@@ -231,6 +231,9 @@ export const SOCLE_SOCKET_EVENTS = {
   MQTT_DISCONNECTED: 'mqtt:disconnected',
   MODULES_LIST: 'app:modules:list',
   MODULES_CONFIG: 'app:modules:config',
+  // ⭐ fonctionnelles-supervisor_specs v2.4 — identité de cette machine (core.machineId), exposée
+  // côté client pour un futur affichage par écran d'application (Phase 1, minimal : juste exposé).
+  MACHINE_ID: 'app:machine-id',
 } as const;
 
 /**
