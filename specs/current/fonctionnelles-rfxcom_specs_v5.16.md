@@ -1,5 +1,19 @@
 # Spécifications Fonctionnelles - Module RFXCOM
 
+*Version 5.16 - 16 Août 2026*
+*⭐ Nouvelle §17bis "Multi-instances — Recouvrement RF et Relais entre Bridges" : ferme une lacune
+documentaire (le mécanisme `registered-devices`/`claimed-elsewhere`, construit plus tôt cette
+session avant même la migration en process séparé, n'avait jamais été documenté dans ce fichier —
+seulement dans `fonctionnelles-supervisor_specs` §9.4, sans référence croisée depuis ici, corrigé).
+Deux ajouts réels : **exclusion effective** de la liste "découverts" pour un device déjà revendiqué
+par une autre instance (jusqu'ici seul un avertissement séparé existait, le device restait visible
+comme "à déclarer" — bug signalé par l'utilisateur, corrigé) et **relais de valeur inter-instances**
+(nouveau topic non retenu `rfxcom/{bridgeInstance}/relayed-value`) avec un garde-fou anti-écho pour
+les commandes envoyées. **Non vérifié en conditions réelles** — nécessiterait deux instances RFXCOM
+actives avec recouvrement RF réel, indisponible cette session (récepteur physique unique). Aucun
+relais de commande (scope explicitement écarté par l'utilisateur). Référence croisée
+`techniques-socle-ha-mqtt_specs` mise à jour (v4.19→v4.30, §22.1).*
+
 *Version 5.15 - 15 Août 2026*
 *Ferme le gap documenté en v5.14 §20 : `lastValue`/`commandDeviceId` ajoutés à `rfxComDeviceSchema`
 (§20) — ces deux champs survivent désormais au rechargement, comme `lastOn`/`lastLevel` des
@@ -107,6 +121,7 @@ correction de la numérotation des sections (dérivée depuis 5.7).*
 15. [Commandes](#15-commandes)
 16. [Traduction Commandes HA → RFXCOM](#16-traduction-commandes-ha--rfxcom)
 17. [Découverte et Retrait MQTT](#17-découverte-et-retrait-mqtt)
+    - 17bis. [Multi-instances — Recouvrement RF et Relais entre Bridges](#17bis-multi-instances--recouvrement-rf-et-relais-entre-bridges-nouveau-v516)
 18. [Arborescence des Programmes](#18-arborescence-des-programmes)
 19. [Tests](#19-tests)
 20. [Limites et Contraintes](#20-limites-et-contraintes)
@@ -1296,6 +1311,116 @@ Déclenché par :
 
 ---
 
+## 17bis. Multi-instances — Recouvrement RF et Relais entre Bridges (⭐ nouveau v5.16)
+
+### 17bis.1 Contexte — `registered-devices`, conçu dans la spec supervisor, jamais documenté ici
+
+Deux dongles RFXCOM sur deux machines ont de bonnes chances de recevoir le **même** signal RF pour
+un même appareil physique — la RF ne respecte aucune frontière machine. Un premier mécanisme,
+construit plus tôt dans la session du 16/08/2026 (avant même la migration de `rfxcom` en process
+séparé) répond à la collision de **découverte** : chaque instance publie
+`rfxcom/{bridgeInstance}/registered-devices` (retenu, QoS 1) — tableau JSON des `objectId`
+(uniqueId device, `receiverId`, ou `scene_{receiverId}`) actuellement publiés vers HA depuis cette
+instance. Chaque instance s'abonne à `rfxcom/+/registered-devices` (toutes les autres), et
+`isClaimedByOtherInstance(objectId)` bloque la republication de découverte pour un `objectId` déjà
+revendiqué ailleurs — jamais une exclusion silencieuse, un avertissement visible
+(`rfxcom:claimed-elsewhere:list`) signale le conflit à l'utilisateur (principe "une entité, un
+endroit, responsabilité du paramétreur", voir `fonctionnelles-supervisor_specs` §9.1/§9.4 pour la
+conception complète — non reproduite ici, référence croisée uniquement).
+
+**Lacune documentaire fermée par cette version** : ce mécanisme, pourtant en place et fonctionnel
+depuis plus tôt dans la session, n'avait jamais eu de mention dans ce document — seulement dans la
+spec supervisor. §17bis.2/17bis.3 ci-dessous documentent les deux ajouts réels de cette version.
+
+### 17bis.2 ⭐ Exclusion effective de la liste "découverts" (nouveau v5.16)
+
+**Bug signalé par l'utilisateur, corrigé** : `isClaimedByOtherInstance` ne servait jusqu'ici qu'à
+peupler l'avertissement `claimed-elsewhere` — le device revendiqué par une autre instance restait
+malgré tout visible dans la liste "découverts" (`rfxcom:devices:list`, champ `discovered`), comme
+s'il restait "à déclarer" ici. `emitDevicesList()` (`RfxComService.ts`) filtre désormais cette liste
+en excluant tout `uniqueId` revendiqué ailleurs — recalculé également à chaque réception d'un
+message `registered-devices` (pas seulement au chargement de la page), pour que l'UI reflète les
+changements en direct sans rafraîchissement manuel.
+
+**Déclaration : reste locale, au plus près du signal reçu** — décision explicite de l'utilisateur
+en discutant cette version : pas de mécanisme pour transmettre les métadonnées d'un device
+*non déclaré* d'une instance à l'autre afin de le déclarer ailleurs (une première formulation de
+l'idée l'envisageait, simplifiée en cours de discussion). L'instance qui capte physiquement un
+signal reste celle qui le déclare, si elle le souhaite ; §17bis.3 couvre le cas où le device est
+*déjà* déclaré par une autre instance.
+
+### 17bis.3 ⭐ Relais de valeur inter-instances (nouveau v5.16)
+
+**Principe** : quand une instance capte un signal RF433 pour un device qu'elle sait revendiqué par
+une **autre** instance (`isClaimedByOtherInstance` positif), elle transmet la trame brute plutôt que
+de l'ignorer silencieusement — un secours en cas de réception ratée côté propriétaire, jamais une
+publication concurrente vers HA (reste cohérent avec §9.1 de la spec supervisor).
+
+**Topic** : `rfxcom/{bridgeInstance}/relayed-value` — **non retenu** (`retain: false`), à la
+différence de `registered-devices` : un événement ponctuel, pas un état à rejouer aux nouveaux
+abonnés. Payload : `{ objectId: string, message: RfxComRawMessage }` (la trame brute complète —
+`type`, `subType`, `sensorId`, `unitCode`, `data`, `signalLevel`, `batteryLevel`, `timestamp`).
+
+**Émission** (`publishRelayedValue`, appelée depuis `handleRfxMessage`) : dès que
+`isClaimedByOtherInstance(uniqueId)` est positif pour un signal reçu. L'événement local
+`rfxcom:device:detected` n'est alors **pas** émis (le device n'est pas "à découvrir" ici, il
+appartient déjà à quelqu'un).
+
+**Réception** (`handleRelayedValueMessage`) — trois vérifications avant tout traitement :
+1. **Anti-écho** (§17bis.4 ci-dessous).
+2. **Appartenance réelle** : `deviceManager.getDevice(objectId)` doit exister — sinon le relais est
+   ignoré silencieusement (topologie invalide, ou message pour une troisième instance qui partage
+   le même abonnement wildcard).
+3. **Reconstruction de `timestamp`** : le passage JSON.stringify/JSON.parse via le passthrough MQTT
+   transforme le `Date` d'origine en chaîne ISO — reconstruit explicitement en `Date` avant tout
+   traitement, sinon tout `.toISOString()` en aval (`DeviceManager.handleRawMessage`,
+   `RfxComService.publishDeviceState`) lèverait une exception.
+
+Une fois acceptée, la trame relayée est rejouée par le **même chemin** qu'une réception RF433
+réelle : mise à jour `lastSeen`/`commandDeviceId` du device configuré, publication d'état si
+`transmitToHa` (capteur), et `receiverManager.handleEmitterMessage()` si le type commence par
+`Lighting` (émetteur associé à un ou plusieurs récepteurs — met à jour `lastOn`/`lastLevel`, publie
+l'état des récepteurs affectés).
+
+**Explicitement hors scope (décision utilisateur)** : aucun relais de **commande** — ce mécanisme
+est à sens unique (valeurs captées → propriétaire), il n'existe aucun moyen pour une instance sans
+portée RF sur un device de faire transmettre une commande par une autre instance qui, elle,
+l'aurait.
+
+### 17bis.4 ⭐ Garde-fou anti-écho (nouveau v5.16)
+
+**Problème identifié par l'utilisateur avant construction** : quand une instance exécute une
+commande (`applyReceiverCommandInternal` → `transceiver.sendCommand()`), elle transmet réellement un
+signal RF433 en se faisant passer pour le `primaryEmitter` déclaré — un dongle d'une **autre**
+instance à portée le capte exactement comme une vraie pression sur la télécommande physique (RF433
+ne distingue pas les deux). Sans garde-fou, le mécanisme de relais ferait remonter à l'instance
+émettrice l'écho de sa propre commande comme s'il s'agissait d'une information nouvelle.
+
+**Résolu** : `recentlyCommandedEmitters` (`Map<uniqueId du primaryEmitter, horodatage d'expiration>`)
+— posé juste après `transceiver.sendCommand()` réussi dans `applyReceiverCommandInternal`, fenêtre
+de **5 secondes** (`RELAY_ECHO_SUPPRESSION_MS`, même ordre de grandeur que la boucle de reconnexion
+du transceiver, cohérent avec les répétitions de trame RF433). `handleRelayedValueMessage` vérifie
+cette table avant tout traitement — un relais entrant pour un `objectId` encore dans la fenêtre est
+ignoré (log de niveau debug, pas une erreur).
+
+Ne concerne que le relais **inter-instances** : la même instance n'entend jamais l'écho de sa propre
+transmission (le dongle émetteur ne se réécoute pas lui-même — voir le commentaire existant dans
+`applyReceiverCommandInternal` sur l'absence d'écho intra-instance), ce garde-fou n'aurait donc
+aucun effet sur le chemin local.
+
+### 17bis.5 ⚠️ Non vérifié en conditions réelles
+
+Contrairement à la plupart des correctifs RFXCOM de cette session (tous validés avec le vrai
+transceiver), ce mécanisme **n'a pas pu être testé en conditions réelles** : il nécessiterait deux
+instances RFXCOM actives simultanément, avec des dongles en recouvrement RF réel — configuration
+indisponible cette session (un seul récepteur physique, reparti sur `orangepi` juste avant ce
+chantier ; l'instance locale `rfxcom` a été redésactivée en conséquence). Build propre (`tsc -b`),
+aucune régression de comportement pour le chemin RF433 local (réception réelle) — seule la
+correction de flux ajoutée. À vérifier au prochain déploiement où deux instances RFXCOM
+tourneraient simultanément avec du recouvrement RF.
+
+---
+
 ## 18. Arborescence des Programmes (réelle, corrigée v5.9)
 
 > ⚠️ La structure documentée jusqu'à v5.8 (`base/`, `switch/`, `light/`, `cover/` en
@@ -1380,6 +1505,7 @@ sans action corrective engagée à ce jour (voir Roadmap §21).
 | Échec de push de protocoles non remonté à l'UI | L'utilisateur ne voit pas un échec de push (bouton dédié ou rafraîchissement) | Non corrigé — logs serveur uniquement |
 | `SceneExecutionResult` sans distinction échec/annulation | `scene_failed` et `scene_cancelled` produisent le même `success: false` | Acceptée, `errors[]` permet de distinguer manuellement |
 | Découverte `device_automation` à un seul segment (scènes) | Jamais vérifiée contre une instance HA réelle (seulement broker MQTT) | Acceptée, non vérifiée |
+| Relais de valeur/exclusion multi-instances (§17bis) non vérifiés en conditions réelles | Nécessiterait deux dongles RFXCOM actifs avec recouvrement RF, indisponible cette session | Non vérifié — à tester au prochain déploiement multi-instances |
 
 ---
 
@@ -1409,7 +1535,10 @@ Voir historique §22.3 pour le détail complet des versions précédentes.
 - [Spécification de Nommage **OBLIGATOIRE**](spec-nommage-v1.0.md) ⭐
 - [Spécifications Implémentation RFXCOM](implementation-rfxcom_specs_v1.5.md)
 - [Spécifications Récepteurs/Émetteurs RFXCOM](recepteurs-emetteurs-rfxcom_specs_v5.4.md)
-- [Spécifications Techniques Socle HA-MQTT **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.19.md) ⭐
+- [Spécifications Techniques Socle HA-MQTT **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.30.md) ⭐
+- [Spécifications Fonctionnelles Supervision Multi-Machines](fonctionnelles-supervisor_specs_v2.6.md)
+  (§9.1/§9.4 — conception complète du principe "une entité, un endroit" et de `registered-devices`,
+  voir §17bis de ce document pour son usage réel côté RFXCOM)
 - [Documentation librairie npm rfxcom](https://www.npmjs.com/package/rfxcom)
 
 ### 22.2 Glossaire
@@ -1423,6 +1552,9 @@ Voir historique §22.3 pour le détail complet des versions précédentes.
 | transmitToHa | Case à cocher autorisant l'envoi du device/récepteur vers HA |
 | Protocoles matériel | Sélection (granularité bibliothèque `rfxcom`) poussée au RFXtrx433 en RAM — voir §8.3 |
 | protocolsPushGate | Verrou retardant la première découverte jusqu'à la tentative de push des protocoles (§8.3) |
+| `registered-devices` | Topic MQTT retenu par instance, liste des `objectId` publiés vers HA — anti-collision de découverte entre instances (§17bis.1) |
+| Relais de valeur | Transmission d'une trame RF433 captée pour un device revendiqué par une autre instance, vers cette dernière (§17bis.3) |
+| Anti-écho | Garde-fou évitant qu'une instance ne se voie relayer l'écho de sa propre commande RF433 (§17bis.4) |
 
 ### 22.3 Annexe : Communication Inter-Applications — **NON IMPLÉMENTÉE**
 
@@ -1457,6 +1589,7 @@ Capacités Request/Reply envisagées : `rfxcom:devices:list`, `rfxcom:device:get
 | 5.13 | 2026-08-15 | Claude | **Statut matériel affiché sur la page application** (§12.2/§12.3, nouvelle carte "Matériel du Transceiver") : type de récepteur, firmware, protocoles activés/disponibles — déjà récupéré en interne (§8.2) mais jamais exposé à l'UI. Vérifié en conditions réelles sur transceiver physique (RFXtrx433 XL, firmware ProXL 2 v1047). Ancienne version v5.12 archivée. |
 | 5.14 | 2026-08-15 | Claude | **⚠️ Correctif de sécurité réel** (§9.2bis, nouvelle) : `publishReceiverStateAtStartup()` envoyait une vraie commande RF433 `turn_off` à tout récepteur commandable sans `lastOn` connu au démarrage — incident constaté par l'utilisateur (maison éteinte de façon imprévisible à certains redémarrages, selon l'état de connexion du transceiver à ce moment précis). Corrigé : republication strictement passive de l'état, plus aucune commande matérielle au démarrage. §20 corrigée au passage (la ligne "lastOn/lastLevel strippés" était stale — déjà corrigée le 07/08/2026, jamais reflété dans le tableau ; le vrai gap restant, `lastValue`/`commandDeviceId` niveau devices, reste documenté séparément). Ancienne version v5.13 archivée. |
 | 5.15 | 2026-08-15 | Claude | Ferme le gap restant de v5.14 §20 : `lastValue`/`commandDeviceId` ajoutés à `rfxComDeviceSchema` — survivent désormais au rechargement. Fenêtre de fraîcheur de 30 min retirée de `publishDeviceStateAtStartup()` (§9.2, demande utilisateur) — devenue sans objet une fois `lastValue` persisté correctement, la dernière valeur connue est toujours republiée au démarrage. Nouveau `lastAnyValueChangeAt` (§9.2ter) : horodatage global (tous devices confondus, pas par device), persisté, exposé dans `RfxComStatus` et sur le tableau de bord — demande utilisateur explicite, sans logique de fraîcheur/alerte dessus pour l'instant. Ancienne version v5.14 archivée. |
+| 5.16 | 2026-08-16 | Claude | **Nouvelle §17bis "Multi-instances — Recouvrement RF et Relais entre Bridges"** : ferme une lacune documentaire (`registered-devices`/`claimed-elsewhere`, construit plus tôt dans la session, jamais documenté ici — seulement dans `fonctionnelles-supervisor_specs` §9.4, référence croisée ajoutée). Deux ajouts réels : exclusion effective de la liste "découverts" pour un device revendiqué par une autre instance (§17bis.2, corrige un bug signalé par l'utilisateur — seul un avertissement séparé existait jusqu'ici) et relais de valeur inter-instances (§17bis.3, nouveau topic non retenu `rfxcom/{bridgeInstance}/relayed-value`) avec garde-fou anti-écho pour les commandes envoyées (§17bis.4, `RELAY_ECHO_SUPPRESSION_MS` 5s). Déclaration d'un device reste locale (décision explicite, une idée initiale de déclaration inter-instances a été simplifiée en discussion). Aucun relais de commande (hors scope explicite). **Non vérifié en conditions réelles** (§17bis.5) — nécessiterait deux dongles RFXCOM en recouvrement RF, indisponible cette session. Référence croisée techniques-socle mise à jour (v4.19→v4.30). Ancienne version v5.15 archivée. |
 
 ---
 

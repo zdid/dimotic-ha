@@ -64,6 +64,23 @@ export class RfxComService implements IRfxComService {
   private otherInstancesRegisteredDevices: Map<string, Set<string>> = new Map();
   /** objectId → bridgeInstance qui le revendique déjà — alimente rfxcom:claimed-elsewhere:list. */
   private claimedElsewhereWarnings: Map<string, string> = new Map();
+
+  // ⭐ Relais de valeur inter-instances (16/08/2026, demande utilisateur — suite logique de
+  // registered-devices ci-dessus) : quand cette instance capte un signal RF pour un device qu'une
+  // AUTRE instance revendique déjà (recouvrement RF réel, voir isClaimedByOtherInstance), elle
+  // transmet la trame brute à l'instance propriétaire plutôt que de l'ignorer silencieusement —
+  // backup en cas de réception ratée côté propriétaire, jamais une publication concurrente vers HA
+  // (§9.1 "une entité, un endroit"). Voir publishRelayedValue/handleRelayedValueMessage.
+  /** Fenêtre de suppression anti-écho : une instance qui vient d'émettre une commande RF433 pour
+   *  un de ses propres devices (primaryEmitter) doit ignorer tout relais entrant la concernant
+   *  pendant ce délai — sans quoi une autre instance à portée, qui capte cette transmission
+   *  exactement comme une vraie pression télécommande, la relaierait comme une info nouvelle,
+   *  faisant remonter l'écho de sa propre commande. Fenêtre courte, cohérente avec les répétitions
+   *  de trame RF433 (même ordre de grandeur que RECONNECT_LOOP_INTERVAL_MS). */
+  private static readonly RELAY_ECHO_SUPPRESSION_MS = 5000;
+  /** uniqueId du primaryEmitter commandé → horodatage (ms epoch) jusqu'auquel un relais entrant le
+   *  concernant doit être ignoré — voir RELAY_ECHO_SUPPRESSION_MS/applyReceiverCommandInternal. */
+  private recentlyCommandedEmitters: Map<string, number> = new Map();
   /** Scènes dont l'exécution séquentielle en cours doit s'arrêter à la prochaine étape. */
   private cancelledScenes: Set<string> = new Set();
   // ⚠️ configureRFX (RfxComTransceiver.pushEnabledProtocols) déclenche lui-même un nouvel
@@ -273,6 +290,7 @@ export class RfxComService implements IRfxComService {
         // activés, qui doit passer en premier (voir le commentaire sur protocolsPushGate).
         if (event.connected) {
           this.subscribeRegisteredDevices();
+          this.subscribeRelayedValues();
           this.protocolsPushGate.then(() => this.publishInitialDiscoveries());
         }
         this.emitStatus();
@@ -290,11 +308,15 @@ export class RfxComService implements IRfxComService {
       () => this.publishInitialDiscoveries()
     );
 
-    // ⭐ fonctionnelles-supervisor_specs v2.3 §9.4 : reçoit la liste des devices enregistrés par les
-    // AUTRES instances RFXCOM (abonnement passthrough posé dans start(), voir subscribeRegisteredDevices).
+    // ⭐ fonctionnelles-supervisor_specs v2.3 §9.4 / relais de valeur (16/08/2026) : un seul canal
+    // passthrough générique, deux gestionnaires dispatchés par motif de topic (chacun ignore les
+    // messages qui ne correspondent pas au sien, voir leurs regex respectives).
     this.eventBus.onGeneric<{ bridgeInstance: string; topic: string; payload: string }>(
       `integration:${MODULE_NAME}:passthrough:message`,
-      (event) => this.handleRegisteredDevicesMessage(event)
+      (event) => {
+        this.handleRegisteredDevicesMessage(event);
+        this.handleRelayedValueMessage(event);
+      }
     );
 
     // Reconnecte le transceiver (port série) à chaud si sa config a réellement changé — même
@@ -401,7 +423,16 @@ export class RfxComService implements IRfxComService {
   private handleRfxMessage(message: RfxComRawMessage): void {
     const { uniqueId, isNew } = this.deviceManager.handleRawMessage(message);
 
-    if (isNew) {
+    // ⭐ Relais de valeur (16/08/2026) : ce device est à nous de le voir, mais pas de le publier —
+    // une AUTRE instance le revendique déjà. On transmet la trame brute plutôt que de la garder
+    // pour nous (voir publishRelayedValue) ; le traitement local ci-dessous continue sans effet
+    // (getDevice(uniqueId) reste undefined pour un device non paramétré ici).
+    const claimedBy = this.isClaimedByOtherInstance(uniqueId);
+    if (claimedBy) {
+      this.publishRelayedValue(uniqueId, message);
+    }
+
+    if (isNew && !claimedBy) {
       this.eventBus.emitGeneric('rfxcom:device:detected', { device: this.deviceManager.getDiscoveredDevices().find((d) => d.uniqueId === uniqueId) });
     }
 
@@ -516,6 +547,99 @@ export class RfxComService implements IRfxComService {
       }
     }
     this.emitClaimedElsewhereList();
+    // ⭐ La liste des "découverts" exclut désormais tout objectId revendiqué par une autre
+    // instance (emitDevicesList) — recalculée à chaque mise à jour de otherInstancesRegisteredDevices,
+    // pas seulement au chargement initial, pour que l'UI reflète les changements en direct.
+    this.emitDevicesList();
+  }
+
+  /** S'abonne, une fois, aux valeurs relayées par TOUTES les instances RFXCOM (§ relais de valeur,
+   *  16/08/2026) — topic distinct de registered-devices, non retenu (événements ponctuels). */
+  private subscribeRelayedValues(): void {
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:subscribe`, {
+      bridgeInstance: this.config.bridgeInstance,
+      topic: `${MODULE_NAME}/+/relayed-value`,
+      qos: 1
+    });
+  }
+
+  /**
+   * Publie la trame brute d'un signal RF433 capté pour un device revendiqué par une AUTRE
+   * instance — appelé depuis handleRfxMessage dès que isClaimedByOtherInstance() est positif.
+   * Non retenu (retain: false) : un événement ponctuel, à la différence de registered-devices qui
+   * doit survivre pour les nouveaux abonnés.
+   */
+  private publishRelayedValue(uniqueId: string, message: RfxComRawMessage): void {
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:publish`, {
+      bridgeInstance: this.config.bridgeInstance,
+      topic: `${MODULE_NAME}/${this.config.bridgeInstance}/relayed-value`,
+      payload: { objectId: uniqueId, message },
+      qos: 1,
+      retain: false
+    });
+  }
+
+  /**
+   * Réception d'un relais émis par une autre instance pour un device qu'ELLE a capté mais que
+   * NOUS possédons (voir publishRelayedValue côté émetteur). Rejoue la trame comme si elle venait
+   * de notre propre transceiver (même chemin sensor/émetteur que handleRfxMessage), sauf :
+   * - suppression anti-écho (RELAY_ECHO_SUPPRESSION_MS) si nous venons nous-mêmes de commander ce
+   *   device — sans quoi l'écho de notre propre transmission, capté par l'instance qui relaie,
+   *   nous reviendrait comme une fausse information nouvelle ;
+   * - aucune contribution à discoveredDevices/rfxcom:device:detected — le device nous appartient
+   *   déjà par construction (isClaimedByOtherInstance ne déclenche l'émission côté relais que pour
+   *   des objectId revendiqués par une instance identifiée, jamais pour un device inconnu de
+   *   personne) ; si nous ne le trouvons pas dans nos devices paramétrés, le relais est ignoré —
+   *   soit une topologie invalide, soit un message destiné à une troisième instance.
+   */
+  private handleRelayedValueMessage(event: { bridgeInstance: string; topic: string; payload: string }): void {
+    const match = event.topic.match(new RegExp(`^${MODULE_NAME}/([^/]+)/relayed-value$`));
+    if (!match) return;
+    const remoteBridgeInstance = match[1] as string;
+    if (remoteBridgeInstance === this.config.bridgeInstance) return; // écho de notre propre publication
+
+    let parsed: { objectId: string; message: RfxComRawMessage };
+    try {
+      parsed = JSON.parse(event.payload) as { objectId: string; message: RfxComRawMessage };
+    } catch {
+      this.logger.warn('RfxComService', `Payload relayed-value invalide sur ${event.topic}`);
+      return;
+    }
+    const { objectId } = parsed;
+    // Le passage JSON.stringify/JSON.parse (via le passthrough MQTT) transforme timestamp (Date)
+    // en chaîne ISO — reconstruit ici, sinon tout .toISOString() en aval (DeviceManager,
+    // publishDeviceState) lèverait une exception (chaîne, pas un objet Date).
+    const message: RfxComRawMessage = { ...parsed.message, timestamp: new Date(parsed.message.timestamp) };
+
+    const suppressUntil = this.recentlyCommandedEmitters.get(objectId);
+    if (suppressUntil !== undefined && suppressUntil > Date.now()) {
+      this.logger.debug('RfxComService', `Relais ignoré pour ${objectId} — écho probable d'une commande que nous venons d'émettre nous-mêmes`);
+      return;
+    }
+
+    if (!this.deviceManager.getDevice(objectId)) {
+      // Ne nous appartient pas (ou plus) — ignoré silencieusement, pas une erreur.
+      return;
+    }
+
+    // Met à jour lastSeen/commandDeviceId comme une réception réelle (branche "configuré" de
+    // handleRawMessage, garantie ici puisque getDevice(objectId) vient de confirmer sa présence).
+    this.deviceManager.handleRawMessage(message);
+
+    const device = this.deviceManager.getDevice(objectId);
+    if (device?.transmitToHa) {
+      this.publishDeviceState(device, message);
+    }
+
+    if (message.type.startsWith('Lighting')) {
+      const affectedReceivers = this.receiverManager.handleEmitterMessage(objectId);
+      if (affectedReceivers.length > 0) {
+        this.persistDevicesConfig();
+        for (const receiver of affectedReceivers) {
+          this.publishReceiverState(receiver);
+        }
+      }
+    }
   }
 
   /**
@@ -924,6 +1048,13 @@ export class RfxComService implements IRfxComService {
         result.action as 'on' | 'off' | 'set_level' | 'open' | 'close' | 'stop',
         result.value
       );
+      // ⭐ Anti-écho relais inter-instances (16/08/2026, voir RELAY_ECHO_SUPPRESSION_MS) : on vient
+      // de transmettre réellement un signal RF433 en se faisant passer pour ce primaryEmitter — un
+      // dongle d'une autre instance à portée peut le capter exactement comme une vraie pression
+      // télécommande et nous le relayer comme une info "nouvelle". Marqué AVANT toute chance de
+      // recevoir ce relais (le réseau/MQTT a de toute façon une latence bien supérieure à cet appel
+      // synchrone), pour être sûr que handleRelayedValueMessage trouve l'entrée à temps.
+      this.recentlyCommandedEmitters.set(primaryDevice.uniqueId, Date.now() + RfxComService.RELAY_ECHO_SUPPRESSION_MS);
       // Mise à jour optimiste de l'état interne : contrairement à ce qu'on pouvait supposer, le
       // primaryEmitter n'est PAS réécouté en écho après l'envoi — findReceiversForEmitter ne
       // matche que receiver.config.emitters[] (télécommandes secondaires appairées), jamais
@@ -1047,10 +1178,20 @@ export class RfxComService implements IRfxComService {
     this.eventBus.emitGeneric('rfxcom:status', this.getStatus());
   }
 
+  /**
+   * ⭐ Exclusion réelle (16/08/2026, corrige une lacune signalée par l'utilisateur) : un device déjà
+   * géré par une AUTRE instance (isClaimedByOtherInstance) ne doit pas apparaître comme "à
+   * déclarer" ici — jusqu'ici seul un avertissement séparé (claimed-elsewhere) le signalait, sans
+   * jamais le retirer de la liste "découverts". Reste en mémoire dans DeviceManager (pas de perte
+   * si l'autre instance disparaît/déclasse ce device plus tard, il redevient visible ici au
+   * prochain appel) — seul l'envoi à l'UI est filtré.
+   */
   private emitDevicesList(): void {
+    const discovered = this.deviceManager.getDiscoveredDevices()
+      .filter((d) => !this.isClaimedByOtherInstance(d.uniqueId));
     this.eventBus.emitGeneric('rfxcom:devices:list', {
       configured: this.deviceManager.getConfiguredDevices(),
-      discovered: this.deviceManager.getDiscoveredDevices()
+      discovered
     });
   }
 
