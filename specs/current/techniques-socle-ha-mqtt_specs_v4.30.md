@@ -1,8 +1,17 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.29  
-**Date :** 15 Août 2026  
+**Version :** 4.30  
+**Date :** 16 Août 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.30** : **`parseIncomingCommand()` rejette désormais tout message reçu avec `retain: true`**
+> (§8.5.4ter, nouvelle) — incident de sécurité réel sur RFXCOM : ~21 messages de commande
+> (`.../set`) retenus sur le broker (probablement un `mosquitto_pub -r` manuel ancien), rejoués à
+> chaque redémarrage/réabonnement du service et exécutés comme de vraies commandes RF433 dès que le
+> transceiver était déjà connecté au moment du réabonnement — maison éteinte de façon imprévisible
+> à certains redémarrages. Correctif au niveau du socle (`stateCommand.ts`), protège tous les
+> modules utilisant ce mécanisme (rfxcom, evoo7, arexx, nommage), pas seulement RFXCOM. Les 21
+> messages retenus déjà présents nettoyés manuellement sur le broker réel après le correctif.
 
 > **v4.29** : **Deux correctifs distincts**, tous deux issus de bugs réels constatés par
 > l'utilisateur le 15/08/2026, tous deux en creusant "la navigation entre applications pose des
@@ -2004,6 +2013,32 @@ démarrage/reconnexion du bridge MQTT propre au module).
 }
 ```
 
+#### 8.5.4ter Rejet des commandes retenues (⭐ nouveau v4.30)
+
+**Un topic de commande ne doit jamais être traité comme actionnable quand il est délivré en tant
+que message MQTT retenu** (`retain: true`) — que ce soit la livraison initiale d'un message déjà
+présent sur le broker au moment du (ré)abonnement (le protocole MQTT positionne explicitement le
+flag `RETAIN` sur cette livraison précise), ou un message publié à tort avec retain. Une commande
+est par nature une action ponctuelle : la rejouer à chaque redémarrage/réabonnement — donc
+potentiellement à chaque redémarrage du service — n'est jamais correct, quelle que soit son
+origine.
+
+**Incident réel constaté (15-16/08/2026)** : environ 21 messages `.../set` retenus trouvés sur le
+broker de production pour RFXCOM (`rfxcom/rfx_bridge_0001/{receiverId}/set`, payload `"OFF"`/`"ON"`
+brut), probablement un artefact d'un test manuel ancien (`mosquitto_pub -r`) — aucun code du socle
+ni d'aucune application ne publie jamais de commande avec retain (audité). Ces messages étaient
+redistribués par le broker à chaque réabonnement de RFXCOM à ses topics de commande (au démarrage
+du service), déclenchant de vraies transmissions RF433 dès que le transceiver était déjà connecté à
+ce moment précis — un redémarrage pouvait donc réellement éteindre des lumières allumées, de façon
+imprévisible.
+
+**Corrigé** : `parseIncomingCommand()` (`stateCommand.ts`) retourne `null` (commande ignorée) si
+`message.retain === true` — le flag est déjà capturé par `MqttTransport` (`MqttMessage.retain`),
+simplement jamais vérifié avant ce correctif. S'applique à **tous** les modules utilisant ce
+mécanisme (rfxcom, evoo7, arexx, nommage), pas seulement RFXCOM. Les 21 messages déjà présents sur
+le broker de production ont été nettoyés manuellement (payload vide en retain sur chaque topic
+concerné) après le correctif.
+
 #### 8.5.5 Événements EventBus pour les modules
 
 **Modules → HaMqttIntegrationService :**
@@ -2459,6 +2494,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.30** | 16/08/2026 | Claude | **`parseIncomingCommand()` rejette les commandes retenues** (§8.5.4ter, nouvelle) — incident de sécurité réel RFXCOM : ~21 messages `.../set` retenus sur le broker (probablement `mosquitto_pub -r` manuel ancien), rejoués à chaque redémarrage et exécutés comme de vraies commandes RF433 dès que le transceiver était connecté — maison éteinte de façon imprévisible. Correctif socle (`stateCommand.ts`), protège tous les modules (rfxcom, evoo7, arexx, nommage). Messages déjà présents nettoyés manuellement sur le broker. Ancienne version v4.29 archivée. |
 | **4.29** | 15/08/2026 | Claude | **Deux correctifs distincts, "navigation entre applications" (§6.1/§6.2)** : (1) `arbreouquoi` rejoint la convention `window.{id}App.init()` (laissé de côté en v4.28), écouteurs socket/DOM scindés (une fois vs à chaque revisite). (2) Bug réel `Sidebar.ts` : un module sans `menu.pages` (ESPDISPLAY, HAPLAN) était rendu avec `href="#moduleId"` au lieu de `entry.path`, désynchronisé du sélecteur d'attachement du clic — clic sans effet, corrigé. Toutes deux issues de bugs réels constatés par l'utilisateur. Ancienne version v4.28 archivée. |
 | **4.28** | 11/08/2026 | Claude | **Deux correctifs distincts, tous deux issus de bugs réels constatés par l'utilisateur** (1) `ModuleContainer` rappelle désormais `window.{moduleId}App.init()` après réaffichage d'un module depuis son cache (§6.1) — corrige des dashboards inertes après revisite (formulaire "Tester une commande" de IA sans effet, Planificateur bloqué sur "Chargement") : le HTML réinjecté par `innerHTML` ne rebranchait plus aucun écouteur pour les apps vanilla TS (`Alpine.initTree()` sans effet pour elles). `init()` rendu idempotent côté `setupEventListeners()` (drapeau `listenersReady`) dans `ia`/`planificateur`/`evoo7`/`arexx`/`rfxcom`/`nommage` — `arbreouquoi` non touché, hors périmètre. (2) **`HaStructureRegistry.getLieuCatalog()`** (§8.3.3 nouvelle) — catalogue de lieux statique (tous niveaux confondus), complément de `getQuoiCatalog()`, exposé côté `ia` (voir `fonctionnelles-ia_specs` v1.8) pour réduire les faux refus "quoi_introuvable" en fournissant une vérité de terrain stable, propice au cache de prompt côté fournisseur LLM. Toutes demandes utilisateur, session du 11/08/2026. Ancienne version v4.27 archivée. |
 | **4.27** | 11/08/2026 | Claude | **Graphe de lieux centralisé dans `HaStructureRegistry`** (§8.3.2 nouvelle, `getEntitiesByQuoiAndLieux()`) — remplace la résolution `quoi`/`lieux` dupliquée et divergente entre `planificateur/resolution.ts` et `ia/ToolExecutor.ts`. Résolution indépendante du niveau taxonomique (area/`lieu_pere`/`lieu_grand_pere`/`lieu_precis`) via un graphe de containment construit paresseusement, plus un repli tokenisé pour les phrases composées ("plafonnier de la chambre"). Bug réel corrigé en cours de route : `lieu_precis` exclu du graphe de containment (des labels comme "plafonnier" sont réutilisés par de nombreuses pièces sans rapport, les y inclure faisait converger toutes ces pièces vers le même nœud — constaté en testant "éteins les toilettes du haut" en direct, qui éteignait aussi cuisine/chambre/bureau). Toutes demandes utilisateur, session du 10-11/08/2026. Ancienne version v4.26 archivée. |

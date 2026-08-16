@@ -1,5 +1,9 @@
 # Spécifications Fonctionnelles - Supervision Multi-Machines (SUPERVISOR)
 
+*Version 2.4 - 16 Août 2026*
+*Correction de référence croisée uniquement — `techniques-socle-ha-mqtt_specs` v4.29 → v4.30
+(§8.5.4ter, rejet des commandes MQTT retenues). Aucun changement de contenu propre à cette spec.*
+
 *Version 2.3 - 15 Août 2026*
 *Discussion approfondie, point par point, avant tout passage à l'implémentation : persistance
 horodatée locale du registre (§6.4), conception détaillée des redondances rpigpio/rfxcom (§9,
@@ -684,7 +688,7 @@ MQTT bridge loopback court-circuité) plutôt que de renoncer au modèle.
 ## 14. Annexes
 
 ### 14.1 Références
-- [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.29.md) ⭐
+- [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.30.md) ⭐
 - [Spécifications Fonctionnelles ESPDISPLAY](fonctionnelles-espdisplay_specs_v1.1.md) (§6.3, cas
   d'usage cible de la migration SSH → bus MQTT unifié, et précédent pour la commande forcée
   whitelisté reprise en §11.2)
@@ -710,6 +714,7 @@ MQTT bridge loopback court-circuité) plutôt que de renoncer au modèle.
 ### 14.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 2.4 | 2026-08-16 | Claude | Correction de référence croisée uniquement (`techniques-socle-ha-mqtt_specs` v4.29→v4.30, §8.5.4ter rejet des commandes MQTT retenues). Aucun changement de contenu propre à cette spec. Ancienne version v2.3 archivée. |
 | 2.3 | 2026-08-15 | Claude | Discussion approfondie, point par point, avant implémentation. **§6.4 étendue** : persistance locale horodatée du registre par machine (résilience si le broker perd son retain), horodatage source fait foi. **§9 entièrement réécrite** : principe "une entité, un endroit, responsabilité du paramétreur" ; `bridgeInstance` par défaut passe de "dérivé du machineId" à un tirage aléatoire persisté, généralisé à tous les modules à bridge ; `rpigpio` découvert sans aucun `bridgeInstance` (passe par mqtt-io externe, collision réelle aujourd'hui) ; `node_id`=`bridgeInstance` tranché pour le topic de découverte (rejoint l'item 🔴 Haute de `TODO.md`) ; nouveau mécanisme RFXCOM de diffusion des devices enregistrés + avertissement UI pour le recouvrement RF réel. **§10 réécrite** : décision concrète de signature HMAC du canal de commandes (clé partagée), authentification broker/TLS explicitement écartée. **§11 nouvelle** : Agent Minimal pour Machines Contraintes (ARMv6/teleinfo) — referme le hors-scope de la v2.2, scope délibérément modeste (présence + commandes nommées fermées, même principe que la commande forcée SSH d'espdisplay). **§13.1 nouvelle** : liste consolidée de 7 prérequis avant implémentation. Ancienne version v2.2 archivée. |
 | 2.2 | 2026-08-15 | Claude | **Politique de redémarrage en cas de crash** (§8.4, nouvelle) : backoff exponentiel (1s→30s plafond), réarmement du compteur de tentatives après 60s de fonctionnement stable, abandon après 5 tentatives rapprochées (état terminal `crashed`, redémarrage manuel). Machine à états explicite, registre étendu d'un statut par application (`running`/`restarting`/`crashed`). Discutée puis validée avec l'utilisateur avant rédaction. Ancienne version v2.1 archivée. |
 | 2.1 | 2026-08-15 | Claude | **§7 réécrite** en réponse à une question directe de l'utilisateur ("voir toutes les applis de toutes les machines sur la même interface web ?"). Corrige une incohérence de la v2.0 (pontage Socket.io limité à sa propre machine, alors que le bus MQTT lui-même était déjà global) — §7.1. Ajoute le proxy HTTP de repli pour les fichiers statiques d'une application distante — §7.2, seule pièce manquante puisque le service de fichiers ne passe jamais par le process de l'application. Registre étendu (`address`/`webPort` dans le payload de présence, §6.2). Ancienne version v2.0 archivée. |

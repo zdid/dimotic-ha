@@ -60,6 +60,19 @@ export function parseIncomingCommand(message: MqttMessage): ParsedIncomingComman
     return null;
   }
 
+  // ⭐ Corrigé (16/08/2026) — incident réel RFXCOM : un topic de commande ne doit JAMAIS être
+  // traité comme actionnable quand il est délivré en tant que message RETENU (retain: true) — soit
+  // le message initial livré au (ré)abonnement pour un topic déjà retenu sur le broker (protocole
+  // MQTT, RETAIN=1 sur cette livraison précise), soit un message publié avec retain à tort. Une
+  // commande est par nature une action ponctuelle : la rejouer à chaque redémarrage/reconnexion
+  // (donc à chaque réabonnement) est toujours une erreur, quelle que soit son origine — ~21 messages
+  // "OFF"/"ON" retenus trouvés sur le broker réel (rfxcom/rfx_bridge_0001/*/set), rejoués à chaque
+  // redémarrage du service et déclenchant de vraies transmissions RF433 dès que le transceiver
+  // était déjà connecté au moment du réabonnement (maison éteinte de façon imprévisible).
+  if (message.retain) {
+    return null;
+  }
+
   const moduleName = segments[0] as string;
   const bridgeInstance = segments[1] as string;
   const deviceId = segments[2] as string;
