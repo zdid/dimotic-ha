@@ -78,6 +78,9 @@ export const RFXCOM_CLIENT_EVENTS = {
   DEVICE_SET_NAME: 'rfxcom:device:set_name',
   DEVICE_SET_TRANSMIT: 'rfxcom:device:set_transmit',
   DEVICE_DELETE: 'rfxcom:device:delete',
+  // --- Création manuelle (⭐ nouveau, protocole Rfy/Somfy) : seul protocole jamais découvert par
+  // réception RF (RTS ne remonte aucun signal), voir fonctionnelles-rfxcom_specs §17ter.
+  DEVICE_CREATE_MANUAL: 'rfxcom:device:create_manual',
 
   // --- Scan ---
   SCAN_START: 'rfxcom:scan:start',

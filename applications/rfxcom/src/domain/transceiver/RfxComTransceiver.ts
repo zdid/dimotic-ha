@@ -467,6 +467,16 @@ export class RfxComTransceiver {
         else throw new Error(`Action non supportée pour blinds1: ${action}`);
         break;
       }
+      case 'rfy': {
+        // ⭐ Volets Somfy RTS — up/down/stop mappés sur open/close/stop, mêmes noms d'action que
+        // les autres covers (fonctionnelles-rfxcom_specs §17ter).
+        const t = transmitter as rfxcom.Rfy;
+        if (action === 'open') t.up(commandDeviceId, ack);
+        else if (action === 'close') t.down(commandDeviceId, ack);
+        else if (action === 'stop') t.stop(commandDeviceId, ack);
+        else throw new Error(`Action non supportée pour rfy: ${action}`);
+        break;
+      }
       default:
         throw new Error(`Protocole non supporté pour l'envoi de commandes: ${protocole}`);
     }
@@ -506,6 +516,9 @@ export class RfxComTransceiver {
         break;
       case 'blinds1':
         transmitter = new rfxcom.Blinds1(this.device, rfxcom.blinds1[subType] ?? 0);
+        break;
+      case 'rfy':
+        transmitter = new rfxcom.Rfy(this.device, rfxcom.rfy[subType] ?? 0);
         break;
       default:
         return undefined;

@@ -139,6 +139,14 @@ declare module 'rfxcom' {
     stop(deviceId: string, callback?: TransmitCallback): void;
   }
 
+  /** Volets Somfy RTS — jamais d'événement reçu (voir Rfy.js, aucun décodeur de réception dans la
+   *  lib), seulement des commandes. deviceId au format "id/unitCode" (identique à Lighting2). */
+  export class Rfy extends Transmitter {
+    up(deviceId: string, callback?: TransmitCallback): void;
+    down(deviceId: string, callback?: TransmitCallback): void;
+    stop(deviceId: string, callback?: TransmitCallback): void;
+  }
+
   // Tables de protocoles (numéro ↔ nom), une par famille -------------------------------------
   export const lighting1: ProtocolSubtypeTable;
   export const lighting2: ProtocolSubtypeTable;
@@ -146,6 +154,7 @@ declare module 'rfxcom' {
   export const lighting5: ProtocolSubtypeTable;
   export const lighting6: ProtocolSubtypeTable;
   export const blinds1: ProtocolSubtypeTable;
+  export const rfy: ProtocolSubtypeTable;
   export const security1: ProtocolSubtypeTable;
 
   /** hex packetType (ex: 0x11) → nom (ex: "lighting2"), et l'inverse. */

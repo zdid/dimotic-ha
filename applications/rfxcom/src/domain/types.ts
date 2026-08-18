@@ -18,7 +18,10 @@ export type RfxComDeviceType =
   | 'Lighting4'
   | 'Lighting5'
   | 'Lighting6'
-  | 'Blinds1';
+  | 'Blinds1'
+  /** ⭐ Volets Somfy RTS — jamais reçu en RF (protocole d'émission uniquement), voir
+   *  fonctionnelles-rfxcom_specs §17ter : device toujours créé manuellement, jamais découvert. */
+  | 'Rfy';
 
 /**
  * Message RF433 normalisé, produit par RfxComTransceiver à partir de l'événement
@@ -91,7 +94,7 @@ export interface RfxComDiscoveredDevice {
 // ============================================================================
 
 export type ReceiverType = 'switch' | 'light' | 'cover' | 'scene';
-export type CoverType = 'Curtain1' | 'Curtain2' | 'Curtain3' | 'Blind1' | 'Blind2' | 'Blind3';
+export type CoverType = 'Curtain1' | 'Curtain2' | 'Curtain3' | 'Blind1' | 'Blind2' | 'Blind3' | 'RFY' | 'RFYEXT' | 'ASA';
 export type EmitterAction = 'toggle' | 'on' | 'off' | 'set_level' | 'open' | 'close' | 'stop';
 
 /** Émetteur associé à un récepteur — appairage N↔N (recepteurs-emetteurs-rfxcom_specs §4.2). */

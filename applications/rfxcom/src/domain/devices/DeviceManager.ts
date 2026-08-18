@@ -134,6 +134,40 @@ export class DeviceManager {
     return device;
   }
 
+  /**
+   * Crée un device SANS passer par la découverte RF — cas d'un protocole qui ne remonte jamais
+   * de signal reçu (Rfy/Somfy RTS, voir fonctionnelles-rfxcom_specs §17ter). Contrairement à
+   * setDeviceName(), ne dépend pas de discoveredDevices : tous les champs sont fournis
+   * explicitement par l'appelant (RfxComService, depuis le payload Socket.io). `commandDeviceId`
+   * est calculé ici (format "sensorId/unitCode", identique à Lighting2) plutôt que reconstruit
+   * plus tard — un device Rfy n'ayant jamais de trame RF reçue pour le déduire autrement.
+   */
+  createManualDevice(params: {
+    sensorId: string;
+    type: RfxComDeviceInfo['type'];
+    subType: string;
+    protocole: string;
+    unitCode: number;
+    name: string;
+  }): RfxComDeviceInfo {
+    const uniqueId = `${params.protocole}_${params.subType.toLowerCase()}_${params.sensorId.toLowerCase()}_${params.unitCode}`;
+    const device: RfxComDeviceInfo = {
+      uniqueId,
+      sensorId: params.sensorId,
+      type: params.type,
+      subType: params.subType,
+      protocole: params.protocole,
+      name: params.name,
+      defaultQuoi: determineQuoi(params.type, params.subType),
+      transmitToHa: false,
+      unitCode: params.unitCode,
+      commandDeviceId: `${params.sensorId}/${params.unitCode}`
+    };
+    this.configuredDevices.set(uniqueId, device);
+    this.logger.info('DeviceManager', `Device créé manuellement: ${uniqueId}`);
+    return device;
+  }
+
   setTransmitToHa(uniqueId: string, transmitToHa: boolean): RfxComDeviceInfo | undefined {
     const device = this.configuredDevices.get(uniqueId);
     if (!device) return undefined;

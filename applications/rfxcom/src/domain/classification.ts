@@ -25,7 +25,8 @@ const TYPE_TO_QUOI: Partial<Record<RfxComDeviceType, string>> = {
   Lighting4: 'Télécommande',
   Lighting5: 'Interrupteur',
   Lighting6: 'Interrupteur',
-  Blinds1: 'Volet'
+  Blinds1: 'Volet',
+  Rfy: 'Volet'
 };
 
 /**
@@ -50,6 +51,7 @@ export function getProtocole(type: RfxComDeviceType): string {
     case 'Lighting5': return 'lighting5';
     case 'Lighting6': return 'lighting6';
     case 'Blinds1': return 'blinds1';
+    case 'Rfy': return 'rfy';
     default: return String(type).toLowerCase();
   }
 }

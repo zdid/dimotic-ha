@@ -128,6 +128,34 @@
         <p style="color:var(--color-text-muted);font-size:0.9em;">✏️ pour saisir la taxonomie et paramétrer le device (le fait passer dans la liste ci-dessus).</p>
         <div id="discovered-devices-body"></div>
       </div>
+
+      <div class="card">
+        <h3>Ajouter un volet Somfy (Rfy) manuellement</h3>
+        <p style="color:var(--color-text-muted);font-size:0.9em;">Le protocole RTS de Somfy ne renvoie jamais de signal — impossible à découvrir automatiquement, il faut saisir l'identifiant directement.</p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Sous-type</label>
+            <select class="select-control" id="rfy-manual-subtype">
+              <option value="RFY">RFY</option>
+              <option value="RFYEXT">RFYEXT</option>
+              <option value="ASA">ASA</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Identifiant (0x000001-0xFFFFF)</label>
+            <input type="text" class="form-control" id="rfy-manual-sensorid" placeholder="0x000001">
+          </div>
+          <div class="form-group">
+            <label>Code d'unité</label>
+            <input type="number" class="form-control" id="rfy-manual-unitcode" min="0" max="15" value="1">
+          </div>
+          <div class="form-group">
+            <label>Nom (QUOI---OÙ)</label>
+            <input type="text" class="form-control" id="rfy-manual-name" placeholder="Volet---séjour">
+          </div>
+        </div>
+        <button class="btn btn-primary" id="btn-rfy-manual-create">➕ Créer le device</button>
+      </div>
     </div>
 
     <!-- Onglet Récepteurs -->
@@ -330,6 +358,7 @@
           <select class="select-control" id="rf-coverType">
             <option value="Curtain1">Curtain1</option>
             <option value="Blind1">Blind1</option>
+            <option value="RFY">RFY (Somfy)</option>
           </select>
         </div>
         <div class="form-group">

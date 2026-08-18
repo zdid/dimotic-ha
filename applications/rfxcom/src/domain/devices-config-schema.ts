@@ -19,7 +19,8 @@ export const rfxComDeviceTypeSchema = z.enum([
   'Lighting4',
   'Lighting5',
   'Lighting6',
-  'Blinds1'
+  'Blinds1',
+  'Rfy'
 ]);
 
 export const rfxComDeviceSchema = z.object({
@@ -96,7 +97,7 @@ export const receiverLightSchema = z.object({
 export const receiverCoverSchema = z.object({
   type: z.literal('cover'),
   ...baseReceiverFields,
-  coverType: z.enum(['Curtain1', 'Curtain2', 'Curtain3', 'Blind1', 'Blind2', 'Blind3']),
+  coverType: z.enum(['Curtain1', 'Curtain2', 'Curtain3', 'Blind1', 'Blind2', 'Blind3', 'RFY', 'RFYEXT', 'ASA']),
   openTimeSec: z.number().positive(),
   closeTimeSec: z.number().positive()
 });

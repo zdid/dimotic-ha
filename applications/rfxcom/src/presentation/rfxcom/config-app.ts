@@ -259,6 +259,20 @@ function setupUiListeners(): void {
     socket.emit('rfxcom:devices:list:get');
   });
 
+  document.getElementById('btn-rfy-manual-create')?.addEventListener('click', () => {
+    const subType = (document.getElementById('rfy-manual-subtype') as HTMLSelectElement).value;
+    const sensorId = (document.getElementById('rfy-manual-sensorid') as HTMLInputElement).value.trim();
+    const unitCode = Number((document.getElementById('rfy-manual-unitcode') as HTMLInputElement).value);
+    const name = (document.getElementById('rfy-manual-name') as HTMLInputElement).value.trim();
+    if (!sensorId || !name || Number.isNaN(unitCode)) {
+      showAlert('Identifiant, code d\'unité et nom sont obligatoires', 'error');
+      return;
+    }
+    socket.emit('rfxcom:device:create_manual', { sensorId, subType, unitCode, name });
+    (document.getElementById('rfy-manual-sensorid') as HTMLInputElement).value = '';
+    (document.getElementById('rfy-manual-name') as HTMLInputElement).value = '';
+  });
+
   document.getElementById('dv-cancel')?.addEventListener('click', closeDeviceModal);
   document.getElementById('dv-save')?.addEventListener('click', saveDeviceModal);
 
