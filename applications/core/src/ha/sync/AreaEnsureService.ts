@@ -41,7 +41,8 @@ export class AreaEnsureService {
    * conditions réelles.
    */
   private registryReady = false;
-  private registryReadyPromise?: Promise<void>;
+  private registryReadyPromise: Promise<void>;
+  private resolveRegistryReady!: () => void;
 
   /**
    * Demandes de création en cours, par nom capitalisé — au démarrage, de nombreuses entités
@@ -58,6 +59,8 @@ export class AreaEnsureService {
     private readonly eventBus: IEventBus,
     private readonly logger: Logger
   ) {
+    this.registryReadyPromise = new Promise((resolve) => { this.resolveRegistryReady = resolve; });
+
     // ⭐ 10/08/2026 : registryReady était un verrou à sens unique — une fois vrai après le tout
     // premier ha:ready, plus jamais réarmé. Or AppService.loadHaRegistry() reconstruit
     // entièrement HaStructureRegistry (rebuild()) et réémet ha:ready à CHAQUE reconnexion WS, pas
@@ -69,7 +72,23 @@ export class AreaEnsureService {
     // 191 échecs sur une seule reconnexion, contre 0 avant celle-ci.
     this.eventBus.onGeneric('ha:disconnected', () => {
       this.registryReady = false;
-      this.registryReadyPromise = undefined;
+      this.registryReadyPromise = new Promise((resolve) => { this.resolveRegistryReady = resolve; });
+    });
+
+    // ⭐ Corrigé (18/08/2026, bug réel — RFXCOM jamais découvert côté HA) : ha:ready est un
+    // événement PONCTUEL émis très tôt au démarrage (dès le référentiel HA chargé, quasi
+    // immédiat). L'abonnement était posé paresseusement dans waitUntilRegistryReady(), à la
+    // PREMIÈRE demande d'ensureArea() — pour une app dont le démarrage prend plusieurs secondes
+    // (RFXCOM : connexion transceiver série avant son premier ensureArea), ha:ready avait déjà
+    // été émis et disparu avant cet abonnement tardif, laissant la promesse attendre indéfiniment
+    // un signal qui ne reviendra plus (sauf reconnexion HA) — silencieux, jamais de log, jamais
+    // de timeout pour les apps waitIndefinitely (RFXCOM/AREXX/NOMMAGE). Abonnement déplacé ici,
+    // au constructeur (une seule fois, jamais réarmé — le reset se fait via registryReadyPromise
+    // recréée sur ha:disconnected ci-dessus, ce même abonnement continue de la résoudre ensuite),
+    // pour ne jamais rater l'émission quel que soit le moment du premier appel à ensureArea().
+    this.eventBus.onGeneric('ha:ready', () => {
+      this.registryReady = true;
+      this.resolveRegistryReady();
     });
   }
 
@@ -157,14 +176,6 @@ export class AreaEnsureService {
 
   private waitUntilRegistryReady(): Promise<void> {
     if (this.registryReady) return Promise.resolve();
-    if (!this.registryReadyPromise) {
-      this.registryReadyPromise = new Promise((resolve) => {
-        this.eventBus.onGeneric('ha:ready', () => {
-          this.registryReady = true;
-          resolve();
-        });
-      });
-    }
     return this.registryReadyPromise;
   }
 

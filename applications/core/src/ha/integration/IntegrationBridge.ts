@@ -43,6 +43,11 @@ export interface StateRequestEvent {
   bridgeInstance: string;
   deviceId: string;
   state: HaMqttStateMessage;
+  /** Défaut true (comportement historique). RFXCOM passe false pour ses états device (voir
+   *  RfxComService) — sinon chaque reconnexion MQTT du pont ancien-système (rfxcombridge.js)
+   *  fait rejouer tous les états retenus d'un coup, noyant rfxcomserv.js sous des évènements
+   *  redondants (constaté le 17/08/2026). */
+  retain?: boolean;
 }
 
 export interface PassthroughDiscoveryRequestEvent {
@@ -233,7 +238,7 @@ export class IntegrationBridge {
 
     this.eventBus.onGeneric<StateRequestEvent>(`integration:${moduleName}:state`, (data) => {
       if (!this.mqttEnabled) return;
-      this.haMqttService.publishState(moduleName, data.bridgeInstance, data.deviceId, data.state);
+      this.haMqttService.publishState(moduleName, data.bridgeInstance, data.deviceId, data.state, data.retain);
     });
 
     this.eventBus.onGeneric<PassthroughDiscoveryRequestEvent>(`integration:${moduleName}:passthrough:discovery`, (data) => {

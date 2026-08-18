@@ -202,7 +202,7 @@ export class MqttTransport {
     this.activeSubscriptions.set(topic, qos);
 
     if (!this.client || !this.isConnected) {
-      this.logger?.warn('ha:mqtt:transport', `Client MQTT déconnecté — abonnement à "${topic}" appliqué dès la reconnexion`);
+      this.logger?.warn('ha:mqtt:transport', `Client MQTT déconnecté [${this.config.clientId}] — abonnement à "${topic}" appliqué dès la reconnexion`);
       return;
     }
 
@@ -509,7 +509,7 @@ export class MqttTransport {
       this.client.subscribe(topic, { qos });
     }
 
-    this.logger?.info('ha:mqtt:transport', `Reconnexion — ${this.activeSubscriptions.size} abonnement(s) réappliqué(s)`);
+    this.logger?.info('ha:mqtt:transport', `Reconnexion [${this.config.clientId}] — ${this.activeSubscriptions.size} abonnement(s) réappliqué(s)`);
   }
 
   // ===========================================================================

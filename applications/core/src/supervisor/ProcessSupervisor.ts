@@ -24,6 +24,12 @@ const BACKOFF_MAX_MS = 30000;
 const STABLE_THRESHOLD_MS = 60000;
 /** Au-delà de ce nombre de tentatives rapprochées (sans franchir STABLE_THRESHOLD_MS), abandon. */
 const MAX_RAPID_ATTEMPTS = 5;
+// ⭐ 18/08/2026, demande utilisateur : stop()/restart() n'envoyaient qu'un SIGTERM et attendaient
+// indéfiniment l'événement 'exit' — un enfant dont le handler SIGTERM reste bloqué (hang sur un
+// await qui ne se résout jamais) bloquait le superviseur pour de bon, sans filet de secours. Ce
+// délai borne l'attente : passé ce temps sans sortie, un SIGKILL est envoyé (non catchable, sortie
+// garantie côté noyau).
+const SIGKILL_TIMEOUT_MS = 5000;
 
 interface ManagedApp {
   appId: string;
@@ -38,6 +44,9 @@ interface ManagedApp {
   stopRequested: boolean;
   /** Callback one-shot posé par restart() pour relancer une fois l'ancien process bien sorti. */
   onStoppedForRestart: (() => void) | null;
+  /** Armé par killGracefully() après le SIGTERM, désarmé dans handleExit() si l'enfant sort à
+   *  temps — sinon il déclenche le SIGKILL de secours (voir SIGKILL_TIMEOUT_MS). */
+  killTimer: NodeJS.Timeout | null;
 }
 
 export interface LifecycleCommandBrokerConfig {
@@ -83,7 +92,8 @@ export class ProcessSupervisor {
       attempts: 0,
       backoffTimer: null,
       stopRequested: false,
-      onStoppedForRestart: null
+      onStoppedForRestart: null,
+      killTimer: null
     });
   }
 
@@ -114,7 +124,7 @@ export class ProcessSupervisor {
     if (!app || !app.child) return;
     this.clearBackoff(app);
     app.stopRequested = true;
-    app.child.kill('SIGTERM');
+    this.killGracefully(app);
   }
 
   restart(appId: string): void {
@@ -130,7 +140,22 @@ export class ProcessSupervisor {
       app.attempts = 0;
       this.spawnChild(app);
     };
+    this.killGracefully(app);
+  }
+
+  /** Envoie SIGTERM puis arme un SIGKILL de secours si l'enfant n'est pas sorti à temps — voir
+   *  SIGKILL_TIMEOUT_MS. Le timer est désarmé dans handleExit() dès que l'enfant sort, par
+   *  n'importe quel chemin (SIGTERM honoré ou SIGKILL de secours). */
+  private killGracefully(app: ManagedApp): void {
+    if (!app.child) return;
     app.child.kill('SIGTERM');
+    app.killTimer = setTimeout(() => {
+      app.killTimer = null;
+      if (app.child) {
+        this.logger.warn('ProcessSupervisor', `${app.appId} : pas de sortie ${SIGKILL_TIMEOUT_MS / 1000}s après SIGTERM — SIGKILL de secours`);
+        app.child.kill('SIGKILL');
+      }
+    }, SIGKILL_TIMEOUT_MS);
   }
 
   /**
@@ -239,6 +264,10 @@ export class ProcessSupervisor {
 
   private handleExit(app: ManagedApp, code: number | null, signal: NodeJS.Signals | null, startedAt: number): void {
     app.child = null;
+    if (app.killTimer) {
+      clearTimeout(app.killTimer);
+      app.killTimer = null;
+    }
     this.eventBridge?.detachChild(app.appId);
     const ranMs = Date.now() - startedAt;
 

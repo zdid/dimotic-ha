@@ -186,10 +186,10 @@ export class HaMqttIntegrationService {
     unpublishDiscovery(transport, component, objectId, 1);
   }
 
-  publishState(moduleName: string, bridgeInstance: string, deviceId: string, state: HaMqttStateMessage): void {
+  publishState(moduleName: string, bridgeInstance: string, deviceId: string, state: HaMqttStateMessage, retain = true): void {
     const transport = this.getBridgeOrWarn(moduleName, bridgeInstance);
     if (!transport) return;
-    publishState(transport, moduleName, bridgeInstance, deviceId, state);
+    publishState(transport, moduleName, bridgeInstance, deviceId, state, 1, retain);
   }
 
   subscribeCommandsFor(moduleName: string, bridgeInstance: string, deviceId: string): void {

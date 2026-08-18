@@ -111,6 +111,17 @@ export class RfxComService implements IRfxComService {
   private static readonly RECONNECT_LOOP_INTERVAL_MS = 5000;
   private reconnectLoopTimer: ReturnType<typeof setInterval> | null = null;
 
+  // ⭐ 18/08/2026, incident réel : le handler bridge:connection republie discovery+état de tous
+  // les devices/récepteurs à CHAQUE reconnexion MQTT (voir plus bas, comportement voulu pour se
+  // re-signaler à HA après une coupure normale). Constaté en conditions réelles : une tempête de
+  // reconnexions côté socle (~1/s, cause root cause non élucidée — process zombie suspecté) a fait
+  // tourner ce handler des centaines de fois d'affilée, republiant l'intégralité des ~40 devices à
+  // chaque fois — plus de 30000 messages accumulés côté pont ancien-système en quelques minutes.
+  // Ce throttle limite la republication à une fois maximum par fenêtre, quel que soit le nombre de
+  // reconnexions reçues entre-temps — protection même si la tempête revient, peu importe sa cause.
+  private static readonly INITIAL_DISCOVERIES_MIN_INTERVAL_MS = 30000;
+  private lastInitialDiscoveriesAt = 0;
+
   // ⭐ 10/08/2026, demande utilisateur : journal des ordres reçus (HA→RFXCOM) avec leur résultat
   // d'exécution réel — 100 dernières entrées maximum, voir socket-events.ts::ORDERS_LIST.
   private static readonly MAX_ORDERS = 100;
@@ -291,7 +302,7 @@ export class RfxComService implements IRfxComService {
         if (event.connected) {
           this.subscribeRegisteredDevices();
           this.subscribeRelayedValues();
-          this.protocolsPushGate.then(() => this.publishInitialDiscoveries());
+          this.throttledPublishInitialDiscoveries();
         }
         this.emitStatus();
       }
@@ -305,7 +316,7 @@ export class RfxComService implements IRfxComService {
     // à protocolsPushGate ici : HA online n'a aucun rapport avec l'état du transceiver série.
     this.eventBus.onGeneric<{ bridgeInstance: string }>(
       `integration:${MODULE_NAME}:ha:online`,
-      () => this.publishInitialDiscoveries()
+      () => this.throttledPublishInitialDiscoveries()
     );
 
     // ⭐ fonctionnelles-supervisor_specs v2.3 §9.4 / relais de valeur (16/08/2026) : un seul canal
@@ -466,6 +477,22 @@ export class RfxComService implements IRfxComService {
   // ==========================================================================
   // Discovery / State — devices physiques
   // ==========================================================================
+
+  /** Point d'entrée UNIQUE pour republier la découverte initiale — voir le throttle sur
+   *  INITIAL_DISCOVERIES_MIN_INTERVAL_MS. Deux déclencheurs indépendants passent par ici
+   *  (bridge:connection connected:true, et ha:online) : les deux doivent partager le MÊME
+   *  compteur de throttle, sinon l'un peut contourner la protection posée pour l'autre — bug réel
+   *  constaté le 18/08/2026 (ha:online seul, jamais throttlé, republiait en boucle malgré le
+   *  garde-fou déjà en place sur l'autre déclencheur). */
+  private throttledPublishInitialDiscoveries(): void {
+    const now = Date.now();
+    if (now - this.lastInitialDiscoveriesAt < RfxComService.INITIAL_DISCOVERIES_MIN_INTERVAL_MS) {
+      this.logger.warn('RfxComService', `Republication de découverte ignorée (trop rapprochée d'une reconnexion précédente, < ${RfxComService.INITIAL_DISCOVERIES_MIN_INTERVAL_MS / 1000}s) — signe possible d'une instabilité MQTT`);
+      return;
+    }
+    this.lastInitialDiscoveriesAt = now;
+    this.protocolsPushGate.then(() => this.publishInitialDiscoveries());
+  }
 
   private publishInitialDiscoveries(): void {
     for (const device of this.deviceManager.getConfiguredDevices()) {
@@ -695,7 +722,14 @@ export class RfxComService implements IRfxComService {
         model: device.protocole.toUpperCase(),
         suggested_area: taxonomy.nomLieu ?? undefined
       },
-      extra: isBouton ? { entity_category: 'diagnostic' } : undefined
+      extra: isBouton ? { entity_category: 'diagnostic' } : undefined,
+      // Sans ça, HaMqttIntegrationService ne s'abonne jamais au topic /set du device brut (seuls
+      // les récepteurs l'avaient) — le pont ancien-système (rfxcombridge.js) adresse pourtant ses
+      // commandes par uniqueId de device (ex: lighting2_ac_0x01570892_11), résolu ensuite vers le
+      // ou les récepteurs appairés par resolveReceiverIdsForCommand. Sans abonnement, ces messages
+      // arrivaient sur un topic sans souscripteur et étaient perdus silencieusement (constaté en
+      // direct le 17/08/2026). isBouton exclut RFXSensor/RFXMeter, non commandables.
+      commandEnabled: isBouton
     };
 
     const claimedBy = this.isClaimedByOtherInstance(device.uniqueId);
@@ -736,7 +770,11 @@ export class RfxComService implements IRfxComService {
           signal_level: message.signalLevel,
           battery_level: message.batteryLevel
         }
-      }
+      },
+      // Pas de retain (17/08/2026, demande utilisateur) : sinon chaque reconnexion MQTT du pont
+      // ancien-système (rfxcombridge.js) fait rejouer tous les états retenus d'un coup vers
+      // rfxcomserv.js, qui les traite comme autant d'évènements RF réels.
+      retain: false
     });
   }
 
@@ -757,7 +795,8 @@ export class RfxComService implements IRfxComService {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.config.bridgeInstance,
       deviceId,
-      state: { state: device.lastValue as string | number }
+      state: { state: device.lastValue as string | number },
+      retain: false
     });
   }
 
@@ -819,7 +858,8 @@ export class RfxComService implements IRfxComService {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.config.bridgeInstance,
       deviceId: receiver.config.receiverId,
-      state: receiver.getState()
+      state: receiver.getState(),
+      retain: false
     });
   }
 
@@ -936,7 +976,8 @@ export class RfxComService implements IRfxComService {
           failed_commands: result.failedCommands,
           duration_ms: result.duration
         }
-      }
+      },
+      retain: false
     });
   }
 
@@ -957,29 +998,68 @@ export class RfxComService implements IRfxComService {
   // Commandes HA → récepteur → device RFXCOM
   // ==========================================================================
 
-  private handleHaCommand(deviceId: string, payload: Record<string, unknown>): void {
-    if (deviceId.startsWith(SCENE_DEVICE_ID_PREFIX)) {
-      void this.executeScene(deviceId.slice(SCENE_DEVICE_ID_PREFIX.length));
+  private handleHaCommand(rawTargetId: string, payload: Record<string, unknown>): void {
+    // ⭐ Corrigé (18/08/2026, bug réel — commande jamais reçue) : le topic de commande MQTT est
+    // TOUJOURS construit par le socle au format buildStateDeviceId (double underscore avant le
+    // sensorId, ex: lighting2_ac__0x01570892_11), jamais au format uniqueId (underscore simple,
+    // ex: lighting2_ac_0x01570892_11) qu'utilisent deviceManager/receiverManager comme clé
+    // interne. Sans cette normalisation, resolveReceiverIdsForCommand ne trouve jamais rien pour
+    // un device — seuls les récepteurs (dont le receiverId ne contient jamais "__") passaient.
+    // Remplacer seulement le PREMIER "__" suffit : ni un receiverId (ex: recepteur_1001324) ni un
+    // sceneId préfixé n'en contiennent.
+    const targetId = rawTargetId.replace('__', '_');
+    if (targetId.startsWith(SCENE_DEVICE_ID_PREFIX)) {
+      void this.executeScene(targetId.slice(SCENE_DEVICE_ID_PREFIX.length));
       return;
     }
 
-    if (!this.receiverManager.getReceiver(deviceId)) {
-      this.logger.warn('RfxComService', `Commande reçue pour un récepteur inconnu: ${deviceId}`);
+    const receiverIds = this.resolveReceiverIdsForCommand(targetId);
+    if (receiverIds.length === 0) {
+      this.logger.warn('RfxComService', `Commande reçue pour un récepteur/device inconnu: ${targetId}`);
       return;
     }
 
     const parsed = this.parseHaCommandPayload(payload);
     if (!parsed) {
-      this.logger.warn('RfxComService', `Commande non reconnue pour ${deviceId}: ${JSON.stringify(payload)}`);
+      this.logger.warn('RfxComService', `Commande non reconnue pour ${targetId}: ${JSON.stringify(payload)}`);
       return;
     }
 
-    const result = this.applyReceiverCommand(deviceId, parsed.command, parsed.value);
-    if (!result.success) {
-      this.logger.error('RfxComService', `Échec de la commande ${parsed.command} pour ${deviceId}: ${result.error}`);
-      this.eventBus.emitGeneric('rfxcom:error',
-        createRfxComError('RFXCOM_COMMAND_FAILED', result.error ?? 'Erreur inconnue', 'rfxcom:command', { deviceId }));
+    for (const receiverId of receiverIds) {
+      const result = this.applyReceiverCommand(receiverId, parsed.command, parsed.value);
+      if (!result.success) {
+        this.logger.error('RfxComService', `Échec de la commande ${parsed.command} pour ${receiverId} (déclenché par ${targetId}): ${result.error}`);
+        this.eventBus.emitGeneric('rfxcom:error',
+          createRfxComError('RFXCOM_COMMAND_FAILED', result.error ?? 'Erreur inconnue', 'rfxcom:command', { deviceId: receiverId }));
+      }
     }
+  }
+
+  /**
+   * Résout les récepteurs concernés par ce qui a été reçu sur le topic de commande — soit
+   * directement un receiverId (cas normal, HA commande le récepteur logique qu'il connaît), soit
+   * un uniqueId de device physique brut (⭐ nouveau, demande utilisateur 17/08/2026 : permet à un
+   * système tiers — ex. le pont vers l'ancien système domotique — d'envoyer une commande
+   * directement par adresse RF433, sans avoir à connaître/maintenir sa propre correspondance
+   * device→récepteur, qui resterait sinon à régénérer à chaque changement de récepteur côté
+   * nouveau pilote ; ici la résolution se fait toujours sur la config live, jamais périmée).
+   *
+   * Un device physique peut être `primaryEmitter` d'AU PLUS un récepteur, mais aussi apparaître
+   * comme émetteur secondaire appairé (`emitters[]`) d'autres récepteurs (appairage N↔N,
+   * recepteurs-emetteurs-rfxcom_specs §4.2) — TOUS sont retournés, chacun sera commandé via SON
+   * PROPRE `primaryEmitter` (pas forcément `targetId`) par applyReceiverCommand : c'est le seul
+   * moyen de l'atteindre réellement en RF433 si son matériel de réception diffère.
+   */
+  private resolveReceiverIdsForCommand(targetId: string): string[] {
+    if (this.receiverManager.getReceiver(targetId)) {
+      return [targetId];
+    }
+    if (!this.deviceManager.getDevice(targetId)) {
+      return [];
+    }
+    return this.receiverManager.getAllReceivers()
+      .filter((r) => r.config.primaryEmitter === targetId || r.config.emitters.some((e) => e.emitterId === targetId))
+      .map((r) => r.config.receiverId);
   }
 
   /**
@@ -1090,7 +1170,8 @@ export class RfxComService implements IRfxComService {
       return device.sensorId;
     }
 
-    if (device.type === 'Lighting2') {
+    if (device.type === 'Lighting2' || device.type === 'Rfy') {
+      // Même format "id/unitCode" pour les deux protocoles (confirmé Rfy._splitDeviceId de la lib).
       if (device.unitCode !== undefined) {
         return `${device.sensorId}/${device.unitCode}`;
       }
@@ -1319,6 +1400,23 @@ export class RfxComService implements IRfxComService {
       if (device.transmitToHa) this.publishDeviceDiscovery(device);
       this.emitDevicesList();
     });
+
+    // ⭐ Création manuelle (Rfy/Somfy — jamais découvert par réception RF, voir DeviceManager.createManualDevice).
+    this.eventBus.onGeneric<{ sensorId: string; subType: string; unitCode: number; name: string }>(
+      'rfxcom:device:create_manual',
+      (data) => {
+        const device = this.deviceManager.createManualDevice({
+          sensorId: data.sensorId,
+          type: 'Rfy',
+          subType: data.subType,
+          protocole: 'rfy',
+          unitCode: data.unitCode,
+          name: data.name
+        });
+        this.persistDevicesConfig();
+        this.emitDevicesList();
+      }
+    );
 
     this.eventBus.onGeneric<{ uniqueId: string; transmitToHa: boolean }>('rfxcom:device:set_transmit', (data) => {
       const previousTransmit = this.deviceManager.getDevice(data.uniqueId)?.transmitToHa;
