@@ -17,7 +17,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as yaml from 'js-yaml';
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
-import { scriptsConfigSchema, DEFAULT_SCRIPTS_CONFIG, type ScriptEntry, type ScriptsConfigFile } from './storage-schema';
+import { scriptsConfigSchema, DEFAULT_SCRIPTS_CONFIG, type ScriptEntry, type ScriptsConfigFile, type ProvisioningConfig } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { SCRIPTSHA_SOCKET_EVENTS, SCRIPTSHA_CLIENT_EVENTS } from './socket-events';
 import type { ScriptshaConfig } from './config-schema';
@@ -48,9 +48,24 @@ interface HaHelperResultPayload {
   error?: string;
 }
 
+interface HaEntityTaxonomyPayload {
+  lieuPrecis?: string | null;
+  lieuPrincipal?: string | null;
+  lieuPere?: string | null;
+  lieuGrandPere?: string | null;
+}
+
+interface HaEntitySummary {
+  entity_id: string;
+  name?: string;
+  area_id?: string;
+  quoiIds?: string[];
+  taxonomy?: HaEntityTaxonomyPayload;
+}
+
 interface HaEntitiesListResultPayload {
   domain: string;
-  entities: Array<{ entity_id: string; name?: string }>;
+  entities: HaEntitySummary[];
 }
 
 interface HaEntityUpdatedPayload {
@@ -58,8 +73,6 @@ interface HaEntityUpdatedPayload {
   domain: string;
   action: 'create' | 'update' | 'delete';
 }
-
-const LIGHT_TIMER_DEFAULT_DURATION = '00:10:00';
 
 const EXAMPLE_SCRIPT_ID = 'ensemble_de_minuterie';
 const EXAMPLE_SCRIPT_TITLE = 'Ensemble de minuterie';
@@ -95,9 +108,9 @@ export class ScriptsHaService implements IScriptsHaService {
   /** Résolveurs des requêtes ha:helper:request en vol, corrélés par requestId (plusieurs peuvent
    *  être simultanées — une par lumière manquante lors d'une réconciliation). */
   private readonly pendingHelperRequests = new Map<string, (result: HaHelperResultPayload) => void>();
-  /** Mutex simple — évite deux réconciliations lumières↔timers concurrentes (déploiement +
-   *  détection réactive d'une nouvelle lumière survenant en même temps). */
-  private reconcilingLightTimers = false;
+  /** Mutex simple — évite deux réconciliations concurrentes (déploiement + détection réactive
+   *  d'une nouvelle entité survenant en même temps). */
+  private reconcilingProvisioning = false;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -168,7 +181,13 @@ export class ScriptsHaService implements IScriptsHaService {
       description: EXAMPLE_SCRIPT_DESCRIPTION,
       originalFilename: `${EXAMPLE_SCRIPT_ID}.yaml`,
       deployed: false,
-      createdAt: now
+      createdAt: now,
+      provisioning: {
+        watchDomain: 'light',
+        helperDomain: 'timer',
+        namePrefix: 'Minuterie',
+        helperData: { duration: '00:10:00' }
+      }
     });
     this.scriptsManager.save({ scripts: this.scripts });
     this.logger.info('ScriptsHaService', `Script d'exemple "${EXAMPLE_SCRIPT_TITLE}" créé`);
@@ -320,11 +339,10 @@ export class ScriptsHaService implements IScriptsHaService {
       this.scriptsManager.save({ scripts: this.scripts });
       this.logger.info('ScriptsHaService', `${action === 'deploy' ? 'Diffusé' : 'Retiré'}: ${data.id}`);
 
-      // Provisionnement spécifique au script "Ensemble de minuterie" (demande utilisateur,
-      // 18/08/2026) : à généraliser à d'autres scripts si un 2e cas se présente, pas de mécanisme
-      // générique construit pour ce seul exemple aujourd'hui.
-      if (action === 'deploy' && data.id === EXAMPLE_SCRIPT_ID) {
-        void this.reconcileLightTimers();
+      // Provisionnement générique (voir §Provisionnement plus bas) : tout script diffusé portant
+      // un `provisioning` déclenche la réconciliation, quel que soit son id.
+      if (action === 'deploy' && entry.provisioning) {
+        void this.reconcileEntityHelpers(entry.provisioning);
       }
     } else {
       this.emitError(`Échec ${action === 'deploy' ? 'de la diffusion' : 'du retrait'}: ${data.error}`, data.id);
@@ -373,7 +391,9 @@ export class ScriptsHaService implements IScriptsHaService {
   }
 
   // ==========================================================================
-  // Provisionnement lumières↔timers (spécifique à EXAMPLE_SCRIPT_ID, voir handleHaRestResult)
+  // Provisionnement générique (voir storage-schema.ts::ProvisioningConfig, fonctionnelles-
+  // scriptsha_specs §4bis) — le moteur ci-dessous ne connaît aucun script en particulier, seul le
+  // champ `provisioning` d'une entrée active le mécanisme.
   // ==========================================================================
 
   /** Requête générique vers HaHelperBridge, corrélée par requestId (voir HaHelperBridge.ts). */
@@ -392,8 +412,8 @@ export class ScriptsHaService implements IScriptsHaService {
     resolve(data);
   }
 
-  /** Requête ponctuelle des entités d'un domaine (photo initiale, voir HaHelperBridge.ts) — un seul
-   *  domaine interrogé par cette app (light), une requête à la fois suffit (pas de corrélation). */
+  /** Requête ponctuelle des entités d'un domaine (photo initiale, voir HaHelperBridge.ts) — une
+   *  seule réconciliation à la fois (mutex `reconcilingProvisioning`), pas besoin de corrélation. */
   private pendingEntitiesListResolve: ((result: HaEntitiesListResultPayload) => void) | null = null;
 
   private requestEntitiesList(domain: string): Promise<HaEntitiesListResultPayload> {
@@ -410,83 +430,127 @@ export class ScriptsHaService implements IScriptsHaService {
     resolve(data);
   }
 
-  /** Détection réactive d'une nouvelle lumière — seulement si le script minuterie est
-   *  actuellement diffusé (pas d'intérêt à provisionner pour un script retiré). */
-  private handleEntityUpdated(data: HaEntityUpdatedPayload): void {
-    if (data.domain !== 'light' || data.action !== 'create') return;
-    const minuterie = this.scripts.find((s) => s.id === EXAMPLE_SCRIPT_ID);
-    if (!minuterie?.deployed) return;
-    this.logger.info('ScriptsHaService', `Nouvelle lumière détectée (${data.entity_id}) — réconciliation minuterie`);
-    void this.reconcileLightTimers();
+  /**
+   * Condition d'appartenance au domaine surveillé — isolée à dessein dans sa propre méthode, car
+   * c'est la partie la plus susceptible d'évoluer rapidement (aujourd'hui : simple égalité de
+   * domaine ; demain, potentiellement : exclusion par quoi_ids, filtre sur l'area, etc. — voir
+   * fonctionnelles-scriptsha_specs §4bis.5, 2 des 35 lumières réelles ne sont pas des lumières de
+   * pièce). Un seul point à modifier si ce filtre doit un jour devenir plus riche.
+   */
+  private matchesWatchCondition(entity: { entity_id: string; quoiIds?: string[] }, entityDomain: string, provisioning: ProvisioningConfig): boolean {
+    return entityDomain === provisioning.watchDomain;
   }
 
-  /** Nom du timer d'une lumière — suffixe brut de l'entity_id (unique par construction,
-   *  contrairement au friendly_name qui peut se répéter entre pièces — ex: plusieurs
-   *  "Plafonnier"). Vérifié empiriquement (18/08/2026) : le slug résultant d'ici correspond
-   *  exactement à l'id que HA génère lui-même pour ce name — la comparaison à la liste réelle des
-   *  timers (§reconcileLightTimers) est donc fiable sans état local séparé. */
-  private lightTimerName(lightEntityId: string): string {
-    const suffix = lightEntityId.replace(/^light\./, '');
-    return `Minuterie ${suffix}`;
+  /** Détection réactive d'une nouvelle entité — pour chaque script actuellement diffusé dont le
+   *  `watchDomain` correspond, relance une réconciliation complète (volume négligeable, pas de
+   *  logique ciblée séparée pour la seule entité détectée). */
+  private handleEntityUpdated(data: HaEntityUpdatedPayload): void {
+    if (data.action !== 'create') return;
+    for (const entry of this.scripts) {
+      if (!entry.deployed || !entry.provisioning) continue;
+      if (!this.matchesWatchCondition({ entity_id: data.entity_id }, data.domain, entry.provisioning)) continue;
+      this.logger.info('ScriptsHaService', `Nouvelle entité détectée (${data.entity_id}, domaine ${data.domain}) — réconciliation pour "${entry.title}"`);
+      void this.reconcileEntityHelpers(entry.provisioning);
+    }
+  }
+
+  /** Nom d'un helper pour une entité surveillée — convention QUOI---OÙ du projet (même patron que
+   *  rpigpio::buildQuoiOuLabel) : `namePrefix` remplace le "quoi" (pas la peine de répéter celui
+   *  de l'entité elle-même), le "où" vient de la taxonomie déjà calculée par le core
+   *  (TaxonomyHaClassifier) — lieu_precis ignoré s'il est identique à lieu_principal. Repli sur le
+   *  suffixe brut de l'entity_id si aucune taxonomie n'est disponible. */
+  private buildHelperName(entity: HaEntitySummary, provisioning: ProvisioningConfig): string {
+    const t = entity.taxonomy;
+    if (!t || (!t.lieuPrincipal && !t.lieuPrecis)) {
+      return `${provisioning.namePrefix} ${entity.entity_id.replace(/^[^.]+\./, '')}`;
+    }
+    const segments: string[] = [];
+    const precisDistinct = t.lieuPrecis && t.lieuPrecis.toLowerCase() !== t.lieuPrincipal?.toLowerCase();
+    if (precisDistinct) segments.push(t.lieuPrecis!);
+    if (t.lieuPrincipal) segments.push(t.lieuPrincipal);
+    if (t.lieuPere) segments.push(t.lieuPere);
+    if (t.lieuGrandPere) segments.push(t.lieuGrandPere);
+    return `${provisioning.namePrefix}---${segments.join('--')}`;
   }
 
   /**
    * "Détection de mise en œuvre" + installation demandées par l'utilisateur (18/08/2026) : pour
-   * chaque lumière (domaine `light.*`) sans timer correspondant, en crée un. Re-scanne l'état réel
+   * chaque entité du domaine surveillé sans helper correspondant, en crée un. Re-scanne l'état réel
    * de HA à chaque appel (pas d'état local séparé) — résilient à une perte du fichier local ou à un
-   * ajout/suppression manuel côté HA. Déclenché après diffusion réussie du script minuterie
-   * (handleHaRestResult) et à chaque nouvelle lumière détectée tant qu'il reste diffusé
-   * (handleEntityUpdated).
+   * ajout/suppression manuel côté HA. Déclenché après diffusion réussie d'un script portant un
+   * `provisioning` (handleHaRestResult) et à chaque nouvelle entité détectée tant qu'il reste
+   * diffusé (handleEntityUpdated).
    */
-  private async reconcileLightTimers(): Promise<void> {
-    if (this.reconcilingLightTimers) {
-      this.logger.debug('ScriptsHaService', 'Réconciliation lumières↔timers déjà en cours, ignorée');
+  private async reconcileEntityHelpers(provisioning: ProvisioningConfig): Promise<void> {
+    if (this.reconcilingProvisioning) {
+      this.logger.debug('ScriptsHaService', 'Réconciliation déjà en cours, ignorée');
       return;
     }
-    this.reconcilingLightTimers = true;
+    this.reconcilingProvisioning = true;
 
     try {
-      const [lightsResult, timersResult] = await Promise.all([
-        this.requestEntitiesList('light'),
-        this.helperRequest('list', 'timer')
+      const [entitiesResult, helpersResult] = await Promise.all([
+        this.requestEntitiesList(provisioning.watchDomain),
+        this.helperRequest('list', provisioning.helperDomain)
       ]);
 
-      if (!timersResult.success) {
-        this.emitError(`Réconciliation minuterie : échec de la liste des timers HA: ${timersResult.error}`);
+      if (!helpersResult.success) {
+        this.emitError(`Réconciliation : échec de la liste des helpers HA (${provisioning.helperDomain}): ${helpersResult.error}`);
         return;
       }
 
-      const existingTimerIds = new Set(
-        (timersResult.result as Array<{ id: string }>).map((t) => t.id)
+      const existingHelperIds = new Set(
+        (helpersResult.result as Array<{ id: string }>).map((h) => h.id)
       );
+      // Noms déjà attribués DURANT cette passe — anti-collision entre deux entités de cette même
+      // réconciliation (voir buildHelperName : la taxonomie ne garantit pas une unicité absolue).
+      const namesUsedThisPass = new Set<string>();
 
-      const missing = lightsResult.entities.filter((light) => {
-        const expectedName = this.lightTimerName(light.entity_id);
-        return !existingTimerIds.has(this.slugify(expectedName));
-      });
+      const watched = entitiesResult.entities.filter((e) => this.matchesWatchCondition(e, entitiesResult.domain, provisioning));
 
-      if (missing.length === 0) {
-        this.logger.info('ScriptsHaService', 'Réconciliation lumières↔timers : rien à installer');
+      const toCreate: Array<{ entity: HaEntitySummary; name: string }> = [];
+      for (const entity of watched) {
+        const baseName = this.buildHelperName(entity, provisioning);
+        let name = baseName;
+        let expectedId = this.slugify(name);
+        // Un nom déjà réclamé par UNE AUTRE entité DE CETTE MÊME PASSE prime sur la simple
+        // présence côté HA — sinon une 2e entité colliderait silencieusement avec le helper de la
+        // 1ère au lieu d'être désambiguïsée (voir le commentaire de buildHelperName : la taxonomie
+        // ne garantit pas une unicité absolue).
+        let n = 2;
+        while (namesUsedThisPass.has(expectedId)) {
+          name = `${baseName} ${n}`;
+          expectedId = this.slugify(name);
+          n++;
+        }
+        namesUsedThisPass.add(expectedId);
+        if (!existingHelperIds.has(expectedId)) {
+          toCreate.push({ entity, name });
+        }
+      }
+
+      if (toCreate.length === 0) {
+        this.logger.info('ScriptsHaService', 'Réconciliation : rien à installer');
         return;
       }
 
-      this.logger.info('ScriptsHaService', `Réconciliation lumières↔timers : ${missing.length} timer(s) manquant(s), création en cours`);
+      this.logger.info('ScriptsHaService', `Réconciliation : ${toCreate.length} helper(s) manquant(s), création en cours`);
       const results = await Promise.all(
-        missing.map((light) =>
-          this.helperRequest('create', 'timer', undefined, {
-            name: this.lightTimerName(light.entity_id),
-            duration: LIGHT_TIMER_DEFAULT_DURATION
+        toCreate.map(({ name }) =>
+          this.helperRequest('create', provisioning.helperDomain, undefined, {
+            name,
+            ...(provisioning.helperData ?? {})
           })
         )
       );
 
       const failures = results.filter((r) => !r.success);
       if (failures.length > 0) {
-        this.emitError(`Réconciliation minuterie : ${failures.length}/${missing.length} timer(s) en échec (${failures.map((f) => f.error).join('; ')})`);
+        this.emitError(`Réconciliation : ${failures.length}/${toCreate.length} helper(s) en échec (${failures.map((f) => f.error).join('; ')})`);
       }
-      this.logger.info('ScriptsHaService', `Réconciliation lumières↔timers : ${missing.length - failures.length}/${missing.length} timer(s) créé(s)`);
+      this.logger.info('ScriptsHaService', `Réconciliation : ${toCreate.length - failures.length}/${toCreate.length} helper(s) créé(s)`);
     } finally {
-      this.reconcilingLightTimers = false;
+      this.reconcilingProvisioning = false;
     }
   }
 

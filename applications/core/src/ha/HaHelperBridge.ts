@@ -41,9 +41,16 @@ export interface HaEntitiesListRequest {
   domain: string;
 }
 
+export interface HaEntityTaxonomy {
+  lieuPrecis?: string | null;
+  lieuPrincipal?: string | null;
+  lieuPere?: string | null;
+  lieuGrandPere?: string | null;
+}
+
 export interface HaEntitiesListResult {
   domain: string;
-  entities: Array<{ entity_id: string; name?: string }>;
+  entities: Array<{ entity_id: string; name?: string; area_id?: string; quoiIds?: string[]; taxonomy?: HaEntityTaxonomy }>;
 }
 
 export class HaHelperBridge {
@@ -98,7 +105,23 @@ export class HaHelperBridge {
     const entities = this.haStructureRegistry
       .getAllEntities()
       .filter((e) => e.domain === req.domain)
-      .map((e) => ({ entity_id: e.entity_id, name: e.friendly_name }));
+      .map((e) => {
+        // attributs_taxonomie posé par TaxonomyHaClassifier (toujours présent après classify(),
+        // au moins sous forme "virtuelle" — voir TaxonomyHaClassifier.ts) — type non exporté,
+        // lu ici en générique plutôt que dupliquer l'interface interne.
+        const t = e.attributes?.attributs_taxonomie as
+          | { lieu_precis?: string | null; lieu_principal?: string | null; lieu_pere?: string | null; lieu_grand_pere?: string | null }
+          | undefined;
+        return {
+          entity_id: e.entity_id,
+          name: e.friendly_name,
+          area_id: e.area_id,
+          quoiIds: e.quoi_ids,
+          taxonomy: t
+            ? { lieuPrecis: t.lieu_precis, lieuPrincipal: t.lieu_principal, lieuPere: t.lieu_pere, lieuGrandPere: t.lieu_grand_pere }
+            : undefined
+        };
+      });
 
     this.eventBus.emitGeneric<HaEntitiesListResult>(replyEvent, { domain: req.domain, entities });
   }

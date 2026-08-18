@@ -6,6 +6,29 @@
 
 import { z } from 'zod';
 
+/**
+ * Provisionnement optionnel associé à un script — métadonnées structurées, pas un nouveau format
+ * de fichier (le contenu YAML du script reste un script HA pur). Décrit une ressource HA à
+ * garantir présente par entité surveillée (ex: un helper timer par lumière) — le moteur
+ * générique (ScriptsHaService::reconcileEntityHelpers) ne connaît aucun script en particulier,
+ * seul ce champ, quand présent, active le mécanisme. Voir fonctionnelles-scriptsha_specs §4bis.
+ */
+export const provisioningSchema = z.object({
+  /** Domaine HA à surveiller (ex: 'light') — la "condition" au sens le plus simple aujourd'hui,
+   *  volontairement isolée côté service (ScriptsHaService::matchesWatchCondition) pour pouvoir
+   *  évoluer vers un filtre plus riche sans toucher ce schéma. */
+  watchDomain: z.string().min(1),
+  /** Domaine de helper HA à créer (ex: 'timer') — voir HaHelperBridge. */
+  helperDomain: z.string().min(1),
+  /** Préfixe du nom (ex: 'Minuterie') — le reste du nom vient de la taxonomie OÙ de l'entité
+   *  surveillée (lieu_precis/lieu_principal/lieu_pere/lieu_grand_pere), voir buildHelperName(). */
+  namePrefix: z.string().min(1),
+  /** Champs additionnels passés tels quels à la création du helper (ex: { duration: '00:10:00' } pour un timer). */
+  helperData: z.record(z.unknown()).optional()
+});
+
+export type ProvisioningConfig = z.infer<typeof provisioningSchema>;
+
 export const scriptEntrySchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -14,7 +37,8 @@ export const scriptEntrySchema = z.object({
   deployed: z.boolean().default(false),
   deployedAt: z.string().optional(),
   createdAt: z.string(),
-  updatedAt: z.string().optional()
+  updatedAt: z.string().optional(),
+  provisioning: provisioningSchema.optional()
 });
 
 export type ScriptEntry = z.infer<typeof scriptEntrySchema>;

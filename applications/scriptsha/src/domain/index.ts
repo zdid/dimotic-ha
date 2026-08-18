@@ -14,9 +14,10 @@
  *   `ha:rest:request` émise par ce service (côté enfant, reçue automatiquement côté core).
  * - `scriptsha:ha:helper:result` / `scriptsha:ha:entities:list:result` : relayés par le pont
  *   générique HaHelperBridge (CRUD des helpers HA type `timer`, requête ponctuelle du référentiel
- *   d'entités par domaine) — voir ScriptsHaService::reconcileLightTimers.
+ *   d'entités par domaine) — voir ScriptsHaService::reconcileEntityHelpers.
  * - `ha:entity:updated` : événement générique déjà émis par le core (AppService) pour tout
- *   `entity_registry_updated` — utilisé ici pour détecter une nouvelle lumière en continu.
+ *   `entity_registry_updated` — utilisé ici pour détecter une nouvelle entité surveillée en continu
+ *   (pour tout script diffusé portant un `provisioning`, voir storage-schema.ts).
  */
 
 import {
@@ -68,8 +69,8 @@ export const SCRIPTSHA_APP: ApplicationModule = {
     'scriptsha:ha:helper:result',
     'scriptsha:ha:entities:list:result',
     // Événement générique existant (AppService.ts, émis pour tout entity_registry_updated), pas
-    // préfixé scriptsha — utilisé pour détecter une nouvelle lumière en continu, voir
-    // ScriptsHaService::reconcileLightTimers.
+    // préfixé scriptsha — utilisé pour détecter une nouvelle entité surveillée en continu, voir
+    // ScriptsHaService::reconcileEntityHelpers.
     'ha:entity:updated'
   ]
 };
