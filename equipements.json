@@ -309,90 +309,6 @@
                 }
             ]
         },
-        "1000785": {
-            "num": "0x01a3a576/10",
-            "lieu": "boutons",
-            "lieuprecis": "cuisine1",
-            "___nummat": 1000785,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1000801": {
-            "num": "0x00c53f52/11",
-            "lieu": "boutons",
-            "lieuprecis": "entree1",
-            "___nummat": 1000801,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1000802": {
-            "num": "0x00c53f52/12",
-            "lieu": "boutons",
-            "lieuprecis": "devant",
-            "___nummat": 1000802,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
         "1000803": {
             "num": "0x01731b7e/10",
             "lieu": "boutons",
@@ -416,54 +332,6 @@
                     "commandstypes": [
                         "on",
                         "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1000820": {
-            "num": "0x01570f52/12",
-            "lieu": "boutons",
-            "lieuprecis": "bureau1",
-            "___nummat": 1000820,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "off",
-                "on",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "equivalences": "",
-            "min": "",
-            "max": "",
-            "textlgmax": "",
-            "storevoletdelay": "",
-            "storevoletdelaydecol": "",
-            "storevoletdelaydescente": "",
-            "temperatureassociee": "",
-            "newcoordonnees": {
-                "lumiere": {
-                    "portrait": {
-                        "x": -1,
-                        "y": -1
-                    },
-                    "paysage": {
-                        "x": -1,
-                        "y": -1
-                    }
-                }
-            },
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "off",
-                        "on",
                         "switch"
                     ]
                 }
@@ -510,54 +378,6 @@
             "lieu": "boutons",
             "lieuprecis": "chambre d'ami",
             "___nummat": 1000823,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "off",
-                "on",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "equivalences": "",
-            "min": "",
-            "max": "",
-            "textlgmax": "",
-            "storevoletdelay": "",
-            "storevoletdelaydecol": "",
-            "storevoletdelaydescente": "",
-            "temperatureassociee": "",
-            "newcoordonnees": {
-                "lumiere": {
-                    "portrait": {
-                        "x": -1,
-                        "y": -1
-                    },
-                    "paysage": {
-                        "x": -1,
-                        "y": -1
-                    }
-                }
-            },
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "off",
-                        "on",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1000824": {
-            "num": "0x0156d382/12",
-            "lieu": "boutons",
-            "lieuprecis": "chambre de jojo",
-            "___nummat": 1000824,
             "newsensorstypes": [
                 "bouton"
             ],
@@ -649,59 +469,10 @@
                 }
             ]
         },
-        "1000827": {
-            "protocol": "ac",
-            "num": "0x0173442a/10",
-            "equivalences": "",
-            "lieu": "boutons",
-            "lieuprecis": "lumière wc",
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "off",
-                "on",
-                "switch"
-            ],
-            "precision": "0",
-            "correction": 0,
-            "min": "0",
-            "max": "0",
-            "textlgmax": "0",
-            "isautomatique": false,
-            "___nummat": 1000827,
-            "systmotor": false,
-            "storevoletdelay": "0",
-            "storevoletdelaydecol": "0",
-            "storevoletdelaydescente": "0",
-            "temperatureassociee": "",
-            "newcoordonnees": {
-                "lumiere": {
-                    "portrait": {
-                        "x": -1,
-                        "y": -1
-                    },
-                    "paysage": {
-                        "x": -1,
-                        "y": -1
-                    }
-                }
-            },
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "off",
-                        "on",
-                        "switch"
-                    ]
-                }
-            ]
-        },
         "1000831": {
             "lieu": "chambre d'ami",
             "lieuprecis": "plafonnier de la chambre d'ami",
-            "equivalences": "0x01525c02/13;0x01532d72/12;0x0aa00006/1;0x0aa00007/1",
+            "equivalences": "0x01532d72/12",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -709,7 +480,7 @@
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num": "0x0aa00016/1",
+            "num": "0x01525c02/13",
             "___nummat": 1000831,
             "isautomatique": false,
             "protocol": "ac",
@@ -757,148 +528,10 @@
                 }
             }
         },
-        "1000851": {
-            "lieu": "rez-de-chaussée",
-            "lieuprecis": "",
-            "systmotor": false,
-            "storevoletdelay": "0",
-            "storevoletdelaydecol": "0",
-            "storevoletdelaydescente": "0",
-            "num": "0x0aa00005/1",
-            "___nummat": 1000851,
-            "isautomatique": false,
-            "protocol": "ac",
-            "commandstypes": [
-                "off",
-                "on",
-                "switch"
-            ],
-            "precision": "0",
-            "correction": 0,
-            "min": "0",
-            "max": "0",
-            "textlgmax": "0",
-            "temperatureassociee": "",
-            "equivalences": "",
-            "newsensorstypes": [
-                "bouton",
-                "lumiere"
-            ],
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "off",
-                        "on",
-                        "switch"
-                    ]
-                },
-                {
-                    "name": "lumiere",
-                    "commandstypes": [
-                        "off",
-                        "on",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1000852": {
-            "lieu": "étage",
-            "lieuprecis": "",
-            "newsensorstypes": [
-                "bouton",
-                "lumiere"
-            ],
-            "systmotor": false,
-            "storevoletdelay": "0",
-            "storevoletdelaydecol": "0",
-            "storevoletdelaydescente": "0",
-            "num": "0x0aa00007/1",
-            "___nummat": 1000852,
-            "isautomatique": false,
-            "protocol": "ac",
-            "commandstypes": [
-                "off",
-                "on",
-                "switch"
-            ],
-            "precision": "0",
-            "correction": 0,
-            "min": "0",
-            "max": "0",
-            "textlgmax": "0",
-            "temperatureassociee": "",
-            "equivalences": "",
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "off",
-                        "on",
-                        "switch"
-                    ]
-                },
-                {
-                    "name": "lumiere",
-                    "commandstypes": [
-                        "off",
-                        "on",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1000853": {
-            "lieu": "maison",
-            "lieuprecis": "",
-            "newsensorstypes": [
-                "bouton",
-                "lumiere"
-            ],
-            "systmotor": false,
-            "storevoletdelay": "0",
-            "storevoletdelaydecol": "0",
-            "storevoletdelaydescente": "0",
-            "num": "0x0aa00006/1",
-            "___nummat": 1000853,
-            "isautomatique": false,
-            "protocol": "ac",
-            "commandstypes": [
-                "off",
-                "on",
-                "switch"
-            ],
-            "precision": "0",
-            "correction": 0,
-            "min": "0",
-            "max": "0",
-            "textlgmax": "0",
-            "temperatureassociee": "",
-            "equivalences": "",
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "off",
-                        "on",
-                        "switch"
-                    ]
-                },
-                {
-                    "name": "lumiere",
-                    "commandstypes": [
-                        "off",
-                        "on",
-                        "switch"
-                    ]
-                }
-            ]
-        },
         "1000854": {
             "lieu": "chambre de jojo",
             "lieuprecis": "plafonnier de la chambre de jojo",
-            "zequivalences": "0x0156d382/12;0x0aa00006/1;0x0aa00007/1",
+            "zequivalences": "",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -906,7 +539,7 @@
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num1": "0x0aa00013/1",
+            "num1": "0x0156d382/12",
             "num": "lumière---plafonnier--chambre de jo--1er étage",
             "___nummat": 1000854,
             "isautomatique": false,
@@ -1060,7 +693,7 @@
         "1000890": {
             "lieu": "chambre",
             "lieuprecis": "plafonnier de la chambre",
-            "equivalences": "0x02be2c02/13;0x01037dae/12;0x0aa00006/1;0x0aa00007/1",
+            "equivalences": "0x01037dae/12",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -1068,7 +701,7 @@
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num": "0x0aa0000d/1",
+            "num": "0x02be2c02/13",
             "___nummat": 1000890,
             "isautomatique": false,
             "protocol": "ac",
@@ -1109,12 +742,12 @@
         "1000919": {
             "lieu": "entrée",
             "lieuprecis": "",
-            "equivalences": "0x00c53f52/11;0x01731b7e/10;0x0aa00006/1;0x0aa00005/1",
+            "equivalences": "0x01731b7e/10",
             "systmotor": false,
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num": "0x0aa00003/1",
+            "num": "0x00c53f52/11",
             "___nummat": 1000919,
             "isautomatique": false,
             "protocol": "ac",
@@ -1150,34 +783,6 @@
                     "commandstypes": [
                         "off",
                         "on",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1000948": {
-            "num": "0x017334a2/10",
-            "lieu": "boutons",
-            "lieuprecis": "escalier bas",
-            "___nummat": 1000948,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
                         "switch"
                     ]
                 }
@@ -1295,90 +900,6 @@
                 }
             ]
         },
-        "1000979": {
-            "num": "0x01571fa6/11",
-            "lieu": "boutons",
-            "lieuprecis": "bas escalier lumiere lampadaire",
-            "___nummat": 1000979,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1000980": {
-            "num": "0x01571fa6/12",
-            "lieu": "boutons",
-            "lieuprecis": "bas escalier lumiere fenetre",
-            "___nummat": 1000980,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1000981": {
-            "num": "0x01570892/11",
-            "lieu": "boutons",
-            "lieuprecis": "bas escalier lumiere milieu",
-            "___nummat": 1000981,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
         "1000985": {
             "num": "0x01570d5a/11",
             "lieu": "boutons",
@@ -1438,7 +959,7 @@
         "1000987": {
             "lieu": "salle",
             "lieuprecis": "salon",
-            "equivalences": "0x01571fa6/12;0x01570d5a/12;0x0aa00006/1;0x0aa00005/1",
+            "equivalences": "0x01570d5a/12",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -1446,7 +967,7 @@
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num": "0x0aa00026/1",
+            "num": "0x01571fa6/12",
             "___nummat": 1000987,
             "isautomatique": false,
             "protocol": "ac",
@@ -1497,7 +1018,7 @@
         "1000988": {
             "lieu": "salle",
             "lieuprecis": "lampadaire",
-            "equivalences": "0x01571fa6/11;0x01570d5a/11;0x0aa00006/1;0x0aa00005/1",
+            "equivalences": "0x01570d5a/11",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -1505,7 +1026,7 @@
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num": "0x0aa00027/1",
+            "num": "0x01571fa6/11",
             "___nummat": 1000988,
             "isautomatique": false,
             "protocol": "ac",
@@ -1543,34 +1064,6 @@
                 }
             ]
         },
-        "1000990": {
-            "num": "0x01570892/12",
-            "lieu": "boutons",
-            "lieuprecis": "bas escalier lumiere bibliotheque",
-            "___nummat": 1000990,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
         "1000991": {
             "num": "0x0156f0d6/11",
             "lieu": "boutons",
@@ -1602,7 +1095,7 @@
         "1000992": {
             "lieu": "salle",
             "lieuprecis": "bibliothèque",
-            "equivalences": "0x01570892/12;0x0156f0d6/11;0x0aa00006/1;0x0aa00005/1",
+            "equivalences": "0x0156f0d6/11",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -1610,7 +1103,7 @@
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num": "0x0aa0002b/1",
+            "num": "0x01570892/12",
             "___nummat": 1000992,
             "isautomatique": false,
             "protocol": "ac",
@@ -1684,38 +1177,10 @@
                 }
             ]
         },
-        "1001063": {
-            "num": "0x01976816/10",
-            "lieu": "toilettes du bas",
-            "lieuprecis": "",
-            "___nummat": 1001063,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
         "1001069": {
             "lieu": "toilettes du bas",
             "lieuprecis": "",
-            "equivalences": "0x0aa00006/1;0x0aa00005/1;0x01976816/10",
+            "equivalences": "",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -1724,7 +1189,7 @@
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
             "persistence": true,
-            "num": "0x0aa0002e/1",
+            "num": "0x01976816/10",
             "___nummat": 1001069,
             "isautomatique": false,
             "protocol": "ac",
@@ -2387,7 +1852,7 @@
         "1001269": {
             "lieu": "escalier",
             "lieuprecis": "couloir",
-            "equivalences": "0x017334a2/10;0x01732532/10;0x01732d92/10;0x0aa00006/1;0x0aa00007/1",
+            "equivalences": "0x01732532/10;0x01732d92/10",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -2395,7 +1860,7 @@
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num": "0x0aa00025/1",
+            "num": "0x017334a2/10",
             "___nummat": 1001269,
             "isautomatique": false,
             "protocol": "ac",
@@ -2432,62 +1897,6 @@
                 }
             ]
         },
-        "1001272": {
-            "num": "0x0156f95e/11",
-            "lieu": "boutons",
-            "lieuprecis": "chbas- chambre du bas",
-            "___nummat": 1001272,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1001273": {
-            "num": "0x0156f95e/12",
-            "lieu": "boutons",
-            "lieuprecis": "chbas - salle de bains du bas",
-            "___nummat": 1001273,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
         "1001274": {
             "num": "0x0196e326/10",
             "lieu": "boutons",
@@ -2519,7 +1928,7 @@
         "1001276": {
             "lieu": "salle de bain du bas",
             "lieuprecis": "",
-            "equivalences": "0x0156f95e/12;0x01a39c3a/10;0x0aa00006/1;0x0aa00005/1",
+            "equivalences": "0x01a39c3a/10",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -2530,7 +1939,7 @@
             "minuteriedelay": 7200,
             "minuteriedeclencheur": "on",
             "persistence": false,
-            "num": "0x0aa00030/1",
+            "num": "0x0156f95e/12",
             "___nummat": 1001276,
             "isautomatique": false,
             "protocol": "ac",
@@ -2573,7 +1982,7 @@
         "1001277": {
             "lieu": "toilettes du haut",
             "lieuprecis": "toilettes du haut",
-            "zequivalences": "0x0173442a/10;0x0aa00006/1;0x0aa00007/1",
+            "zequivalences": "",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -2581,7 +1990,7 @@
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num1": "0x0aa00022/1",
+            "num1": "0x0173442a/10",
             "num": "lumière---plafonnier--toilettes du haut--1er étage",
             "___nummat": 1001277,
             "isautomatique": false,
@@ -2626,7 +2035,7 @@
         "1001288": {
             "lieu": "extérieur",
             "lieuprecis": "devant",
-            "equivalences": "0x00c53f52/12;0x0aa00006/1",
+            "equivalences": "",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -2637,7 +2046,7 @@
             "minuteriedelay": 3600,
             "minuteriedeclencheur": "on",
             "persistence": false,
-            "num": "0x0aa0003a/1",
+            "num": "0x00c53f52/12",
             "___nummat": 1001288,
             "isautomatique": false,
             "protocol": "ac",
@@ -2680,7 +2089,7 @@
         "1001289": {
             "lieu": "chambre du bas",
             "lieuprecis": "",
-            "equivalences": "0x0156f95e/11;0x0196e326/10;0x0aa00006/1;0x0aa00005/1",
+            "equivalences": "0x0196e326/10",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -2688,7 +2097,7 @@
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num": "0x0aa00009/1",
+            "num": "0x0156f95e/11",
             "___nummat": 1001289,
             "isautomatique": false,
             "protocol": "ac",
@@ -2756,38 +2165,10 @@
                 }
             ]
         },
-        "1001311": {
-            "num": "0x017340ca/10",
-            "lieu": "boutons",
-            "lieuprecis": "machines",
-            "___nummat": 1001311,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
         "1001312": {
             "lieu": "buanderie",
             "lieuprecis": "",
-            "equivalences": "0x017340ca/10;0x0aa00006/1;0x0aa00005/1",
+            "equivalences": "",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -2798,7 +2179,7 @@
             "minuteriedelay": 600,
             "minuteriedeclencheur": "on",
             "persistence": false,
-            "num": "0x0aa00031/1",
+            "num": "0x017340ca/10",
             "___nummat": 1001312,
             "isautomatique": false,
             "protocol": "ac",
@@ -2829,7 +2210,7 @@
         "1001313": {
             "lieu": "bureau",
             "lieuprecis": "plafonnier du bureau",
-            "equivalences": "0x01570f52/12;0x0aa00006/1;0x0aa00007/1",
+            "equivalences": "",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -2837,7 +2218,7 @@
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num": "0x0aa0001a/1",
+            "num": "0x01570f52/12",
             "___nummat": 1001313,
             "isautomatique": false,
             "protocol": "ac",
@@ -2880,7 +2261,7 @@
         "1001324": {
             "lieu": "salle",
             "lieuprecis": "salle à manger",
-            "equivalences": "0x01570892/11;0x0156f0d6/12;0x0aa00006/1;0x0aa00005/1",
+            "equivalences": "0x0156f0d6/12",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -2889,7 +2270,7 @@
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
             "minuteriedelay": 0,
-            "num": "0x0aa00029/1",
+            "num": "0x01570892/11",
             "___nummat": 1001324,
             "isautomatique": false,
             "protocol": "ac",
@@ -3044,7 +2425,7 @@
         "1001362": {
             "lieu": "grenier",
             "lieuprecis": "petit grenier",
-            "equivalences": "0x0aa00006/1",
+            "equivalences": "",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -3052,7 +2433,7 @@
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num": "0x0aa0002d/1",
+            "num": "0x02a0002d/1",
             "___nummat": 1001362,
             "isautomatique": false,
             "protocol": "ac",
@@ -3311,38 +2692,10 @@
                 }
             ]
         },
-        "1001413": {
-            "num": "0x015705ee/12",
-            "lieu": "boutons",
-            "lieuprecis": "table",
-            "___nummat": 1001413,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
         "1001414": {
             "lieu": "cuisine",
             "lieuprecis": "table",
-            "equivalences": "0x015705ee/12;0x0aa00006/1;0x0aa00005/1",
+            "equivalences": "",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -3353,7 +2706,7 @@
             "minuteriedelay": 0,
             "minuteriedeclencheur": "on",
             "persistence": false,
-            "num": "0x0aa00043/1",
+            "num": "0x015705ee/12",
             "___nummat": 1001414,
             "isautomatique": false,
             "protocol": "ac",
@@ -3404,7 +2757,7 @@
         "1001415": {
             "lieu": "cuisine",
             "lieuprecis": "plafonnier de la cuisine",
-            "equivalences": "0x01a3a576/10;0x0aa00006/1;0x0aa00005/1;0x0229e8ae/1",
+            "equivalences": "0x0229e8ae/1",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -3412,7 +2765,7 @@
             "storevoletdelay": "0",
             "storevoletdelaydecol": "0",
             "storevoletdelaydescente": "0",
-            "num": "0x0aa00002/1",
+            "num": "0x01a3a576/10",
             "___nummat": 1001415,
             "isautomatique": false,
             "protocol": "ac",
@@ -3563,7 +2916,7 @@
         "1001451": {
             "lieu": "chambre de jojo",
             "lieuprecis": "leds de jojo",
-            "zequivalences": "0x0156d382/11;0x0aa00006/1;0x0aa00007/1",
+            "zequivalences": "0x0156d382/11",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -3625,7 +2978,7 @@
         "1001452": {
             "lieu": "chambre de jojo",
             "lieuprecis": "chevet droit de jojo",
-            "zequivalences": "0x0156d382/11;0x0aa00006/1;0x0aa00007/1",
+            "zequivalences": "0x0156d382/11",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -3687,7 +3040,7 @@
         "1001453": {
             "lieu": "chambre de jojo",
             "lieuprecis": "chevet gauche de jojo",
-            "zequivalences": "0x0156d382/11;0x0aa00006/1;0x0aa00007/1",
+            "zequivalences": "0x0156d382/11",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -4539,7 +3892,7 @@
         "1001648": {
             "lieu": "chambre d'ami",
             "lieuprecis": "chevet droit",
-            "equivalences": "0x01525c02/1;0x01532d72/11;0x0aa00006/1;0x0aa00007/1",
+            "equivalences": "0x01532d72/11",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -4550,7 +3903,7 @@
             "minuteriedelay": 86340,
             "minuteriedeclencheur": "on",
             "persistence": false,
-            "num": "0x0aa00045/1",
+            "num": "0x01525c02/1",
             "___nummat": 1001648,
             "isautomatique": false,
             "protocol": "ac",
@@ -4581,7 +3934,7 @@
         "1001649": {
             "lieu": "chambre d'ami",
             "lieuprecis": "chevet gauche",
-            "equivalences": "0x01525c02/5;0x01532d72/11;0x0aa00006/1;0x0aa00007/1",
+            "equivalences": "0x01532d72/11",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -4592,7 +3945,7 @@
             "minuteriedelay": 86340,
             "minuteriedeclencheur": "on",
             "persistence": false,
-            "num": "0x0aa00046/1",
+            "num": "0x01525c02/5",
             "___nummat": 1001649,
             "isautomatique": false,
             "protocol": "ac",
@@ -4620,179 +3973,11 @@
                 }
             ]
         },
-        "1001650": {
-            "num": "0x02be2c02/1",
-            "lieu": "boutons",
-            "lieuprecis": "tel chambre but1",
-            "___nummat": 1001650,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1001651": {
-            "num": "0x02be2c02/5",
-            "lieu": "boutons",
-            "lieuprecis": "tel chambre but2",
-            "___nummat": 1001651,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1001652": {
-            "num": "0x02be2c02/13",
-            "lieu": "boutons",
-            "lieuprecis": "tel chambre but3",
-            "___nummat": 1001652,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
         "1001653": {
             "num": "0x02be2c02",
             "lieu": "boutons",
             "lieuprecis": "tel chambre but4",
             "___nummat": 1001653,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1001654": {
-            "num": "0x01525c02/1",
-            "lieu": "boutons",
-            "lieuprecis": "tel chambre d ami but1",
-            "___nummat": 1001654,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1001655": {
-            "num": "0x01525c02/5",
-            "lieu": "boutons",
-            "lieuprecis": "tel chambre d ami but2",
-            "___nummat": 1001655,
-            "newsensorstypes": [
-                "bouton"
-            ],
-            "commandstypes": [
-                "on",
-                "off",
-                "switch"
-            ],
-            "isautomatique": false,
-            "systmotor": false,
-            "protocol": "ac",
-            "correction": 0,
-            "sensorstypes": [
-                {
-                    "name": "bouton",
-                    "commandstypes": [
-                        "on",
-                        "off",
-                        "switch"
-                    ]
-                }
-            ]
-        },
-        "1001656": {
-            "num": "0x01525c02/13",
-            "lieu": "boutons",
-            "lieuprecis": "tel chambre d ami but3",
-            "___nummat": 1001656,
             "newsensorstypes": [
                 "bouton"
             ],
@@ -4847,7 +4032,7 @@
         "1001658": {
             "lieu": "chambre",
             "lieuprecis": "chevet gauche chambre",
-            "equivalences": "0x02be2c02/1;0x01037dae/11;0x0aa00006/1;0x0aa00007/1",
+            "equivalences": "0x01037dae/11",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -4858,7 +4043,7 @@
             "minuteriedelay": 86340,
             "minuteriedeclencheur": "on",
             "persistence": false,
-            "num": "0x0aa00047/1",
+            "num": "0x02be2c02/1",
             "___nummat": 1001658,
             "isautomatique": false,
             "protocol": "ac",
@@ -4889,7 +4074,7 @@
         "1001659": {
             "lieu": "chambre",
             "lieuprecis": "chevet droit chambre",
-            "equivalences": "0x02be2c02/5;0x01037dae/11;0x0aa00006/1;0x0aa00007/1",
+            "equivalences": "0x01037dae/11",
             "newsensorstypes": [
                 "lumiere"
             ],
@@ -4900,7 +4085,7 @@
             "minuteriedelay": 86340,
             "minuteriedeclencheur": "on",
             "persistence": false,
-            "num": "0x0aa00048/1",
+            "num": "0x02be2c02/5",
             "___nummat": 1001659,
             "isautomatique": false,
             "protocol": "ac",
