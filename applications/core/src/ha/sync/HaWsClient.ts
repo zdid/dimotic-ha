@@ -281,6 +281,78 @@ export class HaWsClient {
     return this.connection.sendMessagePromise({ type: 'config/area_registry/create', name, ...(icon ? { icon } : {}) });
   }
 
+  /**
+   * Lit/écrit/supprime la config brute d'une entité "éditeur à base de clé" HA (script,
+   * automation, scene — toutes servies par la même vue interne HA `EditKeyBasedConfigView`,
+   * `GET/POST/DELETE /api/config/{domain}/config/{id}`). Aucune commande WebSocket équivalente
+   * n'existe pour ce CRUD (seul le service `{domain}.reload` l'est, via sendCommand ci-dessus) —
+   * voir le commentaire d'origine dans HaAutomationBackupService, qui utilisait un `fetch()` privé
+   * avant que ces 3 méthodes ne soient généralisées ici pour être réutilisables par toute app
+   * (ex: applications/scriptsha) via HaRestBridge.
+   */
+  async getDomainConfig(domain: string, id: string): Promise<unknown> {
+    const url = `http://${this.currentConfig.host}:${this.currentConfig.port}/api/config/${domain}/config/${encodeURIComponent(id)}`;
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${this.currentConfig.token}` } });
+    if (!response.ok) {
+      throw new Error(`GET ${url} → HTTP ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async setDomainConfig(domain: string, id: string, config: unknown): Promise<void> {
+    const url = `http://${this.currentConfig.host}:${this.currentConfig.port}/api/config/${domain}/config/${encodeURIComponent(id)}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.currentConfig.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    if (!response.ok) {
+      throw new Error(`POST ${url} → HTTP ${response.status}`);
+    }
+  }
+
+  async deleteDomainConfig(domain: string, id: string): Promise<void> {
+    const url = `http://${this.currentConfig.host}:${this.currentConfig.port}/api/config/${domain}/config/${encodeURIComponent(id)}`;
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${this.currentConfig.token}` },
+    });
+    if (!response.ok) {
+      throw new Error(`DELETE ${url} → HTTP ${response.status}`);
+    }
+  }
+
+  /**
+   * CRUD générique des "helpers" HA (`timer`, `input_boolean`, `input_number`, `counter`,
+   * `schedule`...) — ces domaines partagent le même patron de commandes WebSocket
+   * `{domain}/create|list|delete` (`StorageCollectionWebsocket` côté HA), vérifié empiriquement en
+   * conditions réelles pour `timer` (18/08/2026) : `timer/create {name, duration}` →
+   * `{id, name, duration, restore}` (id = slug HA du name), `timer/delete {timer_id}`,
+   * `timer/list` → tableau. Contrairement à `getDomainConfig`/`setDomainConfig` (§ci-dessus, REST,
+   * pour script/automation/scene), ce sont ici de vraies commandes WebSocket.
+   */
+  async listHelpers(domain: string): Promise<unknown[]> {
+    if (!this.isAuthenticated || !this.connection) {
+      throw new Error('Cannot list helpers: not authenticated');
+    }
+    const result = await this.connection.sendMessagePromise<unknown[]>({ type: `${domain}/list` });
+    return result;
+  }
+
+  async createHelper(domain: string, data: Record<string, unknown>): Promise<{ id: string } & Record<string, unknown>> {
+    if (!this.isAuthenticated || !this.connection) {
+      throw new Error('Cannot create helper: not authenticated');
+    }
+    return this.connection.sendMessagePromise({ type: `${domain}/create`, ...data });
+  }
+
+  async deleteHelper(domain: string, id: string): Promise<void> {
+    if (!this.isAuthenticated || !this.connection) {
+      throw new Error('Cannot delete helper: not authenticated');
+    }
+    await this.connection.sendMessagePromise({ type: `${domain}/delete`, [`${domain}_id`]: id });
+  }
+
   // ===========================================================================
   // Callbacks pour s'abonner aux événements
   // ===========================================================================

@@ -64,6 +64,8 @@ import type { HaWsClient } from './ha/sync/HaWsClient';
 import type { HaStructureRegistry } from './ha/sync/HaStructureRegistry';
 import type { IntegrationBridge } from './ha/integration/IntegrationBridge';
 import type { HaAutomationBackupService } from './ha/automations/HaAutomationBackupService';
+import type { HaRestBridge } from './ha/HaRestBridge';
+import type { HaHelperBridge } from './ha/HaHelperBridge';
 
 // =============================================================================
 // Bootstrap de l'application
@@ -91,6 +93,8 @@ class ApplicationBootstrap {
   private haStructureRegistry?: HaStructureRegistry;
   private integrationBridge?: IntegrationBridge;
   private haAutomationBackupService?: HaAutomationBackupService;
+  private haRestBridge?: HaRestBridge;
+  private haHelperBridge?: HaHelperBridge;
 
   /**
    * Initialise toutes les dépendances
@@ -225,6 +229,19 @@ class ApplicationBootstrap {
       this.integrationBridge.initialize();
       this.logger.info('Bootstrap', 'IntegrationBridge initialisé');
 
+      // HaRestBridge : toujours instancié (contrairement à AreaEnsureService ci-dessous), pour
+      // pouvoir répondre "HA non connecté" à toute app process séparé qui demanderait une action
+      // HA REST même quand le WS n'est pas configuré — sinon la requête ne recevrait jamais de
+      // réponse (voir applications/scriptsha, seul consommateur actuel de ce pont générique).
+      const haRestBridgeModule = await import('./ha/HaRestBridge');
+      this.haRestBridge = new haRestBridgeModule.HaRestBridge(this.eventBus, this.haWsClient, this.logger);
+
+      // HaHelperBridge : même principe que HaRestBridge (toujours instancié, "HA non connecté" en
+      // repli) — CRUD des helpers HA (timer, etc.) et requête ponctuelle du référentiel d'entités
+      // par domaine pour les apps process séparé (voir applications/scriptsha).
+      const haHelperBridgeModule = await import('./ha/HaHelperBridge');
+      this.haHelperBridge = new haHelperBridgeModule.HaHelperBridge(this.eventBus, this.haWsClient, this.haStructureRegistry, this.logger);
+
       // AreaEnsureService : optionnel, seulement si Mode A (WS) est disponible — garantit les
       // areas suggérées par les découvertes MQTT (device.suggested_area), voir AreaEnsureService.
       if (this.haWsClient && this.haStructureRegistry) {
@@ -245,7 +262,6 @@ class ApplicationBootstrap {
         this.haAutomationBackupService = new automationBackupModule.HaAutomationBackupService(
           this.haWsClient,
           this.haStructureRegistry,
-          config.ha!.ws!, // this.haWsClient n'existe que si config.ha.ws était défini (voir plus haut)
           this.logger,
           process.env.PROJECT_ROOT as string
         );

@@ -1,0 +1,22 @@
+{
+  "name": "scriptsha",
+  "version": "1.0.0",
+  "description": "Gestion de scripts Home Assistant (script.*) : dépôt de fichiers YAML, diffusion/retrait à la demande via l'API config HA",
+  "main": "dist/domain/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "build:ui": "tsc -p src/presentation/tsconfig.ui.json",
+    "watch": "tsc -w"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

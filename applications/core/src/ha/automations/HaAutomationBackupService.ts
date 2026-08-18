@@ -6,7 +6,6 @@ import * as path from 'node:path';
 import type { Logger } from '../../infrastructure/logger/index';
 import type { HaWsClient } from '../sync/HaWsClient';
 import type { HaStructureRegistry } from '../sync/HaStructureRegistry';
-import type { HaWsConfig } from '../../infrastructure/config/schema';
 
 export interface AutomationBackupResult {
   success: boolean;
@@ -34,7 +33,8 @@ const MAX_BACKUPS_KEPT = 10;
  * `automation.reload` — un vrai appel de service — l'est) : la lecture passe par la route REST HA
  * `GET /api/config/automation/config/{id}` (celle qu'utilise l'éditeur d'automatisations du
  * frontend HA lui-même), un appel par automatisation, avec le même jeton longue durée que le
- * WebSocket (voir HaWsConfig).
+ * WebSocket (voir HaWsConfig) — via `HaWsClient.getDomainConfig()`, généralisée pour ce même besoin
+ * côté `applications/scriptsha` (voir HaRestBridge).
  */
 export class HaAutomationBackupService {
   private readonly backupDir: string;
@@ -42,7 +42,6 @@ export class HaAutomationBackupService {
   constructor(
     private readonly haWsClient: HaWsClient,
     private readonly haStructureRegistry: HaStructureRegistry,
-    private readonly haWsConfig: HaWsConfig,
     private readonly logger: Logger,
     projectRoot: string
   ) {
@@ -61,7 +60,7 @@ export class HaAutomationBackupService {
           continue;
         }
 
-        const config = await this.fetchAutomationConfig(String(automationId));
+        const config = await this.haWsClient.getDomainConfig('automation', String(automationId));
         configs.push({
           entity_id: automation.entity_id,
           id: String(automationId),
@@ -104,15 +103,6 @@ export class HaAutomationBackupService {
   listBackups(): string[] {
     if (!fs.existsSync(this.backupDir)) return [];
     return fs.readdirSync(this.backupDir).filter((f) => f.endsWith('.json')).sort().reverse();
-  }
-
-  private async fetchAutomationConfig(automationId: string): Promise<unknown> {
-    const url = `http://${this.haWsConfig.host}:${this.haWsConfig.port}/api/config/automation/config/${encodeURIComponent(automationId)}`;
-    const response = await fetch(url, { headers: { Authorization: `Bearer ${this.haWsConfig.token}` } });
-    if (!response.ok) {
-      throw new Error(`GET ${url} → HTTP ${response.status}`);
-    }
-    return response.json();
   }
 
   private pruneOldBackups(): void {

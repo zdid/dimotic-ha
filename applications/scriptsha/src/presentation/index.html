@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scripts HA</title>
+
+  <link rel="stylesheet" href="/styles/main.css">
+
+  <style>
+    .scriptsha-container { max-width: 900px; margin: 0 auto; padding: 20px; }
+    .scriptsha-header { text-align: center; margin-bottom: 30px; }
+    .scriptsha-header h1 { color: var(--color-accent); font-size: 2em; }
+
+    .section { background: var(--color-surface); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-primary); padding-bottom: 10px; margin-bottom: 15px; }
+    .section-header h2 { margin: 0; }
+
+    .form-row { margin-bottom: 12px; }
+    .form-row label { display: block; font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 4px; }
+    .form-row input[type="text"], .form-row input[type="file"], .form-row textarea {
+      width: 100%; padding: 8px 10px; border-radius: var(--radius);
+      border: 1px solid var(--color-primary); background: var(--color-background); color: var(--color-text);
+      font-size: 0.95em; box-sizing: border-box;
+    }
+    .form-row textarea { resize: vertical; min-height: 60px; }
+
+    .script-row {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      padding: 10px 12px; background: var(--color-background); border-radius: var(--radius); margin-bottom: 8px;
+    }
+    .script-row .script-info { flex: 1; min-width: 0; }
+    .script-row .script-title { font-weight: bold; color: var(--color-text); }
+    .script-row .script-desc { font-size: 0.9em; color: var(--color-text-muted); }
+    .script-row .script-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75em; margin-left: 8px; }
+    .badge.deployed { background: #1e5e2e; color: #a6e6ae; }
+    .badge.not-deployed { background: var(--color-background); color: var(--color-text-muted); border: 1px solid var(--color-primary); }
+    .badge.pending { background: var(--color-warning); color: white; }
+
+    .empty { color: var(--color-text-muted); font-style: italic; padding: 10px; }
+    .loading { text-align: center; padding: 40px; color: var(--color-text-muted); }
+    .btn { padding: 10px 20px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em; }
+    .btn-primary { background: var(--color-accent); color: white; }
+    .btn-secondary { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-primary); }
+    .btn-danger { background: var(--color-error); color: white; }
+    .section .btn { padding: 6px 12px; font-size: 0.85em; }
+
+    .alert { padding: 12px; border-radius: var(--radius); margin: 10px 0; display: none; }
+    .alert-error { background: rgba(244, 67, 54, 0.1); border: 1px solid var(--color-error); color: var(--color-error); }
+
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
+      z-index: 1000; align-items: flex-start; justify-content: center; padding: 40px 20px; overflow-y: auto;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-overlay .card {
+      max-width: 700px; width: 100%; margin-bottom: 0;
+      background: var(--color-surface); border-radius: var(--radius); padding: 20px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    }
+    .modal-overlay .card h2 { margin-top: 0; }
+    .modal-overlay pre {
+      background: var(--color-background); padding: 12px; border-radius: var(--radius);
+      overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow-y: auto;
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px; }
+  </style>
+</head>
+<body>
+  <div class="scriptsha-container">
+    <div class="scriptsha-header">
+      <h1>📜 Scripts HA</h1>
+      <p class="description">Dépôt et gestion de scripts Home Assistant (script.*) — diffusion/retrait à la demande.</p>
+    </div>
+
+    <div id="main-container">
+      <div class="section">
+        <div class="section-header">
+          <h2>Déposer un script</h2>
+        </div>
+        <div class="form-row">
+          <label for="upload-title">Titre</label>
+          <input type="text" id="upload-title" placeholder="Ensemble de minuterie">
+        </div>
+        <div class="form-row">
+          <label for="upload-description">Explication</label>
+          <textarea id="upload-description" placeholder="Ce que fait ce script..."></textarea>
+        </div>
+        <div class="form-row">
+          <label for="upload-file">Fichier (.yaml, .yml)</label>
+          <input type="file" id="upload-file" accept=".yaml,.yml">
+        </div>
+        <div class="alert alert-error" id="upload-error"></div>
+        <button class="btn btn-primary" id="upload-submit">➕ Déposer</button>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <h2>Scripts</h2>
+        </div>
+        <div class="alert alert-error" id="list-error"></div>
+        <div id="scripts-list"><div class="empty">Chargement...</div></div>
+      </div>
+
+      <div class="loading" id="loading">Chargement de l'application Scripts HA</div>
+    </div>
+  </div>
+
+  <!-- Modale de consultation du contenu -->
+  <div class="modal-overlay" id="content-overlay">
+    <div class="card">
+      <h2 id="content-modal-title">Contenu du script</h2>
+      <pre id="content-body"></pre>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="content-close">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/applications/scriptsha/presentation/ts/app.js"></script>
+
+  <!-- Derniere modification: 2026-08-18 00:00:00 - Création de l'application scriptsha -->
+</body>
+</html>

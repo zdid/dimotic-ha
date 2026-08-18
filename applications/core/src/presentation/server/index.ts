@@ -35,6 +35,12 @@ import type { HaAutomationBackupService } from '../../ha/automations/HaAutomatio
  *   `POST /api/ha/automations/backup` et `/reload` — pensées pour être appelées depuis l'extérieur
  *   (script, cron, HA lui-même) sans navigateur connecté en Socket.io ; la réponse HTTP porte donc
  *   le résultat réel plutôt qu'un accusé de réception. Voir `HaAutomationBackupService`.
+ * - **Route d'upload générique** (2026-08-18) : `POST /api/apps/:appId/upload` — même besoin que
+ *   l'upload HAPLAN ci-dessus (transfert binaire), mais généralisée pour ne plus coder le nom d'une
+ *   app en dur dans le core : `appId` vient de l'URL, le core ne connaît le contenu ni le format
+ *   attendu, il relaie tel quel via `<appId>:internal:upload`. Toute nouvelle app veut ce besoin
+ *   utilise cette route plutôt que d'en ajouter une dédiée ; la route HAPLAN reste inchangée
+ *   (précédent historique, pas de migration rétroactive).
  */
 export class PresentationServer {
   private app: Express;
@@ -302,6 +308,43 @@ export class PresentationServer {
           floorplanId,
           imageBuffer: file.buffer,
           imageMimeType: file.mimetype
+        });
+        res.status(200).json({ success: true });
+      });
+    });
+
+    // Upload générique — voir le commentaire de tête de cette classe. Aucun filtre de type
+    // imposé ici (le core ignore le contenu attendu par chaque app) ; seule la taille est bornée.
+    // Réponse HTTP = accusé de réception, résultat réel relayé par l'app elle-même via Socket.io
+    // (même convention que l'exception HAPLAN ci-dessus).
+    const genericUpload = multer({
+      storage: multer.memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024 }
+    });
+
+    this.app.post('/api/apps/:appId/upload', (req: Request, res: Response) => {
+      genericUpload.single('file')(req, res, (err: unknown) => {
+        if (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          res.status(415).json({ error: 'Unsupported Media Type', message });
+          return;
+        }
+        const file = (req as Request & { file?: Express.Multer.File }).file;
+        const appId = req.params.appId;
+        if (!file) {
+          res.status(400).json({ error: 'Bad Request', message: 'Champ "file" requis' });
+          return;
+        }
+        if (!this.eventBus) {
+          res.status(503).json({ error: 'Service Unavailable', message: 'EventBus non initialisé' });
+          return;
+        }
+
+        this.eventBus.emitGeneric(`${appId}:internal:upload`, {
+          buffer: file.buffer,
+          filename: file.originalname,
+          mimetype: file.mimetype,
+          fields: req.body
         });
         res.status(200).json({ success: true });
       });
