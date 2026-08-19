@@ -34,6 +34,11 @@ export const scriptEntrySchema = z.object({
   title: z.string().min(1),
   description: z.string().default(''),
   originalFilename: z.string().min(1),
+  /** Domaine HA cible pour la diffusion (§4 fonctionnelles-scriptsha_specs) — 'script' pour un
+   *  script.* classique (pas de déclencheur propre), 'automation' pour une automation.* qui a
+   *  besoin de réagir seule à des changements d'état (ex: la minuterie des lumières). Même API
+   *  REST générique des deux côtés (HaRestBridge), seul le domaine cible change. */
+  haDomain: z.enum(['script', 'automation']).default('script'),
   deployed: z.boolean().default(false),
   deployedAt: z.string().optional(),
   createdAt: z.string(),

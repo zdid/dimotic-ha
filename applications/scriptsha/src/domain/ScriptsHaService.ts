@@ -74,29 +74,91 @@ interface HaEntityUpdatedPayload {
   action: 'create' | 'update' | 'delete';
 }
 
-const EXAMPLE_SCRIPT_ID = 'ensemble_de_minuterie';
-const EXAMPLE_SCRIPT_TITLE = 'Ensemble de minuterie';
-const EXAMPLE_SCRIPT_DESCRIPTION = 'Démarre en une fois toutes les minuteries (timer.*) de la maison avec la même durée.';
-const EXAMPLE_SCRIPT_YAML = `alias: Ensemble de minuterie
+const EXAMPLE_SCRIPT_ID = 'minuterie_automatique_des_lumieres';
+const EXAMPLE_SCRIPT_TITLE = 'Minuterie automatique des lumières';
+const EXAMPLE_SCRIPT_DESCRIPTION =
+  "Démarre la minuterie d'une lumière dès qu'elle s'allume, l'annule dès qu'elle change d'état " +
+  "autrement. Éteint automatiquement la lumière à l'expiration de sa minuterie. Délai par défaut " +
+  '24h, réglable timer par timer (Paramètres > Appareils et services > Aides).';
+// Automatisation (pas un script.* — voir échange avec l'utilisateur, 18/08/2026 : un script n'a
+// aucun déclencheur propre, HA ne peut pas réagir seul à un changement d'état depuis un script).
+// Nom du timer dérivé directement du suffixe d'entity_id de la lumière (ScriptsHaService::
+// buildHelperName) — calcul Jinja symétrique ici, sans accès à la taxonomie interne de dimotic-ha.
+//
+// ⭐ 19/08/2026, correctif suite à incident réel (ha2, 18/08/2026, ~1h20 hors service) : le
+// déclencheur était `event_type: state_changed` SANS filtre d'entité au niveau du déclencheur
+// lui-même (le filtre `entity_id.split('.')[0] == 'light'` n'était qu'une condition évaluée APRÈS
+// déclenchement) — l'automatisation se redéclenchait sur SON PROPRE changement d'état (chaque
+// exécution modifie `current`/`last_triggered`, lui-même un `state_changed`), boucle infinie
+// auto-entretenue. Remplacé par `platform: state` avec une liste explicite d'`entity_id` (les
+// lumières réellement surveillées) — exclut par construction l'automatisation elle-même et toute
+// entité non concernée, un filtre en condition après coup ne suffit pas. La liste est maintenue à
+// jour par `syncExampleAutomationTrigger()`, appelée depuis la même réconciliation qui crée les
+// timers manquants (voir reconcileEntityHelpers) — jamais codée en dur, jamais désynchronisée des
+// timers eux-mêmes.
+function buildTriggerEntityIdBlock(lightEntityIds: string[]): string {
+  if (lightEntityIds.length === 0) return '    entity_id: []';
+  return `    entity_id:\n${lightEntityIds.map((id) => `      - ${id}`).join('\n')}`;
+}
+
+function buildExampleAutomationYaml(lightEntityIds: string[]): string {
+  return `alias: Minuterie automatique des lumières
 description: >-
-  Démarre en une fois toutes les minuteries (timer.*) de la maison avec la même durée.
-mode: single
-fields:
-  duree:
-    name: Durée
-    description: Durée à appliquer à chaque minuterie
-    example: "00:10:00"
-    default: "00:10:00"
-sequence:
-  - repeat:
-      for_each: "{{ states.timer | map(attribute='entity_id') | list }}"
-      sequence:
-        - service: timer.start
-          target:
-            entity_id: "{{ repeat.item }}"
-          data:
-            duration: "{{ duree | default('00:10:00') }}"
+  Démarre la minuterie d'une lumière dès qu'elle s'allume, l'annule dès qu'elle change d'état
+  autrement. Éteint automatiquement la lumière à l'expiration de sa minuterie. Délai par défaut
+  24h, réglable timer par timer (Paramètres > Appareils et services > Aides).
+mode: queued
+max: 100
+trigger:
+  - platform: state
+    id: light_changed
+${buildTriggerEntityIdBlock(lightEntityIds)}
+  - platform: event
+    event_type: timer.finished
+    id: timer_expired
+condition: []
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: light_changed
+          - condition: template
+            value_template: >-
+              {{ trigger.from_state is not none and trigger.to_state is not none
+                 and trigger.from_state.state != trigger.to_state.state }}
+        sequence:
+          - variables:
+              timer_id: "timer.minuterie_{{ trigger.entity_id.split('.')[1] }}"
+          - condition: template
+            value_template: "{{ states(timer_id) not in ['unknown', 'unavailable'] }}"
+          - choose:
+              - conditions:
+                  - "{{ trigger.to_state.state == 'on' }}"
+                sequence:
+                  - service: timer.start
+                    target:
+                      entity_id: "{{ timer_id }}"
+              - conditions:
+                  - "{{ trigger.to_state.state != 'on' }}"
+                sequence:
+                  - service: timer.cancel
+                    target:
+                      entity_id: "{{ timer_id }}"
+      - conditions:
+          - condition: trigger
+            id: timer_expired
+          - condition: template
+            value_template: "{{ trigger.event.data.entity_id.startswith('timer.minuterie_') }}"
+        sequence:
+          - variables:
+              light_id: "light.{{ trigger.event.data.entity_id.split('.')[1].replace('minuterie_', '', 1) }}"
+          - condition: template
+            value_template: "{{ states(light_id) not in ['unknown', 'unavailable'] }}"
+          - service: light.turn_off
+            target:
+              entity_id: "{{ light_id }}"
 `;
+}
 
 export class ScriptsHaService implements IScriptsHaService {
   private readonly scriptsManager: ConfigFileManager<ScriptsConfigFile>;
@@ -173,20 +235,25 @@ export class ScriptsHaService implements IScriptsHaService {
 
     const now = new Date().toISOString();
     fs.mkdirSync(this.scriptsDir, { recursive: true });
-    fs.writeFileSync(path.join(this.scriptsDir, `${EXAMPLE_SCRIPT_ID}.yaml`), EXAMPLE_SCRIPT_YAML, 'utf8');
+    // Liste de lumières vide au départ (déclencheur inerte tant qu'aucune n'est détectée) — voir
+    // syncExampleAutomationTrigger(), qui la maintient à jour dès la première diffusion.
+    fs.writeFileSync(path.join(this.scriptsDir, `${EXAMPLE_SCRIPT_ID}.yaml`), buildExampleAutomationYaml([]), 'utf8');
 
     this.scripts.push({
       id: EXAMPLE_SCRIPT_ID,
       title: EXAMPLE_SCRIPT_TITLE,
       description: EXAMPLE_SCRIPT_DESCRIPTION,
       originalFilename: `${EXAMPLE_SCRIPT_ID}.yaml`,
+      haDomain: 'automation',
       deployed: false,
       createdAt: now,
       provisioning: {
         watchDomain: 'light',
         helperDomain: 'timer',
         namePrefix: 'Minuterie',
-        helperData: { duration: '00:10:00' }
+        // 24h par défaut (demande utilisateur) — réglable ensuite timer par timer directement
+        // dans HA (Paramètres > Appareils et services > Aides), jamais recalculé par ce service.
+        helperData: { duration: '24:00:00' }
       }
     });
     this.scriptsManager.save({ scripts: this.scripts });
@@ -257,6 +324,7 @@ export class ScriptsHaService implements IScriptsHaService {
         title,
         description,
         originalFilename: data.filename,
+        haDomain: 'script',
         deployed: false,
         createdAt: now
       });
@@ -298,7 +366,7 @@ export class ScriptsHaService implements IScriptsHaService {
     this.eventBus.emitGeneric('ha:rest:request', {
       appId: 'scriptsha',
       method: 'set',
-      domain: 'script',
+      domain: entry.haDomain,
       id,
       config
     });
@@ -316,7 +384,7 @@ export class ScriptsHaService implements IScriptsHaService {
     this.eventBus.emitGeneric('ha:rest:request', {
       appId: 'scriptsha',
       method: 'delete',
-      domain: 'script',
+      domain: entry.haDomain,
       id
     });
   }
@@ -342,7 +410,7 @@ export class ScriptsHaService implements IScriptsHaService {
       // Provisionnement générique (voir §Provisionnement plus bas) : tout script diffusé portant
       // un `provisioning` déclenche la réconciliation, quel que soit son id.
       if (action === 'deploy' && entry.provisioning) {
-        void this.reconcileEntityHelpers(entry.provisioning);
+        void this.reconcileEntityHelpers(entry.id, entry.provisioning);
       }
     } else {
       this.emitError(`Échec ${action === 'deploy' ? 'de la diffusion' : 'du retrait'}: ${data.error}`, data.id);
@@ -450,27 +518,69 @@ export class ScriptsHaService implements IScriptsHaService {
       if (!entry.deployed || !entry.provisioning) continue;
       if (!this.matchesWatchCondition({ entity_id: data.entity_id }, data.domain, entry.provisioning)) continue;
       this.logger.info('ScriptsHaService', `Nouvelle entité détectée (${data.entity_id}, domaine ${data.domain}) — réconciliation pour "${entry.title}"`);
-      void this.reconcileEntityHelpers(entry.provisioning);
+      void this.reconcileEntityHelpers(entry.id, entry.provisioning);
     }
   }
 
-  /** Nom d'un helper pour une entité surveillée — convention QUOI---OÙ du projet (même patron que
-   *  rpigpio::buildQuoiOuLabel) : `namePrefix` remplace le "quoi" (pas la peine de répéter celui
-   *  de l'entité elle-même), le "où" vient de la taxonomie déjà calculée par le core
-   *  (TaxonomyHaClassifier) — lieu_precis ignoré s'il est identique à lieu_principal. Repli sur le
-   *  suffixe brut de l'entity_id si aucune taxonomie n'est disponible. */
+  /**
+   * Nom d'un helper pour une entité surveillée — dérivé directement et simplement du suffixe de
+   * l'entity_id (`namePrefix` + suffixe), volontairement PAS de la taxonomie QUOI/OÙ pourtant déjà
+   * disponible (`entity.taxonomy`, voir HaHelperBridge). Choix délibéré (demande utilisateur,
+   * 18/08/2026) : une automatisation HA qui doit retrouver le helper d'une entité donnée ne parle
+   * qu'en Jinja, sans accès à la taxonomie interne de dimotic-ha (jamais republiée dans les vrais
+   * attributs HA) — seul un calcul simple et déterministe à partir de l'entity_id natif (que
+   * l'automatisation connaît déjà) permet ce calcul des deux côtés indépendamment. La taxonomie
+   * reste renvoyée par HaHelperBridge pour un futur besoin purement "affichage humain", sans
+   * contrainte de recalcul côté HA. */
   private buildHelperName(entity: HaEntitySummary, provisioning: ProvisioningConfig): string {
-    const t = entity.taxonomy;
-    if (!t || (!t.lieuPrincipal && !t.lieuPrecis)) {
-      return `${provisioning.namePrefix} ${entity.entity_id.replace(/^[^.]+\./, '')}`;
+    return `${provisioning.namePrefix} ${entity.entity_id.replace(/^[^.]+\./, '')}`;
+  }
+
+  /**
+   * Maintient le déclencheur `platform: state` de l'automatisation minuterie synchronisé avec les
+   * lumières réellement surveillées (voir le commentaire au-dessus de `buildExampleAutomationYaml`
+   * pour le pourquoi — corrige l'incident du 18/08/2026). Idempotent par construction : compare la
+   * liste calculée à celle déjà écrite sur disque, ne réécrit/ne redéploie QUE si elle a changé —
+   * sans cette garde, le redéploiement lui-même déclencherait une nouvelle réconciliation
+   * (handleHaRestResult), qui rappellerait cette méthode indéfiniment.
+   */
+  private syncExampleAutomationTrigger(lightEntityIds: string[]): void {
+    const entry = this.scripts.find((s) => s.id === EXAMPLE_SCRIPT_ID);
+    if (!entry || !entry.deployed) return;
+
+    const filePath = path.join(this.scriptsDir, `${EXAMPLE_SCRIPT_ID}.yaml`);
+    let currentEntityIds: string[] = [];
+    try {
+      const currentDoc = yaml.load(fs.readFileSync(filePath, 'utf8')) as {
+        trigger?: Array<{ id?: string; entity_id?: string[] }>;
+      };
+      currentEntityIds = currentDoc?.trigger?.find((t) => t.id === 'light_changed')?.entity_id ?? [];
+    } catch {
+      // Fichier absent/illisible : on considère qu'il faut (re)générer.
     }
-    const segments: string[] = [];
-    const precisDistinct = t.lieuPrecis && t.lieuPrecis.toLowerCase() !== t.lieuPrincipal?.toLowerCase();
-    if (precisDistinct) segments.push(t.lieuPrecis!);
-    if (t.lieuPrincipal) segments.push(t.lieuPrincipal);
-    if (t.lieuPere) segments.push(t.lieuPere);
-    if (t.lieuGrandPere) segments.push(t.lieuGrandPere);
-    return `${provisioning.namePrefix}---${segments.join('--')}`;
+
+    const sortedNew = [...lightEntityIds].sort();
+    const sortedCurrent = [...currentEntityIds].sort();
+    if (JSON.stringify(sortedNew) === JSON.stringify(sortedCurrent)) return; // déjà à jour
+
+    const yamlContent = buildExampleAutomationYaml(lightEntityIds);
+    fs.writeFileSync(filePath, yamlContent, 'utf8');
+    entry.updatedAt = new Date().toISOString();
+    this.scriptsManager.save({ scripts: this.scripts });
+
+    this.logger.info(
+      'ScriptsHaService',
+      `Minuterie : liste des lumières surveillées mise à jour (${lightEntityIds.length} lumière(s)), redéploiement`
+    );
+    this.pendingAction.set(EXAMPLE_SCRIPT_ID, 'deploy');
+    this.emitScripts();
+    this.eventBus.emitGeneric('ha:rest:request', {
+      appId: 'scriptsha',
+      method: 'set',
+      domain: entry.haDomain,
+      id: EXAMPLE_SCRIPT_ID,
+      config: yaml.load(yamlContent)
+    });
   }
 
   /**
@@ -481,7 +591,7 @@ export class ScriptsHaService implements IScriptsHaService {
    * `provisioning` (handleHaRestResult) et à chaque nouvelle entité détectée tant qu'il reste
    * diffusé (handleEntityUpdated).
    */
-  private async reconcileEntityHelpers(provisioning: ProvisioningConfig): Promise<void> {
+  private async reconcileEntityHelpers(scriptId: string, provisioning: ProvisioningConfig): Promise<void> {
     if (this.reconcilingProvisioning) {
       this.logger.debug('ScriptsHaService', 'Réconciliation déjà en cours, ignorée');
       return;
@@ -507,6 +617,13 @@ export class ScriptsHaService implements IScriptsHaService {
       const namesUsedThisPass = new Set<string>();
 
       const watched = entitiesResult.entities.filter((e) => this.matchesWatchCondition(e, entitiesResult.domain, provisioning));
+
+      // Spécifique à la minuterie (pas généralisé, comme le reste de ses particularités — voir
+      // buildExampleAutomationYaml) : garde le déclencheur `platform: state` de l'automatisation
+      // synchronisé avec les lumières réellement surveillées, à chaque réconciliation.
+      if (scriptId === EXAMPLE_SCRIPT_ID) {
+        this.syncExampleAutomationTrigger(watched.map((e) => e.entity_id));
+      }
 
       const toCreate: Array<{ entity: HaEntitySummary; name: string }> = [];
       for (const entity of watched) {
