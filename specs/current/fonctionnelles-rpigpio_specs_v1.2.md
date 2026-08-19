@@ -1,5 +1,14 @@
 # Spécifications Fonctionnelles - Module RPIGPIO
 
+*Version 1.2 - 19 Août 2026*
+*Déploiement en conditions réelles sur `stfort` (192.168.1.53) : 3 pins réels (relais/lumière,
+radiateur, journuit — anciennement gérés en direct par un module `/dev/mem` de l'ancien système
+`dimotic`), agent mqtt-io vérifié en ligne (§7.3, caveat "non vérifié" de la v1.1 levé). L'ancien
+système continue de piloter ces 3 relais via son code métier inchangé, mais un pont de
+compatibilité (hors périmètre de ce dépôt, voir §2.5) redirige désormais son accès GPIO bas niveau
+vers ce module plutôt que vers le matériel directement. Correction de topic (§4.1bis, nouveau)
+trouvée en vérification empirique. Ancienne version v1.1 archivée.*
+
 *Version 1.1 - 16 Août 2026*
 *Migration en process séparé (`fonctionnelles-supervisor_specs` v2.6, IPC — §2.4, nouvelle) +
 présence de l'agent mqtt-io distant, lecture seule (§7.3, nouvelle) : `RpigpioService` s'abonne au
@@ -18,12 +27,14 @@ posteriori) — application créée et déployée en conditions réelles au cour
 1. [Introduction](#1-introduction)
 2. [Architecture](#2-architecture)
     - 2.4 [Process séparé (v1.1)](#24-process-séparé-nouveau-v11-16082026)
+    - 2.5 [Pont de compatibilité avec l'ancien système (v1.2)](#25-pont-de-compatibilité-avec-lancien-système-nouveau-v12-19082026)
 3. [Modèle de données](#3-modèle-de-données)
 4. [Génération de la configuration mqtt-io](#4-génération-de-la-configuration-mqtt-io)
+    - 4.1bis [Topic de commande réel — segment `output`](#41bis-topic-de-commande-réel--segment-output-nouveau-v12-19082026)
 5. [Déploiement Docker](#5-déploiement-docker)
 6. [Configuration](#6-configuration)
 7. [Interface Web et Socket.io](#7-interface-web-et-socketio)
-    - 7.3 [Présence de l'agent mqtt-io (v1.1)](#73-présence-de-lagent-mqtt-io-lwt-lecture-seule--nouveau-v11-16082026)
+    - 7.3 [Présence de l'agent mqtt-io (v1.1, vérifiée v1.2)](#73-présence-de-lagent-mqtt-io-lwt-lecture-seule--nouveau-v11-16082026)
 8. [Limites et Contraintes Connues](#8-limites-et-contraintes-connues)
 9. [Arborescence des Programmes](#9-arborescence-des-programmes)
 10. [Annexes](#10-annexes)
@@ -38,7 +49,7 @@ posteriori) — application créée et déployée en conditions réelles au cour
 "ce n'est que le paramétrage") pour des pins GPIO exposées via l'outil tiers **mqtt-io**
 (`flyte/mqtt-io`, ex `pi-mqtt-gpio`) : saisie quoi/où par pin, numéro de pin (BCM), inversion,
 direction (entrée/sortie), puis génération + déploiement du `config.yaml` de mqtt-io et de son
-conteneur Docker sur une machine cible (ha2 ou orangepi).
+conteneur Docker sur une machine cible.
 
 L'application ne parle **jamais** GPIO, MQTT ni HA directement — elle ne fait que produire de la
 configuration et la déployer par SSH. Le pilotage matériel réel est entièrement délégué au
@@ -56,10 +67,33 @@ conteneur mqtt-io déployé.
 
 ### 1.3 Pourquoi Docker ici et pas pour teleinfo (application sœur)
 
-Décision explicite de l'utilisateur, confirmée après vérification technique : ha2/orangepi sont
-des machines suffisamment capables (Node 20 officiel disponible en `arm64`) pour tourner en
-Docker, contrairement au RPi1 cible de `teleinfo` (ARMv6, aucun build Node officiel récent — voir
-`fonctionnelles-teleinfo_specs` §1.3).
+Décision explicite de l'utilisateur, confirmée après vérification technique : les machines cibles
+utilisées (ha2, orangepi, stfort) sont suffisamment capables (Node 20 officiel disponible en
+`arm64`/`armv7`) pour tourner en Docker, contrairement au RPi1 cible de `teleinfo` (ARMv6, aucun
+build Node officiel récent — voir `fonctionnelles-teleinfo_specs` §1.3).
+
+### 1.4 Déploiement réel actuel (⭐ v1.2, 19/08/2026)
+
+L'application tourne **sur `stfort`** (192.168.1.53), au sein de son propre conteneur
+`dimotic-ha` (retirée de son `disabledApps`) — pas depuis une autre machine ciblant stfort par
+SSH. `target.sshUser`/`target.sshKeyPath` sont donc **volontairement laissés vides** dans sa
+configuration : un futur changement de pins nécessite un redéploiement manuel depuis une machine
+ayant un accès SSH root à stfort (voir §6.1, décision explicite de ne pas donner à l'application le
+moyen de se redéployer elle-même sur la même machine — aurait nécessité de stocker une clé privée
+SSH dans son propre volume de données).
+
+3 pins réelles en production, toutes en sortie :
+
+| `id` | `quoi` | `lieu` | Pin BCM | Inversé |
+|---|---|---|---|---|
+| `15` | lumiere | relais (précis : relais15) | 22 | non |
+| `13` | radiateur | salle de bain du bas | 27 | oui |
+| `7` | journuit | grenier (précis : petit grenier) | 4 | non |
+
+`id` choisi comme la position **physique** du connecteur (pas un slug `quoi_lieu` comme documenté
+en §3.1) — convention volontaire pour permettre au pont de compatibilité (§2.5) de calculer le
+topic mqtt-io directement depuis le numéro qu'expose déjà l'ancien système, sans table de
+correspondance à maintenir.
 
 ---
 
@@ -121,16 +155,39 @@ ha_discovery:
 mqtt-io fait un `dict.update()` (fusion non profonde) sur ce bloc — l'override **remplace**
 entièrement le device par défaut pour cette pin, sans affecter les autres.
 
-### 2.4 Process séparé (⭐ nouveau v1.1, 16/08/2026)
+### 2.4 Process séparé (⭐ v1.1, 16/08/2026)
 
 `RPIGPIO_APP.runsAsSeparateProcess = true` — l'application tourne dans son propre process OS,
 démarré par `ProcessSupervisor` (`applications/rpigpio/src/standalone.ts`), plutôt qu'in-process
 avec `core`. Architecture générique détaillée dans `fonctionnelles-supervisor_specs` (pas dupliquée
 ici) — aucun changement du code métier propre à `RpigpioService.ts`, le contrat de factory
 (`createRpigpioServiceWithConfig(eventBus, logger, configProvider)`) reste identique, seul
-l'`eventBus` injecté change de nature (`IpcEventBus` au lieu de l'`EventBus` in-process). Premier
-test grandeur nature du pontage UI Socket.io d'une app séparée (avant `rpigpio`, seule `espdisplay`
-avait été migrée, sans interface Socket.io) — voir `fonctionnelles-supervisor_specs` §14.7.
+l'`eventBus` injecté change de nature (`IpcEventBus` au lieu de l'`EventBus` in-process).
+
+### 2.5 Pont de compatibilité avec l'ancien système (⭐ nouveau v1.2, 19/08/2026)
+
+Sur `stfort`, l'ancien système `dimotic` (`zdidnodesuperdimotic`) continue de gérer ces 3 relais
+via son propre module GPIO (`zdidnodegpio`, historiquement basé sur le paquet npm `rpio`,
+accès direct `/dev/mem`) — **son code métier n'a pas été touché**. Un pont
+(`gpiobridge.js`, hors périmètre de ce dépôt, vit dans l'arborescence de l'ancien système sur
+stfort) remplace uniquement l'accès bas niveau : `gpioserv.js` importe désormais `global.rpio`
+au lieu du vrai module `rpio`, posé par `appmean.js` avant son chargement. `gpiobridge.js` expose
+la même interface minimale que `rpio` (`init`/`open`/`close`/`write` — `read`/`poll` non
+implémentés, aucun device GPIO en entrée n'étant déclaré sur ce site) et relaie les écritures vers
+ce module en MQTT, sur le broker **local** de stfort (le GPIO physique n'étant pas déportable,
+contrairement au port série RFXCOM, aucune chaîne de pont mosquitto inter-machines n'est
+nécessaire ici — voir `techniques-socle-ha-mqtt_specs` §8.5.4bis pour le mécanisme équivalent côté
+RFXCOM, qui lui en a besoin).
+
+Même principe que le pont de compatibilité RFXCOM (`rfxcombridge.js`, voir `INSTALLATION.md` partie
+B) — non documenté plus en détail ici pour la même raison : ce code vit en dehors de ce dépôt, sans
+gestion de version formelle, et n'est pas un composant `dimotic-ha`.
+
+**Vérifié en conditions réelles (19/08/2026)** : commande envoyée par `gpiobridge.js` (isolément,
+hors du flux complet de l'ancien système) → relais réel confirmé activé/désactivé, état
+correctement republié sur `mqttio/rpigpio/rpigpio_bridge_stfort/output/15`. Le trajet complet
+depuis l'interface historique de l'ancien système (dimoweb) jusqu'au relais n'a en revanche pas été
+vérifié (structure exacte du message de commande interne à l'ancien système non explorée).
 
 ---
 
@@ -140,7 +197,7 @@ avait été migrée, sans interface Socket.io) — voir `fonctionnelles-supervis
 
 | Champ | Type | Obligatoire | Description |
 |---|---|---|---|
-| `id` | string | oui (généré) | Slug `quoi_lieu` (dédupliqué si collision), utilisé comme `name` mqtt-io (topic) et suffixe de `identifiers` |
+| `id` | string | oui (généré ou choisi) | Slug `quoi_lieu` par défaut (dédupliqué si collision), utilisé comme `name` mqtt-io (topic) et suffixe de `identifiers` — **mais peut être choisi manuellement** (ex : position physique du connecteur, voir §1.4, §2.5) quand une convention externe l'exige |
 | `quoi` | string | oui | Taxonomie QUOI |
 | `lieuPrecis` | string | non | Taxonomie OÙ, niveau précis |
 | `lieu` | string | oui | Taxonomie OÙ, niveau principal |
@@ -151,12 +208,15 @@ avait été migrée, sans interface Socket.io) — voir `fonctionnelles-supervis
 | `inverted` | boolean | oui (défaut `false`) | Niveau bas = actif |
 
 `id` est généré côté serveur (`RpigpioService::generatePinId`) à partir de `slugify(quoi_lieu)`,
-avec suffixe numérique en cas de collision — jamais saisi directement par l'utilisateur.
+avec suffixe numérique en cas de collision, sauf saisie manuelle explicite (cas du pont de
+compatibilité, §2.5, où l'`id` doit être calculable par un tiers externe sans table de
+correspondance).
 
 ### 3.2 Persistance
 
 `data/rpigpio/rpigpio-pins-v1.0.yaml` — tableau `pins: PinDefinition[]`, aucune limite de nombre
-(contrairement à `teleinfo`, pas de contrainte matérielle de type "bascule à 2 positions").
+(contrairement à `teleinfo`, pas de contrainte matérielle de type "bascule à 2 positions"). Sur
+stfort, ce fichier contient les 3 pins réelles de §1.4.
 
 ---
 
@@ -167,6 +227,17 @@ avec suffixe numérique en cas de collision — jamais saisi directement par l'u
 Le schéma mqtt-io (`config.yaml` : `mqtt`, `gpio_modules`, `digital_inputs`, `digital_outputs`) a
 été vérifié directement contre `docs_src/schema.json` et `home_assistant.py` du dépôt
 `flyte/mqtt-io` le 12/08/2026 — pas deviné depuis une documentation tierce potentiellement obsolète.
+
+### 4.1bis Topic de commande réel — segment `output` (⭐ nouveau v1.2, 19/08/2026)
+
+**Vérifié empiriquement** (`mosquitto_pub`/`sub` contre un déploiement réel, 19/08/2026) : le topic
+de commande d'une sortie mqtt-io est `<topic_prefix>/output/<name>/set` (état publié sur
+`<topic_prefix>/output/<name>`) — le segment `output` est **fixe côté mqtt-io**
+(`server.py::_init_digital_outputs::publish_callback`), pas configurable, et n'apparaît nulle part
+dans `generator.ts` ni dans ce document avant cette version. Tout code externe qui construit ce
+topic à la main (le pont de compatibilité, §2.5) doit l'inclure explicitement — erreur réelle
+trouvée et corrigée dans `gpiobridge.js` avant sa mise en service. Payload confirmé : chaînes `ON`/
+`OFF`.
 
 ### 4.2 `discoveryPrefix` — jamais `homeassistant/` directement
 
@@ -181,6 +252,14 @@ l'accès GPIO — l'image `flyte/mqtt-io` bascule sur un utilisateur non-root en
 mqtt_io` dans son Dockerfile), qui n'a pas accès à `/dev/mem` malgré le mode privilégié du
 conteneur (permissions du fichier, pas des capacités du conteneur). `user: '0:0'` dans le
 `compose.yaml` généré court-circuite ce `USER` de l'image.
+
+**Comportement au démarrage vérifié en conditions réelles (19/08/2026)** : sans `publish_initial`
+(non exposé par l'IHM, jamais renseigné dans le `config.yaml` généré), mqtt-io **lit** l'état
+existant du pin (`GPIO.setup(..., initial=-1)`, sémantique "ne rien piloter", puis lecture) et le
+republie — il ne force **aucun** niveau au démarrage. Comportement volontairement conservé tel
+quel : ne pas exposer `initial` dans l'IHM évite qu'une source de vérité concurrente (ce module)
+impose un état qui pourrait contredire celui attendu par un système tiers gérant encore le même
+pin (cas du pont de compatibilité, §2.5).
 
 ---
 
@@ -199,6 +278,10 @@ conteneur (permissions du fichier, pas des capacités du conteneur). `user: '0:0
    resterait sans effet tant que le conteneur n'est pas relancé manuellement.
 5. `docker inspect --format '{{.State.Status}}'` — statut retourné à l'IHM.
 
+Sur stfort, `target.sshUser`/`target.sshKeyPath` sont vides (§1.4) — cette séquence n'est
+aujourd'hui déclenchable que depuis une autre machine ayant un accès SSH root à stfort, pas depuis
+l'IHM de stfort elle-même.
+
 ### 5.2 Conteneur généré
 
 `--privileged` + `network_mode: host` + `user: '0:0'` — même convention que le conteneur
@@ -214,15 +297,15 @@ mqtt_io /config.yml`).
 
 | Champ | Type | Défaut | Utilisation |
 |---|---|---|---|
-| `target.host` | string | `''` | Hôte SSH (ha2/orangepi) |
-| `target.sshUser` | string | `claude` | Utilisateur SSH dédié (même convention que `docker/rebuild-and-deploy.sh`) |
+| `target.host` | string | `''` | Hôte SSH — peut être la machine locale elle-même (stfort, §1.4) |
+| `target.sshUser` | string | `claude` | Utilisateur SSH dédié (même convention que `docker/rebuild-and-deploy.sh`) — laissé vide si aucun redéploiement automatique n'est voulu (§1.4) |
 | `target.sshKeyPath` | string | `''` | Chemin **local** vers la clé privée SSH (jamais son contenu) |
 | `target.hostDir` | string | `/docker/mqttio-rpigpio` | Répertoire distant (`compose.yaml` + `config.yml`) |
 | `target.containerName` | string | `mqtt-io-rpigpio` | Nom du conteneur ET du service dans le compose |
 | `target.image` | string | `flyte/mqtt-io:2.6.0` | Épinglée à une version numérotée, pas `:latest`/`:develop` |
-| `mqtt.host`/`mqtt.port` | string/number | `''`/`1883` | Broker que **mqtt-io** utilisera (pas le socle) |
+| `mqtt.host`/`mqtt.port` | string/number | `''`/`1883` | Broker que **mqtt-io** utilisera (pas le socle) — broker local de la machine cible si l'application y tourne elle-même |
 | `mqtt.user`/`mqtt.password` | string | `''` | Identifiants MQTT — en clair dans `data/rpigpio/config.yaml`, comme le reste du projet |
-| `mqtt.topicPrefix` | string | `mqttio/rpigpio` | Topics état/commande mqtt-io |
+| `mqtt.topicPrefix` | string | `mqttio/rpigpio` | Topics état/commande mqtt-io (voir §4.1bis pour le segment `output` additionnel) |
 | `mqtt.discoveryPrefix` | string | `homeassist` | Voir §4.2 |
 
 ### 6.2 Formulaire générique ("Paramètres Techniques → RPIGPIO")
@@ -282,11 +365,10 @@ timestamp porté par le payload mqtt-io lui-même).
 reçu), `agentLastSeenAt: string | null`. Dashboard : champs "Agent mqtt-io" (En ligne/Hors
 ligne/Inconnu) et "Dernier contact".
 
-⚠️ **Non vérifié en conditions réelles** : le conteneur mqtt-io réel sur `ha2` n'a pas été
-redéployé avec le nouveau format de topic incluant `bridgeInstance` (contrainte "pas de contact
-ha2/orangepi" en vigueur cette session) — affiche "Inconnu" en pratique aujourd'hui, cohérent avec
-l'absence de redéploiement, pas un défaut du mécanisme. À vérifier au prochain redéploiement
-autorisé de mqtt-io sur `ha2`.
+**✅ Vérifié en conditions réelles (⭐ v1.2, 19/08/2026)** : déploiement réel sur stfort, `agentOnline`
+confirmé `true` après démarrage du conteneur mqtt-io (`pinsCount: 3, agentOnline: true` observé sur
+`rpigpio:status`). Le caveat "non vérifié" de la v1.1 (contrainte "pas de contact ha2/orangepi",
+alors en vigueur) est levé.
 
 ---
 
@@ -299,9 +381,11 @@ autorisé de mqtt-io sur `ha2`.
 | Aucune détection de collision de numéro de pin | Deux `PinDefinition` pourraient viser le même GPIO physique sans avertissement | Non corrigé |
 | Pas de suivi de dérive config↔déploiement | L'IHM ne sait pas si la configuration stockée correspond à ce qui tourne réellement sur la cible (seul le résultat du dernier clic "Déployer" est visible) | Non corrigé |
 | `docker restart` à chaque déploiement | Coupure de service de quelques secondes (acceptable en usage domestique, pas de rolling update) | Accepté |
-| `pullup`/`pulldown`/`initial`/`timed_set_ms` de mqtt-io non exposés | Fonctionnalités mqtt-io disponibles mais non paramétrables depuis l'IHM | Non implémenté |
+| `pullup`/`pulldown`/`initial`/`timed_set_ms` de mqtt-io non exposés | Fonctionnalités mqtt-io disponibles mais non paramétrables depuis l'IHM — `initial` volontairement non exposé (§4.3, comportement par défaut jugé plus sûr) | Accepté |
 | Identifiants MQTT en clair dans `data/rpigpio/config.yaml` | Cohérent avec le reste du projet (aucun secret manager) | Accepté |
-| Présence de l'agent (§7.3) non vérifiée sur `ha2` réel | Conteneur mqtt-io non redéployé cette session (contrainte "pas de contact ha2/orangepi") — affiche "Inconnu" | Connu, à vérifier au prochain redéploiement autorisé |
+| Broker MQTT local de stfort sans authentification | N'importe quel process local peut publier une commande sur les 3 relais réels sans contrôle — même limite que RFXCOM sur le même broker | Non corrigé, connu |
+| Pas de redéploiement automatique depuis stfort (§1.4/§5.1) | Décision explicite (pas de clé SSH stockée dans le volume de données de l'application) | Accepté |
+| Trajet complet ancien système → relais non vérifié via l'interface historique (§2.5) | Seul un test isolé du pont a été fait, pas via dimoweb | Non vérifié |
 
 ---
 
@@ -334,7 +418,10 @@ applications/rpigpio/
 - [Spécifications Fonctionnelles TELEINFO](fonctionnelles-teleinfo_specs_v1.1.md) (application
   sœur, même principe de paramétrage/déploiement, cible non-Docker, même mécanisme de présence
   d'agent §6.5)
-- Dépôt source de mqtt-io : `github.com/flyte/mqtt-io` (schéma vérifié le 12/08/2026)
+- `INSTALLATION.md` (racine du dépôt), partie B — pont de compatibilité RFXCOM, même principe que
+  le pont GPIO (§2.5), pour la partie hors périmètre de ce dépôt
+- Dépôt source de mqtt-io : `github.com/flyte/mqtt-io` (schéma vérifié le 12/08/2026, topic
+  `output` vérifié le 19/08/2026 — §4.1bis)
 
 ### 10.2 Glossaire
 | Terme | Définition |
@@ -343,9 +430,11 @@ applications/rpigpio/
 | Pin | Une entrée ou sortie GPIO paramétrée (quoi/où, numéro, direction, inversion) |
 | `hostDir` | Répertoire sur la machine cible contenant `compose.yaml` + `config.yml` déployés |
 | LWT (agent) | Last Will and Testament MQTT natif de mqtt-io (`.../status`, `running`/`dead`) — suivi en lecture seule par `RpigpioService` depuis la v1.1 (§7.3) |
+| Pont de compatibilité | Code hors périmètre de ce dépôt (legacy, sans gestion de version formelle) redirigeant l'accès matériel bas niveau de l'ancien système `dimotic` vers un pilote `dimotic-ha` — voir §2.5 (GPIO) et `INSTALLATION.md` partie B (RFXCOM) |
 
 ### 10.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.2 | 2026-08-19 | Claude | **Déploiement réel sur stfort** (§1.4, nouveau) : 3 pins réelles (relais/lumière, radiateur, journuit — anciennement pilotées en direct par l'ancien système), `id` choisi manuellement (position physique) pour permettre un calcul de topic sans table de correspondance côté pont. **Pont de compatibilité avec l'ancien système** (§2.5, nouveau) : redirige l'accès GPIO bas niveau de `zdidnodegpio` vers ce module, même principe que le pont RFXCOM, non documenté en détail ici (hors périmètre du dépôt). **Correction de topic** (§4.1bis, nouveau) : segment `output` fixe côté mqtt-io, absent de `generator.ts` et non documenté avant cette version — trouvé et corrigé avant mise en service du pont. Comportement de démarrage de `initial` clarifié (§4.3) : lecture, pas écriture, par conception. Caveat "non vérifié" de la présence d'agent (§7.3) levé — vérifié en conditions réelles sur stfort. Application désormais déployée SANS moyen de se redéployer elle-même (décision explicite, §1.4/§5.1/§8). Ancienne version v1.1 archivée. |
 | 1.1 | 2026-08-16 | Claude | Migration en process séparé (§2.4, `runsAsSeparateProcess`/`standalone.ts`, architecture détaillée dans `fonctionnelles-supervisor_specs` v2.6) — premier test grandeur nature du pontage UI Socket.io d'une app séparée. Présence de l'agent mqtt-io distant, lecture seule (§7.3, nouveau) : `RpigpioStatus` étendu (`agentOnline`/`agentLastSeenAt`), dashboard mis à jour. Non vérifié en conditions réelles sur `ha2` (redéploiement du conteneur mqtt-io non autorisé cette session). Référence croisée techniques-socle mise à jour (v4.28→v4.30). Ancienne version v1.0 archivée. |
 | 1.0 | 2026-08-12 | Claude | Première spécification, application créée et déployée en conditions réelles (ha2) au cours de la session. Couvre l'architecture, le modèle de données, la génération de la configuration mqtt-io (device par pin), le déploiement Docker (bug `user:'0:0'` trouvé en conditions réelles), la configuration, l'UI/Socket.io, et les limites connues. |
