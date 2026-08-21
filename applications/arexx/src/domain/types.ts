@@ -53,4 +53,6 @@ export interface ArexxStatus {
   running: boolean;
   sensorsCount: number;
   lastReadingAt: string | null;
+  /** Port du serveur HTTP local (modes push/usb) — exposé pour la page Déploiement (§ scripts/deploy-sender.sh). */
+  httpservPort: number;
 }

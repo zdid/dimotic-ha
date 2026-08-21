@@ -79,7 +79,8 @@ export const AREXX_UI_METADATA: ModuleUiMetadata = {
           name: 'usbDevicePath',
           label: 'Périphérique USB (mode usb)',
           type: 'string',
-          placeholder: '/dev/ttyUSB0'
+          placeholder: '/dev/ttyUSB0',
+          description: "Dongle branché sur une autre machine que celle-ci ? Voir l'onglet « Déploiement » de l'application AREXX (script d'installation à copier sur la machine cible)."
         },
         {
           name: 'bridgeInstance',

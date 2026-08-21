@@ -22,6 +22,7 @@ import { extractTaxonomy, buildAttributsTaxonomie } from './taxonomy';
 import { PushReceiver } from './acquisition/PushReceiver';
 import { PollClient } from './acquisition/PollClient';
 import { UsbBridge } from './acquisition/UsbBridge';
+import { ensureDriversBundle } from './DriversBundle';
 
 const MODULE_NAME = 'arexx';
 
@@ -84,6 +85,8 @@ export class ArexxService implements IArexxService {
 
     this.sensorsConfig = this.configFileManager.load();
     this.sensorRegistry.loadConfigured(this.sensorsConfig.arexx_sensors as Record<string, ArexxSensorInfo>);
+
+    ensureDriversBundle(this.config, this.logger);
 
     this.setupSocketEventListeners();
 
@@ -247,7 +250,8 @@ export class ArexxService implements IArexxService {
       acquisitionMode: this.config.acquisitionMode,
       running: this.running,
       sensorsCount: this.sensorRegistry.getConfiguredSensors().length,
-      lastReadingAt: this.lastReadingAt
+      lastReadingAt: this.lastReadingAt,
+      httpservPort: this.config.httpservPort
     };
   }
 

@@ -1,6 +1,14 @@
 # Spécifications Fonctionnelles - Module AREXX
 
-*Version 1.1 - 4 Août 2026*
+*Version 1.2 - 21 Août 2026*
+*v1.2 : nouveau §5.4 "Déploiement sur une machine distante" — script
+`scripts/deploy-sender.sh` (détection d'architecture, installation systemd) + second binaire
+vendored `tl-500/` (source C portable, alternative à `rf_usb_http.elf` sur les architectures où ce
+dernier ne fonctionne pas — RPi 3/4/5 en arm64, limite déjà documentée en §5.3/§10 sous forme de
+commentaire de code, jamais formalisée ici avant cette version). Nouvel onglet "Déploiement" dans
+l'IHM (§9.2bis). `ArexxStatus` étendu (`httpservPort`, exposé pour préremplir la commande affichée
+à l'écran). Sans changement de comportement du service lui-même (`ArexxService`/`PushReceiver`
+inchangés).*
 *v1.1 : correction de la référence `ws-ha` → `dimotic-ha` (§5.1, projet renommé le 04/08/2026),
 sans changement fonctionnel.*
 *Version 1.0 - 3 Août 2026*
@@ -17,10 +25,12 @@ projet).*
 3. [Modes d'Acquisition](#3-modes-dacquisition)
 4. [Serveur HTTP Local](#4-serveur-http-local)
 5. [Mode USB (BS500)](#5-mode-usb-bs500)
+   - 5.4 [Déploiement sur une machine distante (v1.2)](#54-déploiement-sur-une-machine-distante-nouveau-v12-21082026)
 6. [Registre des Capteurs et Persistance](#6-registre-des-capteurs-et-persistance)
 7. [Taxonomie et Découverte HA](#7-taxonomie-et-découverte-ha)
 8. [Configuration](#8-configuration)
 9. [Interface Web et Socket.io](#9-interface-web-et-socketio)
+   - 9.2bis [Page dédiée "Déploiement" (v1.2)](#92bis-page-dédiée-déploiement-nouveau-v12-21082026)
 10. [Limites et Contraintes Connues](#10-limites-et-contraintes-connues)
 11. [Arborescence des Programmes](#11-arborescence-des-programmes)
 12. [Annexes](#12-annexes)
@@ -43,7 +53,8 @@ dans plusieurs fichiers du code) — `PushReceiver` porte son `HttpServ`, `PollC
 
 ### 1.2 Périmètre
 - **Inclus** : réception de relevés température/humidité (3 modes d'acquisition), classification
-  HA, publication MQTT (découverte + état), enregistrement/désenregistrement de capteurs via UI.
+  HA, publication MQTT (découverte + état), enregistrement/désenregistrement de capteurs via UI,
+  déploiement scripté du "sender" USB sur une machine distante (§5.4, nouveau v1.2).
 - **Exclus** : commandes HA→matériel (aucune, application read-only), configuration du matériel
   AREXX lui-même (BS1000/BS500), configuration broker MQTT (socle).
 
@@ -65,13 +76,14 @@ capteur→HA.
 |---|---|
 | `ArexxService.ts` | Orchestrateur unique : cycle de vie, backends d'acquisition, découverte/état HA, événements Socket.io, persistance |
 | `SensorRegistry.ts` | Registre en mémoire : capteurs configurés (persistés) vs découverts (session uniquement) |
+| `DriversBundle.ts` | ⭐ v1.2 — génère `data/arexx/drivers/` (bundle de déploiement distant, §5.4) à chaque démarrage |
 | `taxonomy.ts` | Extraction QUOI/OÙ — copie verbatim de celui de RFXCOM (pas de parseur partagé dans le socle) |
 | `yaml/ConfigFileManager.ts` | Chargement/sauvegarde atomique du YAML des capteurs |
 | `acquisition/PushReceiver.ts` | Serveur HTTP local Express (modes `push`/`usb`) |
 | `acquisition/PollClient.ts` | Client HTTP périodique vers le BS1000 (mode `poll`) |
 | `acquisition/UsbBridge.ts` | `spawn()` du binaire ARM vendored (mode `usb`) |
 | `config-schema.ts` / `devices-config-schema.ts` | Schémas Zod (config générale / capteurs) |
-| `types.ts` | `ArexxRawReading`, `ArexxSensorInfo`, `ArexxDiscoveredSensor`, `ArexxStatus` |
+| `types.ts` | `ArexxRawReading`, `ArexxSensorInfo`, `ArexxDiscoveredSensor`, `ArexxStatus` (`httpservPort` ajouté v1.2) |
 | `socket-events.ts` | Catalogue des événements Socket.io |
 | `index.ts` | Manifeste du module (`AREXX_APP`, `AREXX_UI_METADATA`, `AREXX_MENU_CONFIG`) |
 
@@ -144,10 +156,11 @@ silencieusement à démarrer dans ce cas, mais le statut global du service reste
 ### 3.3 `usb`
 
 BS500 branché en direct sur la machine hôte. **Hors Docker uniquement, architectures arm/v6 ou
-arm/v7** (le binaire vendored ne fonctionne pas sur arm64 — Raspberry Pi 3/4/5 en distribution
-64 bits — incident connu et remonté à Arexx). Détail complet en §5. **Démarre à la fois
-`UsbBridge` ET `PushReceiver`** — le binaire USB repousse ses lectures vers le serveur HTTP local,
-qui les traite exactement comme le mode `push`.
+arm/v7** (le binaire vendored `rf_usb_http.elf` ne fonctionne pas sur arm64 — Raspberry Pi 3/4/5
+en distribution 64 bits — incident connu et remonté à Arexx ; voir §5.4 pour l'alternative portable
+`tl-500` sur ces architectures). Détail complet en §5. **Démarre à la fois `UsbBridge` ET
+`PushReceiver`** — le binaire USB repousse ses lectures vers le serveur HTTP local, qui les traite
+exactement comme le mode `push`.
 
 ---
 
@@ -214,6 +227,77 @@ bibliothèque série Node.
 - **Le binaire n'est pas copié dans `dist`** au build — la résolution de chemin relative à
   `__dirname` ne fonctionne que depuis `src` (exécution en développement/`tsx`), pas depuis un
   build de production.
+- **⭐ `-v` (mode verbeux) + rejeu d'historique interne du dongle = charge CPU/logs élevée**,
+  constaté en conditions réelles le 21/08/2026 (machine `bs510`, ~155 lignes/s pendant plusieurs
+  minutes, `systemd-journald`/`rsyslogd` saturés). Le dongle TL-500 rejoue systématiquement tout
+  son historique interne à chaque (re)connexion, quel que soit le programme qui le lit (même
+  constat avec `tl-500`, §5.4) — le mode `-v` amplifie ce pic en loggant chaque lecture rejouée.
+  Le script de déploiement (§5.4) désactive `-v` par défaut pour cette raison.
+- **La ligne `Z` de `rulefile.txt` (condition, non supportée d'après le `ReadMe.txt` officiel du
+  binaire) doit être conservée telle quelle** — la retirer fait planter le programme au démarrage
+  (`close usb` immédiat), constaté empiriquement le 21/08/2026, malgré son statut "non supporté".
+
+### 5.4 Déploiement sur une machine distante (⭐ nouveau v1.2, 21/08/2026)
+
+Le dongle BS500 n'est pas toujours branché sur la même machine que l'application `arexx`
+elle-même — cas réel rencontré cette session (bs510, un Raspberry Pi 1 séparé, pousse ses relevés
+vers le récepteur `PushReceiver` d'une autre machine). Ni `UsbBridge` (spawn local uniquement) ni
+aucun autre mécanisme du dépôt n'automatisait jusqu'ici cette mise en place à distance — entièrement
+manuelle (copie SSH, compilation, rédaction à la main de la configuration).
+
+**Nouveau bundle vendored `applications/arexx/tl-500/`** : source C portable (base open-source
+`mochad`, licence LGPL), alternative à `rf_usb_http.elf` pour toute architecture où ce dernier ne
+fonctionne pas (arm64 notamment — voir §3.3). Compile et fonctionne identiquement en 32 et 64 bits
+— validé en conditions réelles cette session sur x86_64, ARM64 (Raspberry Pi 4) et ARMv6
+(Raspberry Pi 1), avec les mêmes capteurs détectés et les mêmes valeurs que `rf_usb_http.elf`
+(comparaison directe faite sur `bs510` : un seul capteur actif, `id=11719`, températures
+identiques des deux côtés).
+
+**⚠️ RSSI non calibré** : le champ `dbm`/`rssi` produit par `tl-500` est l'octet **brut** du
+paquet radio, pas un vrai dBm — contrairement à `rf_usb_http.elf`, qui renvoie une vraie valeur en
+dBm (négative, ex: -81 à -92). Aucune formule de conversion documentée trouvée (le `device.xml`
+vendored, §5.1, ne couvre que les types de mesure, pas la calibration du signal). Une seule paire
+de valeurs comparées empiriquement (insuffisant pour une régression fiable — il en faudrait
+plusieurs, à signal variable, capturées simultanément par les deux programmes). Ne pas interpréter
+cette valeur comme un dBm réel.
+
+**`data/arexx/drivers/` — bundle généré à chaque démarrage, PAS `applications/arexx/`** :
+`applications/arexx/` est figé dans l'image Docker au build (aucun volume dessus, voir Dockerfile
+racine) — inaccessible depuis l'hôte à l'exécution. `DriversBundle.ts::ensureDriversBundle()`,
+appelé depuis `ArexxService.start()`, copie (`fs.cpSync`, écrasement systématique — ce sont des
+copies statiques du code livré, sans risque) `scripts/`, `rf_usb_http_rpi_0_6/` et `tl-500/` depuis
+l'installation de l'application vers `data/arexx/drivers/` — un volume monté, donc réellement
+copiable par l'utilisateur même en déploiement Docker. Seul `target.txt` (voir plus bas) n'est créé
+QUE s'il est absent, pour ne jamais écraser une valeur déjà éditée.
+
+**`target.txt`** : fichier texte d'une ligne (`host:port`, adresse du récepteur AREXX à joindre
+depuis la machine cible), créé au premier démarrage avec un contenu-gabarit
+(`A_REMPLACER:<httpservPort réel>`) — le port est connu, l'hôte doit être édité manuellement par
+l'utilisateur (aucune tentative de deviner l'adresse IP réseau de la machine courante, jugé plus
+fragile qu'utile — même décision que documentée plus bas pour la page IHM, §9.2bis).
+
+**Script `scripts/deploy-sender.sh`** : à lancer en root, **sans argument** — lit l'adresse dans
+`target.txt` (fichier frère de `scripts/`, donc à la racine du dossier `drivers/` copié), rejette
+explicitement le contenu-gabarit non édité. Détecte l'architecture (`uname -m`) : `armv6l`/`armv7l`
+→ déploie `rf_usb_http.elf` ; toute autre architecture → compile `tl-500` sur place. Dans les deux
+cas : arrête un service déjà en cours AVANT d'écraser ses fichiers (`systemctl stop`, sinon `cp`
+échoue sur le binaire en cours d'exécution — trouvé en conditions réelles lors d'une réinstallation
+avec une nouvelle adresse), installe les dépendances système manquantes (`libusb-1.0-0` dans tous
+les cas ; `gcc`/`make`/`libusb-1.0-0-dev` seulement pour compiler `tl-500`), génère la configuration
+(`rulefile.txt`/`url.txt`) avec l'adresse lue, installe et démarre un service systemd persistant
+(`arexx-sender.service`, sans `-v` par défaut — voir §5.3). Idempotent.
+
+**Vérifié en conditions réelles (21/08/2026)** : dossier `data/arexx/drivers/` généré au démarrage
+(vérifié après un redémarrage : `scripts/`/`rf_usb_http_rpi_0_6/`/`tl-500/` rafraîchis, `target.txt`
+préservé s'il existait déjà) ; script testé avec le contenu-gabarit (rejeté, message clair), avec
+une adresse valide (accepté, bloqué ensuite sur le contrôle root — attendu hors root) ; installation
+complète sur `bs510` avec ce mécanisme, relevé du capteur réel reçu par l'application `arexx`
+tournant en local, chaîne bout en bout confirmée.
+
+**Documentation associée** : pointeur court dans le formulaire de paramétrage (description du
+champ `usbDevicePath`) + page dédiée "Déploiement" dans l'IHM de l'application (§9.2bis),
+expliquant la marche à suivre (éditer `target.txt`, copier tout `data/arexx/drivers/`, lancer le
+script sans argument).
 
 ---
 
@@ -313,11 +397,11 @@ par AREXX. Non corrigé à ce jour.
 |---|---|---|---|
 | `enabled` | boolean | `true` | Déclaré, **jamais lu** par le service (activation gérée au niveau dossier, voir `ApplicationManager`) |
 | `acquisitionMode` | enum `push`\|`poll`\|`usb` | `push` | §3 |
-| `httpservPort` | int positif | `49161` | §4 |
+| `httpservPort` | int positif | `49161` | §4 — exposé côté client via `arexx:status` depuis v1.2 (page Déploiement, §9.2bis) |
 | `bs1000Address` | string, optionnel | — | §3.2 |
 | `bs1000Port` | int positif | `80` | §3.2 |
 | `pollIntervalSeconds` | int, 5-300 | `50` | §3.2 |
-| `usbDevicePath` | string, optionnel | — | ⚠️ **déclaré, jamais lu** (le binaire USB découvre le dongle lui-même) |
+| `usbDevicePath` | string, optionnel | — | ⚠️ **déclaré, jamais lu** (le binaire USB découvre le dongle lui-même) — description étendue en v1.2 pour pointer vers la page Déploiement |
 | `bridgeInstance` | string | `arexx_bridge_0001` | Enregistrement/désenregistrement du bridge, découverte, état |
 | `sensorsConfigFile` | string | `arexx-sensors-v1.0.yaml` | Chemin du fichier capteurs |
 
@@ -343,7 +427,7 @@ d'un mode "push" qui n'a besoin ni de `bs1000Address` ni de `pollIntervalSeconds
 - Grille : Mode (chaîne brute), Capteurs paramétrés (compteur), Dernier relevé (horodatage ou
   `--`).
 - Liste des capteurs récemment détectés non paramétrés (masquée si vide).
-- Bouton "Rafraîchir" et lien vers la page dédiée "⚙️ Capteurs".
+- Bouton "Rafraîchir" et liens vers les pages dédiées "⚙️ Capteurs" et "📦 Déploiement" (v1.2).
 - N'affiche jamais les valeurs des capteurs configurés — seulement les non-paramétrés en attente.
 
 ### 9.2 Page dédiée "Capteurs" (`presentation/arexx/config.html`)
@@ -358,11 +442,23 @@ Vraie navigation de page complète (comme RFXCOM/EVOO7), sa propre connexion Soc
   `${quoi}---${lieu}`. Aucune validation contre le référentiel NOMMAGE — texte libre.
 - Suppression via `confirm()` natif.
 
+### 9.2bis Page dédiée "Déploiement" (⭐ nouveau v1.2, 21/08/2026)
+
+`presentation/arexx/deploiement.html` + `deploiement-app.ts` — même patron de page complète que
+"Capteurs" (§9.2), sa propre connexion Socket.io. Quatre étapes documentées : éditer
+`data/arexx/drivers/target.txt`, copier tout `data/arexx/drivers/` sur la machine cible, lancer
+`scripts/deploy-sender.sh` sans argument, et ce que fait le script (§5.4). Une seule valeur
+dynamique : le port HTTP local réellement configuré (`arexx:status` → `httpservPort`, §8.1),
+affiché dans le contenu à écrire dans `target.txt` (`A_REMPLACER:<port réel>`) — l'adresse IP de la
+machine cible reste à saisir manuellement (aucune tentative de deviner automatiquement l'adresse
+LAN correcte de la machine courante, jugé plus fragile qu'utile). Bouton "Copier"
+(`navigator.clipboard`).
+
 ### 9.3 Événements Socket.io
 
 **Server → Client** (persistants : `arexx:status`, `arexx:sensors:list`) :
 ```typescript
-'arexx:status'          // { running, acquisitionMode, sensorsCount, lastReadingAt }
+'arexx:status'          // { running, acquisitionMode, sensorsCount, lastReadingAt, httpservPort } — champ ajouté v1.2
 'arexx:sensors:list'    // { configured, discovered }
 'arexx:sensor:detected' // { uniqueId, kind }
 'arexx:error'           // ⚠️ déclaré et écouté côté UI, jamais émis par le serveur
@@ -387,16 +483,19 @@ Vraie navigation de page complète (comme RFXCOM/EVOO7), sa propre connexion Soc
 | Persistance `lastValue`/`lastSeen` opportuniste, pas automatique | La fenêtre de fraîcheur de 30 min au démarrage trouve le plus souvent des données périmées | Non corrigé |
 | Aucun retrait de découverte MQTT | Supprimer un capteur ou désactiver `transmitToHa` laisse l'entité HA orpheline | Non corrigé |
 | `usbDevicePath` jamais lu | Champ de configuration purement décoratif | Non corrigé |
-| `rulefile.txt` cible `localhost:49161` en dur | Changer `httpservPort` casse silencieusement le mode USB | Non corrigé |
+| `rulefile.txt` cible `localhost:49161` en dur (bundle vendored `rf_usb_http_rpi_0_6/`, mode `usb` LOCAL) | Changer `httpservPort` casse silencieusement le mode USB local | Non corrigé |
 | Binaire USB non copié dans `dist` | Mode USB fonctionnel seulement en exécution depuis `src` | Non corrigé |
 | `running` toujours vrai après `startAcquisition()` | Le badge "En cours" peut mentir en cas d'échec silencieux (`poll` sans adresse, `usb` sans spawn réussi) | Non corrigé |
-| Pas de supervision du process USB enfant | Aucun redémarrage automatique si le binaire se termine de façon inattendue | Non corrigé |
+| Pas de supervision du process USB enfant (mode `usb` local) | Aucun redémarrage automatique si le binaire se termine de façon inattendue | Non corrigé (le service systemd du script de déploiement §5.4, lui, redémarre sur échec — mais ne concerne que le déploiement distant, pas `UsbBridge`) |
 | Parsing HTML du BS1000 (mode `poll`) fragile | Format non documenté par Arexx, chaînage de remplacements successifs — accepté comme fidèle au portage d'origine | Accepté |
 | Seuls température/humidité sont gérés | Un relevé d'un autre type AREXX (CO2, tension) serait publié à tort comme une température | Non corrigé |
 | `arexx:error` jamais émis | Aucune erreur (BS1000 injoignable, payload invalide, échec d'écriture YAML, échec de spawn USB) n'atteint l'UI — logs serveur uniquement | Non corrigé |
 | Aucune authentification sur le serveur HTTP local | Écoute sur toutes les interfaces, sans filtrage — acceptable en LAN de confiance, à ne pas exposer publiquement | Accepté (cohérent avec le reste du socle, voir `techniques-socle-ha-mqtt_specs` §5.6) |
 | Port HTTP local non publié dans `compose.yaml` | Mode `push` depuis un BS1000 externe injoignable dans le conteneur fourni tel quel | Non corrigé |
 | Désactivation de l'application ne coupe pas le serveur HTTP / process USB en cours | Fuite de handles OS (item générique du projet, particulièrement critique ici — AREXX cumule serveur HTTP, timer et process enfant) | Non implémenté (chantier différé, voir `TODO.md`) |
+| `tl-500` : RSSI non calibré (octet brut, pas un vrai dBm) | Voir §5.4 — ne pas interpréter cette valeur comme un signal en dBm | Connu, non corrigé (calibration nécessiterait plusieurs paires de mesures simultanées avec `rf_usb_http.elf`) |
+| `deploy-sender.sh` ne devine pas l'IP de la machine courante | L'utilisateur doit l'écrire manuellement dans `target.txt` (§9.2bis) | Accepté (détection fiable jugée trop fragile) |
+| `data/arexx/drivers/scripts` et `rf_usb_http_rpi_0_6`/`tl-500` écrasés à chaque démarrage de l'app | Toute modification manuelle de ces fichiers dans `drivers/` est perdue au redémarrage (seul `target.txt` est préservé) | Accepté (ce sont des copies statiques du code livré, pas censées être éditées sur place) |
 
 ---
 
@@ -405,17 +504,24 @@ Vraie navigation de page complète (comme RFXCOM/EVOO7), sa propre connexion Soc
 ```
 applications/arexx/
 ├── package.json, tsconfig.json
-├── rf_usb_http_rpi_0_6/          # Binaire vendored (mode USB), non compilé par ce projet
+├── rf_usb_http_rpi_0_6/          # Binaire vendored (source du bundle copié vers data/arexx/drivers/, §5.4)
 │   ├── rf_usb_http.elf
 │   ├── rulefile.txt
 │   ├── 51-rf_usb.rules
 │   ├── device.xml
 │   └── rf.service                # Référence de l'ancien déploiement standalone, non utilisée
+├── tl-500/                       # ⭐ nouveau v1.2 — source C portable (source du bundle, §5.4)
+│   ├── tl-500.c
+│   ├── global500.h
+│   └── Makefile
+├── scripts/
+│   └── deploy-sender.sh          # ⭐ nouveau v1.2 — voir §5.4 (source du bundle)
 ├── src/
 │   ├── domain/
 │   │   ├── ArexxService.ts
 │   │   ├── SensorRegistry.ts
 │   │   ├── taxonomy.ts
+│   │   ├── DriversBundle.ts          # ⭐ nouveau v1.2 — génère data/arexx/drivers/ au démarrage
 │   │   ├── types.ts, config-schema.ts, devices-config-schema.ts, socket-events.ts, index.ts
 │   │   ├── acquisition/
 │   │   │   ├── PushReceiver.ts
@@ -426,7 +532,17 @@ applications/arexx/
 │       ├── index.html, ts/app.ts    # Tableau de bord (Shadow DOM du core)
 │       └── arexx/
 │           ├── config.html          # Page dédiée "Capteurs"
-│           └── config-app.ts
+│           ├── config-app.ts
+│           ├── deploiement.html     # ⭐ nouveau v1.2 — page dédiée "Déploiement"
+│           └── deploiement-app.ts
+
+data/arexx/
+├── config.yaml, arexx-sensors-v1.0.yaml   # déjà existants
+└── drivers/                                # ⭐ nouveau v1.2 — généré au démarrage (DriversBundle.ts)
+    ├── scripts/deploy-sender.sh             #   copie de applications/arexx/scripts/
+    ├── rf_usb_http_rpi_0_6/                 #   copie de applications/arexx/rf_usb_http_rpi_0_6/
+    ├── tl-500/                              #   copie de applications/arexx/tl-500/
+    └── target.txt                           #   PAS écrasé au redémarrage — adresse host:port éditée par l'utilisateur
 ```
 
 ---
@@ -446,8 +562,11 @@ applications/arexx/
 | `rawId` | Identifiant matériel brut d'un capteur AREXX, tel qu'envoyé sur le fil |
 | `uniqueId` | `arexx_{rawId}` (température) ou `arexx_{rawId}_rh` (humidité) — un capteur physique T+RH produit deux identifiants |
 | Capteur découvert | Relevé reçu d'un `uniqueId` non encore paramétré — en mémoire seulement, jamais persisté tant qu'il n'est pas nommé |
+| `tl-500` | Alternative portable (32/64 bits) à `rf_usb_http.elf` pour parler au dongle BS500, base open-source `mochad` — voir §5.4 |
 
 ### 12.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.2 | 2026-08-21 | Claude | **Déploiement scripté sur une machine distante** (§5.4, nouveau) : `DriversBundle.ts` génère `data/arexx/drivers/` à chaque démarrage (copie depuis `applications/arexx/`, figé dans l'image Docker et donc inaccessible depuis l'hôte — `data/` est le volume monté), contenant `scripts/deploy-sender.sh` (détection d'architecture, installation systemd, idempotent, arrête un service existant avant d'écraser ses fichiers), un second bundle vendored `tl-500/` (portable 32/64 bits, alternative à `rf_usb_http.elf` sur les architectures où ce dernier ne fonctionne pas — validé en conditions réelles sur x86_64/ARM64/ARMv6, mêmes valeurs que la référence), et `target.txt` (adresse du récepteur, lue par le script — remplace un argument en ligne de commande — préservé aux redémarrages contrairement au reste du bundle). RSSI de `tl-500` documenté comme non calibré (§5.4, §10). Nouvelle page IHM "Déploiement" (§9.2bis) expliquant le flux en 4 étapes, `ArexxStatus.httpservPort` exposé pour préremplir le contenu de `target.txt` affiché. Deux pièges de `rf_usb_http.elf` documentés pour la première fois ici (§5.3) : mode `-v` + rejeu d'historique = charge/logs élevés (constaté en conditions réelles), ligne `Z` de `rulefile.txt` à conserver malgré son statut "non supportée". Installation complète validée en conditions réelles sur `bs510`, chaîne bout en bout confirmée avec l'application `arexx` locale. Ancienne version v1.1 archivée. |
+| 1.1 | 2026-08-04 | Claude | Correction de référence `ws-ha` → `dimotic-ha` (projet renommé), sans changement fonctionnel. Ancienne version v1.0 archivée. |
 | 1.0 | 2026-08-03 | Claude | Première spécification formelle, écrite a posteriori (application opérationnelle depuis le 23/07/2026 sans documentation dédiée). Couvre l'architecture, les 3 modes d'acquisition, le mode USB (binaire vendored), la persistance, la taxonomie/découverte HA, la configuration, l'UI/Socket.io, et une liste consolidée des limites connues identifiées en lisant le code réel. |

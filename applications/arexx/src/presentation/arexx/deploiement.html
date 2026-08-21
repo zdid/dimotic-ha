@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AREXX - Déploiement</title>
+
+  <link rel="stylesheet" href="/styles/main.css">
+
+  <style>
+    .config-container { max-width: 900px; margin: 0 auto; padding: 20px; }
+    .config-header { text-align: center; margin-bottom: 20px; }
+    .config-header h1 { color: var(--color-accent); font-size: 1.8em; }
+
+    .card { background: var(--color-surface); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
+    .card h3 { margin-top: 0; }
+    .card ul { padding-left: 20px; }
+    .card li { margin-bottom: 6px; }
+
+    pre {
+      background: var(--color-background); border: 1px solid var(--color-primary);
+      border-radius: var(--radius); padding: 12px; overflow-x: auto; font-size: 0.9em;
+    }
+    code { font-family: monospace; }
+
+    .btn {
+      padding: 8px 16px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em;
+    }
+    .btn-secondary { background: var(--color-background); color: var(--color-text); border: 1px solid var(--color-primary); }
+  </style>
+</head>
+<body>
+  <div class="config-container">
+    <div class="config-header">
+      <h1>📦 AREXX — Déploiement</h1>
+      <p>Mettre en place le "sender" (celui qui parle au dongle USB TL-500/BS500) sur une machine distincte de celle-ci.</p>
+    </div>
+
+    <div class="card">
+      <h3>1. Éditer <code>data/arexx/drivers/target.txt</code></h3>
+      <p>
+        Ce dossier <code>drivers/</code> est généré automatiquement au démarrage de l'application
+        (accessible directement sur cette machine, y compris sous Docker — c'est un volume monté,
+        contrairement au code de l'application lui-même). Il contient le script d'installation et
+        ses deux dépendances, déjà prêts.
+      </p>
+      <p>
+        <code>target.txt</code> contient une seule ligne (<code>host:port</code>) : l'adresse de
+        <strong>ce</strong> récepteur, telle que joignable depuis la machine cible. Le port est déjà
+        renseigné d'après la configuration actuelle — seul l'hôte reste à indiquer (l'application ne
+        peut pas deviner de façon fiable sa propre adresse IP réseau) :
+      </p>
+      <pre id="deploy-command">A_REMPLACER:<span id="port-value">…</span></pre>
+      <button class="btn btn-secondary" id="btn-copy">📋 Copier</button>
+      <p style="margin-top:10px;color:var(--color-text-muted);font-size:0.9em;">
+        Remplacer <code>A_REMPLACER</code> par l'adresse IP réellement joignable depuis la machine
+        cible, et écrire le résultat dans <code>data/arexx/drivers/target.txt</code> (fichier texte
+        simple, éditable directement).
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>2. Copier tout le dossier <code>data/arexx/drivers/</code> sur la machine cible</h3>
+      <p>Une seule copie, en une fois — <code>target.txt</code> une fois édité (étape 1) voyage avec le reste :</p>
+      <pre>scp -r data/arexx/drivers &lt;utilisateur&gt;@&lt;machine cible&gt;:/root/arexx-drivers</pre>
+      <ul>
+        <li><code>scripts/deploy-sender.sh</code> — le script d'installation, à lancer une fois copié</li>
+        <li><code>rf_usb_http_rpi_0_6/</code> — utilisé si la machine cible est un Raspberry Pi 32 bits (ARMv6/ARMv7)</li>
+        <li><code>tl-500/</code> — sources compilées sur place pour toute autre architecture (64 bits, x86_64...)</li>
+        <li><code>target.txt</code> — l'adresse éditée à l'étape 1</li>
+      </ul>
+      <p>Le script détecte lui-même l'architecture (<code>uname -m</code>) et choisit le bon des deux — rien à choisir à la main.</p>
+    </div>
+
+    <div class="card">
+      <h3>3. Lancer le script (en root) sur la machine cible</h3>
+      <p>Sans argument — l'adresse est lue directement dans <code>target.txt</code> :</p>
+      <pre>./arexx-drivers/scripts/deploy-sender.sh</pre>
+    </div>
+
+    <div class="card">
+      <h3>4. Ce que fait le script</h3>
+      <ul>
+        <li>Installe les dépendances système manquantes (<code>libusb-1.0-0</code>, et pour tl-500 : <code>gcc</code>/<code>make</code>/<code>libusb-1.0-0-dev</code>)</li>
+        <li>Copie/compile le bon programme, génère sa configuration (<code>rulefile.txt</code> ou <code>url.txt</code>) avec l'adresse lue dans <code>target.txt</code></li>
+        <li>Installe et démarre un service systemd (<code>arexx-sender.service</code>) — persistant, redémarre au boot</li>
+      </ul>
+      <p>Ré-exécutable sans risque (idempotent) — relancer le script met simplement à jour l'installation existante.</p>
+      <p>Vérification une fois lancé : <code>systemctl status arexx-sender.service</code> / <code>journalctl -u arexx-sender.service -f</code></p>
+    </div>
+
+    <div class="loading" id="loading" style="text-align:center;padding:20px;color:var(--color-text-muted);">
+      Chargement du port configuré...
+    </div>
+  </div>
+
+  <script defer src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script type="module" src="/applications/arexx/presentation/arexx/deploiement-app.js"></script>
+
+  <!-- Derniere modification: 2026-08-21 - Création de la page Déploiement -->
+</body>
+</html>
