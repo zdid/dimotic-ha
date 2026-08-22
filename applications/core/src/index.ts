@@ -38,6 +38,11 @@ if (!process.env.PROJECT_ROOT) {
   process.env.PROJECT_ROOT = findProjectRoot();
 }
 
+// Détecte Docker une fois pour toute l'application — voir infrastructure/runtime/docker.ts pour
+// le pourquoi (variable d'environnement héritée par les process enfants, pas un global.*).
+import { detectDockerEnvironment } from './infrastructure/runtime/docker';
+detectDockerEnvironment();
+
 import type { Server as HttpServer } from 'node:http';
 
 // Import des services d'infrastructure

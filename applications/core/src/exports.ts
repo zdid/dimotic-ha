@@ -139,6 +139,9 @@ export * from './infrastructure/transport/MqttTransport';
 // EventBus de l'infrastructure (alternative)
 export * from './infrastructure/EventBus';
 
+// Environnement d'exécution (détection Docker, posée par core au bootstrap — voir index.ts)
+export { detectDockerEnvironment, isRunningInDocker } from './infrastructure/runtime/docker';
+
 // =============================================================================
 // 4. COUCHE HA (Home Assistant)
 // =============================================================================
