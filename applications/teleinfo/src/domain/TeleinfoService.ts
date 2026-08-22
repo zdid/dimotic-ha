@@ -11,7 +11,7 @@
  */
 
 import * as path from 'node:path';
-import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
+import type { IEventBus, Logger, IAppConfigProvider, RemoteAction } from '../../../core/dist/exports';
 import { MqttTransport } from '../../../core/dist/exports';
 import { teleinfoConfigSchema, type TeleinfoConfig } from './config-schema';
 import { compteursConfigSchema, DEFAULT_COMPTEURS_CONFIG, type CompteurDefinition, type CompteursConfigFile } from './storage-schema';
@@ -79,7 +79,7 @@ export class TeleinfoService implements ITeleinfoService {
     this.eventBus.on(TELEINFO_CLIENT_EVENTS.GET_COMPTEURS, () => this.emitCompteurs());
     this.eventBus.on(TELEINFO_CLIENT_EVENTS.SAVE_COMPTEUR, (data: unknown) => this.handleSaveCompteur(data as SaveCompteurInput));
     this.eventBus.on(TELEINFO_CLIENT_EVENTS.DELETE_COMPTEUR, (data: unknown) => this.handleDeleteCompteur(data as { adco: number }));
-    this.eventBus.on(TELEINFO_CLIENT_EVENTS.DEPLOY, () => this.handleDeploy());
+    this.eventBus.on(TELEINFO_CLIENT_EVENTS.REMOTE_OP, (data: unknown) => this.handleRemoteOp((data as { action: RemoteAction })?.action));
   }
 
   async start(): Promise<void> {
@@ -188,9 +188,15 @@ export class TeleinfoService implements ITeleinfoService {
   // Déploiement
   // ==========================================================================
 
-  private async handleDeploy(): Promise<void> {
-    if (this.compteurs.length !== 2) {
-      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.DEPLOY_RESULT, {
+  /**
+   * Point d'entrée unique pour toute intervention distante (protocole uniforme partagé avec
+   * rpigpio, 22/08/2026) — `deploy` est le seul cas branché aujourd'hui ; `start`/`stop`/`restart`
+   * délèguent déjà au contrôleur systemd partagé côté DeployService, prêts pour de futurs boutons.
+   */
+  private async handleRemoteOp(action: RemoteAction): Promise<void> {
+    if (action === 'deploy' && this.compteurs.length !== 2) {
+      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.REMOTE_OP_RESULT, {
+        action,
         success: false,
         error: `Exactement 2 compteurs doivent être déclarés avant de déployer (actuellement ${this.compteurs.length})`
       });
@@ -198,11 +204,19 @@ export class TeleinfoService implements ITeleinfoService {
     }
 
     try {
-      const agentConfigYaml = generateAgentConfig(this.config, this.compteurs);
-      const result = await this.deployService.deploy(this.config.target, agentConfigYaml);
-      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.DEPLOY_RESULT, result);
+      const result = await (action === 'deploy'
+        ? this.deployService.deploy(this.config.target, generateAgentConfig(this.config, this.compteurs))
+        : action === 'start'
+        ? this.deployService.start(this.config.target)
+        : action === 'stop'
+        ? this.deployService.stop(this.config.target)
+        : action === 'restart'
+        ? this.deployService.restart(this.config.target)
+        : Promise.resolve({ success: false, error: `Action distante inconnue: ${action}` }));
+      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.REMOTE_OP_RESULT, { action, ...result });
     } catch (error) {
-      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.DEPLOY_RESULT, {
+      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.REMOTE_OP_RESULT, {
+        action,
         success: false,
         error: error instanceof Error ? error.message : String(error)
       });

@@ -142,6 +142,25 @@ export * from './infrastructure/EventBus';
 // Environnement d'exécution (détection Docker, posée par core au bootstrap — voir index.ts)
 export { detectDockerEnvironment, isRunningInDocker } from './infrastructure/runtime/docker';
 
+// Exécution distante (SSH/SCP + contrôle uniforme start/stop/restart d'une unité Docker/systemd) —
+// voir infrastructure/remote/, mutualise ce que rpigpio/teleinfo/espdisplay réimplémentaient chacune
+export {
+  runSsh,
+  runScp,
+  shellQuote,
+  expandHome,
+} from './infrastructure/remote/SshClient';
+export type { RemoteTarget, RemoteOpResult } from './infrastructure/remote/SshClient';
+export {
+  DockerContainerController,
+  SystemdUnitController,
+} from './infrastructure/remote/RemoteUnitController';
+export type {
+  RemoteAction,
+  RemoteUnitController,
+  RemoteUnitControllerOptions,
+} from './infrastructure/remote/RemoteUnitController';
+
 // =============================================================================
 // 4. COUCHE HA (Home Assistant)
 // =============================================================================

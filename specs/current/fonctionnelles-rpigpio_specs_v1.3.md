@@ -1,5 +1,14 @@
 # Spécifications Fonctionnelles - Module RPIGPIO
 
+*Version 1.3 - 22 Août 2026*
+*v1.3 : `DeployService.ts` migré sur le socle partagé `core/infrastructure/remote/` (SSH/SCP +
+contrôleur Docker/systemd, §5.1/§9), mutualisé avec `teleinfo` qui réimplémentait des primitives
+quasi identiques. Protocole Socket.io de déclenchement uniformisé (§7.2) : l'ancien couple
+`rpigpio:deploy`/`rpigpio:deploy:result` devient `rpigpio:remote-op`/`rpigpio:remote-op:result`
+(payload `{ action }`), le même quelle que soit l'intervention distante. `start`/`stop`/`restart`
+exposés côté `DeployService`/`DockerContainerController` (docker start/stop/restart, via sudo) mais
+pas encore câblés sur un bouton IHM — en attente des scripts distants annoncés par l'utilisateur.
+Ancienne version v1.2 archivée.*
 *Version 1.2 - 19 Août 2026*
 *Déploiement en conditions réelles sur `stfort` (192.168.1.53) : 3 pins réels (relais/lumière,
 radiateur, journuit — anciennement gérés en direct par un module `/dev/mem` de l'ancien système
@@ -32,6 +41,7 @@ posteriori) — application créée et déployée en conditions réelles au cour
 4. [Génération de la configuration mqtt-io](#4-génération-de-la-configuration-mqtt-io)
     - 4.1bis [Topic de commande réel — segment `output`](#41bis-topic-de-commande-réel--segment-output-nouveau-v12-19082026)
 5. [Déploiement Docker](#5-déploiement-docker)
+    - 5.1bis [Socle SSH/SCP partagé (v1.3)](#51bis-socle-sshscp-partagé-nouveau-v13-22082026)
 6. [Configuration](#6-configuration)
 7. [Interface Web et Socket.io](#7-interface-web-et-socketio)
     - 7.3 [Présence de l'agent mqtt-io (v1.1, vérifiée v1.2)](#73-présence-de-lagent-mqtt-io-lwt-lecture-seule--nouveau-v11-16082026)
@@ -105,7 +115,7 @@ correspondance à maintenir.
 |---|---|
 | `RpigpioService.ts` | Orchestrateur : CRUD des pins, événements Socket.io, appel au déploiement |
 | `generator.ts` | Construit le `config.yaml` mqtt-io et le `compose.yaml` du conteneur à partir des pins stockées |
-| `DeployService.ts` | SSH : écrit `config.yaml`/`compose.yaml` sur la cible, `docker compose up -d`, `docker restart` |
+| `DeployService.ts` | `deploy()` : écrit `config.yaml`/`compose.yaml` sur la cible, `docker compose up -d`, `docker restart` — SSH via le socle partagé (§5.1bis). `start()`/`stop()`/`restart()` : délèguent au `DockerContainerController` partagé, ⭐ v1.3 |
 | `config-schema.ts` | Schéma Zod des réglages (cible SSH, broker MQTT utilisé par mqtt-io) |
 | `storage-schema.ts` | Schéma Zod d'une pin (`PinDefinition`) |
 | `yaml/ConfigFileManager.ts` | Chargement/sauvegarde atomique du YAML des pins (copie locale du pattern planificateur/AREXX) |
@@ -282,6 +292,22 @@ Sur stfort, `target.sshUser`/`target.sshKeyPath` sont vides (§1.4) — cette s�
 aujourd'hui déclenchable que depuis une autre machine ayant un accès SSH root à stfort, pas depuis
 l'IHM de stfort elle-même.
 
+### 5.1bis Socle SSH/SCP partagé (⭐ nouveau v1.3, 22/08/2026)
+
+`runSsh`/`runScp`/`shellQuote`/`expandHome` viennent désormais de
+`applications/core/src/infrastructure/remote/SshClient.ts` (exporté via `core/exports.ts`) — jusque
+là réimplémentés quasi à l'identique dans `rpigpio` et `teleinfo` (constaté en comparant les deux
+fichiers). `DeployResult` reste défini localement dans `DeployService.ts` (forme identique à
+`RemoteOpResult` du socle, avec un type `step` plus précis propre à ce module).
+
+`start()`/`stop()`/`restart()` (⭐ v1.3) délèguent à un `DockerContainerController` partagé
+(`core/infrastructure/remote/RemoteUnitController.ts`, `useSudo: true` — même convention que
+`deploy()`) : `docker start|stop|restart target.containerName`. Symétrique côté `teleinfo`, qui
+utilise un `SystemdUnitController` pour sa cible (systemd, pas de Docker sur le RPi1) — la même
+abstraction couvre les deux natures de cible. Pas encore exposés côté Socket.io/IHM (§7.2) : prêts
+pour de futurs boutons "Démarrer"/"Arrêter"/"Redémarrer", en attendant les scripts distants annoncés
+par l'utilisateur.
+
 ### 5.2 Conteneur généré
 
 `--privileged` + `network_mode: host` + `user: '0:0'` — même convention que le conteneur
@@ -335,17 +361,19 @@ sauf structure interne (`target`/`mqtt` aplatis en `target.xxx`/`mqtt.xxx`).
 'rpigpio:pins:list'     // PinDefinition[]
 'rpigpio:pin:saved'     // PinDefinition
 'rpigpio:pin:deleted'   // { id }
-'rpigpio:deploy:result' // { success, step?, error?, output? }
-'rpigpio:error'         // { message }
+'rpigpio:remote-op:result' // { action, success, step?, error?, output? } — ⭐ v1.3, remplace rpigpio:deploy:result
+'rpigpio:error'            // { message }
 ```
 
 **Client → Server :**
 ```typescript
 'rpigpio:status:get'
 'rpigpio:pins:list:get'
-'rpigpio:pin:save'    // PinDefinition sans id (création) ou avec id (modification)
-'rpigpio:pin:delete'  // { id }
-'rpigpio:deploy'
+'rpigpio:pin:save'   // PinDefinition sans id (création) ou avec id (modification)
+'rpigpio:pin:delete' // { id }
+'rpigpio:remote-op'  // { action: 'deploy'|'start'|'stop'|'restart' } — ⭐ v1.3, remplace rpigpio:deploy (sans payload).
+                      // Seul 'deploy' est branché aujourd'hui côté serveur (§5.1bis) ; les 3 autres
+                      // répondent par une erreur explicite tant qu'aucun bouton IHM ne les déclenche.
 ```
 
 ### 7.3 Présence de l'agent mqtt-io (LWT, lecture seule) — ⭐ nouveau v1.1, 16/08/2026
@@ -435,6 +463,7 @@ applications/rpigpio/
 ### 10.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.3 | 2026-08-22 | Claude | **`DeployService.ts` migré sur le socle SSH/SCP partagé** `core/infrastructure/remote/` (§5.1bis) — mutualisé avec `teleinfo`, qui réimplémentait des primitives (`runSsh`/`runScp`/`shellQuote`/`expandHome`) quasi identiques. Protocole Socket.io uniformisé (§7.2) : `rpigpio:deploy`/`rpigpio:deploy:result` (sans payload) devient `rpigpio:remote-op`/`rpigpio:remote-op:result` (`{ action }`) — même mécanisme quelle que soit l'intervention distante, demande explicite de l'utilisateur en prévision de futurs scripts de start/stop/restart. `start()`/`stop()`/`restart()` ajoutés côté `DeployService`, délèguent à un `DockerContainerController` partagé — non encore exposés en IHM. Ancienne version v1.2 archivée. |
 | 1.2 | 2026-08-19 | Claude | **Déploiement réel sur stfort** (§1.4, nouveau) : 3 pins réelles (relais/lumière, radiateur, journuit — anciennement pilotées en direct par l'ancien système), `id` choisi manuellement (position physique) pour permettre un calcul de topic sans table de correspondance côté pont. **Pont de compatibilité avec l'ancien système** (§2.5, nouveau) : redirige l'accès GPIO bas niveau de `zdidnodegpio` vers ce module, même principe que le pont RFXCOM, non documenté en détail ici (hors périmètre du dépôt). **Correction de topic** (§4.1bis, nouveau) : segment `output` fixe côté mqtt-io, absent de `generator.ts` et non documenté avant cette version — trouvé et corrigé avant mise en service du pont. Comportement de démarrage de `initial` clarifié (§4.3) : lecture, pas écriture, par conception. Caveat "non vérifié" de la présence d'agent (§7.3) levé — vérifié en conditions réelles sur stfort. Application désormais déployée SANS moyen de se redéployer elle-même (décision explicite, §1.4/§5.1/§8). Ancienne version v1.1 archivée. |
 | 1.1 | 2026-08-16 | Claude | Migration en process séparé (§2.4, `runsAsSeparateProcess`/`standalone.ts`, architecture détaillée dans `fonctionnelles-supervisor_specs` v2.6) — premier test grandeur nature du pontage UI Socket.io d'une app séparée. Présence de l'agent mqtt-io distant, lecture seule (§7.3, nouveau) : `RpigpioStatus` étendu (`agentOnline`/`agentLastSeenAt`), dashboard mis à jour. Non vérifié en conditions réelles sur `ha2` (redéploiement du conteneur mqtt-io non autorisé cette session). Référence croisée techniques-socle mise à jour (v4.28→v4.30). Ancienne version v1.0 archivée. |
 | 1.0 | 2026-08-12 | Claude | Première spécification, application créée et déployée en conditions réelles (ha2) au cours de la session. Couvre l'architecture, le modèle de données, la génération de la configuration mqtt-io (device par pin), le déploiement Docker (bug `user:'0:0'` trouvé en conditions réelles), la configuration, l'UI/Socket.io, et les limites connues. |

@@ -6,11 +6,20 @@
  * docker/rebuild-and-deploy.sh (utilisateur dédié, clé SSH par fichier, sudo NOPASSWD déjà en
  * place sur ha2/orangepi) — mais invoqué depuis l'app plutôt qu'un script shell externe, pour être
  * déclenchable depuis l'IHM (demande utilisateur, 12/08/2026).
+ *
+ * `runSsh`/`shellQuote`/`DockerContainerController` viennent du socle (`core/infrastructure/remote`,
+ * 22/08/2026) — mutualisés avec teleinfo, qui réimplémentait des primitives quasi identiques.
+ * `start`/`stop`/`restart` délèguent déjà au contrôleur Docker partagé, prêts pour de futurs
+ * boutons dans l'IHM (pas encore câblés sur Socket.io, voir fonctionnelles-rpigpio_specs).
  */
 
-import { spawn } from 'node:child_process';
-import * as os from 'node:os';
-import type { Logger } from '../../../core/dist/exports';
+import {
+  runSsh,
+  shellQuote,
+  DockerContainerController,
+  type Logger,
+  type RemoteOpResult,
+} from '../../../core/dist/exports';
 import type { RpigpioTargetConfig } from './config-schema';
 
 export interface DeployResult {
@@ -20,68 +29,25 @@ export interface DeployResult {
   output?: string;
 }
 
-const SSH_TIMEOUT_MS = 30000;
-
-function expandHome(p: string): string {
-  return p.startsWith('~') ? p.replace(/^~/, os.homedir()) : p;
-}
-
-/** Exécute une commande distante via SSH, avec un contenu optionnel envoyé sur stdin. */
-function runSsh(
-  target: RpigpioTargetConfig,
-  remoteCommand: string,
-  stdin?: string
-): Promise<{ success: boolean; output: string; error?: string }> {
-  return new Promise((resolve) => {
-    const args = [
-      '-o', 'ConnectTimeout=10',
-      '-o', 'BatchMode=yes'
-    ];
-    if (target.sshKeyPath) {
-      args.push('-i', expandHome(target.sshKeyPath));
-    }
-    args.push(`${target.sshUser}@${target.host}`, remoteCommand);
-
-    const child = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill();
-      resolve({ success: false, output: stdout, error: `Timeout après ${SSH_TIMEOUT_MS}ms` });
-    }, SSH_TIMEOUT_MS);
-
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
-
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      resolve({ success: false, output: stdout, error: err.message });
-    });
-
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve({ success: true, output: stdout });
-      } else {
-        resolve({ success: false, output: stdout, error: stderr || `ssh a quitté avec le code ${code}` });
-      }
-    });
-
-    if (stdin !== undefined) {
-      child.stdin.write(stdin);
-    }
-    child.stdin.end();
-  });
-}
-
-/** Échappement simple pour un argument shell distant (chemins/noms, pas de saisie libre). */
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
+const unitController = new DockerContainerController({ useSudo: true });
 
 export class DeployService {
   constructor(private readonly logger: Logger) {}
+
+  /** Démarre le conteneur sur la machine cible (docker start, via sudo — voir docker/rebuild-and-deploy.sh). */
+  start(target: RpigpioTargetConfig): Promise<RemoteOpResult> {
+    return unitController.start(target, target.containerName);
+  }
+
+  /** Arrête le conteneur sur la machine cible (docker stop). */
+  stop(target: RpigpioTargetConfig): Promise<RemoteOpResult> {
+    return unitController.stop(target, target.containerName);
+  }
+
+  /** Redémarre le conteneur sur la machine cible (docker restart) sans réappliquer la config. */
+  restart(target: RpigpioTargetConfig): Promise<RemoteOpResult> {
+    return unitController.restart(target, target.containerName);
+  }
 
   /** Écrit un fichier sur la machine cible (sudo tee, écrase l'existant, crée le répertoire au besoin). */
   private async writeRemoteFile(target: RpigpioTargetConfig, remotePath: string, content: string): Promise<DeployResult> {

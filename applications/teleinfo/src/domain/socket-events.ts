@@ -1,5 +1,10 @@
 /**
  * Événements Socket.io spécifiques à l'application TELEINFO — voir nommage/rpigpio/socket-events.ts.
+ *
+ * `REMOTE_OP`/`REMOTE_OP_RESULT` (22/08/2026, remplace l'ancien couple `DEPLOY`/`DEPLOY_RESULT`) :
+ * protocole uniforme partagé avec rpigpio — { action: RemoteAction } en entrée, quelle que soit
+ * l'intervention distante (deploy aujourd'hui, start/stop/restart dès que ces boutons existeront),
+ * plutôt qu'un événement par action. Voir core/infrastructure/remote/RemoteUnitController.ts.
  */
 
 export const TELEINFO_SOCKET_EVENTS = {
@@ -7,7 +12,7 @@ export const TELEINFO_SOCKET_EVENTS = {
   COMPTEURS_LIST: 'teleinfo:compteurs:list',
   COMPTEUR_SAVED: 'teleinfo:compteur:saved',
   COMPTEUR_DELETED: 'teleinfo:compteur:deleted',
-  DEPLOY_RESULT: 'teleinfo:deploy:result',
+  REMOTE_OP_RESULT: 'teleinfo:remote-op:result',
   ERROR: 'teleinfo:error'
 } as const;
 
@@ -16,7 +21,7 @@ export const TELEINFO_CLIENT_EVENTS = {
   GET_COMPTEURS: 'teleinfo:compteurs:list:get',
   SAVE_COMPTEUR: 'teleinfo:compteur:save',
   DELETE_COMPTEUR: 'teleinfo:compteur:delete',
-  DEPLOY: 'teleinfo:deploy'
+  REMOTE_OP: 'teleinfo:remote-op'
 } as const;
 
 export const TELEINFO_ALL_EVENTS = {

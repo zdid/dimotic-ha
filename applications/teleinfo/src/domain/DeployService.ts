@@ -7,12 +7,23 @@
  * historique de l'ancienne domotique) plutôt que de relancer une compilation native complète à
  * chaque déploiement (lente et pas garantie sur un RPi1 à 429 Mo de RAM) — repli sur `npm install`
  * uniquement si cette source n'existe pas.
+ *
+ * `runSsh`/`runScp`/`shellQuote`/`SystemdUnitController` viennent du socle
+ * (`core/infrastructure/remote`, 22/08/2026) — mutualisés avec rpigpio, qui réimplémentait des
+ * primitives quasi identiques. `start`/`stop`/`restart` délèguent déjà au contrôleur systemd
+ * partagé, prêts pour de futurs boutons dans l'IHM (pas encore câblés sur Socket.io, voir
+ * fonctionnelles-teleinfo_specs).
  */
 
-import { spawn } from 'node:child_process';
-import * as os from 'node:os';
 import * as path from 'node:path';
-import type { Logger } from '../../../core/dist/exports';
+import {
+  runSsh,
+  runScp,
+  shellQuote,
+  SystemdUnitController,
+  type Logger,
+  type RemoteOpResult,
+} from '../../../core/dist/exports';
 import type { TeleinfoTargetConfig } from './config-schema';
 
 export interface DeployResult {
@@ -22,7 +33,6 @@ export interface DeployResult {
   output?: string;
 }
 
-const SSH_TIMEOUT_MS = 30000;
 const NPM_INSTALL_TIMEOUT_MS = 300000; // compilation native sur RPi1 : peut être lente
 // __dirname (src/domain, ou dist/domain une fois compilé) → .. (src ou dist) → .. (teleinfo) →
 // device-agent/ — vérifié par le message d'erreur obtenu en test réel le 12/08/2026 (un ".." de
@@ -36,71 +46,26 @@ const JS_YAML_LOCAL_PATH = path.join(__dirname, '..', '..', 'node_modules', 'js-
 const ARGPARSE_LOCAL_PATH = path.join(__dirname, '..', '..', '..', '..', 'node_modules', 'argparse');
 const PROVEN_NODE_MODULES_PATH = '/home/domotique/node_applications/node_modules';
 
-function expandHome(p: string): string {
-  return p.startsWith('~') ? p.replace(/^~/, os.homedir()) : p;
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-function runSsh(
-  target: TeleinfoTargetConfig,
-  remoteCommand: string,
-  stdin?: string,
-  timeoutMs = SSH_TIMEOUT_MS
-): Promise<{ success: boolean; output: string; error?: string }> {
-  return new Promise((resolve) => {
-    const args = ['-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes'];
-    if (target.sshKeyPath) args.push('-i', expandHome(target.sshKeyPath));
-    args.push(`${target.sshUser}@${target.host}`, remoteCommand);
-
-    const child = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill();
-      resolve({ success: false, output: stdout, error: `Timeout après ${timeoutMs}ms` });
-    }, timeoutMs);
-
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('error', (err) => { clearTimeout(timer); resolve({ success: false, output: stdout, error: err.message }); });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve({ success: true, output: stdout });
-      else resolve({ success: false, output: stdout, error: stderr || `ssh a quitté avec le code ${code}` });
-    });
-
-    if (stdin !== undefined) child.stdin.write(stdin);
-    child.stdin.end();
-  });
-}
-
-function runScp(target: TeleinfoTargetConfig, localPaths: string[], remoteDest: string): Promise<{ success: boolean; error?: string }> {
-  return new Promise((resolve) => {
-    // -r fonctionne aussi bien pour un mélange de fichiers et de répertoires (js-yaml/argparse,
-    // voir copyBundledPureJsDeps) que pour de simples fichiers plats (agentFiles ci-dessous).
-    const args = ['-r', '-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes'];
-    if (target.sshKeyPath) args.push('-i', expandHome(target.sshKeyPath));
-    args.push(...localPaths, `${target.sshUser}@${target.host}:${remoteDest}`);
-
-    const child = spawn('scp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    const timer = setTimeout(() => { child.kill(); resolve({ success: false, error: `Timeout après ${SSH_TIMEOUT_MS}ms` }); }, SSH_TIMEOUT_MS);
-
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('error', (err) => { clearTimeout(timer); resolve({ success: false, error: err.message }); });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve({ success: true });
-      else resolve({ success: false, error: stderr || `scp a quitté avec le code ${code}` });
-    });
-  });
-}
+// teleinfo est connecté en root sur le RPi1 (pas besoin de sudo) — contrairement à rpigpio/stfort.
+const unitController = new SystemdUnitController();
 
 export class DeployService {
   constructor(private readonly logger: Logger) {}
+
+  /** Démarre le service systemd sur la machine cible. */
+  start(target: TeleinfoTargetConfig): Promise<RemoteOpResult> {
+    return unitController.start(target, target.serviceName);
+  }
+
+  /** Arrête le service systemd sur la machine cible. */
+  stop(target: TeleinfoTargetConfig): Promise<RemoteOpResult> {
+    return unitController.stop(target, target.serviceName);
+  }
+
+  /** Redémarre le service systemd sur la machine cible sans réappliquer la config/l'agent. */
+  restart(target: TeleinfoTargetConfig): Promise<RemoteOpResult> {
+    return unitController.restart(target, target.serviceName);
+  }
 
   async deploy(target: TeleinfoTargetConfig, agentConfigYaml: string): Promise<DeployResult> {
     if (!target.host) {

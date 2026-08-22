@@ -72,7 +72,7 @@ function setupEventListeners(): void {
     renderPins();
   });
 
-  socket.on('rpigpio:deploy:result', (result: DeployResult) => {
+  socket.on('rpigpio:remote-op:result', (result: DeployResult) => {
     showDeployResult(result);
   });
 
@@ -295,7 +295,7 @@ function setupDeployButton(): void {
   $('deploy-btn')?.addEventListener('click', () => {
     hideElement('deploy-success');
     hideElement('deploy-error');
-    socket?.emit('rpigpio:deploy');
+    socket?.emit('rpigpio:remote-op', { action: 'deploy' });
   });
 }
 

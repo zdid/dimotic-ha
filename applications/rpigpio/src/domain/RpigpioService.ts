@@ -15,7 +15,7 @@
  */
 
 import * as path from 'node:path';
-import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
+import type { IEventBus, Logger, IAppConfigProvider, RemoteAction } from '../../../core/dist/exports';
 import { generateRandomBridgeInstance, MqttTransport } from '../../../core/dist/exports';
 import { rpigpioConfigSchema, type RpigpioConfig } from './config-schema';
 import { pinsConfigSchema, DEFAULT_PINS_CONFIG, type PinDefinition, type PinsConfigFile } from './storage-schema';
@@ -100,7 +100,7 @@ export class RpigpioService implements IRpigpioService {
     this.eventBus.on(RPIGPIO_CLIENT_EVENTS.GET_PINS, () => this.emitPins());
     this.eventBus.on(RPIGPIO_CLIENT_EVENTS.SAVE_PIN, (data: unknown) => this.handleSavePin(data as SavePinInput));
     this.eventBus.on(RPIGPIO_CLIENT_EVENTS.DELETE_PIN, (data: unknown) => this.handleDeletePin(data as { id: string }));
-    this.eventBus.on(RPIGPIO_CLIENT_EVENTS.DEPLOY, () => this.handleDeploy());
+    this.eventBus.on(RPIGPIO_CLIENT_EVENTS.REMOTE_OP, (data: unknown) => this.handleRemoteOp((data as { action: RemoteAction })?.action));
   }
 
   async start(): Promise<void> {
@@ -226,14 +226,26 @@ export class RpigpioService implements IRpigpioService {
   // Déploiement
   // ==========================================================================
 
-  private async handleDeploy(): Promise<void> {
+  /**
+   * Point d'entrée unique pour toute intervention distante (protocole uniforme partagé avec
+   * teleinfo, 22/08/2026) — `deploy` est le seul cas branché aujourd'hui ; `start`/`stop`/`restart`
+   * délèguent déjà au contrôleur Docker partagé côté DeployService, prêts pour de futurs boutons.
+   */
+  private async handleRemoteOp(action: RemoteAction): Promise<void> {
     try {
-      const mqttIoConfigYaml = generateMqttIoConfig(this.config, this.pins);
-      const composeYaml = generateComposeFile(this.config);
-      const result = await this.deployService.deploy(this.config.target, mqttIoConfigYaml, composeYaml);
-      this.eventBus.emit(RPIGPIO_SOCKET_EVENTS.DEPLOY_RESULT, result);
+      const result = await (action === 'deploy'
+        ? this.deployService.deploy(this.config.target, generateMqttIoConfig(this.config, this.pins), generateComposeFile(this.config))
+        : action === 'start'
+        ? this.deployService.start(this.config.target)
+        : action === 'stop'
+        ? this.deployService.stop(this.config.target)
+        : action === 'restart'
+        ? this.deployService.restart(this.config.target)
+        : Promise.resolve({ success: false, error: `Action distante inconnue: ${action}` }));
+      this.eventBus.emit(RPIGPIO_SOCKET_EVENTS.REMOTE_OP_RESULT, { action, ...result });
     } catch (error) {
-      this.eventBus.emit(RPIGPIO_SOCKET_EVENTS.DEPLOY_RESULT, {
+      this.eventBus.emit(RPIGPIO_SOCKET_EVENTS.REMOTE_OP_RESULT, {
+        action,
         success: false,
         error: error instanceof Error ? error.message : String(error)
       });

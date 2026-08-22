@@ -2,6 +2,11 @@
  * Événements Socket.io spécifiques à l'application RPIGPIO
  *
  * Conventions : préfixe 'rpigpio:', format 'rpigpio:<section>:<action>' — voir nommage/socket-events.ts.
+ *
+ * `REMOTE_OP`/`REMOTE_OP_RESULT` (22/08/2026, remplace l'ancien couple `DEPLOY`/`DEPLOY_RESULT`) :
+ * protocole uniforme partagé avec teleinfo — { action: RemoteAction } en entrée, quelle que soit
+ * l'intervention distante (deploy aujourd'hui, start/stop/restart dès que ces boutons existeront),
+ * plutôt qu'un événement par action. Voir core/infrastructure/remote/RemoteUnitController.ts.
  */
 
 export const RPIGPIO_SOCKET_EVENTS = {
@@ -9,7 +14,7 @@ export const RPIGPIO_SOCKET_EVENTS = {
   PINS_LIST: 'rpigpio:pins:list',
   PIN_SAVED: 'rpigpio:pin:saved',
   PIN_DELETED: 'rpigpio:pin:deleted',
-  DEPLOY_RESULT: 'rpigpio:deploy:result',
+  REMOTE_OP_RESULT: 'rpigpio:remote-op:result',
   ERROR: 'rpigpio:error'
 } as const;
 
@@ -18,7 +23,7 @@ export const RPIGPIO_CLIENT_EVENTS = {
   GET_PINS: 'rpigpio:pins:list:get',
   SAVE_PIN: 'rpigpio:pin:save',
   DELETE_PIN: 'rpigpio:pin:delete',
-  DEPLOY: 'rpigpio:deploy'
+  REMOTE_OP: 'rpigpio:remote-op'
 } as const;
 
 export const RPIGPIO_ALL_EVENTS = {

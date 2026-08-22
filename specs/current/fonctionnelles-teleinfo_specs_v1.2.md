@@ -1,5 +1,14 @@
 # Spécifications Fonctionnelles - Module TELEINFO
 
+*Version 1.2 - 22 Août 2026*
+*v1.2 : `DeployService.ts` migré sur le socle partagé `core/infrastructure/remote/` (SSH/SCP +
+contrôleur Docker/systemd, §7.1bis), mutualisé avec `rpigpio` qui réimplémentait des primitives
+quasi identiques. Protocole Socket.io de déclenchement uniformisé (§9.2) : l'ancien couple
+`teleinfo:deploy`/`teleinfo:deploy:result` devient `teleinfo:remote-op`/`teleinfo:remote-op:result`
+(payload `{ action }`), le même quelle que soit l'intervention distante. `start`/`stop`/`restart`
+exposés côté `DeployService`/`SystemdUnitController` (`systemctl start|stop|restart`) mais pas
+encore câblés sur un bouton IHM — en attente des scripts distants annoncés par l'utilisateur.
+Ancienne version v1.1 archivée.*
 *Version 1.1 - 16 Août 2026*
 *Migration en process séparé (`fonctionnelles-supervisor_specs` v2.6, IPC — §2.4, nouvelle) +
 présence de l'agent RPi1 : LWT + battement de cœur ajoutés à `ha-publisher.js` (§6.5, nouvelle) —
@@ -24,6 +33,7 @@ déboguée en conditions réelles (RPi1 physique, 2 compteurs EDF réels) au cou
 6. [Publication MQTT et Découverte HA](#6-publication-mqtt-et-découverte-ha)
     - 6.5 [Présence de l'agent (LWT + battement de cœur)](#65-présence-de-lagent-lwt--battement-de-cœur--nouveau-v11-16082026)
 7. [Déploiement SSH + systemd](#7-déploiement-ssh--systemd)
+    - 7.1bis [Socle SSH/SCP partagé (v1.2)](#71bis-socle-sshscp-partagé-nouveau-v12-22082026)
 8. [Configuration](#8-configuration)
 9. [Interface Web et Socket.io](#9-interface-web-et-socketio)
 10. [Limites et Contraintes Connues](#10-limites-et-contraintes-connues)
@@ -79,7 +89,7 @@ ancien (EOL) en conteneur.
 |---|---|
 | `TeleinfoService.ts` | Orchestrateur : CRUD des 2 compteurs, événements Socket.io, appel au déploiement |
 | `generator.ts` | Construit le `config.yaml` de l'agent à partir des compteurs stockés |
-| `DeployService.ts` | SSH : copie `device-agent/`, résout les dépendances natives, écrit/redémarre le service systemd |
+| `DeployService.ts` | `deploy()` : copie `device-agent/`, résout les dépendances natives, écrit/redémarre le service systemd — SSH/SCP via le socle partagé (§7.1bis). `start()`/`stop()`/`restart()` : délèguent au `SystemdUnitController` partagé, ⭐ v1.2 |
 | `config-schema.ts` | Schéma Zod des réglages (cible SSH, GPIO, port série, broker MQTT) |
 | `storage-schema.ts` | Schéma Zod d'un compteur (`CompteurDefinition`), max 2 |
 | `yaml/ConfigFileManager.ts` | Chargement/sauvegarde atomique du YAML des compteurs |
@@ -314,6 +324,22 @@ de cette session vérifiée avec du vrai matériel (contrairement à `rpigpio`/`
 4. `copyBundledPureJsDeps()` — copie `js-yaml`/`argparse` directement depuis ce dépôt (SCP).
 5. Écrit l'unité systemd, `daemon-reload && enable && restart`, vérifie `is-active`.
 
+### 7.1bis Socle SSH/SCP partagé (⭐ nouveau v1.2, 22/08/2026)
+
+`runSsh`/`runScp`/`shellQuote`/`expandHome` viennent désormais de
+`applications/core/src/infrastructure/remote/SshClient.ts` (exporté via `core/exports.ts`) — jusque
+là réimplémentés quasi à l'identique dans `teleinfo` et `rpigpio` (constaté en comparant les deux
+fichiers). `DeployResult` reste défini localement dans `DeployService.ts` (forme identique à
+`RemoteOpResult` du socle, avec un type `step` plus précis propre à ce module).
+
+`start()`/`stop()`/`restart()` (⭐ v1.2) délèguent à un `SystemdUnitController` partagé
+(`core/infrastructure/remote/RemoteUnitController.ts`, sans `sudo` — la connexion SSH vers le RPi1
+se fait déjà en root) : `systemctl start|stop|restart target.serviceName`. Symétrique côté
+`rpigpio`, qui utilise un `DockerContainerController` pour sa cible (Docker sur stfort) — la même
+abstraction couvre les deux natures de cible. Pas encore exposés côté Socket.io/IHM (§9.2) : prêts
+pour de futurs boutons "Démarrer"/"Arrêter"/"Redémarrer", en attendant les scripts distants annoncés
+par l'utilisateur.
+
 ### 7.2 ⭐ Résolution des dépendances natives — deux approches abandonnées en conditions réelles
 
 Le RPi1 cible dispose d'un `node_modules` **partagé** hérité de l'ancienne domotique
@@ -398,7 +424,7 @@ Trois groupes : "Machine cible (RPi1)" (6 champs), "Câblage" (4 champs, dont `c
 'teleinfo:compteurs:list'  // CompteurDefinition[]
 'teleinfo:compteur:saved'
 'teleinfo:compteur:deleted'
-'teleinfo:deploy:result'   // { success, step?, error?, output? }
+'teleinfo:remote-op:result' // { action, success, step?, error?, output? } — ⭐ v1.2, remplace teleinfo:deploy:result
 'teleinfo:error'
 ```
 
@@ -408,7 +434,9 @@ Trois groupes : "Machine cible (RPi1)" (6 champs), "Câblage" (4 champs, dont `c
 'teleinfo:compteurs:list:get'
 'teleinfo:compteur:save'    // { adco, quoi, lieu, ..., originalAdco? } — originalAdco pour une modification
 'teleinfo:compteur:delete'  // { adco }
-'teleinfo:deploy'
+'teleinfo:remote-op'        // { action: 'deploy'|'start'|'stop'|'restart' } — ⭐ v1.2, remplace teleinfo:deploy
+                             // (sans payload). Seul 'deploy' est branché côté serveur (§7.1bis) ; les 3
+                             // autres répondent par une erreur explicite tant qu'aucun bouton IHM ne les déclenche.
 ```
 
 ---
@@ -463,8 +491,9 @@ applications/teleinfo/
 - [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.30.md) ⭐
 - [Spécifications Fonctionnelles Supervision Multi-Machines](fonctionnelles-supervisor_specs_v2.6.md)
   (§2.4 — architecture process séparé côté dimotic-ha, §11.5/§14.8 — présence de l'agent)
-- [Spécifications Fonctionnelles RPIGPIO](fonctionnelles-rpigpio_specs_v1.1.md) (application sœur,
-  même principe de paramétrage/déploiement, cible Docker, même mécanisme de présence d'agent §7.3)
+- [Spécifications Fonctionnelles RPIGPIO](fonctionnelles-rpigpio_specs_v1.3.md) (application sœur,
+  même principe de paramétrage/déploiement, cible Docker, même mécanisme de présence d'agent §7.3,
+  même socle SSH/SCP partagé depuis la v1.2/v1.3 — §7.1bis/§5.1bis)
 - Code source d'origine : `/home/didier/ownCloud/workspace6/zdidnodeteleinfo/` (hors dépôt git,
   propriété de l'utilisateur)
 
@@ -481,5 +510,6 @@ applications/teleinfo/
 ### 12.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.2 | 2026-08-22 | Claude | **`DeployService.ts` migré sur le socle SSH/SCP partagé** `core/infrastructure/remote/` (§7.1bis) — mutualisé avec `rpigpio`, qui réimplémentait des primitives (`runSsh`/`runScp`/`shellQuote`/`expandHome`) quasi identiques. Protocole Socket.io uniformisé (§9.2) : `teleinfo:deploy`/`teleinfo:deploy:result` (sans payload) devient `teleinfo:remote-op`/`teleinfo:remote-op:result` (`{ action }`) — même mécanisme quelle que soit l'intervention distante, demande explicite de l'utilisateur en prévision de futurs scripts de start/stop/restart. `start()`/`stop()`/`restart()` ajoutés côté `DeployService`, délèguent à un `SystemdUnitController` partagé — non encore exposés en IHM. Ancienne version v1.1 archivée. |
 | 1.1 | 2026-08-16 | Claude | Migration du composant dimotic-ha en process séparé (§2.4, `runsAsSeparateProcess`/`standalone.ts` — l'agent RPi1 lui-même reste un déploiement SSH+systemd distinct, sans rapport). Présence de l'agent RPi1 : LWT + battement de cœur ajoutés à `ha-publisher.js` (§6.5, nouveau) — **seule implémentation de présence/heartbeat de cette session vérifiée en conditions réelles** avec du matériel physique (redéploiement réel confirmé, `agentOnline`/`agentLastSeenAt` mis à jour toutes les 30s). Référence croisée techniques-socle mise à jour (v4.28→v4.30). Ancienne version v1.0 archivée. |
 | 1.0 | 2026-08-12 | Claude | Première spécification. Application créée, déployée et déboguée en conditions réelles (2 compteurs EDF physiques, RPi1 réel) au cours de la session — couvre l'architecture, le protocole téléinformation, la bascule GPIO, la publication MQTT/découverte HA, le déploiement SSH+systemd (dont la leçon sur la résolution de dépendances natives), la configuration, l'UI/Socket.io. Deux bugs réels trouvés et corrigés documentés en détail (§4.3 découpage de trame, §5.4 throttling). |

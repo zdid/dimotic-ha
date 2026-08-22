@@ -69,7 +69,7 @@ function setupEventListeners(): void {
     renderCompteurs();
   });
 
-  socket.on('teleinfo:deploy:result', (result: DeployResult) => {
+  socket.on('teleinfo:remote-op:result', (result: DeployResult) => {
     showDeployResult(result);
   });
 
@@ -273,7 +273,7 @@ function setupDeployButton(): void {
   $('deploy-btn')?.addEventListener('click', () => {
     hideElement('deploy-success');
     hideElement('deploy-error');
-    socket?.emit('teleinfo:deploy');
+    socket?.emit('teleinfo:remote-op', { action: 'deploy' });
   });
 }
 
