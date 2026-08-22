@@ -20,6 +20,9 @@ export const AREXX_SOCKET_EVENTS = {
   SENSORS_LIST: 'arexx:sensors:list',
   SENSOR_DETECTED: 'arexx:sensor:detected',
 
+  // --- Déploiement (page dédiée, voir DriversBundle.ts) ---
+  DRIVER_TARGET: 'arexx:driver-target',
+
   // --- Erreurs ---
   ERROR: 'arexx:error'
 } as const;
@@ -34,7 +37,10 @@ export const AREXX_CLIENT_EVENTS = {
 
   SENSOR_SET_NAME: 'arexx:sensor:set_name',
   SENSOR_SET_TRANSMIT: 'arexx:sensor:set_transmit',
-  SENSOR_DELETE: 'arexx:sensor:delete'
+  SENSOR_DELETE: 'arexx:sensor:delete',
+
+  GET_DRIVER_TARGET: 'arexx:driver-target:get',
+  SAVE_DRIVER_TARGET: 'arexx:driver-target:save'
 } as const;
 
 // ============================================================================

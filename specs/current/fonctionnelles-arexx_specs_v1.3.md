@@ -1,5 +1,13 @@
 # Spécifications Fonctionnelles - Module AREXX
 
+*Version 1.3 - 22 Août 2026*
+*v1.3 : la page "Déploiement" (§9.2bis) n'expose plus une simple édition manuelle de
+`target.txt` — un vrai formulaire (adresse IP + port, bouton "Enregistrer") écrit le fichier
+côté serveur après validation. Deux nouveaux événements Socket.io
+`arexx:driver-target:get`/`:save` (§9.3) ; `arexx:error` a désormais un premier émetteur réel
+(validation de la saisie), après avoir été documenté comme jamais utilisé depuis la v1.0. Testé
+au navigateur (cas succès et erreur). Sans changement du mécanisme de déploiement lui-même
+(§5.4, script/bundle inchangés).*
 *Version 1.2 - 21 Août 2026*
 *v1.2 : nouveau §5.4 "Déploiement sur une machine distante" — script
 `scripts/deploy-sender.sh` (détection d'architecture, installation systemd) + second binaire
@@ -272,9 +280,11 @@ QUE s'il est absent, pour ne jamais écraser une valeur déjà éditée.
 
 **`target.txt`** : fichier texte d'une ligne (`host:port`, adresse du récepteur AREXX à joindre
 depuis la machine cible), créé au premier démarrage avec un contenu-gabarit
-(`A_REMPLACER:<httpservPort réel>`) — le port est connu, l'hôte doit être édité manuellement par
-l'utilisateur (aucune tentative de deviner l'adresse IP réseau de la machine courante, jugé plus
-fragile qu'utile — même décision que documentée plus bas pour la page IHM, §9.2bis).
+(`A_REMPLACER:<httpservPort réel>`) — le port est connu, l'hôte reste à saisir par l'utilisateur
+(aucune tentative de deviner l'adresse IP réseau de la machine courante, jugé plus fragile
+qu'utile). Édité via un formulaire dans la page IHM (§9.2bis, pas une édition manuelle du fichier
+— voir événements Socket.io `arexx:driver-target:get`/`:save`, §9.3), qui écrit le fichier
+côté serveur après validation (hôte non vide, port entier 1-65535).
 
 **Script `scripts/deploy-sender.sh`** : à lancer en root, **sans argument** — lit l'adresse dans
 `target.txt` (fichier frère de `scripts/`, donc à la racine du dossier `drivers/` copié), rejette
@@ -287,17 +297,19 @@ les cas ; `gcc`/`make`/`libusb-1.0-0-dev` seulement pour compiler `tl-500`), gé
 (`rulefile.txt`/`url.txt`) avec l'adresse lue, installe et démarre un service systemd persistant
 (`arexx-sender.service`, sans `-v` par défaut — voir §5.3). Idempotent.
 
-**Vérifié en conditions réelles (21/08/2026)** : dossier `data/arexx/drivers/` généré au démarrage
-(vérifié après un redémarrage : `scripts/`/`rf_usb_http_rpi_0_6/`/`tl-500/` rafraîchis, `target.txt`
-préservé s'il existait déjà) ; script testé avec le contenu-gabarit (rejeté, message clair), avec
-une adresse valide (accepté, bloqué ensuite sur le contrôle root — attendu hors root) ; installation
-complète sur `bs510` avec ce mécanisme, relevé du capteur réel reçu par l'application `arexx`
-tournant en local, chaîne bout en bout confirmée.
+**Vérifié en conditions réelles (21-22/08/2026)** : dossier `data/arexx/drivers/` généré au
+démarrage (vérifié après un redémarrage : `scripts/`/`rf_usb_http_rpi_0_6/`/`tl-500/` rafraîchis,
+`target.txt` préservé s'il existait déjà) ; script testé avec le contenu-gabarit (rejeté, message
+clair), avec une adresse valide (accepté, bloqué ensuite sur le contrôle root — attendu hors
+root) ; installation complète sur `bs510` avec ce mécanisme, relevé du capteur réel reçu par
+l'application `arexx` tournant en local, chaîne bout en bout confirmée. Formulaire de la page
+Déploiement testé au navigateur (cas succès et cas erreur — adresse vide) : écriture réelle de
+`target.txt` confirmée sur disque après clic sur "Enregistrer".
 
 **Documentation associée** : pointeur court dans le formulaire de paramétrage (description du
 champ `usbDevicePath`) + page dédiée "Déploiement" dans l'IHM de l'application (§9.2bis),
-expliquant la marche à suivre (éditer `target.txt`, copier tout `data/arexx/drivers/`, lancer le
-script sans argument).
+expliquant la marche à suivre (renseigner l'adresse dans le formulaire, copier tout
+`data/arexx/drivers/`, lancer le script sans argument).
 
 ---
 
@@ -442,26 +454,35 @@ Vraie navigation de page complète (comme RFXCOM/EVOO7), sa propre connexion Soc
   `${quoi}---${lieu}`. Aucune validation contre le référentiel NOMMAGE — texte libre.
 - Suppression via `confirm()` natif.
 
-### 9.2bis Page dédiée "Déploiement" (⭐ nouveau v1.2, 21/08/2026)
+### 9.2bis Page dédiée "Déploiement" (⭐ nouveau v1.2, 21/08/2026 — formulaire ajouté 22/08/2026)
 
 `presentation/arexx/deploiement.html` + `deploiement-app.ts` — même patron de page complète que
-"Capteurs" (§9.2), sa propre connexion Socket.io. Quatre étapes documentées : éditer
-`data/arexx/drivers/target.txt`, copier tout `data/arexx/drivers/` sur la machine cible, lancer
-`scripts/deploy-sender.sh` sans argument, et ce que fait le script (§5.4). Une seule valeur
-dynamique : le port HTTP local réellement configuré (`arexx:status` → `httpservPort`, §8.1),
-affiché dans le contenu à écrire dans `target.txt` (`A_REMPLACER:<port réel>`) — l'adresse IP de la
-machine cible reste à saisir manuellement (aucune tentative de deviner automatiquement l'adresse
-LAN correcte de la machine courante, jugé plus fragile qu'utile). Bouton "Copier"
-(`navigator.clipboard`).
+"Capteurs" (§9.2), sa propre connexion Socket.io. Quatre étapes documentées : renseigner l'adresse
+du récepteur (formulaire, voir plus bas), copier tout `data/arexx/drivers/` sur la machine cible,
+lancer `scripts/deploy-sender.sh` sans argument, et ce que fait le script (§5.4).
+
+**Étape 1 — vrai formulaire, pas une édition manuelle de fichier** : deux champs (adresse IP, port)
++ bouton "💾 Enregistrer". Au chargement, émet `arexx:driver-target:get` — le port est toujours
+pré-rempli (`httpservPort` réel, §8.1) ; l'hôte n'est pré-rempli que si `target.txt` contient déjà
+une valeur valide (pas le contenu-gabarit) — laissé vide sinon, aucune tentative de deviner
+l'adresse IP réseau de la machine courante, jugé plus fragile qu'utile. Le clic sur "Enregistrer"
+émet `arexx:driver-target:save` ; le serveur valide (hôte non vide, port entier 1-65535), écrit
+`target.txt` si valide, ou répond `arexx:error` sinon — un indicateur `saving` côté client distingue
+la confirmation d'un enregistrement explicite du simple pré-remplissage au chargement (les deux
+réutilisent le même événement retour `arexx:driver-target`). Alertes succès/erreur, même patron que
+la page "Capteurs" (§9.2).
 
 ### 9.3 Événements Socket.io
 
-**Server → Client** (persistants : `arexx:status`, `arexx:sensors:list`) :
+**Server → Client** (persistants : `arexx:status`, `arexx:sensors:list` — `arexx:driver-target` PAS
+persistant, demandé explicitement au chargement de la page Déploiement, même choix que
+`sensors:list` sur la page Capteurs) :
 ```typescript
 'arexx:status'          // { running, acquisitionMode, sensorsCount, lastReadingAt, httpservPort } — champ ajouté v1.2
 'arexx:sensors:list'    // { configured, discovered }
 'arexx:sensor:detected' // { uniqueId, kind }
-'arexx:error'           // ⚠️ déclaré et écouté côté UI, jamais émis par le serveur
+'arexx:driver-target'   // { host, port } — ⭐ v1.2 (22/08/2026), host: '' si non renseigné (voir §9.2bis)
+'arexx:error'           // ⭐ v1.2 (22/08/2026) : premier émetteur réel — jusqu'ici déclaré et écouté côté UI, jamais émis par le serveur (validation de arexx:driver-target:save)
 ```
 
 **Client → Server :**
@@ -471,6 +492,8 @@ LAN correcte de la machine courante, jugé plus fragile qu'utile). Bouton "Copie
 'arexx:sensor:set_name'      // { uniqueId, name }
 'arexx:sensor:set_transmit'  // { uniqueId, transmitToHa }
 'arexx:sensor:delete'        // { uniqueId }
+'arexx:driver-target:get'    // ⭐ v1.2 (22/08/2026)
+'arexx:driver-target:save'   // { host, port } — ⭐ v1.2 (22/08/2026)
 ```
 
 ---
@@ -489,7 +512,7 @@ LAN correcte de la machine courante, jugé plus fragile qu'utile). Bouton "Copie
 | Pas de supervision du process USB enfant (mode `usb` local) | Aucun redémarrage automatique si le binaire se termine de façon inattendue | Non corrigé (le service systemd du script de déploiement §5.4, lui, redémarre sur échec — mais ne concerne que le déploiement distant, pas `UsbBridge`) |
 | Parsing HTML du BS1000 (mode `poll`) fragile | Format non documenté par Arexx, chaînage de remplacements successifs — accepté comme fidèle au portage d'origine | Accepté |
 | Seuls température/humidité sont gérés | Un relevé d'un autre type AREXX (CO2, tension) serait publié à tort comme une température | Non corrigé |
-| `arexx:error` jamais émis | Aucune erreur (BS1000 injoignable, payload invalide, échec d'écriture YAML, échec de spawn USB) n'atteint l'UI — logs serveur uniquement | Non corrigé |
+| `arexx:error` émis UNIQUEMENT pour `driver-target:save` invalide (v1.2) | Les autres erreurs (BS1000 injoignable, payload invalide, échec d'écriture YAML, échec de spawn USB) n'atteignent toujours pas l'UI — logs serveur uniquement | Partiellement corrigé |
 | Aucune authentification sur le serveur HTTP local | Écoute sur toutes les interfaces, sans filtrage — acceptable en LAN de confiance, à ne pas exposer publiquement | Accepté (cohérent avec le reste du socle, voir `techniques-socle-ha-mqtt_specs` §5.6) |
 | Port HTTP local non publié dans `compose.yaml` | Mode `push` depuis un BS1000 externe injoignable dans le conteneur fourni tel quel | Non corrigé |
 | Désactivation de l'application ne coupe pas le serveur HTTP / process USB en cours | Fuite de handles OS (item générique du projet, particulièrement critique ici — AREXX cumule serveur HTTP, timer et process enfant) | Non implémenté (chantier différé, voir `TODO.md`) |
@@ -567,6 +590,7 @@ data/arexx/
 ### 12.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.3 | 2026-08-22 | Claude | **Formulaire réel sur la page Déploiement** (§9.2bis) : remplace l'édition manuelle de `data/arexx/drivers/target.txt` par deux champs (adresse IP, port) + bouton "Enregistrer", écrivant le fichier côté serveur (`arexx:driver-target:get`/`:save`, §9.3) après validation (hôte non vide, port 1-65535). `arexx:error` obtient son premier émetteur réel (jusqu'ici déclaré mais jamais utilisé depuis la v1.0). Testé au navigateur : cas succès (écriture confirmée sur disque) et cas erreur (adresse vide, message affiché). Aucun changement du mécanisme de déploiement lui-même (§5.4). Ancienne version v1.2 archivée. |
 | 1.2 | 2026-08-21 | Claude | **Déploiement scripté sur une machine distante** (§5.4, nouveau) : `DriversBundle.ts` génère `data/arexx/drivers/` à chaque démarrage (copie depuis `applications/arexx/`, figé dans l'image Docker et donc inaccessible depuis l'hôte — `data/` est le volume monté), contenant `scripts/deploy-sender.sh` (détection d'architecture, installation systemd, idempotent, arrête un service existant avant d'écraser ses fichiers), un second bundle vendored `tl-500/` (portable 32/64 bits, alternative à `rf_usb_http.elf` sur les architectures où ce dernier ne fonctionne pas — validé en conditions réelles sur x86_64/ARM64/ARMv6, mêmes valeurs que la référence), et `target.txt` (adresse du récepteur, lue par le script — remplace un argument en ligne de commande — préservé aux redémarrages contrairement au reste du bundle). RSSI de `tl-500` documenté comme non calibré (§5.4, §10). Nouvelle page IHM "Déploiement" (§9.2bis) expliquant le flux en 4 étapes, `ArexxStatus.httpservPort` exposé pour préremplir le contenu de `target.txt` affiché. Deux pièges de `rf_usb_http.elf` documentés pour la première fois ici (§5.3) : mode `-v` + rejeu d'historique = charge/logs élevés (constaté en conditions réelles), ligne `Z` de `rulefile.txt` à conserver malgré son statut "non supportée". Installation complète validée en conditions réelles sur `bs510`, chaîne bout en bout confirmée avec l'application `arexx` locale. Ancienne version v1.1 archivée. |
 | 1.1 | 2026-08-04 | Claude | Correction de référence `ws-ha` → `dimotic-ha` (projet renommé), sans changement fonctionnel. Ancienne version v1.0 archivée. |
 | 1.0 | 2026-08-03 | Claude | Première spécification formelle, écrite a posteriori (application opérationnelle depuis le 23/07/2026 sans documentation dédiée). Couvre l'architecture, les 3 modes d'acquisition, le mode USB (binaire vendored), la persistance, la taxonomie/découverte HA, la configuration, l'UI/Socket.io, et une liste consolidée des limites connues identifiées en lisant le code réel. |

@@ -22,10 +22,19 @@ import type { Logger } from '../../../core/dist/exports';
 import type { ArexxConfig } from './config-schema';
 
 const BUNDLE_ITEMS = ['scripts', 'rf_usb_http_rpi_0_6', 'tl-500'];
+const TARGET_PLACEHOLDER_HOST = 'A_REMPLACER';
+
+export function driversDirPath(): string {
+  const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'arexx');
+  return path.join(dataDir, 'drivers');
+}
+
+function targetFilePath(): string {
+  return path.join(driversDirPath(), 'target.txt');
+}
 
 export function ensureDriversBundle(config: ArexxConfig, logger: Logger): void {
-  const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'arexx');
-  const driversDir = path.join(dataDir, 'drivers');
+  const driversDir = driversDirPath();
   // Depuis dist/domain/DriversBundle.js, remonte à applications/arexx/ (racine de l'app,
   // scripts/rf_usb_http_rpi_0_6/tl-500 y vivent en tant que dossiers frères de dist/src) — même
   // convention que UsbBridge.ts pour localiser son propre binaire vendored.
@@ -43,11 +52,32 @@ export function ensureDriversBundle(config: ArexxConfig, logger: Logger): void {
     fs.cpSync(src, dest, { recursive: true, force: true });
   }
 
-  const targetFile = path.join(driversDir, 'target.txt');
+  const targetFile = targetFilePath();
   if (!fs.existsSync(targetFile)) {
-    fs.writeFileSync(targetFile, `A_REMPLACER:${config.httpservPort}\n`, 'utf8');
-    logger.info('DriversBundle', `target.txt créé (à éditer avant copie sur la machine cible): ${targetFile}`);
+    fs.writeFileSync(targetFile, `${TARGET_PLACEHOLDER_HOST}:${config.httpservPort}\n`, 'utf8');
+    logger.info('DriversBundle', `target.txt créé (à renseigner via la page Déploiement): ${targetFile}`);
   }
 
   logger.info('DriversBundle', `Bundle de déploiement prêt: ${driversDir}`);
+}
+
+/** Lit target.txt tel quel — { host: '', port } si absent/placeholder non encore renseigné. */
+export function readDriverTarget(config: ArexxConfig): { host: string; port: number } {
+  const targetFile = targetFilePath();
+  try {
+    const line = fs.readFileSync(targetFile, 'utf8').split('\n')[0].trim();
+    const [host, portStr] = line.split(':');
+    const port = Number(portStr);
+    if (!host || host === TARGET_PLACEHOLDER_HOST || !Number.isInteger(port) || port <= 0) {
+      return { host: '', port: config.httpservPort };
+    }
+    return { host, port };
+  } catch {
+    return { host: '', port: config.httpservPort };
+  }
+}
+
+/** Écrit target.txt à partir d'une saisie utilisateur (page Déploiement) — validé par l'appelant. */
+export function writeDriverTarget(host: string, port: number): void {
+  fs.writeFileSync(targetFilePath(), `${host}:${port}\n`, 'utf8');
 }

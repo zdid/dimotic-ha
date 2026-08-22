@@ -1,28 +1,62 @@
 /**
- * Script TypeScript pour la page Déploiement AREXX — affiche la commande à lancer sur la
- * machine cible, avec le port réellement configuré (arexx:status) déjà substitué.
+ * Script TypeScript pour la page Déploiement AREXX — pré-remplit et enregistre l'adresse du
+ * récepteur (data/arexx/drivers/target.txt) via un formulaire, plutôt qu'une édition manuelle du
+ * fichier.
  */
 
 import { SocketService } from '/js/ts/services/SocketService.js';
 
 let socket: any | null = null;
+/** Distingue le chargement initial (pré-remplissage silencieux) de l'enregistrement explicite
+ *  (confirmation affichée) — les deux réutilisent le même événement serveur en retour. */
+let saving = false;
 
 function init(): void {
   const socketService = new SocketService();
   socket = socketService.connect();
 
-  socket.on('arexx:status', (status: { httpservPort: number }) => {
-    const el = document.getElementById('port-value');
-    if (el) el.textContent = String(status.httpservPort);
+  socket.on('arexx:driver-target', (target: { host: string; port: number }) => {
+    const hostEl = document.getElementById('input-host') as HTMLInputElement | null;
+    const portEl = document.getElementById('input-port') as HTMLInputElement | null;
+    if (hostEl && !hostEl.value) hostEl.value = target.host;
+    if (portEl) portEl.value = String(target.port);
     hideLoading();
+    if (saving) {
+      saving = false;
+      showAlert('Enregistré', 'success');
+    }
   });
 
-  socket.emit('arexx:status:get');
-
-  document.getElementById('btn-copy')?.addEventListener('click', () => {
-    const text = document.getElementById('deploy-command')?.textContent ?? '';
-    navigator.clipboard.writeText(text.trim());
+  socket.on('arexx:error', (error: { message: string }) => {
+    saving = false;
+    showAlert(error.message, 'error');
   });
+
+  socket.emit('arexx:driver-target:get');
+
+  document.getElementById('btn-save')?.addEventListener('click', () => {
+    const host = (document.getElementById('input-host') as HTMLInputElement | null)?.value.trim() ?? '';
+    const port = Number((document.getElementById('input-port') as HTMLInputElement | null)?.value ?? '');
+    if (!host) {
+      showAlert('Adresse IP manquante', 'error');
+      return;
+    }
+    saving = true;
+    socket.emit('arexx:driver-target:save', { host, port });
+  });
+}
+
+function showAlert(message: string, type: 'success' | 'error'): void {
+  const successEl = document.getElementById('success-alert');
+  const errorEl = document.getElementById('error-alert');
+  [successEl, errorEl].forEach((el) => { if (el) el.style.display = 'none'; });
+
+  const el = type === 'error' ? errorEl : successEl;
+  if (el) {
+    el.textContent = message;
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 4000);
+  }
 }
 
 function hideLoading(): void {

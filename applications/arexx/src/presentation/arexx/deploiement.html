@@ -27,6 +27,17 @@
       padding: 8px 16px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em;
     }
     .btn-secondary { background: var(--color-background); color: var(--color-text); border: 1px solid var(--color-primary); }
+    .btn-primary { background: var(--color-accent); color: white; }
+
+    .form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin: 10px 0; }
+    .form-row label { display: block; font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 4px; }
+    .form-row input { padding: 8px; border-radius: var(--radius); border: 1px solid var(--color-primary); background: var(--color-background); color: var(--color-text); }
+    .form-row input#input-host { width: 220px; }
+    .form-row input#input-port { width: 90px; }
+
+    .alert { padding: 12px; border-radius: var(--radius); margin: 10px 0; display: none; }
+    .alert-success { background: rgba(76, 175, 80, 0.1); border: 1px solid var(--color-success); color: var(--color-success); }
+    .alert-error { background: rgba(244, 67, 54, 0.1); border: 1px solid var(--color-error); color: var(--color-error); }
   </style>
 </head>
 <body>
@@ -45,18 +56,26 @@
         ses deux dépendances, déjà prêts.
       </p>
       <p>
-        <code>target.txt</code> contient une seule ligne (<code>host:port</code>) : l'adresse de
-        <strong>ce</strong> récepteur, telle que joignable depuis la machine cible. Le port est déjà
-        renseigné d'après la configuration actuelle — seul l'hôte reste à indiquer (l'application ne
-        peut pas deviner de façon fiable sa propre adresse IP réseau) :
+        <code>target.txt</code> contient l'adresse de <strong>ce</strong> récepteur, telle que
+        joignable depuis la machine cible. Le port est déjà renseigné d'après la configuration
+        actuelle — seul l'hôte reste à indiquer (l'application ne peut pas deviner de façon fiable
+        sa propre adresse IP réseau) :
       </p>
-      <pre id="deploy-command">A_REMPLACER:<span id="port-value">…</span></pre>
-      <button class="btn btn-secondary" id="btn-copy">📋 Copier</button>
-      <p style="margin-top:10px;color:var(--color-text-muted);font-size:0.9em;">
-        Remplacer <code>A_REMPLACER</code> par l'adresse IP réellement joignable depuis la machine
-        cible, et écrire le résultat dans <code>data/arexx/drivers/target.txt</code> (fichier texte
-        simple, éditable directement).
-      </p>
+
+      <div class="alert alert-success" id="success-alert"></div>
+      <div class="alert alert-error" id="error-alert"></div>
+
+      <div class="form-row">
+        <div>
+          <label for="input-host">Adresse IP</label>
+          <input type="text" id="input-host" placeholder="192.168.1.51">
+        </div>
+        <div>
+          <label for="input-port">Port</label>
+          <input type="number" id="input-port">
+        </div>
+        <button class="btn btn-primary" id="btn-save">💾 Enregistrer</button>
+      </div>
     </div>
 
     <div class="card">

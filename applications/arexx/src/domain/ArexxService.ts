@@ -22,7 +22,7 @@ import { extractTaxonomy, buildAttributsTaxonomie } from './taxonomy';
 import { PushReceiver } from './acquisition/PushReceiver';
 import { PollClient } from './acquisition/PollClient';
 import { UsbBridge } from './acquisition/UsbBridge';
-import { ensureDriversBundle } from './DriversBundle';
+import { ensureDriversBundle, readDriverTarget, writeDriverTarget } from './DriversBundle';
 
 const MODULE_NAME = 'arexx';
 
@@ -297,6 +297,24 @@ export class ArexxService implements IArexxService {
       this.persistSensors();
       this.emitSensorsList();
     });
+
+    this.eventBus.onGeneric('arexx:driver-target:get', () => this.emitDriverTarget());
+
+    this.eventBus.onGeneric<{ host: string; port: number }>('arexx:driver-target:save', (data) => {
+      const host = (data.host || '').trim();
+      const port = Number(data.port);
+      if (!host || !Number.isInteger(port) || port <= 0 || port > 65535) {
+        this.eventBus.emitGeneric('arexx:error', { message: `Adresse invalide (hôte: "${host}", port: ${data.port})` });
+        return;
+      }
+      writeDriverTarget(host, port);
+      this.logger.info('ArexxService', `Cible de déploiement enregistrée: ${host}:${port}`);
+      this.emitDriverTarget();
+    });
+  }
+
+  private emitDriverTarget(): void {
+    this.eventBus.emitGeneric('arexx:driver-target', readDriverTarget(this.config));
   }
 
   private persistSensors(): void {
