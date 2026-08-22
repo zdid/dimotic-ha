@@ -55,4 +55,8 @@ export interface ArexxStatus {
   lastReadingAt: string | null;
   /** Port du serveur HTTP local (modes push/usb) — exposé pour la page Déploiement (§ scripts/deploy-sender.sh). */
   httpservPort: number;
+  /** true si CETTE instance (le récepteur) tourne dans un conteneur Docker — voir core/infrastructure/runtime/docker.ts.
+   *  Affecte le texte de la page Déploiement (préparation de l'accès SSH, §5.4bis) : la clé générée doit
+   *  se trouver là où le conteneur peut la relire ensuite, pas seulement sur l'hôte. */
+  isRunningInDocker: boolean;
 }

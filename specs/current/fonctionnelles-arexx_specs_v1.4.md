@@ -1,5 +1,16 @@
 # Spécifications Fonctionnelles - Module AREXX
 
+*Version 1.4 - 22 Août 2026*
+*v1.4 : nouvelle étape "Préparer l'accès SSH" sur la page "Déploiement" (§9.2bis), entre le
+formulaire `target.txt` et la copie du dossier `drivers/` — explique `ssh-keygen`/`ssh-copy-id`
+à lancer par l'utilisateur (non scriptable côté serveur, `ssh-copy-id` exige un terminal
+interactif pour le mot de passe). Texte conditionnel selon que **ce récepteur** tourne dans un
+conteneur Docker ou non (nouveau champ `ArexxStatus.isRunningInDocker`, §8.1/§9.3, alimenté par
+un nouveau mécanisme partagé du socle — détection `/.dockerenv` posée une fois par `core` au
+bootstrap dans une variable d'environnement héritée par tous les process enfants, voir
+`techniques-socle-ha-mqtt_specs`) : si Docker, la clé doit être générée **dans** le conteneur
+(`docker exec -it <conteneur> bash` d'abord), pas seulement sur l'hôte. Sans changement du
+mécanisme de déploiement lui-même (§5.4).*
 *Version 1.3 - 22 Août 2026*
 *v1.3 : la page "Déploiement" (§9.2bis) n'expose plus une simple édition manuelle de
 `target.txt` — un vrai formulaire (adresse IP + port, bouton "Enregistrer") écrit le fichier
@@ -91,7 +102,7 @@ capteur→HA.
 | `acquisition/PollClient.ts` | Client HTTP périodique vers le BS1000 (mode `poll`) |
 | `acquisition/UsbBridge.ts` | `spawn()` du binaire ARM vendored (mode `usb`) |
 | `config-schema.ts` / `devices-config-schema.ts` | Schémas Zod (config générale / capteurs) |
-| `types.ts` | `ArexxRawReading`, `ArexxSensorInfo`, `ArexxDiscoveredSensor`, `ArexxStatus` (`httpservPort` ajouté v1.2) |
+| `types.ts` | `ArexxRawReading`, `ArexxSensorInfo`, `ArexxDiscoveredSensor`, `ArexxStatus` (`httpservPort` ajouté v1.2, `isRunningInDocker` ajouté v1.4) |
 | `socket-events.ts` | Catalogue des événements Socket.io |
 | `index.ts` | Manifeste du module (`AREXX_APP`, `AREXX_UI_METADATA`, `AREXX_MENU_CONFIG`) |
 
@@ -421,6 +432,13 @@ par AREXX. Non corrigé à ce jour.
 > l'utilisateur n'a pas sauvegardé une fois le formulaire générique, AREXX tourne entièrement sur
 > ses valeurs par défaut Zod.
 
+**`ArexxStatus.isRunningInDocker`** (⭐ nouveau v1.4) : pas un champ de `config.yaml`, calculé à
+chaque `getStatus()` via `isRunningInDocker()` (core, `infrastructure/runtime/docker.ts`) — détecte
+la présence de `/.dockerenv`, une seule fois au bootstrap de `core`, résultat transmis à tous les
+process enfants (dont `arexx`, en process séparé) via héritage `process.env` standard de Node
+(`ProcessSupervisor.spawnChild()` ne passe aucun `env` explicite à `spawn()`). Piloté par ce champ :
+le bloc conditionnel de la page Déploiement (§9.2bis, étape 2).
+
 ### 8.2 Formulaire générique ("Paramètres Techniques → AREXX")
 
 Un seul groupe "Acquisition" (icône 📡), avec les 7 champs ci-dessus **sauf** `enabled` et
@@ -457,9 +475,10 @@ Vraie navigation de page complète (comme RFXCOM/EVOO7), sa propre connexion Soc
 ### 9.2bis Page dédiée "Déploiement" (⭐ nouveau v1.2, 21/08/2026 — formulaire ajouté 22/08/2026)
 
 `presentation/arexx/deploiement.html` + `deploiement-app.ts` — même patron de page complète que
-"Capteurs" (§9.2), sa propre connexion Socket.io. Quatre étapes documentées : renseigner l'adresse
-du récepteur (formulaire, voir plus bas), copier tout `data/arexx/drivers/` sur la machine cible,
-lancer `scripts/deploy-sender.sh` sans argument, et ce que fait le script (§5.4).
+"Capteurs" (§9.2), sa propre connexion Socket.io. Cinq étapes documentées : renseigner l'adresse
+du récepteur (formulaire, voir plus bas), préparer l'accès SSH (⭐ nouveau v1.4, voir plus bas),
+copier tout `data/arexx/drivers/` sur la machine cible, lancer `scripts/deploy-sender.sh` sans
+argument, et ce que fait le script (§5.4).
 
 **Étape 1 — vrai formulaire, pas une édition manuelle de fichier** : deux champs (adresse IP, port)
 + bouton "💾 Enregistrer". Au chargement, émet `arexx:driver-target:get` — le port est toujours
@@ -472,13 +491,27 @@ la confirmation d'un enregistrement explicite du simple pré-remplissage au char
 réutilisent le même événement retour `arexx:driver-target`). Alertes succès/erreur, même patron que
 la page "Capteurs" (§9.2).
 
+**Étape 2 — préparer l'accès SSH (⭐ nouveau v1.4, 22/08/2026)** : texte explicatif uniquement,
+aucune automatisation côté serveur. Décision explicite (voir historique v1.4) : `ssh-keygen -t
+ed25519 -N "" -q` est scriptable sans interaction, mais `ssh-copy-id` exige un terminal interactif
+pour la saisie du mot de passe de la machine cible — impossible à déclencher silencieusement
+depuis une requête HTTP/Socket.io côté backend Node.js. Les deux commandes sont donc simplement
+affichées, à lancer par l'utilisateur lui-même, une fois par machine cible (comme le script
+`deploy-sender.sh` lui-même, §5.4 — pas une automatisation pilotée par l'application). Un bloc
+conditionnel (`#docker-instruction`, masqué par défaut) s'affiche quand `arexx:status` rapporte
+`isRunningInDocker: true` (§8.1/§9.3) : il ajoute l'instruction d'ouvrir d'abord un terminal
+**dans** le conteneur (`docker exec -it <nom du conteneur> bash`) avant `ssh-keygen`, sans quoi
+la clé générée sur l'hôte ne serait pas visible du conteneur qui exécutera réellement la copie/le
+script (étapes 3-4). Basculé côté client dans `deploiement-app.ts` (`socket.on('arexx:status',
+...)`), pas une valeur figée au rendu de la page.
+
 ### 9.3 Événements Socket.io
 
 **Server → Client** (persistants : `arexx:status`, `arexx:sensors:list` — `arexx:driver-target` PAS
 persistant, demandé explicitement au chargement de la page Déploiement, même choix que
 `sensors:list` sur la page Capteurs) :
 ```typescript
-'arexx:status'          // { running, acquisitionMode, sensorsCount, lastReadingAt, httpservPort } — champ ajouté v1.2
+'arexx:status'          // { running, acquisitionMode, sensorsCount, lastReadingAt, httpservPort, isRunningInDocker } — httpservPort ajouté v1.2, isRunningInDocker ajouté v1.4
 'arexx:sensors:list'    // { configured, discovered }
 'arexx:sensor:detected' // { uniqueId, kind }
 'arexx:driver-target'   // { host, port } — ⭐ v1.2 (22/08/2026), host: '' si non renseigné (voir §9.2bis)
@@ -590,6 +623,7 @@ data/arexx/
 ### 12.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.4 | 2026-08-22 | Claude | **Étape "Préparer l'accès SSH"** sur la page Déploiement (§9.2bis), entre le formulaire `target.txt` et la copie du dossier `drivers/` : affiche `ssh-keygen`/`ssh-copy-id` à lancer par l'utilisateur (`ssh-copy-id` non scriptable, exige un terminal interactif pour le mot de passe — décision explicite de ne pas automatiser côté serveur). Nouveau champ `ArexxStatus.isRunningInDocker` (§8.1/§9.3), alimenté par un nouveau mécanisme partagé du socle (`core/infrastructure/runtime/docker.ts` — détection `/.dockerenv` au bootstrap de `core`, transmise aux process enfants séparés via héritage `process.env`, même mécanisme déjà utilisé pour `PROJECT_ROOT`) : si vrai, un bloc conditionnel ajoute l'instruction d'ouvrir un terminal **dans** le conteneur (`docker exec -it`) avant de générer la clé, sans quoi elle ne serait pas visible du conteneur qui exécute réellement la copie/le script. Testé au navigateur (bascule du bloc conditionnel vérifiée dans les deux sens). Sans changement du mécanisme de déploiement lui-même (§5.4). Ancienne version v1.3 archivée. |
 | 1.3 | 2026-08-22 | Claude | **Formulaire réel sur la page Déploiement** (§9.2bis) : remplace l'édition manuelle de `data/arexx/drivers/target.txt` par deux champs (adresse IP, port) + bouton "Enregistrer", écrivant le fichier côté serveur (`arexx:driver-target:get`/`:save`, §9.3) après validation (hôte non vide, port 1-65535). `arexx:error` obtient son premier émetteur réel (jusqu'ici déclaré mais jamais utilisé depuis la v1.0). Testé au navigateur : cas succès (écriture confirmée sur disque) et cas erreur (adresse vide, message affiché). Aucun changement du mécanisme de déploiement lui-même (§5.4). Ancienne version v1.2 archivée. |
 | 1.2 | 2026-08-21 | Claude | **Déploiement scripté sur une machine distante** (§5.4, nouveau) : `DriversBundle.ts` génère `data/arexx/drivers/` à chaque démarrage (copie depuis `applications/arexx/`, figé dans l'image Docker et donc inaccessible depuis l'hôte — `data/` est le volume monté), contenant `scripts/deploy-sender.sh` (détection d'architecture, installation systemd, idempotent, arrête un service existant avant d'écraser ses fichiers), un second bundle vendored `tl-500/` (portable 32/64 bits, alternative à `rf_usb_http.elf` sur les architectures où ce dernier ne fonctionne pas — validé en conditions réelles sur x86_64/ARM64/ARMv6, mêmes valeurs que la référence), et `target.txt` (adresse du récepteur, lue par le script — remplace un argument en ligne de commande — préservé aux redémarrages contrairement au reste du bundle). RSSI de `tl-500` documenté comme non calibré (§5.4, §10). Nouvelle page IHM "Déploiement" (§9.2bis) expliquant le flux en 4 étapes, `ArexxStatus.httpservPort` exposé pour préremplir le contenu de `target.txt` affiché. Deux pièges de `rf_usb_http.elf` documentés pour la première fois ici (§5.3) : mode `-v` + rejeu d'historique = charge/logs élevés (constaté en conditions réelles), ligne `Z` de `rulefile.txt` à conserver malgré son statut "non supportée". Installation complète validée en conditions réelles sur `bs510`, chaîne bout en bout confirmée avec l'application `arexx` locale. Ancienne version v1.1 archivée. |
 | 1.1 | 2026-08-04 | Claude | Correction de référence `ws-ha` → `dimotic-ha` (projet renommé), sans changement fonctionnel. Ancienne version v1.0 archivée. |

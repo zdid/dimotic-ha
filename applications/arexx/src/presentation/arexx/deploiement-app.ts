@@ -27,6 +27,12 @@ function init(): void {
     }
   });
 
+  socket.on('arexx:status', (status: { isRunningInDocker: boolean }) => {
+    const el = document.getElementById('docker-instruction');
+    if (el) el.style.display = status.isRunningInDocker ? 'block' : 'none';
+  });
+  socket.emit('arexx:status:get');
+
   socket.on('arexx:error', (error: { message: string }) => {
     saving = false;
     showAlert(error.message, 'error');

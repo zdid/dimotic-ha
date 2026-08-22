@@ -79,7 +79,29 @@
     </div>
 
     <div class="card">
-      <h3>2. Copier tout le dossier <code>data/arexx/drivers/</code> sur la machine cible</h3>
+      <h3>2. Préparer l'accès SSH (une seule fois par machine cible)</h3>
+      <p>
+        Permet à la copie et au lancement du script (étapes 3-4) de se faire sans ressaisir de mot
+        de passe à chaque fois. À faire une fois par machine cible.
+      </p>
+      <div id="docker-instruction" style="display:none;padding:10px;border-radius:var(--radius);background:rgba(255,193,7,0.1);border:1px solid #ffc107;margin-bottom:10px;">
+        ⚠️ Cette instance tourne dans un conteneur Docker — la clé générée doit être lisible par ce
+        conteneur (pas seulement par l'hôte). Ouvrir d'abord un terminal <strong>dans</strong> le
+        conteneur avant les commandes ci-dessous :
+        <pre>docker exec -it &lt;nom du conteneur&gt; bash</pre>
+      </div>
+      <p>Depuis ce terminal :</p>
+      <pre>ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_arexx -N "" -q
+ssh-copy-id -i ~/.ssh/id_ed25519_arexx.pub &lt;utilisateur&gt;@&lt;machine cible&gt;</pre>
+      <p style="color:var(--color-text-muted);font-size:0.9em;">
+        La première ligne (<code>ssh-keygen</code>) est silencieuse, sans interaction. La seconde
+        (<code>ssh-copy-id</code>) demande le mot de passe de la machine cible normalement — une
+        seule fois, ensuite l'accès se fait sans mot de passe.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>3. Copier tout le dossier <code>data/arexx/drivers/</code> sur la machine cible</h3>
       <p>Une seule copie, en une fois — <code>target.txt</code> une fois édité (étape 1) voyage avec le reste :</p>
       <pre>scp -r data/arexx/drivers &lt;utilisateur&gt;@&lt;machine cible&gt;:/root/arexx-drivers</pre>
       <ul>
@@ -92,13 +114,13 @@
     </div>
 
     <div class="card">
-      <h3>3. Lancer le script (en root) sur la machine cible</h3>
+      <h3>4. Lancer le script (en root) sur la machine cible</h3>
       <p>Sans argument — l'adresse est lue directement dans <code>target.txt</code> :</p>
       <pre>./arexx-drivers/scripts/deploy-sender.sh</pre>
     </div>
 
     <div class="card">
-      <h3>4. Ce que fait le script</h3>
+      <h3>5. Ce que fait le script</h3>
       <ul>
         <li>Installe les dépendances système manquantes (<code>libusb-1.0-0</code>, et pour tl-500 : <code>gcc</code>/<code>make</code>/<code>libusb-1.0-0-dev</code>)</li>
         <li>Copie/compile le bon programme, génère sa configuration (<code>rulefile.txt</code> ou <code>url.txt</code>) avec l'adresse lue dans <code>target.txt</code></li>

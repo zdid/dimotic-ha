@@ -12,7 +12,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
-import { generateRandomBridgeInstance } from '../../../core/dist/exports';
+import { generateRandomBridgeInstance, isRunningInDocker } from '../../../core/dist/exports';
 import { arexxConfigSchema, type ArexxConfig } from './config-schema';
 import type { ArexxSensorsConfigFile } from './devices-config-schema';
 import type { ArexxRawReading, ArexxSensorInfo, ArexxStatus } from './types';
@@ -251,7 +251,8 @@ export class ArexxService implements IArexxService {
       running: this.running,
       sensorsCount: this.sensorRegistry.getConfiguredSensors().length,
       lastReadingAt: this.lastReadingAt,
-      httpservPort: this.config.httpservPort
+      httpservPort: this.config.httpservPort,
+      isRunningInDocker: isRunningInDocker()
     };
   }
 
