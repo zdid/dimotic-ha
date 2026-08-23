@@ -16,7 +16,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, RemoteAction } from '../../../core/dist/exports';
-import { generateRandomBridgeInstance, MqttTransport } from '../../../core/dist/exports';
+import { generateRandomBridgeInstance, MqttTransport, isRunningInDocker } from '../../../core/dist/exports';
 import { rpigpioConfigSchema, type RpigpioConfig } from './config-schema';
 import { pinsConfigSchema, DEFAULT_PINS_CONFIG, type PinDefinition, type PinsConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
@@ -26,7 +26,10 @@ import { RPIGPIO_SOCKET_EVENTS, RPIGPIO_CLIENT_EVENTS } from './socket-events';
 
 export interface RpigpioStatus {
   pinsCount: number;
-  target: { host: string; containerName: string };
+  targets: { id: string; host: string; containerName: string }[];
+  /** true si CETTE instance tourne dans un conteneur Docker — voir core/infrastructure/runtime/docker.ts.
+   *  Affecte le texte de préparation SSH affiché par cible (TargetCards.js). */
+  isRunningInDocker: boolean;
   /** Présence de l'agent mqtt-io distant — null tant qu'aucun message n'a encore été reçu du
    *  topic status (ni "running" ni "dead" retenu). */
   agentOnline: boolean | null;
@@ -100,7 +103,10 @@ export class RpigpioService implements IRpigpioService {
     this.eventBus.on(RPIGPIO_CLIENT_EVENTS.GET_PINS, () => this.emitPins());
     this.eventBus.on(RPIGPIO_CLIENT_EVENTS.SAVE_PIN, (data: unknown) => this.handleSavePin(data as SavePinInput));
     this.eventBus.on(RPIGPIO_CLIENT_EVENTS.DELETE_PIN, (data: unknown) => this.handleDeletePin(data as { id: string }));
-    this.eventBus.on(RPIGPIO_CLIENT_EVENTS.REMOTE_OP, (data: unknown) => this.handleRemoteOp((data as { action: RemoteAction })?.action));
+    this.eventBus.on(RPIGPIO_CLIENT_EVENTS.REMOTE_OP, (data: unknown) => {
+      const { targetId, action } = data as { targetId: string; action: RemoteAction };
+      this.handleRemoteOp(targetId, action);
+    });
   }
 
   async start(): Promise<void> {
@@ -228,23 +234,36 @@ export class RpigpioService implements IRpigpioService {
 
   /**
    * Point d'entrée unique pour toute intervention distante (protocole uniforme partagé avec
-   * teleinfo, 22/08/2026) — `deploy` est le seul cas branché aujourd'hui ; `start`/`stop`/`restart`
-   * délèguent déjà au contrôleur Docker partagé côté DeployService, prêts pour de futurs boutons.
+   * teleinfo/arexx, 22-23/08/2026) — une cible précise est toujours désignée par son `targetId`
+   * (⭐ multi-cible 23/08/2026 : `rpigpio` ne dépasse jamais 1 cible en pratique, mais le schéma et
+   * le protocole restent identiques aux autres apps).
    */
-  private async handleRemoteOp(action: RemoteAction): Promise<void> {
+  private async handleRemoteOp(targetId: string, action: RemoteAction): Promise<void> {
+    const target = this.config.targets.find((t) => t.id === targetId);
+    if (!target) {
+      this.eventBus.emit(RPIGPIO_SOCKET_EVENTS.REMOTE_OP_RESULT, {
+        targetId,
+        action,
+        success: false,
+        error: `Cible introuvable: ${targetId}`
+      });
+      return;
+    }
+
     try {
       const result = await (action === 'deploy'
-        ? this.deployService.deploy(this.config.target, generateMqttIoConfig(this.config, this.pins), generateComposeFile(this.config))
+        ? this.deployService.deploy(target, generateMqttIoConfig(this.config, this.pins), generateComposeFile(target))
         : action === 'start'
-        ? this.deployService.start(this.config.target)
+        ? this.deployService.start(target)
         : action === 'stop'
-        ? this.deployService.stop(this.config.target)
+        ? this.deployService.stop(target)
         : action === 'restart'
-        ? this.deployService.restart(this.config.target)
+        ? this.deployService.restart(target)
         : Promise.resolve({ success: false, error: `Action distante inconnue: ${action}` }));
-      this.eventBus.emit(RPIGPIO_SOCKET_EVENTS.REMOTE_OP_RESULT, { action, ...result });
+      this.eventBus.emit(RPIGPIO_SOCKET_EVENTS.REMOTE_OP_RESULT, { targetId, action, ...result });
     } catch (error) {
       this.eventBus.emit(RPIGPIO_SOCKET_EVENTS.REMOTE_OP_RESULT, {
+        targetId,
         action,
         success: false,
         error: error instanceof Error ? error.message : String(error)
@@ -263,7 +282,8 @@ export class RpigpioService implements IRpigpioService {
   private emitStatus(): void {
     const status: RpigpioStatus = {
       pinsCount: this.pins.length,
-      target: { host: this.config.target.host, containerName: this.config.target.containerName },
+      targets: this.config.targets.map((t) => ({ id: t.id, host: t.host, containerName: t.containerName })),
+      isRunningInDocker: isRunningInDocker(),
       agentOnline: this.agentOnline,
       agentLastSeenAt: this.agentLastSeenAt
     };

@@ -12,7 +12,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, RemoteAction } from '../../../core/dist/exports';
-import { MqttTransport } from '../../../core/dist/exports';
+import { MqttTransport, isRunningInDocker } from '../../../core/dist/exports';
 import { teleinfoConfigSchema, type TeleinfoConfig } from './config-schema';
 import { compteursConfigSchema, DEFAULT_COMPTEURS_CONFIG, type CompteurDefinition, type CompteursConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
@@ -24,7 +24,10 @@ const AGENT_PRESENCE_TOPIC = 'teleinfo/agent/status';
 
 export interface TeleinfoStatus {
   compteursCount: number;
-  target: { host: string; serviceName: string };
+  targets: { id: string; host: string; serviceName: string }[];
+  /** true si CETTE instance tourne dans un conteneur Docker — voir core/infrastructure/runtime/docker.ts.
+   *  Affecte le texte de préparation SSH affiché par cible (TargetCards.js). */
+  isRunningInDocker: boolean;
   /** Présence de l'agent RPi1 distant — null tant qu'aucun message n'a encore été reçu. */
   agentOnline: boolean | null;
   /** Horodatage ISO de la dernière fois qu'un message de présence a été reçu (quel que soit son
@@ -79,7 +82,10 @@ export class TeleinfoService implements ITeleinfoService {
     this.eventBus.on(TELEINFO_CLIENT_EVENTS.GET_COMPTEURS, () => this.emitCompteurs());
     this.eventBus.on(TELEINFO_CLIENT_EVENTS.SAVE_COMPTEUR, (data: unknown) => this.handleSaveCompteur(data as SaveCompteurInput));
     this.eventBus.on(TELEINFO_CLIENT_EVENTS.DELETE_COMPTEUR, (data: unknown) => this.handleDeleteCompteur(data as { adco: number }));
-    this.eventBus.on(TELEINFO_CLIENT_EVENTS.REMOTE_OP, (data: unknown) => this.handleRemoteOp((data as { action: RemoteAction })?.action));
+    this.eventBus.on(TELEINFO_CLIENT_EVENTS.REMOTE_OP, (data: unknown) => {
+      const { targetId, action } = data as { targetId: string; action: RemoteAction };
+      this.handleRemoteOp(targetId, action);
+    });
   }
 
   async start(): Promise<void> {
@@ -105,7 +111,7 @@ export class TeleinfoService implements ITeleinfoService {
       {
         host: this.config.mqtt.host,
         port: this.config.mqtt.port,
-        clientId: `teleinfo-presence-${this.config.target.host}`,
+        clientId: `teleinfo-presence-${this.config.targets[0]?.host || 'none'}`,
         username: this.config.mqtt.user || '',
         password: this.config.mqtt.password || '',
         keepalive: 60,
@@ -190,12 +196,25 @@ export class TeleinfoService implements ITeleinfoService {
 
   /**
    * Point d'entrée unique pour toute intervention distante (protocole uniforme partagé avec
-   * rpigpio, 22/08/2026) — `deploy` est le seul cas branché aujourd'hui ; `start`/`stop`/`restart`
-   * délèguent déjà au contrôleur systemd partagé côté DeployService, prêts pour de futurs boutons.
+   * rpigpio/arexx, 22-23/08/2026) — une cible précise est toujours désignée par son `targetId`
+   * (⭐ multi-cible 23/08/2026 : `teleinfo` ne dépasse jamais 1 cible en pratique, mais le schéma
+   * et le protocole restent identiques aux autres apps).
    */
-  private async handleRemoteOp(action: RemoteAction): Promise<void> {
+  private async handleRemoteOp(targetId: string, action: RemoteAction): Promise<void> {
+    const target = this.config.targets.find((t) => t.id === targetId);
+    if (!target) {
+      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.REMOTE_OP_RESULT, {
+        targetId,
+        action,
+        success: false,
+        error: `Cible introuvable: ${targetId}`
+      });
+      return;
+    }
+
     if (action === 'deploy' && this.compteurs.length !== 2) {
       this.eventBus.emit(TELEINFO_SOCKET_EVENTS.REMOTE_OP_RESULT, {
+        targetId,
         action,
         success: false,
         error: `Exactement 2 compteurs doivent être déclarés avant de déployer (actuellement ${this.compteurs.length})`
@@ -205,17 +224,18 @@ export class TeleinfoService implements ITeleinfoService {
 
     try {
       const result = await (action === 'deploy'
-        ? this.deployService.deploy(this.config.target, generateAgentConfig(this.config, this.compteurs))
+        ? this.deployService.deploy(target, generateAgentConfig(this.config, this.compteurs))
         : action === 'start'
-        ? this.deployService.start(this.config.target)
+        ? this.deployService.start(target)
         : action === 'stop'
-        ? this.deployService.stop(this.config.target)
+        ? this.deployService.stop(target)
         : action === 'restart'
-        ? this.deployService.restart(this.config.target)
+        ? this.deployService.restart(target)
         : Promise.resolve({ success: false, error: `Action distante inconnue: ${action}` }));
-      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.REMOTE_OP_RESULT, { action, ...result });
+      this.eventBus.emit(TELEINFO_SOCKET_EVENTS.REMOTE_OP_RESULT, { targetId, action, ...result });
     } catch (error) {
       this.eventBus.emit(TELEINFO_SOCKET_EVENTS.REMOTE_OP_RESULT, {
+        targetId,
         action,
         success: false,
         error: error instanceof Error ? error.message : String(error)
@@ -234,7 +254,8 @@ export class TeleinfoService implements ITeleinfoService {
   private emitStatus(): void {
     const status: TeleinfoStatus = {
       compteursCount: this.compteurs.length,
-      target: { host: this.config.target.host, serviceName: this.config.target.serviceName },
+      targets: this.config.targets.map((t) => ({ id: t.id, host: t.host, serviceName: t.serviceName })),
+      isRunningInDocker: isRunningInDocker(),
       agentOnline: this.agentOnline,
       agentLastSeenAt: this.agentLastSeenAt
     };

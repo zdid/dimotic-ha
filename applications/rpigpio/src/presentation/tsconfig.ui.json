@@ -13,7 +13,8 @@
     "forceConsistentCasingInFileNames": true,
     "sourceMap": true,
     "paths": {
-      "/js/ts/services/SocketService.js": ["../../../core/dist/presentation/ui/js/ts/services/SocketService.d.ts"]
+      "/js/ts/services/SocketService.js": ["../../../core/dist/presentation/ui/js/ts/services/SocketService.d.ts"],
+      "/js/ts/components/TargetCards.js": ["../../../core/dist/presentation/ui/js/ts/components/TargetCards.d.ts"]
     }
   },
   "include": ["ts/**/*.ts"],

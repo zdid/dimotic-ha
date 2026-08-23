@@ -13,6 +13,7 @@ const DEFAULT_CONFIG: AppConfig = {
     machineId: os.hostname()
   },
   disabledApps: [],
+  targets: [],
   ha: {
     ws_enable: false,
     mqtt_enable: false,

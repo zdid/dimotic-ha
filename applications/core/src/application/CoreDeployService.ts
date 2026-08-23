@@ -1,0 +1,161 @@
+/**
+ * CoreDeployService — déploiement de dimotic-ha lui-même sur une machine distante (⭐ 23/08/2026),
+ * en remplacement de docker/rebuild-and-deploy.sh (qui ne gérait que la mise à jour d'une machine
+ * déjà provisionnée — aucune copie de compose.yaml, aucune création de data/core/config.yaml).
+ *
+ * Même patron que les DeployService des applications (rpigpio/teleinfo/arexx) : réutilise les
+ * primitives SSH/SCP + le contrôleur Docker du socle (`infrastructure/remote/`) — import relatif
+ * direct, `core` étant lui-même la source de ce module.
+ *
+ * Hors périmètre volontairement : le build multi-arch + push Docker Hub (étape 1 de
+ * rebuild-and-deploy.sh) reste une opération manuelle/scriptée à part, pas une action par cible —
+ * `deploy()` suppose que le tag `:latest` existe déjà sur Docker Hub.
+ */
+
+import * as path from 'node:path';
+import * as yaml from 'js-yaml';
+import { runSsh, runScp, shellQuote, type RemoteOpResult } from '../infrastructure/remote/SshClient';
+import { DockerContainerController, type RemoteUnitController } from '../infrastructure/remote/RemoteUnitController';
+import type { ConfigService } from '../infrastructure/config/ConfigService';
+import type { ApplicationManager } from './ApplicationManager';
+import type { DeploymentTargetConfig } from '../infrastructure/config/schema';
+import type { Logger } from '../infrastructure/logger';
+
+export interface DeployResult {
+  success: boolean;
+  step?: 'mkdir' | 'copy-compose' | 'seed-config' | 'pull-up' | 'health-check';
+  error?: string;
+  output?: string;
+}
+
+const CONTAINER_NAME = 'dimotic-ha';
+const HEALTH_CHECK_ATTEMPTS = 30;
+const HEALTH_CHECK_INTERVAL_MS = 3000;
+
+/**
+ * `compose.deploy.yaml`, PAS `compose.yaml` — ce dernier reste réservé à la machine de
+ * développement (`build: .`, image locale). `compose.deploy.yaml` tire l'image uniquement depuis
+ * Docker Hub (`zdid2/dimotic-ha:latest`), sans code source ni Dockerfile requis sur la cible — voir
+ * techniques-socle-ha-mqtt_specs §11.4. Copié puis renommé en `compose.yaml` sur la cible (scp ne
+ * renomme pas, `docker compose` cherche `compose.yaml` par convention).
+ */
+function composeDeployYamlPath(): string {
+  return path.join(process.env.PROJECT_ROOT || process.cwd(), 'compose.deploy.yaml');
+}
+
+export class CoreDeployService {
+  private readonly unitController: RemoteUnitController = new DockerContainerController();
+
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly applicationManager: ApplicationManager,
+    private readonly logger: Logger
+  ) {}
+
+  start(target: DeploymentTargetConfig): Promise<RemoteOpResult> {
+    return this.unitController.start(target, CONTAINER_NAME);
+  }
+
+  stop(target: DeploymentTargetConfig): Promise<RemoteOpResult> {
+    return this.unitController.stop(target, CONTAINER_NAME);
+  }
+
+  restart(target: DeploymentTargetConfig): Promise<RemoteOpResult> {
+    return this.unitController.restart(target, CONTAINER_NAME);
+  }
+
+  /**
+   * Copie compose.deploy.yaml (renommé compose.yaml sur la cible), sème data/core/config.yaml
+   * UNIQUEMENT s'il est absent (jamais écrasé sur une cible déjà provisionnée — même principe que
+   * target.txt/DriversBundle côté AREXX), puis `docker compose pull && up -d` et attend "healthy".
+   */
+  async deploy(target: DeploymentTargetConfig): Promise<DeployResult> {
+    if (!target.host) {
+      return { success: false, step: 'mkdir', error: 'Aucun hôte cible configuré (target.host)' };
+    }
+
+    const mkdir = await runSsh(target, `mkdir -p ${shellQuote(target.remoteDir)}`);
+    if (!mkdir.success) {
+      this.logger.error('CoreDeployService', `Échec de création de ${target.remoteDir} sur ${target.host}: ${mkdir.error}`);
+      return { success: false, step: 'mkdir', error: mkdir.error };
+    }
+
+    const copyCompose = await runScp(target, [composeDeployYamlPath()], target.remoteDir);
+    if (!copyCompose.success) {
+      this.logger.error('CoreDeployService', `Échec de copie de compose.deploy.yaml sur ${target.host}: ${copyCompose.error}`);
+      return { success: false, step: 'copy-compose', error: copyCompose.error };
+    }
+
+    const rename = await runSsh(target, `mv -f ${shellQuote(target.remoteDir + '/compose.deploy.yaml')} ${shellQuote(target.remoteDir + '/compose.yaml')}`);
+    if (!rename.success) {
+      this.logger.error('CoreDeployService', `Échec de renommage de compose.deploy.yaml sur ${target.host}: ${rename.error}`);
+      return { success: false, step: 'copy-compose', error: rename.error };
+    }
+
+    const seedResult = await this.seedConfigIfAbsent(target);
+    if (!seedResult.success) return seedResult;
+
+    const pullUp = await runSsh(target, `cd ${shellQuote(target.remoteDir)} && docker compose pull && docker compose up -d`);
+    if (!pullUp.success) {
+      this.logger.error('CoreDeployService', `Échec de docker compose pull/up sur ${target.host}: ${pullUp.error}`);
+      return { success: false, step: 'pull-up', error: pullUp.error, output: pullUp.output };
+    }
+
+    return this.waitHealthy(target);
+  }
+
+  /**
+   * N'écrit data/core/config.yaml QUE s'il est absent — sème les vraies valeurs HA/MQTT/web/
+   * logging de CETTE machine (identiques pour tout le foyer, décision explicite de l'utilisateur),
+   * sans `core.machineId` (chaque machine garde le sien, défaut `os.hostname()`) ni `targets`
+   * (chaque instance gère sa propre liste de cibles, ne hérite pas de celle de la machine
+   * déployante). `disabledApps` forcé à TOUTES les applications connues sauf core — l'admin de la
+   * machine cible active ensuite ce qu'il veut localement, via sa propre IHM.
+   */
+  private async seedConfigIfAbsent(target: DeploymentTargetConfig): Promise<DeployResult> {
+    const remoteConfigPath = `${target.remoteDir}/data/core/config.yaml`;
+    const exists = await runSsh(target, `test -f ${shellQuote(remoteConfigPath)} && echo present`);
+    if (exists.output.trim() === 'present') {
+      this.logger.info('CoreDeployService', `data/core/config.yaml déjà présent sur ${target.host}, non écrasé`);
+      return { success: true, step: 'seed-config' };
+    }
+
+    const current = this.configService.getConfig();
+    const { activated, disabled } = this.applicationManager.listAll();
+    const seeded = {
+      ha: current.ha,
+      web: current.web,
+      logging: current.logging,
+      disabledApps: [...activated, ...disabled],
+      targets: []
+    };
+    const seededYaml = yaml.dump(seeded, { indent: 2, sortKeys: false });
+
+    const write = await runSsh(
+      target,
+      `mkdir -p ${shellQuote(target.remoteDir + '/data/core')} && tee ${shellQuote(remoteConfigPath)} > /dev/null`,
+      seededYaml
+    );
+    if (!write.success) {
+      this.logger.error('CoreDeployService', `Échec d'écriture de data/core/config.yaml sur ${target.host}: ${write.error}`);
+      return { success: false, step: 'seed-config', error: write.error };
+    }
+
+    this.logger.info('CoreDeployService', `data/core/config.yaml semé sur ${target.host} (${seeded.disabledApps.length} application(s) désactivée(s) par défaut)`);
+    return { success: true, step: 'seed-config' };
+  }
+
+  private async waitHealthy(target: DeploymentTargetConfig): Promise<DeployResult> {
+    for (let attempt = 0; attempt < HEALTH_CHECK_ATTEMPTS; attempt++) {
+      const inspect = await runSsh(target, `docker inspect ${shellQuote(CONTAINER_NAME)} --format '{{.State.Health.Status}}'`);
+      const status = inspect.output.trim();
+      if (status === 'healthy') {
+        this.logger.info('CoreDeployService', `${target.host} : conteneur healthy`);
+        return { success: true, step: 'health-check', output: status };
+      }
+      await new Promise((resolve) => setTimeout(resolve, HEALTH_CHECK_INTERVAL_MS));
+    }
+    this.logger.warn('CoreDeployService', `${target.host} : conteneur pas 'healthy' après ${HEALTH_CHECK_ATTEMPTS * HEALTH_CHECK_INTERVAL_MS / 1000}s`);
+    return { success: false, step: 'health-check', error: `Pas 'healthy' après ${HEALTH_CHECK_ATTEMPTS * HEALTH_CHECK_INTERVAL_MS / 1000}s` };
+  }
+}

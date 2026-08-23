@@ -3,10 +3,10 @@
  *
  * Conventions : préfixe 'rpigpio:', format 'rpigpio:<section>:<action>' — voir nommage/socket-events.ts.
  *
- * `REMOTE_OP`/`REMOTE_OP_RESULT` (22/08/2026, remplace l'ancien couple `DEPLOY`/`DEPLOY_RESULT`) :
- * protocole uniforme partagé avec teleinfo — { action: RemoteAction } en entrée, quelle que soit
- * l'intervention distante (deploy aujourd'hui, start/stop/restart dès que ces boutons existeront),
- * plutôt qu'un événement par action. Voir core/infrastructure/remote/RemoteUnitController.ts.
+ * `REMOTE_OP`/`REMOTE_OP_RESULT` (22-23/08/2026, remplace l'ancien couple `DEPLOY`/`DEPLOY_RESULT`) :
+ * protocole uniforme partagé avec teleinfo/arexx — { targetId, action: RemoteAction } en entrée,
+ * quelle que soit l'intervention distante (deploy/start/stop/restart) ou l'app. `targetId` désigne
+ * une entrée de `config.targets[]` (multi-cible, ⭐ 23/08/2026 — voir core/infrastructure/remote/).
  */
 
 export const RPIGPIO_SOCKET_EVENTS = {

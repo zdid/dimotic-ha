@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import { AppConfig, HaConfig, MqttConfig, WebConfig, LoggingConfig } from './schema';
+import { AppConfig, HaConfig, MqttConfig, WebConfig, LoggingConfig, DeploymentTargetConfig } from './schema';
 import { ConfigLoader } from './loader';
 import { ConfigWriter, SaveResult } from './writer';
 import type { Logger } from '../logger/index';
@@ -133,11 +133,14 @@ export class ConfigService {
     // this.config (état en mémoire, source de vérité) plutôt que newConfig, sinon toute sauvegarde
     // de ce formulaire effaçait silencieusement la liste des applications désactivées (bug réel
     // constaté le 07/08/2026 sur ha2 : RFXCOM réactivé après une simple reconfiguration HA WS).
+    // targets (⭐ 23/08/2026, cibles de déploiement de dimotic-ha lui-même) : même risque, même
+    // traitement préventif — jamais envoyé par ce formulaire non plus.
     const socleConfig = {
       ha: newConfig.ha,
       web: newConfig.web,
       logging: newConfig.logging,
       disabledApps: this.config.disabledApps,
+      targets: this.config.targets,
     } as AppConfig;
     const result = this.writer.save(socleConfig);
     console.log('[ConfigService SERVEUR] Résultat sauvegarde:', result);
@@ -186,10 +189,31 @@ export class ConfigService {
    * transitent jamais par ce chemin, chacune a son propre fichier (saveModuleConfig).
    */
   setDisabledApps(disabledApps: string[]): SaveResult {
-    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps } as AppConfig;
+    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps, targets: this.config.targets } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
       this.config = { ...this.config, disabledApps };
+    }
+    return result;
+  }
+
+  /**
+   * Retourne la liste des cibles de déploiement de dimotic-ha lui-même (⭐ 23/08/2026, voir
+   * CoreDeployService.ts) — même patron que getDisabledApps().
+   */
+  getTargets(): DeploymentTargetConfig[] {
+    return this.config.targets ? [...this.config.targets] : [];
+  }
+
+  /**
+   * Sauvegarde la liste des cibles de déploiement, même narrowing que setDisabledApps() (préserve
+   * ha/web/logging/disabledApps depuis this.config, jamais depuis un payload client partiel).
+   */
+  setTargets(targets: DeploymentTargetConfig[]): SaveResult {
+    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets } as AppConfig;
+    const result = this.writer.save(socleConfig);
+    if (result.success) {
+      this.config = { ...this.config, targets };
     }
     return result;
   }

@@ -319,6 +319,12 @@ const createTemplate = (): HTMLTemplateElement => {
                   <span class="nav-label">Gestion des applications</span>
                 </a>
               </li>
+              <li class="nav-item">
+                <a href="#deployment" class="nav-link" data-section="deployment">
+                  <span class="nav-icon">🚀</span>
+                  <span class="nav-label">Déploiement</span>
+                </a>
+              </li>
               <!-- Sous-menus générés pour chaque application -->
               <div id="app-params-submenu"></div>
             </ul>
@@ -547,7 +553,8 @@ export class Sidebar extends HTMLElement {
       'mqtt': 'section-mqtt',
       'web': 'section-web',
       'logging': 'section-logging',
-      'applications-manager': 'section-applications-manager'
+      'applications-manager': 'section-applications-manager',
+      'deployment': 'section-deployment'
     };
     
     // Pour les applications dynamiques (app-nom)

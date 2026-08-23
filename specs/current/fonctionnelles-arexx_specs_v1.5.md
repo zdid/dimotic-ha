@@ -1,5 +1,23 @@
 # Spécifications Fonctionnelles - Module AREXX
 
+*Version 1.5 - 23 Août 2026*
+*v1.5 : **vrai pilotage SSH automatisé des émetteurs** — nouveau `ArexxDeployService.ts` (même
+patron que `teleinfo/DeployService.ts`, socle partagé `core/infrastructure/remote/`), remplace la
+copie manuelle décrite dans les étapes 3-5 de la page Déploiement (l'utilisateur faisait lui-même
+`scp`/`ssh` depuis son terminal). `deploy(target)` copie `data/arexx/drivers/` (bundle existant,
+`target.txt` déjà renseigné — §5.4, inchangé) sur la cible puis y lance
+`scripts/deploy-sender.sh` (script lui-même inchangé) ; `start`/`stop`/`restart` pilotent
+`arexx-sender.service` via `SystemdUnitController`. Nouveau champ `targets[]` (§5.4bis) — AREXX
+est la première des 3 apps à avoir plusieurs cibles dès le départ (2 émetteurs prévus), même
+patron multi-cible que `rpigpio`/`teleinfo` (`id` texte libre, pas de `.max()`). Toujours en root
+direct, clé SSH par cible sous `data/arexx/ssh/<id>/` (mêmes deux simplifications que
+rpigpio/teleinfo, voir leurs specs pour le raisonnement complet). Protocole Socket.io
+`arexx:remote-op`/`arexx:remote-op:result` (nouveau, `{ targetId, action }`). Page Déploiement
+restructurée (§9.2bis) : étape 1 (adresse du récepteur) inchangée, étapes 2-5 (préparation SSH
+statique + instructions copie/lancement manuelles) remplacées par une liste dynamique de cibles
+pilotables (`TargetCards.js`, composant mutualisé avec rpigpio/teleinfo). Testé au navigateur
+(rendu de carte avec cible simulée, instructions SSH/Docker correctes). Ancienne version v1.4
+archivée.*
 *Version 1.4 - 22 Août 2026*
 *v1.4 : nouvelle étape "Préparer l'accès SSH" sur la page "Déploiement" (§9.2bis), entre le
 formulaire `target.txt` et la copie du dossier `drivers/` — explique `ssh-keygen`/`ssh-copy-id`
@@ -45,6 +63,7 @@ projet).*
 4. [Serveur HTTP Local](#4-serveur-http-local)
 5. [Mode USB (BS500)](#5-mode-usb-bs500)
    - 5.4 [Déploiement sur une machine distante (v1.2)](#54-déploiement-sur-une-machine-distante-nouveau-v12-21082026)
+   - 5.4bis [Pilotage SSH automatisé des émetteurs (v1.5)](#54bis-pilotage-ssh-automatisé-des-émetteurs--targets-nouveau-v15-23082026)
 6. [Registre des Capteurs et Persistance](#6-registre-des-capteurs-et-persistance)
 7. [Taxonomie et Découverte HA](#7-taxonomie-et-découverte-ha)
 8. [Configuration](#8-configuration)
@@ -318,9 +337,47 @@ Déploiement testé au navigateur (cas succès et cas erreur — adresse vide) :
 `target.txt` confirmée sur disque après clic sur "Enregistrer".
 
 **Documentation associée** : pointeur court dans le formulaire de paramétrage (description du
-champ `usbDevicePath`) + page dédiée "Déploiement" dans l'IHM de l'application (§9.2bis),
-expliquant la marche à suivre (renseigner l'adresse dans le formulaire, copier tout
-`data/arexx/drivers/`, lancer le script sans argument).
+champ `usbDevicePath`) + page dédiée "Déploiement" dans l'IHM de l'application (§9.2bis), qui
+pilote désormais directement la copie/le lancement pour chaque cible configurée (§5.4bis) — plus
+seulement des instructions à exécuter manuellement.
+
+### 5.4bis Pilotage SSH automatisé des émetteurs — `targets[]` (⭐ nouveau v1.5, 23/08/2026)
+
+Jusqu'ici, AREXX était la seule des 3 apps ayant une notion de "déploiement distant" (`rpigpio`,
+`teleinfo`) sans le vrai pilotage SSH automatisé que les deux autres avaient déjà — la page
+Déploiement ne faisait qu'afficher des commandes `scp`/`ssh` à copier-coller. `ArexxDeployService.ts`
+(nouveau, même patron que `teleinfo/DeployService.ts`) comble cet écart, en réutilisant le socle
+SSH/SCP partagé (`core/infrastructure/remote/`, déjà en place depuis la session précédente) :
+
+```typescript
+async deploy(target: ArexxTargetConfig): Promise<DeployResult> {
+  await runSsh(target, `mkdir -p ${shellQuote(target.remoteDir)}`);
+  await runScp(target, [driversDirPath()], target.remoteDir);       // copie data/arexx/drivers/
+  return runSsh(target, `cd .../drivers/scripts && ./deploy-sender.sh`); // script inchangé
+}
+```
+`start(target)`/`stop(target)`/`restart(target)` délèguent à un `SystemdUnitController` partagé,
+ciblant `arexx-sender.service` (nom fixe — c'est le script `deploy-sender.sh` qui le crée ainsi,
+§5.4). Zéro modification du script lui-même ni du bundle `drivers/` : l'automatisation se contente
+de faire à distance ce que l'utilisateur tapait à la main jusqu'ici.
+
+**Nouveau champ `targets[]`** (`config-schema.ts`, `arexxTargetSchema` : `id`, `host`,
+`sshKeyPath`, `remoteDir` — défaut `/root/arexx-drivers`) : AREXX est la première des 3 apps ayant
+plusieurs cibles dès le départ (2 émetteurs prévus) — pas de `.max()` contrairement à
+`rpigpio`/`teleinfo`, même pattern sinon (`id` texte libre, unicité via `.refine()`, même
+précédent que `nommage/sources`). `target.txt` (adresse du récepteur, ci-dessus) reste **commun à
+tous les émetteurs** — ce n'est pas un champ par cible, une seule adresse de réception pour tous.
+
+**Toujours en root direct, clé SSH par cible sous `data/arexx/ssh/<id>/`** — mêmes deux
+simplifications décidées avec l'utilisateur que pour `rpigpio`/`teleinfo` (voir leurs specs pour le
+raisonnement complet sur l'équivalence `sudo NOPASSWD` ≈ root, et sur la nécessité de sortir de
+`~/.ssh/...` pour rester accessible depuis le conteneur Docker).
+
+**Non testé en conditions réelles** (contrairement au reste de ce §5.4, validé sur `bs510`) — le
+nouveau `ArexxDeployService` n'a été vérifié qu'au niveau du rendu IHM (carte de cible simulée,
+instructions SSH/Docker correctes) ; aucun clic réel sur Déployer/Démarrer/Arrêter/Redémarrer
+contre un vrai émetteur, en attente d'accord explicite avant tout test destructif sur du matériel
+en service.
 
 ---
 
@@ -427,6 +484,7 @@ par AREXX. Non corrigé à ce jour.
 | `usbDevicePath` | string, optionnel | — | ⚠️ **déclaré, jamais lu** (le binaire USB découvre le dongle lui-même) — description étendue en v1.2 pour pointer vers la page Déploiement |
 | `bridgeInstance` | string | `arexx_bridge_0001` | Enregistrement/désenregistrement du bridge, découverte, état |
 | `sensorsConfigFile` | string | `arexx-sensors-v1.0.yaml` | Chemin du fichier capteurs |
+| `targets` | array | `[]` | ⭐ nouveau v1.5 — émetteurs pilotables à distance (§5.4bis). `id`, `host`, `sshKeyPath` (sous `data/arexx/ssh/<id>/`), `remoteDir` (défaut `/root/arexx-drivers`). Pas de `.max()`, contrairement à `rpigpio`/`teleinfo` |
 
 > ⚠️ **Aucun `data/arexx/config.yaml` n'existe par défaut sur une installation neuve** — tant que
 > l'utilisateur n'a pas sauvegardé une fois le formulaire générique, AREXX tourne entièrement sur
@@ -441,10 +499,11 @@ le bloc conditionnel de la page Déploiement (§9.2bis, étape 2).
 
 ### 8.2 Formulaire générique ("Paramètres Techniques → AREXX")
 
-Un seul groupe "Acquisition" (icône 📡), avec les 7 champs ci-dessus **sauf** `enabled` et
-`sensorsConfigFile` (non exposés). Formulaire **plat** — les 7 champs sont toujours affichés,
-sans masquage conditionnel selon le mode sélectionné (contrairement à ce qu'on pourrait attendre
-d'un mode "push" qui n'a besoin ni de `bs1000Address` ni de `pollIntervalSeconds`).
+Deux groupes : "Acquisition" (icône 📡, les 7 champs historiques **sauf** `enabled` et
+`sensorsConfigFile`, non exposés — formulaire **plat**, sans masquage conditionnel selon le mode
+sélectionné) et **"Émetteurs USB (déploiement distant)"** (⭐ nouveau v1.5, icône 🖥️) : champ
+unique `type: 'array'`, `itemFields` (id/host/sshKeyPath/remoteDir) — liste avec ajout/suppression
+dynamique, même pattern que `nommage/sources`/`rpigpio`/`teleinfo`.
 
 ---
 
@@ -472,15 +531,14 @@ Vraie navigation de page complète (comme RFXCOM/EVOO7), sa propre connexion Soc
   `${quoi}---${lieu}`. Aucune validation contre le référentiel NOMMAGE — texte libre.
 - Suppression via `confirm()` natif.
 
-### 9.2bis Page dédiée "Déploiement" (⭐ nouveau v1.2, 21/08/2026 — formulaire ajouté 22/08/2026)
+### 9.2bis Page dédiée "Déploiement" (⭐ nouveau v1.2, 21/08/2026 — formulaire v1.3, pilotage réel v1.5)
 
 `presentation/arexx/deploiement.html` + `deploiement-app.ts` — même patron de page complète que
-"Capteurs" (§9.2), sa propre connexion Socket.io. Cinq étapes documentées : renseigner l'adresse
-du récepteur (formulaire, voir plus bas), préparer l'accès SSH (⭐ nouveau v1.4, voir plus bas),
-copier tout `data/arexx/drivers/` sur la machine cible, lancer `scripts/deploy-sender.sh` sans
-argument, et ce que fait le script (§5.4).
+"Capteurs" (§9.2), sa propre connexion Socket.io. Deux cartes (⭐ restructuré v1.5, remplace les 5
+étapes précédentes) : l'adresse du récepteur (formulaire, inchangé depuis v1.3), puis la liste des
+émetteurs pilotables (§5.4bis).
 
-**Étape 1 — vrai formulaire, pas une édition manuelle de fichier** : deux champs (adresse IP, port)
+**Carte 1 — vrai formulaire, pas une édition manuelle de fichier** : deux champs (adresse IP, port)
 + bouton "💾 Enregistrer". Au chargement, émet `arexx:driver-target:get` — le port est toujours
 pré-rempli (`httpservPort` réel, §8.1) ; l'hôte n'est pré-rempli que si `target.txt` contient déjà
 une valeur valide (pas le contenu-gabarit) — laissé vide sinon, aucune tentative de deviner
@@ -491,19 +549,20 @@ la confirmation d'un enregistrement explicite du simple pré-remplissage au char
 réutilisent le même événement retour `arexx:driver-target`). Alertes succès/erreur, même patron que
 la page "Capteurs" (§9.2).
 
-**Étape 2 — préparer l'accès SSH (⭐ nouveau v1.4, 22/08/2026)** : texte explicatif uniquement,
-aucune automatisation côté serveur. Décision explicite (voir historique v1.4) : `ssh-keygen -t
-ed25519 -N "" -q` est scriptable sans interaction, mais `ssh-copy-id` exige un terminal interactif
-pour la saisie du mot de passe de la machine cible — impossible à déclencher silencieusement
-depuis une requête HTTP/Socket.io côté backend Node.js. Les deux commandes sont donc simplement
-affichées, à lancer par l'utilisateur lui-même, une fois par machine cible (comme le script
-`deploy-sender.sh` lui-même, §5.4 — pas une automatisation pilotée par l'application). Un bloc
-conditionnel (`#docker-instruction`, masqué par défaut) s'affiche quand `arexx:status` rapporte
-`isRunningInDocker: true` (§8.1/§9.3) : il ajoute l'instruction d'ouvrir d'abord un terminal
-**dans** le conteneur (`docker exec -it <nom du conteneur> bash`) avant `ssh-keygen`, sans quoi
-la clé générée sur l'hôte ne serait pas visible du conteneur qui exécutera réellement la copie/le
-script (étapes 3-4). Basculé côté client dans `deploiement-app.ts` (`socket.on('arexx:status',
-...)`), pas une valeur figée au rendu de la page.
+**Carte 2 — Émetteurs (⭐ nouveau v1.5, remplace les anciennes étapes 2-5 statiques)** : une carte
+par cible configurée (`TargetCards.js`, composant mutualisé avec `rpigpio`/`teleinfo`, servi par
+core en `/js/ts/components/TargetCards.js`), chacune avec :
+- instructions "Préparer l'accès SSH" (repliables, `<details>`) — `ssh-keygen`/`ssh-copy-id`,
+  toujours affichées textuellement (pas d'automatisation possible : `ssh-copy-id` exige un terminal
+  interactif pour le mot de passe, `ssh-keygen` seul serait scriptable mais pas la paire complète),
+  avec le préalable `docker exec -it <conteneur> bash` si `arexx:status` rapporte
+  `isRunningInDocker: true` (§8.1/§9.3, inchangé depuis v1.4) — chemin de clé désormais
+  `data/arexx/ssh/<id>/id_ed25519` (§5.4bis) au lieu de `~/.ssh/...` ;
+- 4 boutons Déployer/Démarrer/Arrêter/Redémarrer, réellement pilotés via `arexx:remote-op`
+  (§9.3, §5.4bis) — contrairement à la génération de texte à copier-coller des versions précédentes.
+
+Si `config.targets` est vide, message "Aucune cible configurée" (ajout via Paramètres Techniques →
+AREXX → Émetteurs USB, §8.2).
 
 ### 9.3 Événements Socket.io
 
@@ -511,10 +570,11 @@ script (étapes 3-4). Basculé côté client dans `deploiement-app.ts` (`socket.
 persistant, demandé explicitement au chargement de la page Déploiement, même choix que
 `sensors:list` sur la page Capteurs) :
 ```typescript
-'arexx:status'          // { running, acquisitionMode, sensorsCount, lastReadingAt, httpservPort, isRunningInDocker } — httpservPort ajouté v1.2, isRunningInDocker ajouté v1.4
+'arexx:status'          // { running, acquisitionMode, sensorsCount, lastReadingAt, httpservPort, isRunningInDocker, targets: {id,host}[] } — targets ⭐ v1.5
 'arexx:sensors:list'    // { configured, discovered }
 'arexx:sensor:detected' // { uniqueId, kind }
 'arexx:driver-target'   // { host, port } — ⭐ v1.2 (22/08/2026), host: '' si non renseigné (voir §9.2bis)
+'arexx:remote-op:result' // { targetId, action, success, step?, error?, output? } — ⭐ nouveau v1.5 (§5.4bis)
 'arexx:error'           // ⭐ v1.2 (22/08/2026) : premier émetteur réel — jusqu'ici déclaré et écouté côté UI, jamais émis par le serveur (validation de arexx:driver-target:save)
 ```
 
@@ -527,6 +587,9 @@ persistant, demandé explicitement au chargement de la page Déploiement, même 
 'arexx:sensor:delete'        // { uniqueId }
 'arexx:driver-target:get'    // ⭐ v1.2 (22/08/2026)
 'arexx:driver-target:save'   // { host, port } — ⭐ v1.2 (22/08/2026)
+'arexx:remote-op'            // { targetId, action: 'deploy'|'start'|'stop'|'restart' } — ⭐ nouveau v1.5.
+                              // handleRemoteOp() cherche la cible via config.targets.find(t => t.id === targetId),
+                              // répond par une erreur explicite si introuvable.
 ```
 
 ---
@@ -578,6 +641,7 @@ applications/arexx/
 │   │   ├── SensorRegistry.ts
 │   │   ├── taxonomy.ts
 │   │   ├── DriversBundle.ts          # ⭐ nouveau v1.2 — génère data/arexx/drivers/ au démarrage
+│   │   ├── ArexxDeployService.ts     # ⭐ nouveau v1.5 — SSH/SCP réel vers targets[] (§5.4bis)
 │   │   ├── types.ts, config-schema.ts, devices-config-schema.ts, socket-events.ts, index.ts
 │   │   ├── acquisition/
 │   │   │   ├── PushReceiver.ts
@@ -623,6 +687,7 @@ data/arexx/
 ### 12.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.5 | 2026-08-23 | Claude | **Vrai pilotage SSH automatisé des émetteurs** (§5.4bis, nouveau) : `ArexxDeployService.ts` (même patron que `teleinfo/DeployService.ts`, socle `core/infrastructure/remote/`) remplace la copie manuelle `scp`/`ssh` décrite jusqu'ici — `deploy()` copie `data/arexx/drivers/` sur la cible et y lance `scripts/deploy-sender.sh` (script inchangé) ; `start`/`stop`/`restart` pilotent `arexx-sender.service` via `SystemdUnitController`. Nouveau champ `targets[]` (id/host/sshKeyPath/remoteDir, pas de `.max()` — AREXX est la 1ère des 3 apps à avoir plusieurs cibles dès le départ), même pattern multi-cible que `rpigpio`/`teleinfo` introduit simultanément. Toujours en root direct, clé SSH par cible sous `data/arexx/ssh/<id>/` (mêmes simplifications que les 2 autres apps). Protocole `arexx:remote-op`/`arexx:remote-op:result` (nouveau, `{ targetId, action }`). Page Déploiement restructurée (§9.2bis) : carte 1 (adresse récepteur) inchangée, carte 2 = liste de cibles pilotables (`TargetCards.js`, composant mutualisé rpigpio/teleinfo/arexx) remplaçant les 4 anciennes étapes statiques. Testé au navigateur (rendu, pas de test réel contre un émetteur physique — en attente d'accord explicite). Ancienne version v1.4 archivée. |
 | 1.4 | 2026-08-22 | Claude | **Étape "Préparer l'accès SSH"** sur la page Déploiement (§9.2bis), entre le formulaire `target.txt` et la copie du dossier `drivers/` : affiche `ssh-keygen`/`ssh-copy-id` à lancer par l'utilisateur (`ssh-copy-id` non scriptable, exige un terminal interactif pour le mot de passe — décision explicite de ne pas automatiser côté serveur). Nouveau champ `ArexxStatus.isRunningInDocker` (§8.1/§9.3), alimenté par un nouveau mécanisme partagé du socle (`core/infrastructure/runtime/docker.ts` — détection `/.dockerenv` au bootstrap de `core`, transmise aux process enfants séparés via héritage `process.env`, même mécanisme déjà utilisé pour `PROJECT_ROOT`) : si vrai, un bloc conditionnel ajoute l'instruction d'ouvrir un terminal **dans** le conteneur (`docker exec -it`) avant de générer la clé, sans quoi elle ne serait pas visible du conteneur qui exécute réellement la copie/le script. Testé au navigateur (bascule du bloc conditionnel vérifiée dans les deux sens). Sans changement du mécanisme de déploiement lui-même (§5.4). Ancienne version v1.3 archivée. |
 | 1.3 | 2026-08-22 | Claude | **Formulaire réel sur la page Déploiement** (§9.2bis) : remplace l'édition manuelle de `data/arexx/drivers/target.txt` par deux champs (adresse IP, port) + bouton "Enregistrer", écrivant le fichier côté serveur (`arexx:driver-target:get`/`:save`, §9.3) après validation (hôte non vide, port 1-65535). `arexx:error` obtient son premier émetteur réel (jusqu'ici déclaré mais jamais utilisé depuis la v1.0). Testé au navigateur : cas succès (écriture confirmée sur disque) et cas erreur (adresse vide, message affiché). Aucun changement du mécanisme de déploiement lui-même (§5.4). Ancienne version v1.2 archivée. |
 | 1.2 | 2026-08-21 | Claude | **Déploiement scripté sur une machine distante** (§5.4, nouveau) : `DriversBundle.ts` génère `data/arexx/drivers/` à chaque démarrage (copie depuis `applications/arexx/`, figé dans l'image Docker et donc inaccessible depuis l'hôte — `data/` est le volume monté), contenant `scripts/deploy-sender.sh` (détection d'architecture, installation systemd, idempotent, arrête un service existant avant d'écraser ses fichiers), un second bundle vendored `tl-500/` (portable 32/64 bits, alternative à `rf_usb_http.elf` sur les architectures où ce dernier ne fonctionne pas — validé en conditions réelles sur x86_64/ARM64/ARMv6, mêmes valeurs que la référence), et `target.txt` (adresse du récepteur, lue par le script — remplace un argument en ligne de commande — préservé aux redémarrages contrairement au reste du bundle). RSSI de `tl-500` documenté comme non calibré (§5.4, §10). Nouvelle page IHM "Déploiement" (§9.2bis) expliquant le flux en 4 étapes, `ArexxStatus.httpservPort` exposé pour préremplir le contenu de `target.txt` affiché. Deux pièges de `rf_usb_http.elf` documentés pour la première fois ici (§5.3) : mode `-v` + rejeu d'historique = charge/logs élevés (constaté en conditions réelles), ligne `Z` de `rulefile.txt` à conserver malgré son statut "non supportée". Installation complète validée en conditions réelles sur `bs510`, chaîne bout en bout confirmée avec l'application `arexx` locale. Ancienne version v1.1 archivée. |

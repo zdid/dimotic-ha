@@ -5,6 +5,7 @@
  */
 
 import { SocketService } from '/js/ts/services/SocketService.js';
+import { renderTargetCards, showTargetActionResult, type TargetActionResult, type RemoteAction } from '/js/ts/components/TargetCards.js';
 
 let socket: any | null = null;
 /** Distingue le chargement initial (pré-remplissage silencieux) de l'enregistrement explicite
@@ -27,11 +28,25 @@ function init(): void {
     }
   });
 
-  socket.on('arexx:status', (status: { isRunningInDocker: boolean }) => {
-    const el = document.getElementById('docker-instruction');
-    if (el) el.style.display = status.isRunningInDocker ? 'block' : 'none';
+  socket.on('arexx:status', (status: { isRunningInDocker: boolean; targets: { id: string; host: string }[] }) => {
+    const container = document.getElementById('targets-container');
+    if (container) {
+      renderTargetCards(container, {
+        appId: 'arexx',
+        targets: status.targets,
+        isRunningInDocker: status.isRunningInDocker,
+        onAction: (targetId: string, action: RemoteAction) => {
+          socket.emit('arexx:remote-op', { targetId, action });
+        }
+      });
+    }
   });
   socket.emit('arexx:status:get');
+
+  socket.on('arexx:remote-op:result', (result: TargetActionResult) => {
+    const container = document.getElementById('targets-container');
+    if (container) showTargetActionResult(container, result);
+  });
 
   socket.on('arexx:error', (error: { message: string }) => {
     saving = false;

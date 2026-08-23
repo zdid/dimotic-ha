@@ -13,7 +13,7 @@
 
 import * as yaml from 'js-yaml';
 import type { PinDefinition } from './storage-schema';
-import type { RpigpioConfig } from './config-schema';
+import type { RpigpioConfig, RpigpioTargetConfig } from './config-schema';
 
 const GPIO_MODULE_NAME = 'rpi';
 
@@ -103,12 +103,12 @@ export function generateMqttIoConfig(config: RpigpioConfig, pins: PinDefinition[
  * conditions réelles sur ha2 : `RuntimeError: No access to /dev/mem. Try running as root!`.
  * `user: "0:0"` court-circuite le USER de l'image.
  */
-export function generateComposeFile(config: RpigpioConfig): string {
+export function generateComposeFile(target: RpigpioTargetConfig): string {
   const doc = {
     services: {
-      [config.target.containerName]: {
-        image: config.target.image,
-        container_name: config.target.containerName,
+      [target.containerName]: {
+        image: target.image,
+        container_name: target.containerName,
         restart: 'unless-stopped',
         network_mode: 'host',
         privileged: true,

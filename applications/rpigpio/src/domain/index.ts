@@ -64,16 +64,24 @@ export const RPIGPIO_UI_METADATA: ModuleUiMetadata = {
   menuPath: '/rpigpio/config',
   fields: [
     {
-      title: 'Machine cible',
-      description: 'Machine où tourne le service mqtt-io — accès SSH par clé (mêmes conventions que le déploiement Docker : utilisateur dédié, sudo NOPASSWD).',
+      title: 'Machines cibles',
+      description: "Machine(s) où tourne le service mqtt-io — accès SSH root direct (voir core/infrastructure/remote). Au plus 1 pour rpigpio en pratique, mais même structure que teleinfo/arexx.",
       icon: '🖥️',
       fields: [
-        { name: 'target.host', label: 'Hôte', type: 'text', placeholder: '192.168.1.51', hint: 'ha2, orangepi, ou toute autre machine Docker' },
-        { name: 'target.sshUser', label: 'Utilisateur SSH', type: 'text', default: 'claude' },
-        { name: 'target.sshKeyPath', label: 'Clé SSH privée (chemin local)', type: 'text', placeholder: '~/.ssh/ha2-claude/id_ed25519', hint: 'Jamais le contenu de la clé, uniquement son chemin sur cette machine' },
-        { name: 'target.hostDir', label: 'Répertoire distant (compose.yaml + config.yml)', type: 'text', default: '/docker/mqttio-rpigpio', hint: 'Même convention que /docker/<app>/ sur ha2/orangepi' },
-        { name: 'target.containerName', label: 'Nom du conteneur', type: 'text', default: 'mqtt-io-rpigpio' },
-        { name: 'target.image', label: 'Image Docker', type: 'text', default: 'flyte/mqtt-io:2.6.0', hint: 'Image officielle flyte/mqtt-io, épinglée à une version numérotée' }
+        {
+          name: 'targets',
+          label: 'Cibles',
+          type: 'array',
+          itemLabel: 'Cible',
+          itemFields: [
+            { name: 'id', label: 'Identifiant', type: 'text', required: true, placeholder: 'stfort', hint: 'Identifiant libre, unique parmi les cibles de cette app' },
+            { name: 'host', label: 'Hôte', type: 'text', placeholder: '192.168.1.53', hint: 'ha2, orangepi, ou toute autre machine Docker' },
+            { name: 'sshKeyPath', label: 'Clé SSH privée (chemin)', type: 'text', placeholder: 'data/rpigpio/ssh/stfort/id_ed25519', hint: "Jamais le contenu de la clé, uniquement son chemin — sous data/ pour rester accessible en Docker, voir la page de l'app" },
+            { name: 'hostDir', label: 'Répertoire distant (compose.yaml + config.yml)', type: 'text', default: '/docker/mqttio-rpigpio', hint: 'Même convention que /docker/<app>/ sur ha2/orangepi' },
+            { name: 'containerName', label: 'Nom du conteneur', type: 'text', default: 'mqtt-io-rpigpio' },
+            { name: 'image', label: 'Image Docker', type: 'text', default: 'flyte/mqtt-io:2.6.0', hint: 'Image officielle flyte/mqtt-io, épinglée à une version numérotée' }
+          ]
+        }
       ]
     },
     {

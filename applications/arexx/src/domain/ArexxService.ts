@@ -11,7 +11,7 @@
  */
 
 import * as path from 'node:path';
-import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
+import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData, RemoteAction } from '../../../core/dist/exports';
 import { generateRandomBridgeInstance, isRunningInDocker } from '../../../core/dist/exports';
 import { arexxConfigSchema, type ArexxConfig } from './config-schema';
 import type { ArexxSensorsConfigFile } from './devices-config-schema';
@@ -23,6 +23,7 @@ import { PushReceiver } from './acquisition/PushReceiver';
 import { PollClient } from './acquisition/PollClient';
 import { UsbBridge } from './acquisition/UsbBridge';
 import { ensureDriversBundle, readDriverTarget, writeDriverTarget } from './DriversBundle';
+import { ArexxDeployService } from './ArexxDeployService';
 
 const MODULE_NAME = 'arexx';
 
@@ -40,6 +41,7 @@ export class ArexxService implements IArexxService {
   private sensorsConfig: ArexxSensorsConfigFile;
   private configFileManager: ConfigFileManager;
   private sensorRegistry: SensorRegistry;
+  private readonly deployService: ArexxDeployService;
 
   private pushReceiver?: PushReceiver;
   private pollClient?: PollClient;
@@ -57,6 +59,7 @@ export class ArexxService implements IArexxService {
     this.configFileManager = new ConfigFileManager(this.resolveSensorsConfigPath(), this.logger);
     this.sensorsConfig = { arexx_sensors: {} };
     this.sensorRegistry = new SensorRegistry(this.logger);
+    this.deployService = new ArexxDeployService(this.logger);
   }
 
   /**
@@ -252,7 +255,8 @@ export class ArexxService implements IArexxService {
       sensorsCount: this.sensorRegistry.getConfiguredSensors().length,
       lastReadingAt: this.lastReadingAt,
       httpservPort: this.config.httpservPort,
-      isRunningInDocker: isRunningInDocker()
+      isRunningInDocker: isRunningInDocker(),
+      targets: this.config.targets.map((t) => ({ id: t.id, host: t.host }))
     };
   }
 
@@ -312,10 +316,55 @@ export class ArexxService implements IArexxService {
       this.logger.info('ArexxService', `Cible de déploiement enregistrée: ${host}:${port}`);
       this.emitDriverTarget();
     });
+
+    this.eventBus.onGeneric<{ targetId: string; action: RemoteAction }>('arexx:remote-op', (data) => {
+      this.handleRemoteOp(data.targetId, data.action).catch((error) => {
+        this.logger.error('ArexxService', `Échec de l'intervention distante (${data.targetId}/${data.action}): ${error}`);
+      });
+    });
   }
 
   private emitDriverTarget(): void {
     this.eventBus.emitGeneric('arexx:driver-target', readDriverTarget(this.config));
+  }
+
+  /**
+   * Point d'entrée unique pour toute intervention distante sur un émetteur (protocole uniforme
+   * partagé avec rpigpio/teleinfo, ⭐ 23/08/2026) — une cible précise est toujours désignée par son
+   * `targetId`. Contrairement à rpigpio/teleinfo, AREXX a plusieurs cibles dès le départ (2
+   * émetteurs USB prévus).
+   */
+  private async handleRemoteOp(targetId: string, action: RemoteAction): Promise<void> {
+    const target = this.config.targets.find((t) => t.id === targetId);
+    if (!target) {
+      this.eventBus.emitGeneric('arexx:remote-op:result', {
+        targetId,
+        action,
+        success: false,
+        error: `Cible introuvable: ${targetId}`
+      });
+      return;
+    }
+
+    try {
+      const result = await (action === 'deploy'
+        ? this.deployService.deploy(target)
+        : action === 'start'
+        ? this.deployService.start(target)
+        : action === 'stop'
+        ? this.deployService.stop(target)
+        : action === 'restart'
+        ? this.deployService.restart(target)
+        : Promise.resolve({ success: false, error: `Action distante inconnue: ${action}` }));
+      this.eventBus.emitGeneric('arexx:remote-op:result', { targetId, action, ...result });
+    } catch (error) {
+      this.eventBus.emitGeneric('arexx:remote-op:result', {
+        targetId,
+        action,
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 
   private persistSensors(): void {

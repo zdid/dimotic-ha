@@ -1,16 +1,16 @@
 /**
- * Déploiement vers la machine cible — SSH (écriture via `sudo tee`, pas de scp) puis
+ * Déploiement vers la machine cible — SSH (écriture via `tee`, pas de scp) puis
  * `docker compose up -d` (crée le conteneur au premier déploiement, ne fait rien si sa définition
  * n'a pas changé) + `docker restart` (fait relire config.yml, jamais fait automatiquement par
- * compose sur un simple changement de contenu d'un fichier bind-monté). Mêmes conventions que
- * docker/rebuild-and-deploy.sh (utilisateur dédié, clé SSH par fichier, sudo NOPASSWD déjà en
- * place sur ha2/orangepi) — mais invoqué depuis l'app plutôt qu'un script shell externe, pour être
- * déclenchable depuis l'IHM (demande utilisateur, 12/08/2026).
+ * compose sur un simple changement de contenu d'un fichier bind-monté).
  *
  * `runSsh`/`shellQuote`/`DockerContainerController` viennent du socle (`core/infrastructure/remote`,
  * 22/08/2026) — mutualisés avec teleinfo, qui réimplémentait des primitives quasi identiques.
  * `start`/`stop`/`restart` délèguent déjà au contrôleur Docker partagé, prêts pour de futurs
  * boutons dans l'IHM (pas encore câblés sur Socket.io, voir fonctionnelles-rpigpio_specs).
+ *
+ * Toutes les commandes distantes s'exécutent en root direct (⭐ 23/08/2026, plus de `sudo` — voir
+ * le commentaire d'en-tête de `core/infrastructure/remote/SshClient.ts` pour le raisonnement).
  */
 
 import {
@@ -29,12 +29,12 @@ export interface DeployResult {
   output?: string;
 }
 
-const unitController = new DockerContainerController({ useSudo: true });
+const unitController = new DockerContainerController();
 
 export class DeployService {
   constructor(private readonly logger: Logger) {}
 
-  /** Démarre le conteneur sur la machine cible (docker start, via sudo — voir docker/rebuild-and-deploy.sh). */
+  /** Démarre le conteneur sur la machine cible (docker start). */
   start(target: RpigpioTargetConfig): Promise<RemoteOpResult> {
     return unitController.start(target, target.containerName);
   }
@@ -49,10 +49,10 @@ export class DeployService {
     return unitController.restart(target, target.containerName);
   }
 
-  /** Écrit un fichier sur la machine cible (sudo tee, écrase l'existant, crée le répertoire au besoin). */
+  /** Écrit un fichier sur la machine cible (tee, écrase l'existant, crée le répertoire au besoin). */
   private async writeRemoteFile(target: RpigpioTargetConfig, remotePath: string, content: string): Promise<DeployResult> {
     const dir = shellQuote(remotePath.substring(0, remotePath.lastIndexOf('/')) || '.');
-    const mkdirAndWrite = `sudo mkdir -p ${dir} && sudo tee ${shellQuote(remotePath)} > /dev/null`;
+    const mkdirAndWrite = `mkdir -p ${dir} && tee ${shellQuote(remotePath)} > /dev/null`;
     const result = await runSsh(target, mkdirAndWrite, content);
     if (!result.success) {
       this.logger.error('DeployService', `Échec d'écriture de ${remotePath} sur ${target.host}: ${result.error}`);
@@ -80,13 +80,13 @@ export class DeployService {
     const writeCompose = await this.writeRemoteFile(target, composePath, composeYaml);
     if (!writeCompose.success) return { ...writeCompose, step: 'write-compose' };
 
-    const composeUp = await runSsh(target, `cd ${shellQuote(target.hostDir)} && sudo docker compose up -d`);
+    const composeUp = await runSsh(target, `cd ${shellQuote(target.hostDir)} && docker compose up -d`);
     if (!composeUp.success) {
       this.logger.error('DeployService', `Échec de docker compose up sur ${target.host}: ${composeUp.error}`);
       return { success: false, step: 'compose-up', error: composeUp.error, output: composeUp.output };
     }
 
-    const restart = await runSsh(target, `sudo docker restart ${shellQuote(target.containerName)} && sleep 2 && sudo docker inspect ${shellQuote(target.containerName)} --format '{{.State.Status}}'`);
+    const restart = await runSsh(target, `docker restart ${shellQuote(target.containerName)} && sleep 2 && docker inspect ${shellQuote(target.containerName)} --format '{{.State.Status}}'`);
     if (!restart.success) {
       this.logger.error('DeployService', `Échec de redémarrage de ${target.containerName} sur ${target.host}: ${restart.error}`);
       return { success: false, step: 'restart', error: restart.error, output: restart.output };

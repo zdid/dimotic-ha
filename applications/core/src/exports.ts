@@ -149,6 +149,7 @@ export {
   runScp,
   shellQuote,
   expandHome,
+  defaultSshKeyPath,
 } from './infrastructure/remote/SshClient';
 export type { RemoteTarget, RemoteOpResult } from './infrastructure/remote/SshClient';
 export {
@@ -158,7 +159,6 @@ export {
 export type {
   RemoteAction,
   RemoteUnitController,
-  RemoteUnitControllerOptions,
 } from './infrastructure/remote/RemoteUnitController';
 
 // =============================================================================

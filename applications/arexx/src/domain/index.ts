@@ -80,7 +80,7 @@ export const AREXX_UI_METADATA: ModuleUiMetadata = {
           label: 'Périphérique USB (mode usb)',
           type: 'string',
           placeholder: '/dev/ttyUSB0',
-          description: "Dongle branché sur une autre machine que celle-ci ? Voir l'onglet « Déploiement » de l'application AREXX (script d'installation à copier sur la machine cible)."
+          description: "Dongle branché sur une autre machine que celle-ci ? Voir l'onglet « Déploiement » de l'application AREXX (émetteurs pilotables à distance)."
         },
         {
           name: 'bridgeInstance',
@@ -94,6 +94,25 @@ export const AREXX_UI_METADATA: ModuleUiMetadata = {
           type: 'boolean',
           default: true,
           description: "Évite de créer des entités sans area assignée (HA n'applique l'area suggérée qu'une seule fois, à la création) — désactiver si les entités doivent apparaître même quand HA WebSocket est indisponible."
+        }
+      ]
+    },
+    {
+      title: 'Émetteurs USB (déploiement distant)',
+      description: "Machines distantes hébergeant un dongle BS500 — déploiement/pilotage automatisé (voir l'onglet « Déploiement »). Contrairement à rpigpio/teleinfo, AREXX peut avoir plusieurs émetteurs.",
+      icon: '🖥️',
+      fields: [
+        {
+          name: 'targets',
+          label: 'Cibles',
+          type: 'array',
+          itemLabel: 'Émetteur',
+          itemFields: [
+            { name: 'id', label: 'Identifiant', type: 'text', required: true, placeholder: 'bs510', hint: 'Identifiant libre, unique parmi les cibles de cette app' },
+            { name: 'host', label: 'Hôte', type: 'text', placeholder: '192.168.1.10' },
+            { name: 'sshKeyPath', label: 'Clé SSH privée (chemin)', type: 'text', placeholder: 'data/arexx/ssh/bs510/id_ed25519', hint: "Jamais le contenu de la clé, uniquement son chemin — sous data/ pour rester accessible en Docker" },
+            { name: 'remoteDir', label: 'Répertoire distant de copie (data/arexx/drivers/)', type: 'text', default: '/root/arexx-drivers' }
+          ]
         }
       ]
     }

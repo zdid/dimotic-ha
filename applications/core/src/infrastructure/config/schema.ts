@@ -71,6 +71,21 @@ const loggingSchema = z.object({
 });
 
 /**
+ * Cible de déploiement de dimotic-ha lui-même (⭐ 23/08/2026) — une machine (ha2, orangepi...) sur
+ * laquelle installer/mettre à jour l'application complète, en remplacement de
+ * docker/rebuild-and-deploy.sh. Même patron multi-cible que rpigpio/teleinfo/arexx (voir leurs
+ * config-schema.ts) : id texte libre unique, toujours en root direct (voir
+ * core/infrastructure/remote/SshClient.ts pour le raisonnement), clé SSH sous
+ * data/core/ssh/<id>/. Pas de .max() — plusieurs cibles réelles.
+ */
+const deploymentTargetSchema = z.object({
+  id: z.string().min(1),
+  host: z.string().default(''),
+  sshKeyPath: z.string().default(''),
+  remoteDir: z.string().default('/docker/dimotic-ha')
+});
+
+/**
  * Schéma principal de la configuration de l'application.
  * STRICT : tous les champs sont requis. Les valeurs par défaut sont appliquées
  * par ConfigLoader/ConfigWriter après validation.
@@ -89,8 +104,14 @@ export const configSchema = z.object({
   // l'empêche d'être chargée. Élimine le besoin de fs.renameSync() entre deux répertoires
   // (qui échouait avec EXDEV sous overlay2 sans volume nommé dédié, voir Dockerfile).
   disabledApps: z.array(z.string()).default([]),
+  // Cibles de déploiement de dimotic-ha lui-même (⭐ 23/08/2026) — voir deploymentTargetSchema.
+  targets: z.array(deploymentTargetSchema).default([]),
   // Les sections spécifiques aux modules seront ajoutées dynamiquement
-}).passthrough();
+}).passthrough()
+  .refine(
+    (config) => new Set(config.targets.map((t) => t.id)).size === config.targets.length,
+    { message: 'Chaque cible doit avoir un id unique', path: ['targets'] }
+  );
 // ⚠️ .passthrough() est indispensable : sans lui, Zod strippe silencieusement toute clé de
 // premier niveau non déclarée ci-dessus (nommage/rfxcom/arbreouquoi/evoo7/...) à chaque
 // ConfigLoader.load() — la config des modules, pourtant bien écrite sur disque par
@@ -108,6 +129,7 @@ export type HaConfig = z.infer<typeof haConfigSchema>;
 export type MqttConfig = z.infer<typeof mqttSchema>;
 export type WebConfig = z.infer<typeof webSchema>;
 export type LoggingConfig = z.infer<typeof loggingSchema>;
+export type DeploymentTargetConfig = z.infer<typeof deploymentTargetSchema>;
 export type AppConfig = z.infer<typeof configSchema>;
 
-export { coreSchema, haWsSchema, haStructureSchema, haConfigSchema, mqttSchema, webSchema, loggingSchema };
+export { coreSchema, haWsSchema, haStructureSchema, haConfigSchema, mqttSchema, webSchema, loggingSchema, deploymentTargetSchema };

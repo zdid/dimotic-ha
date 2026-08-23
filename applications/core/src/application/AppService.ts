@@ -8,6 +8,10 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EventBus } from './EventBus';
 import { ApplicationManager } from './ApplicationManager';
+import { CoreDeployService } from './CoreDeployService';
+import type { DeploymentTargetConfig } from '../infrastructure/config/schema';
+import type { RemoteAction } from '../infrastructure/remote/RemoteUnitController';
+import { isRunningInDocker } from '../infrastructure/runtime/docker';
 import { ProcessSupervisor, SupervisorEventBridge } from '../supervisor';
 import type { RestartManager } from './RestartManager';
 import type { SocketBridge } from './SocketBridge';
@@ -49,6 +53,8 @@ export class AppService {
   
   // Gestion des applications
   public applicationManager: ApplicationManager;
+  // Déploiement de dimotic-ha lui-même sur d'autres machines (⭐ 23/08/2026)
+  private coreDeployService: CoreDeployService;
   // ⭐ fonctionnelles-supervisor_specs v2.6 — applications tournant en process séparé (Phase 1 : espdisplay)
   private processSupervisor: ProcessSupervisor;
   private supervisorBridge: SupervisorEventBridge;
@@ -140,6 +146,7 @@ export class AppService {
 
     // Initialiser le gestionnaire d'applications
     this.applicationManager = new ApplicationManager(restartManager, logger, configService, this.processSupervisor);
+    this.coreDeployService = new CoreDeployService(configService, this.applicationManager, logger);
 
     // Initialiser l'état WS depuis la config
     this.initializeWsState();
@@ -189,6 +196,16 @@ export class AppService {
     this.eventBus.on('app:applications:enable', (data: { appId: string }) => this.handleApplicationEnable(data));
     this.eventBus.on('app:applications:disable', (data: { appId: string }) => this.handleApplicationDisable(data));
     this.eventBus.on('app:applications:restart-now', () => this.applicationManager.restartNowIfPending());
+
+    // Déploiement de dimotic-ha lui-même (⭐ 23/08/2026, voir CoreDeployService.ts) — même
+    // protocole { targetId, action } que rpigpio/teleinfo/arexx (core/infrastructure/remote/).
+    this.eventBus.on('core:deployment:targets:get', () => this.handleDeploymentTargetsGet());
+    this.eventBus.on('core:deployment:target:save', (data: unknown) => this.handleDeploymentTargetSave(data as DeploymentTargetConfig));
+    this.eventBus.on('core:deployment:target:delete', (data: unknown) => this.handleDeploymentTargetDelete(data as { id: string }));
+    this.eventBus.on('core:deployment:remote-op', (data: unknown) => {
+      const { targetId, action } = data as { targetId: string; action: RemoteAction };
+      this.handleDeploymentRemoteOp(targetId, action);
+    });
 
     // Redémarrage manuel demandé depuis l'UI (Paramètres Techniques > Journalisation)
     this.eventBus.on('app:restart:requested', () => this.handleRestartRequested());
@@ -634,6 +651,76 @@ export class AppService {
       success: result.success,
       error: result.error,
     });
+  }
+
+  // ===========================================================================
+  // DÉPLOIEMENT DE DIMOTIC-HA LUI-MÊME (⭐ 23/08/2026, voir CoreDeployService.ts)
+  // ===========================================================================
+
+  private handleDeploymentTargetsGet(): void {
+    this.eventBus.emit('core:deployment:targets:list', {
+      targets: this.configService.getTargets().map((t) => ({ id: t.id, host: t.host })),
+      isRunningInDocker: isRunningInDocker(),
+    });
+  }
+
+  private handleDeploymentTargetSave(target: DeploymentTargetConfig): void {
+    const targets = this.configService.getTargets();
+    const index = targets.findIndex((t) => t.id === target.id);
+    if (index === -1) targets.push(target);
+    else targets[index] = target;
+
+    const result = this.configService.setTargets(targets);
+    if (!result.success) {
+      this.logger.error('AppService', `Échec de sauvegarde de la cible de déploiement ${target.id}: ${result.error}`);
+    }
+    this.handleDeploymentTargetsGet();
+  }
+
+  private handleDeploymentTargetDelete(data: { id: string }): void {
+    const targets = this.configService.getTargets().filter((t) => t.id !== data.id);
+    const result = this.configService.setTargets(targets);
+    if (!result.success) {
+      this.logger.error('AppService', `Échec de suppression de la cible de déploiement ${data.id}: ${result.error}`);
+    }
+    this.handleDeploymentTargetsGet();
+  }
+
+  /**
+   * Point d'entrée unique pour toute intervention distante sur une cible de déploiement de
+   * dimotic-ha — même protocole { targetId, action } que rpigpio/teleinfo/arexx.
+   */
+  private async handleDeploymentRemoteOp(targetId: string, action: RemoteAction): Promise<void> {
+    const target = this.configService.getTargets().find((t) => t.id === targetId);
+    if (!target) {
+      this.eventBus.emit('core:deployment:remote-op:result', {
+        targetId,
+        action,
+        success: false,
+        error: `Cible introuvable: ${targetId}`,
+      });
+      return;
+    }
+
+    try {
+      const result = await (action === 'deploy'
+        ? this.coreDeployService.deploy(target)
+        : action === 'start'
+        ? this.coreDeployService.start(target)
+        : action === 'stop'
+        ? this.coreDeployService.stop(target)
+        : action === 'restart'
+        ? this.coreDeployService.restart(target)
+        : Promise.resolve({ success: false, error: `Action distante inconnue: ${action}` }));
+      this.eventBus.emit('core:deployment:remote-op:result', { targetId, action, ...result });
+    } catch (error) {
+      this.eventBus.emit('core:deployment:remote-op:result', {
+        targetId,
+        action,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   /**

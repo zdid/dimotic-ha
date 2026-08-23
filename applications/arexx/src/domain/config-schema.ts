@@ -7,8 +7,31 @@
 
 import { z } from 'zod';
 
+/**
+ * Cible de déploiement automatisé d'un émetteur USB (BS500) — ⭐ 23/08/2026, remplace la copie
+ * manuelle de `data/arexx/drivers/` décrite jusqu'ici sur la page Déploiement. Même patron
+ * multi-cible que `rpigpio`/`teleinfo` (demande explicite : implémentation identique dans les 3
+ * apps), sans plafond ici : AREXX a 2 émetteurs dès le départ. Toujours en root direct (voir
+ * core/infrastructure/remote/SshClient.ts).
+ */
+const arexxTargetSchema = z.object({
+  // Identifiant libre de la cible (ex: "bs510") — utilisé dans l'IHM et le protocole Socket.io
+  // (arexx:remote-op { targetId, action }), voir ArexxService.ts.
+  id: z.string().min(1),
+  host: z.string().default(''),
+  // Chemin LOCAL vers la clé privée SSH dédiée à CETTE cible — sous data/arexx/ssh/<id>/, jamais
+  // ~/.ssh/... (non résolu dans le conteneur Docker, voir defaultSshKeyPath dans SshClient.ts).
+  sshKeyPath: z.string().default(''),
+  // Répertoire sur la machine cible où copier data/arexx/drivers/ (staging, avant exécution de
+  // scripts/deploy-sender.sh — voir ArexxDeployService.ts).
+  remoteDir: z.string().default('/root/arexx-drivers')
+});
+
 export const arexxConfigSchema = z.object({
   enabled: z.boolean().default(true),
+
+  // Émetteurs USB pilotables à distance (⭐ 23/08/2026) — voir arexxTargetSchema ci-dessus.
+  targets: z.array(arexxTargetSchema).default([]),
 
   // Mode d'acquisition, mutuellement exclusif (mirroring arexx2hass Controller.start()) :
   // - 'push' : arexx2hass héberge un serveur HTTP local, le BS1000 (ou un BS500 sur RPi séparé)
@@ -39,12 +62,18 @@ export const arexxConfigSchema = z.object({
   // Voir le commentaire équivalent dans rfxcom/config-schema.ts — même risque (area jamais
   // réappliquée après coup par HA), même défaut prudent.
   waitForHaWsBeforeDiscovery: z.boolean().default(true)
-});
+})
+  .refine(
+    (config) => new Set(config.targets.map((t) => t.id)).size === config.targets.length,
+    { message: 'Chaque cible doit avoir un id unique', path: ['targets'] }
+  );
 
 export type ArexxConfig = z.infer<typeof arexxConfigSchema>;
+export type ArexxTargetConfig = z.infer<typeof arexxTargetSchema>;
 
 export const DEFAULT_AREXX_CONFIG: ArexxConfig = {
   enabled: true,
+  targets: [],
   acquisitionMode: 'push',
   httpservPort: 49161,
   bs1000Port: 80,

@@ -2,6 +2,8 @@
  * Script TypeScript pour le tableau de bord RPI GPIO.
  */
 
+import { renderTargetCards, showTargetActionResult, type TargetActionResult, type RemoteAction } from '/js/ts/components/TargetCards.js';
+
 function moduleRoot(): ParentNode {
   return (window as any).__moduleContainerRoot || document;
 }
@@ -24,16 +26,10 @@ interface PinDefinition {
 
 interface RpigpioStatus {
   pinsCount: number;
-  target: { host: string; containerName: string };
+  targets: { id: string; host: string; containerName: string }[];
+  isRunningInDocker: boolean;
   agentOnline: boolean | null;
   agentLastSeenAt: string | null;
-}
-
-interface DeployResult {
-  success: boolean;
-  step?: 'write' | 'restart';
-  error?: string;
-  output?: string;
 }
 
 let socket: any | null = null;
@@ -49,7 +45,6 @@ function init(): void {
       listenersReady = true;
     }
     setupPinModal();
-    setupDeployButton();
     requestInitialStatus();
     hideLoading();
 
@@ -72,12 +67,17 @@ function setupEventListeners(): void {
     renderPins();
   });
 
-  socket.on('rpigpio:remote-op:result', (result: DeployResult) => {
-    showDeployResult(result);
+  socket.on('rpigpio:remote-op:result', (result: TargetActionResult) => {
+    const container = $('targets-container');
+    if (container) showTargetActionResult(container, result);
   });
 
   socket.on('rpigpio:error', (data: { message: string }) => {
-    showDeployResult({ success: false, error: data.message });
+    const errorEl = $('pins-error');
+    if (errorEl) {
+      errorEl.textContent = data.message;
+      errorEl.style.display = 'block';
+    }
   });
 }
 
@@ -88,13 +88,9 @@ function requestInitialStatus(): void {
 
 function updateStatusDisplay(status: RpigpioStatus): void {
   const countEl = $('pins-count');
-  const hostEl = $('target-host');
-  const serviceEl = $('target-service');
   const agentEl = $('agent-status');
   const lastSeenEl = $('agent-last-seen');
   if (countEl) countEl.textContent = String(status.pinsCount);
-  if (hostEl) hostEl.textContent = status.target.host || '—';
-  if (serviceEl) serviceEl.textContent = status.target.containerName || '—';
   if (agentEl) {
     agentEl.textContent = status.agentOnline === null ? 'Inconnu' : status.agentOnline ? 'En ligne' : 'Hors ligne';
   }
@@ -103,9 +99,21 @@ function updateStatusDisplay(status: RpigpioStatus): void {
   }
 
   const statusCard = $('status-card');
-  const actions = $('actions');
   if (statusCard) statusCard.style.display = 'block';
-  if (actions) actions.style.display = 'flex';
+
+  const targetsSection = $('targets-section');
+  const targetsContainer = $('targets-container');
+  if (targetsSection) targetsSection.style.display = 'block';
+  if (targetsContainer) {
+    renderTargetCards(targetsContainer, {
+      appId: 'rpigpio',
+      targets: status.targets,
+      isRunningInDocker: status.isRunningInDocker,
+      onAction: (targetId: string, action: RemoteAction) => {
+        socket?.emit('rpigpio:remote-op', { targetId, action });
+      }
+    });
+  }
 }
 
 function showMainContent(): void {
@@ -287,36 +295,6 @@ function submitPinForm(): void {
   closePinModal();
 }
 
-// ==========================================================================
-// Déploiement
-// ==========================================================================
-
-function setupDeployButton(): void {
-  $('deploy-btn')?.addEventListener('click', () => {
-    hideElement('deploy-success');
-    hideElement('deploy-error');
-    socket?.emit('rpigpio:remote-op', { action: 'deploy' });
-  });
-}
-
-function showDeployResult(result: DeployResult): void {
-  const successEl = $('deploy-success');
-  const errorEl = $('deploy-error');
-
-  if (result.success) {
-    if (successEl) {
-      successEl.textContent = `Déploiement réussi (config écrit, conteneur redémarré${result.output ? ` — statut: ${result.output}` : ''}).`;
-      successEl.style.display = 'block';
-    }
-    if (errorEl) errorEl.style.display = 'none';
-  } else {
-    if (errorEl) {
-      errorEl.textContent = `Échec (${result.step || 'inconnu'}) : ${result.error || 'erreur inconnue'}`;
-      errorEl.style.display = 'block';
-    }
-    if (successEl) successEl.style.display = 'none';
-  }
-}
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);

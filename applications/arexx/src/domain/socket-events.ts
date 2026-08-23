@@ -23,6 +23,11 @@ export const AREXX_SOCKET_EVENTS = {
   // --- Déploiement (page dédiée, voir DriversBundle.ts) ---
   DRIVER_TARGET: 'arexx:driver-target',
 
+  // --- Pilotage distant des émetteurs (⭐ 23/08/2026, voir ArexxDeployService.ts) — protocole
+  // uniforme partagé avec rpigpio/teleinfo : { targetId, action } en entrée, quelle que soit
+  // l'intervention (deploy/start/stop/restart). Voir core/infrastructure/remote/.
+  REMOTE_OP_RESULT: 'arexx:remote-op:result',
+
   // --- Erreurs ---
   ERROR: 'arexx:error'
 } as const;
@@ -40,7 +45,9 @@ export const AREXX_CLIENT_EVENTS = {
   SENSOR_DELETE: 'arexx:sensor:delete',
 
   GET_DRIVER_TARGET: 'arexx:driver-target:get',
-  SAVE_DRIVER_TARGET: 'arexx:driver-target:save'
+  SAVE_DRIVER_TARGET: 'arexx:driver-target:save',
+
+  REMOTE_OP: 'arexx:remote-op'
 } as const;
 
 // ============================================================================

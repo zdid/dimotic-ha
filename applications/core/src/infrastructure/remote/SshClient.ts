@@ -7,15 +7,34 @@
  * `RemoteOpResult` remplace les interfaces `DeployResult` dupliquées (même forme partout :
  * `{ success, step?, error?, output? }`) — `step` reste une chaîne libre, chaque appelant peut
  * définir son propre alias de type plus précis s'il veut restreindre les valeurs possibles.
+ *
+ * Toujours `root` (⭐ 23/08/2026) : les machines cibles pilotées par ce socle sont toujours jointes
+ * en root direct, jamais un compte dédié avec `sudo NOPASSWD` — analysé et tranché avec
+ * l'utilisateur : `sudo NOPASSWD` sur des commandes larges (`tee`, `docker`, `mkdir`, déjà le cas
+ * partout ici) équivaut de toute façon à root (`sudo tee` sur un chemin arbitraire permet
+ * d'écraser `/etc/sudoers`) — la distinction n'apportait qu'un vernis, pas une vraie réduction de
+ * privilège. `RemoteTarget` n'a donc plus de champ `sshUser`.
  */
 
 import { spawn } from 'node:child_process';
 import * as os from 'node:os';
+import * as path from 'node:path';
 
 export interface RemoteTarget {
   host: string;
-  sshUser: string;
   sshKeyPath?: string;
+}
+
+/**
+ * Chemin par défaut de la clé SSH privée d'une cible — `data/<appId>/ssh/<targetId>/id_ed25519`,
+ * jamais `~/.ssh/...` : le conteneur Docker tourne en `USER node` (home `/home/node`, jamais
+ * persisté, aucun volume SSH monté, voir Dockerfile/compose.yaml) — seul `data/` survit et reste
+ * identique en dev local et en Docker. Une clé PAR CIBLE (pas partagée par application) : révoquer
+ * une cible compromise ne doit pas obliger à re-clef toutes les autres cibles de la même app.
+ */
+export function defaultSshKeyPath(appId: string, targetId: string): string {
+  const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', appId, 'ssh', targetId);
+  return path.join(dataDir, 'id_ed25519');
 }
 
 export interface RemoteOpResult {
@@ -46,7 +65,7 @@ export function runSsh(
   return new Promise((resolve) => {
     const args = ['-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes'];
     if (target.sshKeyPath) args.push('-i', expandHome(target.sshKeyPath));
-    args.push(`${target.sshUser}@${target.host}`, remoteCommand);
+    args.push(`root@${target.host}`, remoteCommand);
 
     const child = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -91,7 +110,7 @@ export function runScp(
   return new Promise((resolve) => {
     const args = ['-r', '-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes'];
     if (target.sshKeyPath) args.push('-i', expandHome(target.sshKeyPath));
-    args.push(...localPaths, `${target.sshUser}@${target.host}:${remoteDest}`);
+    args.push(...localPaths, `root@${target.host}:${remoteDest}`);
 
     const child = spawn('scp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';

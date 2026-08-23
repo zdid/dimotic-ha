@@ -1,0 +1,171 @@
+/**
+ * Composant DeploymentManager — déploiement de dimotic-ha lui-même sur d'autres machines (⭐
+ * 23/08/2026), en remplacement de docker/rebuild-and-deploy.sh. Structure calquée sur
+ * ApplicationsManager.ts (Shadow DOM + <template>), mais utilise directement
+ * `window.app.socketService.getSocket()` (même pattern que les dashboards rpigpio/teleinfo) plutôt
+ * que la couche `window.app.appManager` — pas de restart-countdown ici, une cible distante n'a
+ * aucun rapport avec le cycle de vie de CETTE instance.
+ *
+ * Réutilise `renderTargetCards`/`showTargetActionResult` (TargetCards.ts, même dossier) — mêmes
+ * cartes de cible que rpigpio/teleinfo/arexx.
+ */
+
+import { renderTargetCards, showTargetActionResult, type TargetActionResult, type RemoteAction } from './TargetCards.js';
+
+const createTemplate = (): HTMLTemplateElement => {
+  const template = document.createElement('template');
+  template.innerHTML = `
+    <style>
+      .deployment-management {
+        padding: 20px;
+        background: #2c3e50;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        color: #ecf0f1;
+      }
+      .deployment-management h2 { color: #ecf0f1; margin-bottom: 10px; }
+      .section-description { margin: 0 0 20px 0; color: #7f8c8d; font-size: 0.9rem; }
+
+      .add-target-form {
+        display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;
+        margin-bottom: 20px; padding: 15px; background: #34495e; border-radius: 8px;
+      }
+      .add-target-form .field { display: flex; flex-direction: column; gap: 4px; }
+      .add-target-form label { font-size: 0.8rem; color: #bdc3c7; }
+      .add-target-form input {
+        padding: 8px 10px; border-radius: 4px; border: 1px solid #4a6278;
+        background: #2c3e50; color: #ecf0f1; font-size: 0.9rem;
+      }
+      .add-target-form button {
+        padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer;
+        background: #3498db; color: white; font-size: 0.9rem; height: 36px;
+      }
+
+      .empty { color: #7f8c8d; font-style: italic; padding: 10px; }
+
+      /* Cartes de cibles (TargetCards.ts) */
+      .target-card { background: #34495e; border-radius: 8px; padding: 15px; margin-bottom: 12px; }
+      .target-card h4 { margin: 0 0 10px; display: inline-block; color: #ecf0f1; }
+      .target-delete {
+        float: right; padding: 4px 10px; border-radius: 4px; border: 1px solid #e74c3c;
+        background: transparent; color: #e74c3c; cursor: pointer; font-size: 0.8rem;
+      }
+      .target-card .target-host { color: #7f8c8d; font-weight: normal; }
+      .target-ssh-prep { margin-bottom: 12px; font-size: 0.9em; color: #ecf0f1; }
+      .target-ssh-prep summary { cursor: pointer; color: #bdc3c7; }
+      .target-ssh-prep pre {
+        background: #2c3e50; border: 1px solid #4a6278; border-radius: 4px;
+        padding: 10px; overflow-x: auto; font-size: 0.85em; color: #ecf0f1;
+      }
+      .target-docker-hint {
+        padding: 8px; border-radius: 4px; background: rgba(255,193,7,0.15);
+        border: 1px solid #ffc107; margin: 8px 0; color: #ecf0f1;
+      }
+      .target-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+      .target-actions button {
+        padding: 6px 14px; border-radius: 4px; border: none; cursor: pointer;
+        background: #3498db; color: white; font-size: 0.85rem;
+      }
+      .target-result { padding: 10px; border-radius: 4px; margin-top: 10px; }
+      .target-result-success { background: rgba(46, 204, 113, 0.15); border: 1px solid #2ecc71; color: #2ecc71; }
+      .target-result-error { background: rgba(231, 76, 60, 0.15); border: 1px solid #e74c3c; color: #e74c3c; }
+    </style>
+    <div class="deployment-management">
+      <h2>📦 Déploiement de dimotic-ha</h2>
+      <p class="section-description">
+        Installer/mettre à jour dimotic-ha lui-même sur une machine distante — suppose que l'image
+        est déjà publiée sur Docker Hub (build multi-arch, reste manuel :
+        docker/rebuild-and-deploy.sh --build-only). Sur une machine neuve, toutes les applications
+        démarrent désactivées ; à activer ensuite localement, depuis l'IHM de cette machine.
+      </p>
+      <div class="add-target-form">
+        <div class="field">
+          <label for="target-id">Identifiant</label>
+          <input type="text" id="target-id" placeholder="ha2">
+        </div>
+        <div class="field">
+          <label for="target-host">Hôte</label>
+          <input type="text" id="target-host" placeholder="192.168.1.51">
+        </div>
+        <div class="field">
+          <label for="target-ssh-key">Clé SSH (chemin)</label>
+          <input type="text" id="target-ssh-key" placeholder="data/core/ssh/ha2/id_ed25519">
+        </div>
+        <button type="button" id="add-target-btn">➕ Ajouter</button>
+      </div>
+      <div id="targets-container"><div class="empty">Chargement...</div></div>
+    </div>
+  `;
+  return template;
+};
+
+export class DeploymentManager extends HTMLElement {
+  private socket: any = null;
+
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    const template = createTemplate();
+    this.shadowRoot!.appendChild(template.content.cloneNode(true));
+  }
+
+  connectedCallback(): void {
+    this.setupSocket();
+  }
+
+  private setupSocket(): void {
+    if (!window.app || !window.app.socketService) {
+      setTimeout(() => this.setupSocket(), 100);
+      return;
+    }
+    this.socket = window.app.socketService.getSocket();
+
+    this.socket.on('core:deployment:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean }) => {
+      this.renderTargets(data);
+    });
+
+    this.socket.on('core:deployment:remote-op:result', (result: TargetActionResult) => {
+      const container = this.shadowRoot!.getElementById('targets-container');
+      if (container) showTargetActionResult(container, result);
+    });
+
+    this.socket.emit('core:deployment:targets:get');
+
+    this.shadowRoot!.getElementById('add-target-btn')?.addEventListener('click', () => this.addTarget());
+  }
+
+  private renderTargets(data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean }): void {
+    const container = this.shadowRoot!.getElementById('targets-container');
+    if (!container) return;
+    renderTargetCards(container, {
+      appId: 'core',
+      targets: data.targets,
+      isRunningInDocker: data.isRunningInDocker,
+      onAction: (targetId: string, action: RemoteAction) => {
+        this.socket.emit('core:deployment:remote-op', { targetId, action });
+      },
+      onDelete: (targetId: string) => {
+        this.socket.emit('core:deployment:target:delete', { id: targetId });
+      }
+    });
+  }
+
+  private addTarget(): void {
+    const idEl = this.shadowRoot!.getElementById('target-id') as HTMLInputElement | null;
+    const hostEl = this.shadowRoot!.getElementById('target-host') as HTMLInputElement | null;
+    const sshKeyEl = this.shadowRoot!.getElementById('target-ssh-key') as HTMLInputElement | null;
+
+    const id = idEl?.value.trim() ?? '';
+    const host = hostEl?.value.trim() ?? '';
+    const sshKeyPath = sshKeyEl?.value.trim() ?? '';
+    if (!id || !host) return;
+
+    this.socket.emit('core:deployment:target:save', { id, host, sshKeyPath, remoteDir: '/docker/dimotic-ha' });
+
+    if (idEl) idEl.value = '';
+    if (hostEl) hostEl.value = '';
+    if (sshKeyEl) sshKeyEl.value = '';
+  }
+}
+
+customElements.define('app-deployment-manager', DeploymentManager);

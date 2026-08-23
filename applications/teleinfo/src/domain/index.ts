@@ -54,16 +54,24 @@ export const TELEINFO_UI_METADATA: ModuleUiMetadata = {
   menuPath: '/teleinfo/config',
   fields: [
     {
-      title: 'Machine cible (RPi1)',
-      description: 'Le RPi1 auquel sont câblés les 2 compteurs — accès SSH par clé, root (rpio nécessite /dev/mem).',
+      title: 'Machines cibles',
+      description: 'Le RPi1 auquel sont câblés les 2 compteurs — accès SSH root direct (rpio nécessite /dev/mem). Au plus 1 en pratique, mais même structure que rpigpio/arexx.',
       icon: '🖥️',
       fields: [
-        { name: 'target.host', label: 'Hôte', type: 'text', placeholder: '192.168.1.183' },
-        { name: 'target.sshUser', label: 'Utilisateur SSH', type: 'text', default: 'root' },
-        { name: 'target.sshKeyPath', label: 'Clé SSH privée (chemin local)', type: 'text', hint: 'Vide = clé par défaut du client SSH' },
-        { name: 'target.remoteDir', label: 'Répertoire distant de l\'agent', type: 'text', default: '/opt/teleinfo' },
-        { name: 'target.nodeBinPath', label: 'Chemin du binaire node sur la cible', type: 'text', default: '/usr/bin/node', hint: 'RPi1/ARMv6 : utiliser le node déjà installé et prouvé sur cette machine, pas un node générique' },
-        { name: 'target.serviceName', label: 'Nom du service systemd', type: 'text', default: 'teleinfo' }
+        {
+          name: 'targets',
+          label: 'Cibles',
+          type: 'array',
+          itemLabel: 'Cible',
+          itemFields: [
+            { name: 'id', label: 'Identifiant', type: 'text', required: true, placeholder: 'rpi1', hint: 'Identifiant libre, unique parmi les cibles de cette app' },
+            { name: 'host', label: 'Hôte', type: 'text', placeholder: '192.168.1.183' },
+            { name: 'sshKeyPath', label: 'Clé SSH privée (chemin)', type: 'text', placeholder: 'data/teleinfo/ssh/rpi1/id_ed25519', hint: "Jamais le contenu de la clé, uniquement son chemin — sous data/ pour rester accessible en Docker" },
+            { name: 'remoteDir', label: "Répertoire distant de l'agent", type: 'text', default: '/opt/teleinfo' },
+            { name: 'nodeBinPath', label: 'Chemin du binaire node sur la cible', type: 'text', default: '/usr/bin/node', hint: 'RPi1/ARMv6 : utiliser le node déjà installé et prouvé sur cette machine, pas un node générique' },
+            { name: 'serviceName', label: 'Nom du service systemd', type: 'text', default: 'teleinfo' }
+          ]
+        }
       ]
     },
     {

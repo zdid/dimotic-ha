@@ -78,6 +78,10 @@ export interface ServerToClientEvents {
 
   // Redémarrage manuel de l'application (Paramètres Techniques)
   'app:restart:result': (data: { success: boolean; error?: string }) => void;
+
+  // Déploiement de dimotic-ha lui-même (⭐ 23/08/2026, voir CoreDeployService.ts)
+  'core:deployment:targets:list': (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean }) => void;
+  'core:deployment:remote-op:result': (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => void;
 }
 
 // ------ Événements Client → Server ------
@@ -119,6 +123,12 @@ export interface ClientToServerEvents {
 
   // Redémarrage manuel de l'application (Paramètres Techniques)
   'app:restart': () => void;
+
+  // Déploiement de dimotic-ha lui-même (⭐ 23/08/2026, voir CoreDeployService.ts)
+  'core:deployment:targets:get': () => void;
+  'core:deployment:target:save': (data: unknown) => void;
+  'core:deployment:target:delete': (data: { id: string }) => void;
+  'core:deployment:remote-op': (data: { targetId: string; action: string }) => void;
 }
 
 // ============================================================================
@@ -174,6 +184,14 @@ export interface AppEvents {
   // Redémarrage manuel de l'application (Paramètres Techniques)
   'app:restart:requested': void;
   'app:restart:result': { success: boolean; error?: string };
+
+  // Déploiement de dimotic-ha lui-même (⭐ 23/08/2026, voir CoreDeployService.ts)
+  'core:deployment:targets:get': void;
+  'core:deployment:targets:list': { targets: { id: string; host: string }[]; isRunningInDocker: boolean };
+  'core:deployment:target:save': unknown;
+  'core:deployment:target:delete': { id: string };
+  'core:deployment:remote-op': { targetId: string; action: string };
+  'core:deployment:remote-op:result': { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string };
 
   // ------ Extension libre par les applications ------
   // Les applications dérivées peuvent ajouter leurs propres événements

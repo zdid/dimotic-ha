@@ -74,6 +74,18 @@
     .alert { padding: 12px; border-radius: var(--radius); margin: 10px 0; display: none; }
     .alert-success { background: rgba(76, 175, 80, 0.1); border: 1px solid var(--color-success); color: var(--color-success); }
     .alert-error { background: rgba(244, 67, 54, 0.1); border: 1px solid var(--color-error); color: var(--color-error); }
+
+    /* Cartes de cibles (TargetCards.js, mutualisé rpigpio/teleinfo/arexx) */
+    .target-card { background: var(--color-background); border-radius: var(--radius); padding: 15px; margin-bottom: 12px; }
+    .target-card h4 { margin: 0 0 10px; }
+    .target-card .target-host { color: var(--color-text-muted); font-weight: normal; }
+    .target-ssh-prep { margin-bottom: 12px; font-size: 0.9em; }
+    .target-ssh-prep summary { cursor: pointer; color: var(--color-text-muted); }
+    .target-docker-hint { padding: 8px; border-radius: var(--radius); background: rgba(255,193,7,0.1); border: 1px solid #ffc107; margin: 8px 0; }
+    .target-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .target-result { padding: 10px; border-radius: var(--radius); margin-top: 10px; }
+    .target-result-success { background: rgba(76, 175, 80, 0.1); border: 1px solid var(--color-success); color: var(--color-success); }
+    .target-result-error { background: rgba(244, 67, 54, 0.1); border: 1px solid var(--color-error); color: var(--color-error); }
   </style>
 </head>
 <body>
@@ -92,14 +104,6 @@
             <span class="value" id="pins-count">0</span>
           </div>
           <div class="status-item">
-            <span class="label">Machine cible</span>
-            <span class="value" id="target-host">—</span>
-          </div>
-          <div class="status-item">
-            <span class="label">Conteneur</span>
-            <span class="value" id="target-service">—</span>
-          </div>
-          <div class="status-item">
             <span class="label">Agent mqtt-io</span>
             <span class="value" id="agent-status">—</span>
           </div>
@@ -115,16 +119,18 @@
           <h2>Pins</h2>
           <button class="btn btn-primary" id="new-pin-btn">➕ Nouveau pin</button>
         </div>
-        <div class="alert alert-success" id="deploy-success"></div>
-        <div class="alert alert-error" id="deploy-error"></div>
+        <div class="alert alert-error" id="pins-error"></div>
         <div id="pins-list"><div class="empty">Chargement...</div></div>
       </div>
 
-      <div class="loading" id="loading">Chargement de l'application RPI GPIO</div>
-    </div>
+      <div class="section" id="targets-section" style="display: none;">
+        <div class="section-header">
+          <h2>Cible</h2>
+        </div>
+        <div id="targets-container"></div>
+      </div>
 
-    <div class="actions" id="actions" style="display: none;">
-      <button class="btn btn-primary" id="deploy-btn">🚀 Générer et déployer</button>
+      <div class="loading" id="loading">Chargement de l'application RPI GPIO</div>
     </div>
   </div>
 

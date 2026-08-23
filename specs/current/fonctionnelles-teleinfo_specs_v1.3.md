@@ -1,5 +1,20 @@
 # Spécifications Fonctionnelles - Module TELEINFO
 
+*Version 1.3 - 23 Août 2026*
+*v1.3 : multi-cible standardisé (`target` singulier → `targets[]`, plafonné à 1 en pratique via
+`.max(1)`), même patron que `rpigpio`/`arexx` (demande explicite : implémentation identique dans
+les 3 apps) — voir §2.1/§7.1bis/§8/§9. Deux simplifications décidées avec l'utilisateur, propagées
+au socle partagé `core/infrastructure/remote/` : accès aux machines cibles toujours en root direct
+(champ `sshUser` retiré — RPi1 était déjà en root, aucun changement pour cette cible précise) et clé
+SSH par cible sous `data/teleinfo/ssh/<id>/` plutôt que `~/.ssh/...` (non résolu dans le conteneur
+Docker). **Migration réelle de `data/teleinfo/config.yaml`** (`target:` → `targets: [{ id: 'rpi1',
+... }]`, `sshUser` retiré) — vérifiée en la reparsant contre le nouveau schéma. Protocole Socket.io
+`teleinfo:remote-op`/`teleinfo:remote-op:result` étendu avec `targetId` (§9.2). Nouvelle carte de
+cible dans le tableau de bord (`TargetCards.js`, composant mutualisé avec rpigpio/arexx, servi par
+core en `/js/ts/components/TargetCards.js`) — remplace l'ancien bloc "cible unique + bouton
+Déployer" ; instructions de préparation SSH par cible désormais affichées directement dans l'IHM.
+Testé au navigateur (rendu de la carte avec la vraie cible `rpi1` migrée, confirmé dans le shadow
+DOM du tableau de bord). Ancienne version v1.2 archivée.*
 *Version 1.2 - 22 Août 2026*
 *v1.2 : `DeployService.ts` migré sur le socle partagé `core/infrastructure/remote/` (SSH/SCP +
 contrôleur Docker/systemd, §7.1bis), mutualisé avec `rpigpio` qui réimplémentait des primitives
@@ -316,7 +331,11 @@ de cette session vérifiée avec du vrai matériel (contrairement à `rpigpio`/`
 
 ## 7. Déploiement SSH + systemd
 
-### 7.1 `DeployService.deploy()` — séquence
+### 7.1 `DeployService.deploy(target)` — séquence
+
+Prend désormais une cible précise (`TeleinfoTargetConfig`, tirée de `config.targets[]` par
+`TeleinfoService.handleRemoteOp(targetId, action)`, §9.2) plutôt que `config.target` singulier
+(⭐ v1.3). Séquence inchangée :
 
 1. Copie `device-agent/*.js` + `package.json` vers `target.remoteDir` (SCP).
 2. Écrit `config.yaml` généré (SSH, `tee`).
@@ -324,21 +343,30 @@ de cette session vérifiée avec du vrai matériel (contrairement à `rpigpio`/`
 4. `copyBundledPureJsDeps()` — copie `js-yaml`/`argparse` directement depuis ce dépôt (SCP).
 5. Écrit l'unité systemd, `daemon-reload && enable && restart`, vérifie `is-active`.
 
-### 7.1bis Socle SSH/SCP partagé (⭐ nouveau v1.2, 22/08/2026)
+### 7.1bis Socle SSH/SCP partagé + multi-cible (⭐ v1.2, étendu v1.3 — 22-23/08/2026)
 
-`runSsh`/`runScp`/`shellQuote`/`expandHome` viennent désormais de
+`runSsh`/`runScp`/`shellQuote`/`expandHome` viennent de
 `applications/core/src/infrastructure/remote/SshClient.ts` (exporté via `core/exports.ts`) — jusque
-là réimplémentés quasi à l'identique dans `teleinfo` et `rpigpio` (constaté en comparant les deux
-fichiers). `DeployResult` reste défini localement dans `DeployService.ts` (forme identique à
-`RemoteOpResult` du socle, avec un type `step` plus précis propre à ce module).
+là réimplémentés quasi à l'identique dans `teleinfo` et `rpigpio`. `DeployResult` reste défini
+localement dans `DeployService.ts` (forme identique à `RemoteOpResult` du socle, avec un type
+`step` plus précis propre à ce module).
 
-`start()`/`stop()`/`restart()` (⭐ v1.2) délèguent à un `SystemdUnitController` partagé
-(`core/infrastructure/remote/RemoteUnitController.ts`, sans `sudo` — la connexion SSH vers le RPi1
-se fait déjà en root) : `systemctl start|stop|restart target.serviceName`. Symétrique côté
-`rpigpio`, qui utilise un `DockerContainerController` pour sa cible (Docker sur stfort) — la même
-abstraction couvre les deux natures de cible. Pas encore exposés côté Socket.io/IHM (§9.2) : prêts
-pour de futurs boutons "Démarrer"/"Arrêter"/"Redémarrer", en attendant les scripts distants annoncés
-par l'utilisateur.
+`start(target)`/`stop(target)`/`restart(target)` délèguent à un `SystemdUnitController` partagé
+(`core/infrastructure/remote/RemoteUnitController.ts`) : `systemctl start|stop|restart
+target.serviceName`. Symétrique côté `rpigpio`, qui utilise un `DockerContainerController` pour sa
+cible (Docker sur stfort) — la même abstraction couvre les deux natures de cible. Exposés côté
+Socket.io/IHM depuis la v1.3 (§9.2) : boutons Déployer/Démarrer/Arrêter/Redémarrer sur chaque carte
+de cible (`TargetCards.js`, §9.1).
+
+**⭐ v1.3 — deux simplifications décidées avec l'utilisateur, appliquées à tout le socle partagé
+(donc aussi à `rpigpio`/`arexx`)** :
+- **Root direct partout, plus de `sudo`/compte dédié** : analysé ensemble — un compte non-root avec
+  `sudo NOPASSWD` sur des commandes larges équivaut de toute façon à root — la distinction
+  n'apportait qu'un vernis. `RemoteTarget`/`TeleinfoTargetConfig` n'ont donc plus de champ
+  `sshUser` — **aucun changement pour le RPi1**, déjà connecté en root depuis toujours (§1.3).
+- **Clé SSH par cible sous `data/teleinfo/ssh/<id>/`, pas `~/.ssh/...`** : vérifié dans le
+  Dockerfile/compose.yaml — le conteneur tourne en `USER node` (home `/home/node`, jamais persisté,
+  aucun volume SSH monté), un chemin `~/.ssh/...` ne fonctionne qu'en dev local.
 
 ### 7.2 ⭐ Résolution des dépendances natives — deux approches abandonnées en conditions réelles
 
@@ -388,12 +416,13 @@ générique du `PATH` qui pourrait être une version incompatible.
 
 | Champ | Type | Défaut | Utilisation |
 |---|---|---|---|
-| `target.host` | string | `''` | Hôte SSH du RPi1 |
-| `target.sshUser` | string | `root` | Nécessaire pour `rpio` (`/dev/mem`) |
-| `target.sshKeyPath` | string | `''` | Chemin **local** vers la clé privée SSH |
-| `target.remoteDir` | string | `/opt/teleinfo` | Répertoire distant de l'agent |
-| `target.nodeBinPath` | string | `/usr/bin/node` | Voir §7.3 |
-| `target.serviceName` | string | `teleinfo` | Nom du service systemd |
+| `targets` | array, `.max(1)` | `[]` (réel : 1 entrée, `rpi1`) | ⭐ v1.3, remplace `target` singulier — même patron que `rpigpio`/`arexx`. Toujours connecté en root (nécessaire pour `rpio`/`/dev/mem`, §1.3) — aucun champ `sshUser`, contrairement à avant où c'était déjà `root` explicitement |
+| `targets[].id` | string | — | Identifiant libre de la cible (`"rpi1"` en réel), unique — utilisé en IHM et Socket.io (§9.2) |
+| `targets[].host` | string | `''` | Hôte SSH du RPi1 |
+| `targets[].sshKeyPath` | string | `''` | Chemin vers la clé privée SSH dédiée à CETTE cible — sous `data/teleinfo/ssh/<id>/` (§7.1bis), jamais `~/.ssh/...` |
+| `targets[].remoteDir` | string | `/opt/teleinfo` | Répertoire distant de l'agent |
+| `targets[].nodeBinPath` | string | `/usr/bin/node` | Voir §7.3 |
+| `targets[].serviceName` | string | `teleinfo` | Nom du service systemd |
 | `gpio.pinA`/`gpio.pinB` | number | `11`/`12` | Pins physiques (BOARD) de la bascule |
 | `serialPort` | string | `/dev/ttyAMA0` | Port série UART |
 | `cycleIntervalMs` | number | `30000` | Voir §5.4 |
@@ -402,8 +431,9 @@ générique du `PATH` qui pourrait être une version incompatible.
 
 ### 8.2 Formulaire générique ("Paramètres Techniques → TELEINFO")
 
-Trois groupes : "Machine cible (RPi1)" (6 champs), "Câblage" (4 champs, dont `cycleIntervalMs`),
-"Broker MQTT" (5 champs).
+Trois groupes : "Machines cibles" (⭐ v1.3, champ unique `type: 'array'`, `itemFields` — liste avec
+ajout/suppression dynamique, même pattern que `nommage/sources`), "Câblage" (4 champs, dont
+`cycleIntervalMs`), "Broker MQTT" (5 champs).
 
 ---
 
@@ -411,21 +441,26 @@ Trois groupes : "Machine cible (RPi1)" (6 champs), "Câblage" (4 champs, dont `c
 
 ### 9.1 Tableau de bord (`presentation/index.html`, page "Compteurs" du menu)
 
-- Carte statut : nombre de compteurs déclarés (0 à 2), machine cible, nom du service.
+- Carte statut : nombre de compteurs déclarés (0 à 2), présence de l'agent RPi1.
 - Liste des compteurs (chaîne QUOI---OÙ, ADCO) — boutons Modifier/Supprimer.
-- Bouton "➕ Nouveau compteur" désactivé au-delà de 2. Bouton "🚀 Générer et déployer" désactivé
-  tant que les 2 compteurs ne sont pas déclarés.
+- Bouton "➕ Nouveau compteur" désactivé au-delà de 2.
+- **⭐ v1.3** — section "Cible" : une carte par cible configurée (`TargetCards.js`, composant
+  mutualisé avec `rpigpio`/`arexx`, servi par core en `/js/ts/components/TargetCards.js`) —
+  remplace l'ancien bloc "cible unique + bouton Déployer" (dont la désactivation conditionnelle sur
+  le nombre de compteurs, remplacée par le contrôle serveur déjà existant dans `handleRemoteOp`).
+  Chaque carte affiche les instructions de préparation SSH puis 4 boutons
+  Déployer/Démarrer/Arrêter/Redémarrer, avec résultat succès/erreur par carte.
 
 ### 9.2 Événements Socket.io
 
 **Server → Client** (persistants : `teleinfo:status`, `teleinfo:compteurs:list`) :
 ```typescript
-'teleinfo:status'          // { compteursCount, target: { host, serviceName }, agentOnline, agentLastSeenAt } — ⭐ v1.1
+'teleinfo:status'          // { compteursCount, targets: {id,host,serviceName}[], isRunningInDocker, agentOnline, agentLastSeenAt } — targets ⭐ v1.3 (remplace target singulier)
 'teleinfo:compteurs:list'  // CompteurDefinition[]
 'teleinfo:compteur:saved'
 'teleinfo:compteur:deleted'
-'teleinfo:remote-op:result' // { action, success, step?, error?, output? } — ⭐ v1.2, remplace teleinfo:deploy:result
-'teleinfo:error'
+'teleinfo:remote-op:result' // { targetId, action, success, step?, error?, output? } — targetId ⭐ v1.3
+'teleinfo:error'            // { message } — désormais aussi affiché dans une alerte dédiée (#compteurs-error)
 ```
 
 **Client → Server :**
@@ -434,9 +469,10 @@ Trois groupes : "Machine cible (RPi1)" (6 champs), "Câblage" (4 champs, dont `c
 'teleinfo:compteurs:list:get'
 'teleinfo:compteur:save'    // { adco, quoi, lieu, ..., originalAdco? } — originalAdco pour une modification
 'teleinfo:compteur:delete'  // { adco }
-'teleinfo:remote-op'        // { action: 'deploy'|'start'|'stop'|'restart' } — ⭐ v1.2, remplace teleinfo:deploy
-                             // (sans payload). Seul 'deploy' est branché côté serveur (§7.1bis) ; les 3
-                             // autres répondent par une erreur explicite tant qu'aucun bouton IHM ne les déclenche.
+'teleinfo:remote-op'        // { targetId, action: 'deploy'|'start'|'stop'|'restart' } — targetId ⭐ v1.3.
+                             // handleRemoteOp() cherche la cible via config.targets.find(t => t.id === targetId),
+                             // répond par une erreur explicite si introuvable ; deploy() garde son contrôle
+                             // "exactement 2 compteurs déclarés" (§inchangé).
 ```
 
 ---
@@ -510,6 +546,7 @@ applications/teleinfo/
 ### 12.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.3 | 2026-08-23 | Claude | **Multi-cible standardisé** : `target` singulier → `targets[]` (`.max(1)`, id texte libre, même pattern que `rpigpio`/`arexx` et `nommage/sources`) — §2.1/§7.1/§8/§9. Deux simplifications décidées avec l'utilisateur, propagées au socle partagé : accès cible toujours en root direct (`sshUser` retiré — aucun changement pour le RPi1, déjà root) et clé SSH par cible sous `data/teleinfo/ssh/<id>/` au lieu de `~/.ssh/...` (non résolu dans le conteneur Docker). **Migration réelle de `data/teleinfo/config.yaml`** (`target:` → `targets: [{ id: 'rpi1', ... }]`), vérifiée par reparsing contre le nouveau schéma. Protocole `teleinfo:remote-op`/`teleinfo:remote-op:result` étendu avec `targetId`. Nouvelle carte de cible dans le tableau de bord (`TargetCards.js`, composant mutualisé rpigpio/teleinfo/arexx) avec instructions SSH par cible et 4 boutons Déployer/Démarrer/Arrêter/Redémarrer. Testé au navigateur (rendu réel avec la cible `rpi1` migrée, confirmé dans le shadow DOM). Ancienne version v1.2 archivée. |
 | 1.2 | 2026-08-22 | Claude | **`DeployService.ts` migré sur le socle SSH/SCP partagé** `core/infrastructure/remote/` (§7.1bis) — mutualisé avec `rpigpio`, qui réimplémentait des primitives (`runSsh`/`runScp`/`shellQuote`/`expandHome`) quasi identiques. Protocole Socket.io uniformisé (§9.2) : `teleinfo:deploy`/`teleinfo:deploy:result` (sans payload) devient `teleinfo:remote-op`/`teleinfo:remote-op:result` (`{ action }`) — même mécanisme quelle que soit l'intervention distante, demande explicite de l'utilisateur en prévision de futurs scripts de start/stop/restart. `start()`/`stop()`/`restart()` ajoutés côté `DeployService`, délèguent à un `SystemdUnitController` partagé — non encore exposés en IHM. Ancienne version v1.1 archivée. |
 | 1.1 | 2026-08-16 | Claude | Migration du composant dimotic-ha en process séparé (§2.4, `runsAsSeparateProcess`/`standalone.ts` — l'agent RPi1 lui-même reste un déploiement SSH+systemd distinct, sans rapport). Présence de l'agent RPi1 : LWT + battement de cœur ajoutés à `ha-publisher.js` (§6.5, nouveau) — **seule implémentation de présence/heartbeat de cette session vérifiée en conditions réelles** avec du matériel physique (redéploiement réel confirmé, `agentOnline`/`agentLastSeenAt` mis à jour toutes les 30s). Référence croisée techniques-socle mise à jour (v4.28→v4.30). Ancienne version v1.0 archivée. |
 | 1.0 | 2026-08-12 | Claude | Première spécification. Application créée, déployée et déboguée en conditions réelles (2 compteurs EDF physiques, RPi1 réel) au cours de la session — couvre l'architecture, le protocole téléinformation, la bascule GPIO, la publication MQTT/découverte HA, le déploiement SSH+systemd (dont la leçon sur la résolution de dépendances natives), la configuration, l'UI/Socket.io. Deux bugs réels trouvés et corrigés documentés en détail (§4.3 découpage de trame, §5.4 throttling). |

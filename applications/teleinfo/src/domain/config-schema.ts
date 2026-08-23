@@ -3,15 +3,22 @@
  *
  * Paramètres de connexion vers la machine cible (RPi1, un seul — 2 compteurs y sont câblés sur une
  * bascule GPIO matérielle, voir device-agent/) et vers le broker MQTT réel qu'utilisera l'agent
- * déployé. Mêmes conventions que rpigpio (SSH par clé, jamais de secret en clair autre que le
- * chemin du fichier de clé).
+ * déployé. Toujours en root direct (voir core/infrastructure/remote/SshClient.ts).
+ *
+ * ⭐ 23/08/2026 — `target` (singulier) devient `targets[]`, plafonné à 1 (`.max(1)`) : teleinfo ne
+ * pilotera jamais plus d'une machine, mais le schéma suit le même patron multi-cible que
+ * `rpigpio`/`arexx` (demande explicite : implémentation identique dans les 3 apps).
  */
 
 import { z } from 'zod';
 
 const targetConfigSchema = z.object({
+  // Identifiant libre de la cible (ex: "rpi1") — utilisé dans l'IHM et le protocole Socket.io
+  // (teleinfo:remote-op { targetId, action }), voir TeleinfoService.ts.
+  id: z.string().min(1),
   host: z.string().default(''),
-  sshUser: z.string().default('root'),
+  // Chemin LOCAL vers la clé privée SSH dédiée à CETTE cible — sous data/teleinfo/ssh/<id>/, jamais
+  // ~/.ssh/... (non résolu dans le conteneur Docker, voir defaultSshKeyPath dans SshClient.ts).
   sshKeyPath: z.string().default(''),
   // Répertoire sur la machine cible où déployer l'agent (device-agent/ + config.yaml généré).
   remoteDir: z.string().default('/opt/teleinfo'),
@@ -40,7 +47,7 @@ const mqttConfigSchema = z.object({
 
 export const teleinfoConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  target: targetConfigSchema.default({}),
+  targets: z.array(targetConfigSchema).max(1).default([]),
   gpio: gpioConfigSchema.default({}),
   serialPort: z.string().default('/dev/ttyAMA0'),
   // ⭐ 12/08/2026 (demande utilisateur) — pause entre chaque cycle complet (les 2 compteurs lus
@@ -49,7 +56,11 @@ export const teleinfoConfigSchema = z.object({
   // pour du suivi de consommation électrique, et lourd pour le recorder HA sur la durée.
   cycleIntervalMs: z.number().int().min(1000).default(30000),
   mqtt: mqttConfigSchema.default({})
-});
+})
+  .refine(
+    (config) => new Set(config.targets.map((t) => t.id)).size === config.targets.length,
+    { message: 'Chaque cible doit avoir un id unique', path: ['targets'] }
+  );
 
 export type TeleinfoConfig = z.infer<typeof teleinfoConfigSchema>;
 export type TeleinfoTargetConfig = z.infer<typeof targetConfigSchema>;
@@ -58,14 +69,7 @@ export type TeleinfoMqttConfig = z.infer<typeof mqttConfigSchema>;
 
 export const DEFAULT_TELEINFO_CONFIG: TeleinfoConfig = {
   enabled: true,
-  target: {
-    host: '',
-    sshUser: 'root',
-    sshKeyPath: '',
-    remoteDir: '/opt/teleinfo',
-    nodeBinPath: '/usr/bin/node',
-    serviceName: 'teleinfo'
-  },
+  targets: [],
   gpio: { pinA: 11, pinB: 12 },
   serialPort: '/dev/ttyAMA0',
   cycleIntervalMs: 30000,

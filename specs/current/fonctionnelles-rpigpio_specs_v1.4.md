@@ -1,5 +1,20 @@
 # Spécifications Fonctionnelles - Module RPIGPIO
 
+*Version 1.4 - 23 Août 2026*
+*v1.4 : multi-cible standardisé (`target` singulier → `targets[]`, plafonné à 1 en pratique via
+`.max(1)`), même patron que `teleinfo`/`arexx` (demande explicite : implémentation identique dans
+les 3 apps) — voir §2.1/§5.1bis/§6.2/§7. Deux simplifications décidées avec l'utilisateur, propagées
+au socle partagé `core/infrastructure/remote/` : accès aux machines cibles toujours en root direct
+(`sudo NOPASSWD` jugé équivalent à root sur ce projet, champ `sshUser` retiré, plus de préfixe
+`sudo` nulle part) et clé SSH par cible sous `data/rpigpio/ssh/<id>/` plutôt que `~/.ssh/...` (non
+résolu dans le conteneur Docker — vérifié dans le Dockerfile/compose.yaml). Protocole Socket.io
+`rpigpio:remote-op`/`rpigpio:remote-op:result` étendu avec `targetId` (§7.2). Nouvelle carte de
+cible dans le tableau de bord (`TargetCards.js`, composant mutualisé avec teleinfo/arexx, servi par
+core en `/js/ts/components/TargetCards.js`) — remplace l'ancien bloc "cible unique + bouton
+Déployer" ; instructions de préparation SSH par cible désormais affichées directement dans l'IHM
+(auparavant absentes pour rpigpio/teleinfo, seule AREXX les avait). `start`/`stop`/`restart` restent
+câblés côté serveur (déjà le cas depuis la v1.3) et sont maintenant exposés par de vrais boutons.
+Testé au navigateur (rendu de carte, formulaire array). Ancienne version v1.3 archivée.*
 *Version 1.3 - 22 Août 2026*
 *v1.3 : `DeployService.ts` migré sur le socle partagé `core/infrastructure/remote/` (SSH/SCP +
 contrôleur Docker/systemd, §5.1/§9), mutualisé avec `teleinfo` qui réimplémentait des primitives
@@ -41,7 +56,7 @@ posteriori) — application créée et déployée en conditions réelles au cour
 4. [Génération de la configuration mqtt-io](#4-génération-de-la-configuration-mqtt-io)
     - 4.1bis [Topic de commande réel — segment `output`](#41bis-topic-de-commande-réel--segment-output-nouveau-v12-19082026)
 5. [Déploiement Docker](#5-déploiement-docker)
-    - 5.1bis [Socle SSH/SCP partagé (v1.3)](#51bis-socle-sshscp-partagé-nouveau-v13-22082026)
+    - 5.1bis [Socle SSH/SCP partagé + multi-cible (v1.3/v1.4)](#51bis-socle-sshscp-partagé--multi-cible-v13-étendu-v14--22-23082026)
 6. [Configuration](#6-configuration)
 7. [Interface Web et Socket.io](#7-interface-web-et-socketio)
     - 7.3 [Présence de l'agent mqtt-io (v1.1, vérifiée v1.2)](#73-présence-de-lagent-mqtt-io-lwt-lecture-seule--nouveau-v11-16082026)
@@ -86,11 +101,12 @@ build Node officiel récent — voir `fonctionnelles-teleinfo_specs` §1.3).
 
 L'application tourne **sur `stfort`** (192.168.1.53), au sein de son propre conteneur
 `dimotic-ha` (retirée de son `disabledApps`) — pas depuis une autre machine ciblant stfort par
-SSH. `target.sshUser`/`target.sshKeyPath` sont donc **volontairement laissés vides** dans sa
-configuration : un futur changement de pins nécessite un redéploiement manuel depuis une machine
-ayant un accès SSH root à stfort (voir §6.1, décision explicite de ne pas donner à l'application le
-moyen de se redéployer elle-même sur la même machine — aurait nécessité de stocker une clé privée
-SSH dans son propre volume de données).
+SSH. `targets` est donc **vide** dans sa configuration réelle : un futur changement de pins
+nécessite un redéploiement manuel depuis une machine ayant un accès SSH root à stfort (voir §6.1).
+⚠️ Cette limite (pas de clé stockée dans son propre volume) n'est plus une contrainte technique
+depuis la v1.4 — `data/rpigpio/ssh/<id>/` (§5.1bis) résout justement ce problème pour du multi-app,
+mais reste une décision opérationnelle non tranchée pour ce cas précis (self-déploiement sur la
+même machine), pas rouverte par ce refactor.
 
 3 pins réelles en production, toutes en sortie :
 
@@ -115,7 +131,7 @@ correspondance à maintenir.
 |---|---|
 | `RpigpioService.ts` | Orchestrateur : CRUD des pins, événements Socket.io, appel au déploiement |
 | `generator.ts` | Construit le `config.yaml` mqtt-io et le `compose.yaml` du conteneur à partir des pins stockées |
-| `DeployService.ts` | `deploy()` : écrit `config.yaml`/`compose.yaml` sur la cible, `docker compose up -d`, `docker restart` — SSH via le socle partagé (§5.1bis). `start()`/`stop()`/`restart()` : délèguent au `DockerContainerController` partagé, ⭐ v1.3 |
+| `DeployService.ts` | `deploy(target)` : écrit `config.yaml`/`compose.yaml` sur la cible, `docker compose up -d`, `docker restart` — SSH via le socle partagé (§5.1bis), root direct. `start(target)`/`stop(target)`/`restart(target)` : délèguent au `DockerContainerController` partagé. Cible passée explicitement (⭐ v1.4, `config.targets[]`) au lieu de `config.target` |
 | `config-schema.ts` | Schéma Zod des réglages (cible SSH, broker MQTT utilisé par mqtt-io) |
 | `storage-schema.ts` | Schéma Zod d'une pin (`PinDefinition`) |
 | `yaml/ConfigFileManager.ts` | Chargement/sauvegarde atomique du YAML des pins (copie locale du pattern planificateur/AREXX) |
@@ -275,38 +291,53 @@ pin (cas du pont de compatibilité, §2.5).
 
 ## 5. Déploiement Docker
 
-### 5.1 `DeployService.deploy()` — séquence
+### 5.1 `DeployService.deploy(target)` — séquence
 
-1. Écrit `config.yaml` sur `target.hostDir` (SSH, `sudo tee`).
+Prend désormais une cible précise (`RpigpioTargetConfig`, tirée de `config.targets[]` par
+`RpigpioService.handleRemoteOp(targetId, action)`, §7.2) plutôt que `config.target` singulier
+(⭐ v1.4). Séquence inchangée, mais sans `sudo` (⭐ v1.4, accès root direct — voir §5.1bis) :
+
+1. Écrit `config.yaml` sur `target.hostDir` (SSH, `tee`).
 2. Écrit `compose.yaml` sur `target.hostDir` (idem).
-3. `cd target.hostDir && sudo docker compose up -d` — crée le conteneur au premier déploiement,
+3. `cd target.hostDir && docker compose up -d` — crée le conteneur au premier déploiement,
    sans effet si sa définition n'a pas changé.
-4. `sudo docker restart target.containerName` — **nécessaire à chaque déploiement** : `docker
+4. `docker restart target.containerName` — **nécessaire à chaque déploiement** : `docker
    compose up -d` ne redémarre PAS automatiquement un conteneur suite à un simple changement de
    contenu d'un fichier bind-monté (`config.yaml`), seulement suite à un changement de la
    définition du service elle-même. Sans ce restart explicite, un nouveau `config.yaml` déployé
    resterait sans effet tant que le conteneur n'est pas relancé manuellement.
 5. `docker inspect --format '{{.State.Status}}'` — statut retourné à l'IHM.
 
-Sur stfort, `target.sshUser`/`target.sshKeyPath` sont vides (§1.4) — cette séquence n'est
-aujourd'hui déclenchable que depuis une autre machine ayant un accès SSH root à stfort, pas depuis
-l'IHM de stfort elle-même.
+Sur stfort, `targets` est vide (§1.4) — cette séquence n'est aujourd'hui déclenchable que depuis
+une autre machine ayant un accès SSH root à stfort, pas depuis l'IHM de stfort elle-même.
 
-### 5.1bis Socle SSH/SCP partagé (⭐ nouveau v1.3, 22/08/2026)
+### 5.1bis Socle SSH/SCP partagé + multi-cible (⭐ v1.3, étendu v1.4 — 22-23/08/2026)
 
-`runSsh`/`runScp`/`shellQuote`/`expandHome` viennent désormais de
+`runSsh`/`runScp`/`shellQuote`/`expandHome` viennent de
 `applications/core/src/infrastructure/remote/SshClient.ts` (exporté via `core/exports.ts`) — jusque
-là réimplémentés quasi à l'identique dans `rpigpio` et `teleinfo` (constaté en comparant les deux
-fichiers). `DeployResult` reste défini localement dans `DeployService.ts` (forme identique à
-`RemoteOpResult` du socle, avec un type `step` plus précis propre à ce module).
+là réimplémentés quasi à l'identique dans `rpigpio` et `teleinfo`. `DeployResult` reste défini
+localement dans `DeployService.ts` (forme identique à `RemoteOpResult` du socle, avec un type
+`step` plus précis propre à ce module).
 
-`start()`/`stop()`/`restart()` (⭐ v1.3) délèguent à un `DockerContainerController` partagé
-(`core/infrastructure/remote/RemoteUnitController.ts`, `useSudo: true` — même convention que
-`deploy()`) : `docker start|stop|restart target.containerName`. Symétrique côté `teleinfo`, qui
-utilise un `SystemdUnitController` pour sa cible (systemd, pas de Docker sur le RPi1) — la même
-abstraction couvre les deux natures de cible. Pas encore exposés côté Socket.io/IHM (§7.2) : prêts
-pour de futurs boutons "Démarrer"/"Arrêter"/"Redémarrer", en attendant les scripts distants annoncés
-par l'utilisateur.
+`start(target)`/`stop(target)`/`restart(target)` délèguent à un `DockerContainerController`
+partagé (`core/infrastructure/remote/RemoteUnitController.ts`) : `docker start|stop|restart
+target.containerName`. Symétrique côté `teleinfo`, qui utilise un `SystemdUnitController` pour sa
+cible (systemd, pas de Docker sur le RPi1) — la même abstraction couvre les deux natures de cible.
+Exposés côté Socket.io/IHM depuis la v1.4 (§7.2) : boutons Déployer/Démarrer/Arrêter/Redémarrer
+sur chaque carte de cible (`TargetCards.js`, §7.1).
+
+**⭐ v1.4 — deux simplifications décidées avec l'utilisateur, appliquées à tout le socle partagé
+(donc aussi à `teleinfo`/`arexx`)** :
+- **Root direct partout, plus de `sudo`/compte `claude` dédié** : analysé ensemble — un compte
+  non-root avec `sudo NOPASSWD` sur des commandes larges (`tee`, `docker`, déjà le cas ici) équivaut
+  de toute façon à root (`sudo tee` sur un chemin arbitraire permet d'écraser `/etc/sudoers`) — la
+  distinction n'apportait qu'un vernis. `RemoteTarget`/`RpigpioTargetConfig` n'ont donc plus de
+  champ `sshUser` ; machines cibles considérées comme cassables mais facilement restaurables.
+- **Clé SSH par cible sous `data/rpigpio/ssh/<id>/`, pas `~/.ssh/...`** : vérifié dans le
+  Dockerfile/compose.yaml — le conteneur tourne en `USER node` (home `/home/node`, jamais persisté,
+  aucun volume SSH monté), un chemin `~/.ssh/...` ne fonctionne qu'en dev local. `data/rpigpio/`
+  est le seul emplacement qui persiste et reste identique dans les deux contextes. Une clé PAR
+  CIBLE (pas partagée) : révoquer une cible compromise ne doit pas obliger à re-clef les autres.
 
 ### 5.2 Conteneur généré
 
@@ -323,12 +354,13 @@ mqtt_io /config.yml`).
 
 | Champ | Type | Défaut | Utilisation |
 |---|---|---|---|
-| `target.host` | string | `''` | Hôte SSH — peut être la machine locale elle-même (stfort, §1.4) |
-| `target.sshUser` | string | `claude` | Utilisateur SSH dédié (même convention que `docker/rebuild-and-deploy.sh`) — laissé vide si aucun redéploiement automatique n'est voulu (§1.4) |
-| `target.sshKeyPath` | string | `''` | Chemin **local** vers la clé privée SSH (jamais son contenu) |
-| `target.hostDir` | string | `/docker/mqttio-rpigpio` | Répertoire distant (`compose.yaml` + `config.yml`) |
-| `target.containerName` | string | `mqtt-io-rpigpio` | Nom du conteneur ET du service dans le compose |
-| `target.image` | string | `flyte/mqtt-io:2.6.0` | Épinglée à une version numérotée, pas `:latest`/`:develop` |
+| `targets` | array, `.max(1)` | `[]` | ⭐ v1.4, remplace `target` singulier — voir détail des champs ci-dessous. Plafonné à 1 (contrainte métier réelle), même patron que `teleinfo`/`arexx` |
+| `targets[].id` | string | — | Identifiant libre de la cible (ex: `"stfort"`), unique (`.refine()`) — utilisé en IHM et dans le protocole Socket.io (§7.2) |
+| `targets[].host` | string | `''` | Hôte SSH — peut être la machine locale elle-même (stfort, §1.4) |
+| `targets[].sshKeyPath` | string | `''` | Chemin vers la clé privée SSH dédiée à CETTE cible — sous `data/rpigpio/ssh/<id>/` (§5.1bis), jamais `~/.ssh/...` |
+| `targets[].hostDir` | string | `/docker/mqttio-rpigpio` | Répertoire distant (`compose.yaml` + `config.yml`) |
+| `targets[].containerName` | string | `mqtt-io-rpigpio` | Nom du conteneur ET du service dans le compose |
+| `targets[].image` | string | `flyte/mqtt-io:2.6.0` | Épinglée à une version numérotée, pas `:latest`/`:develop` |
 | `mqtt.host`/`mqtt.port` | string/number | `''`/`1883` | Broker que **mqtt-io** utilisera (pas le socle) — broker local de la machine cible si l'application y tourne elle-même |
 | `mqtt.user`/`mqtt.password` | string | `''` | Identifiants MQTT — en clair dans `data/rpigpio/config.yaml`, comme le reste du projet |
 | `mqtt.topicPrefix` | string | `mqttio/rpigpio` | Topics état/commande mqtt-io (voir §4.1bis pour le segment `output` additionnel) |
@@ -336,8 +368,9 @@ mqtt_io /config.yml`).
 
 ### 6.2 Formulaire générique ("Paramètres Techniques → RPIGPIO")
 
-Deux groupes : "Machine cible" (5 champs), "Broker MQTT" (5 champs) — tous les champs de §6.1
-sauf structure interne (`target`/`mqtt` aplatis en `target.xxx`/`mqtt.xxx`).
+Deux groupes : "Machines cibles" (champ unique `type: 'array'`, `itemFields` — liste avec
+ajout/suppression dynamique, ⭐ v1.4, même pattern que `nommage/sources`, voir
+`core/src/types/config.ts`) et "Broker MQTT" (5 champs, inchangé).
 
 ---
 
@@ -345,24 +378,27 @@ sauf structure interne (`target`/`mqtt` aplatis en `target.xxx`/`mqtt.xxx`).
 
 ### 7.1 Tableau de bord (`presentation/index.html`, page "Pins" du menu)
 
-- Carte statut : nombre de pins déclarées, machine cible, nom du conteneur.
+- Carte statut : nombre de pins déclarées, présence de l'agent mqtt-io.
 - Liste des pins (chaîne QUOI---OÙ, badge direction, badge "inversé" si applicable, numéro GPIO,
   `id`) — boutons Modifier/Supprimer par ligne.
 - Bouton "➕ Nouveau pin" → modale (quoi, lieu précis/lieu/père/grand-père, numéro, direction,
   inversion).
-- Bouton "🚀 Générer et déployer" → résultat affiché en alerte succès/erreur avec le détail de
-  l'étape en échec (`step`: `write-config`/`write-compose`/`compose-up`/`restart`).
+- **⭐ v1.4** — section "Cible" : une carte par cible configurée (`TargetCards.js`, composant
+  mutualisé avec `teleinfo`/`arexx`, servi par core en `/js/ts/components/TargetCards.js`) —
+  remplace l'ancien bloc "cible unique + bouton Déployer". Chaque carte affiche les instructions de
+  préparation SSH (`ssh-keygen`/`ssh-copy-id`, adaptées si Docker) puis 4 boutons
+  Déployer/Démarrer/Arrêter/Redémarrer, avec résultat succès/erreur par carte.
 
 ### 7.2 Événements Socket.io
 
 **Server → Client** (persistants : `rpigpio:status`, `rpigpio:pins:list`) :
 ```typescript
-'rpigpio:status'        // { pinsCount, target: { host, containerName }, agentOnline, agentLastSeenAt } — ⭐ v1.1
+'rpigpio:status'        // { pinsCount, targets: {id,host,containerName}[], isRunningInDocker, agentOnline, agentLastSeenAt } — targets ⭐ v1.4 (remplace target singulier)
 'rpigpio:pins:list'     // PinDefinition[]
 'rpigpio:pin:saved'     // PinDefinition
 'rpigpio:pin:deleted'   // { id }
-'rpigpio:remote-op:result' // { action, success, step?, error?, output? } — ⭐ v1.3, remplace rpigpio:deploy:result
-'rpigpio:error'            // { message }
+'rpigpio:remote-op:result' // { targetId, action, success, step?, error?, output? } — targetId ⭐ v1.4
+'rpigpio:error'            // { message } — désormais aussi utilisé pour les erreurs de sauvegarde/suppression de pin (alerte dédiée #pins-error)
 ```
 
 **Client → Server :**
@@ -371,9 +407,9 @@ sauf structure interne (`target`/`mqtt` aplatis en `target.xxx`/`mqtt.xxx`).
 'rpigpio:pins:list:get'
 'rpigpio:pin:save'   // PinDefinition sans id (création) ou avec id (modification)
 'rpigpio:pin:delete' // { id }
-'rpigpio:remote-op'  // { action: 'deploy'|'start'|'stop'|'restart' } — ⭐ v1.3, remplace rpigpio:deploy (sans payload).
-                      // Seul 'deploy' est branché aujourd'hui côté serveur (§5.1bis) ; les 3 autres
-                      // répondent par une erreur explicite tant qu'aucun bouton IHM ne les déclenche.
+'rpigpio:remote-op'  // { targetId, action: 'deploy'|'start'|'stop'|'restart' } — targetId ⭐ v1.4.
+                      // handleRemoteOp() cherche la cible via config.targets.find(t => t.id === targetId),
+                      // répond par une erreur explicite si introuvable.
 ```
 
 ### 7.3 Présence de l'agent mqtt-io (LWT, lecture seule) — ⭐ nouveau v1.1, 16/08/2026
@@ -463,6 +499,7 @@ applications/rpigpio/
 ### 10.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.4 | 2026-08-23 | Claude | **Multi-cible standardisé** : `target` singulier → `targets[]` (`.max(1)`, id texte libre, même pattern que `teleinfo`/`arexx` et `nommage/sources`) — §2.1/§5.1/§6/§7. Deux simplifications décidées avec l'utilisateur, propagées au socle partagé : accès cible toujours en root direct (`sshUser` retiré, plus de `sudo` — `sudo NOPASSWD` jugé équivalent à root sur ce projet) et clé SSH par cible sous `data/rpigpio/ssh/<id>/` au lieu de `~/.ssh/...` (non résolu dans le conteneur Docker — vérifié Dockerfile/compose.yaml). Protocole `rpigpio:remote-op`/`rpigpio:remote-op:result` étendu avec `targetId`. Nouvelle carte de cible dans le tableau de bord (`TargetCards.js`, composant mutualisé rpigpio/teleinfo/arexx) avec instructions SSH par cible et 4 boutons Déployer/Démarrer/Arrêter/Redémarrer — remplace l'ancien bloc à cible unique. Testé au navigateur. Ancienne version v1.3 archivée. |
 | 1.3 | 2026-08-22 | Claude | **`DeployService.ts` migré sur le socle SSH/SCP partagé** `core/infrastructure/remote/` (§5.1bis) — mutualisé avec `teleinfo`, qui réimplémentait des primitives (`runSsh`/`runScp`/`shellQuote`/`expandHome`) quasi identiques. Protocole Socket.io uniformisé (§7.2) : `rpigpio:deploy`/`rpigpio:deploy:result` (sans payload) devient `rpigpio:remote-op`/`rpigpio:remote-op:result` (`{ action }`) — même mécanisme quelle que soit l'intervention distante, demande explicite de l'utilisateur en prévision de futurs scripts de start/stop/restart. `start()`/`stop()`/`restart()` ajoutés côté `DeployService`, délèguent à un `DockerContainerController` partagé — non encore exposés en IHM. Ancienne version v1.2 archivée. |
 | 1.2 | 2026-08-19 | Claude | **Déploiement réel sur stfort** (§1.4, nouveau) : 3 pins réelles (relais/lumière, radiateur, journuit — anciennement pilotées en direct par l'ancien système), `id` choisi manuellement (position physique) pour permettre un calcul de topic sans table de correspondance côté pont. **Pont de compatibilité avec l'ancien système** (§2.5, nouveau) : redirige l'accès GPIO bas niveau de `zdidnodegpio` vers ce module, même principe que le pont RFXCOM, non documenté en détail ici (hors périmètre du dépôt). **Correction de topic** (§4.1bis, nouveau) : segment `output` fixe côté mqtt-io, absent de `generator.ts` et non documenté avant cette version — trouvé et corrigé avant mise en service du pont. Comportement de démarrage de `initial` clarifié (§4.3) : lecture, pas écriture, par conception. Caveat "non vérifié" de la présence d'agent (§7.3) levé — vérifié en conditions réelles sur stfort. Application désormais déployée SANS moyen de se redéployer elle-même (décision explicite, §1.4/§5.1/§8). Ancienne version v1.1 archivée. |
 | 1.1 | 2026-08-16 | Claude | Migration en process séparé (§2.4, `runsAsSeparateProcess`/`standalone.ts`, architecture détaillée dans `fonctionnelles-supervisor_specs` v2.6) — premier test grandeur nature du pontage UI Socket.io d'une app séparée. Présence de l'agent mqtt-io distant, lecture seule (§7.3, nouveau) : `RpigpioStatus` étendu (`agentOnline`/`agentLastSeenAt`), dashboard mis à jour. Non vérifié en conditions réelles sur `ha2` (redéploiement du conteneur mqtt-io non autorisé cette session). Référence croisée techniques-socle mise à jour (v4.28→v4.30). Ancienne version v1.0 archivée. |

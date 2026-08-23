@@ -8,6 +8,9 @@
  * entre Docker et systemd, s'y prête. Deux implémentations existent parce que les cibles réelles du
  * projet se répartissent sur les deux : `rpigpio` pilote un conteneur Docker (stfort), `teleinfo`
  * un service systemd (RPi1, pas de Docker sur cette machine — voir DeployService.ts de teleinfo).
+ *
+ * Aucun préfixe `sudo` (⭐ 23/08/2026) : toutes les cibles sont désormais jointes en root direct
+ * (voir SshClient.ts) — l'option `useSudo` qui existait ici a été retirée, devenue sans objet.
  */
 
 import { runSsh, shellQuote, type RemoteTarget, type RemoteOpResult } from './SshClient';
@@ -20,20 +23,12 @@ export interface RemoteUnitController {
   restart(target: RemoteTarget, unitName: string): Promise<RemoteOpResult>;
 }
 
-export interface RemoteUnitControllerOptions {
-  /** Préfixe `sudo` sur la commande distante — nécessaire pour rpigpio/stfort, pas pour teleinfo (connecté en root). */
-  useSudo?: boolean;
-}
-
 abstract class BaseUnitController implements RemoteUnitController {
-  constructor(private readonly options: RemoteUnitControllerOptions = {}) {}
-
   protected abstract buildCommand(action: 'start' | 'stop' | 'restart', unitName: string): string;
 
   private async run(target: RemoteTarget, action: 'start' | 'stop' | 'restart', unitName: string): Promise<RemoteOpResult> {
     const command = this.buildCommand(action, unitName);
-    const prefixed = this.options.useSudo ? `sudo ${command}` : command;
-    const result = await runSsh(target, prefixed);
+    const result = await runSsh(target, command);
     return { success: result.success, step: action, error: result.error, output: result.output };
   }
 

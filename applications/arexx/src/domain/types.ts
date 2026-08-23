@@ -59,4 +59,6 @@ export interface ArexxStatus {
    *  Affecte le texte de la page Déploiement (préparation de l'accès SSH, §5.4bis) : la clé générée doit
    *  se trouver là où le conteneur peut la relire ensuite, pas seulement sur l'hôte. */
   isRunningInDocker: boolean;
+  /** Émetteurs USB pilotables à distance (⭐ multi-cible 23/08/2026) — voir ArexxDeployService.ts. */
+  targets: { id: string; host: string }[];
 }

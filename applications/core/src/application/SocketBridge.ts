@@ -237,6 +237,20 @@ export class SocketBridge {
       this.logger.info('SocketBridge', 'EventBus → Socket.io: app:restart:result');
       this.broadcast('app:restart:result', data);
     });
+
+    // ======================================================================
+    // DÉPLOIEMENT DE DIMOTIC-HA LUI-MÊME (⭐ 23/08/2026)
+    // ======================================================================
+
+    this.eventBus.on('core:deployment:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean }) => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:targets:list');
+      this.broadcast('core:deployment:targets:list', data);
+    });
+
+    this.eventBus.on('core:deployment:remote-op:result', (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:remote-op:result');
+      this.broadcast('core:deployment:remote-op:result', data);
+    });
   }
 
   /**
@@ -361,6 +375,34 @@ export class SocketBridge {
       socket.on('app:restart', () => {
         this.logger.info('SocketBridge', `Socket.io → EventBus: app:restart de ${socket.id}`);
         this.eventBus.emit('app:restart:requested', undefined as void);
+      });
+
+      // ===========================================================================
+      // DÉPLOIEMENT DE DIMOTIC-HA LUI-MÊME (⭐ 23/08/2026)
+      // ===========================================================================
+
+      // @ts-ignore
+      socket.on('core:deployment:targets:get', () => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:targets:get de ${socket.id}`);
+        this.eventBus.emit('core:deployment:targets:get', undefined as void);
+      });
+
+      // @ts-ignore
+      socket.on('core:deployment:target:save', (data: unknown) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:target:save de ${socket.id}`);
+        this.eventBus.emit('core:deployment:target:save', data);
+      });
+
+      // @ts-ignore
+      socket.on('core:deployment:target:delete', (data: { id: string }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:target:delete de ${socket.id}, id: ${data.id}`);
+        this.eventBus.emit('core:deployment:target:delete', data);
+      });
+
+      // @ts-ignore
+      socket.on('core:deployment:remote-op', (data: { targetId: string; action: string }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:remote-op de ${socket.id}, ${data.targetId}/${data.action}`);
+        this.eventBus.emit('core:deployment:remote-op', data);
       });
 
       // Gestion de la déconnexion

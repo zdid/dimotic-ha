@@ -1,9 +1,25 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.30  
-**Date :** 16 Août 2026  
+**Version :** 4.31  
+**Date :** 23 Août 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
 
+> **v4.31** : **Déploiement de dimotic-ha lui-même sur d'autres machines** (§4.3bis, §7.1, §11.4bis)
+> — nouveau `targets: DeploymentTargetConfig[]` sur le schéma config racine (`disabledApps`
+> forcé à toutes les applications connues sauf `core` sur une machine neuve, l'admin de cette
+> machine les active ensuite localement), nouveau `CoreDeployService.ts` réutilisant le socle SSH/
+> SCP partagé (`core/infrastructure/remote/`, construit pour rpigpio/teleinfo/arexx la session
+> précédente — même patron `{targetId, action}`), nouvelle section IHM "Déploiement"
+> (`DeploymentManager.ts`, Web Component calqué sur `ApplicationsManager.ts`). Remplace
+> `docker/rebuild-and-deploy.sh` pour l'étape "déployer sur une cible" (le build multi-arch + push
+> Docker Hub reste manuel, `--build-only`) — et automatise ce que §11.4 (`compose.deploy.yaml`)
+> décrivait jusqu'ici comme une procédure manuelle (copie + configuration via l'UI après premier
+> boot). Corollaire découvert en écrivant cette section : `ConfigService.saveConfig()`/
+> `setDisabledApps()` ne retenaient que `{ha, web, logging, disabledApps}` avant d'écrire —
+> exactement le bug déjà corrigé une fois pour `disabledApps` (incident du 07/08/2026) — `targets`
+> aurait été silencieusement effacé à chaque sauvegarde HA/MQTT ou activation/désactivation d'app
+> sans le même correctif préventif, appliqué ici avant la mise en service.
+>
 > **v4.30** : **`parseIncomingCommand()` rejette désormais tout message reçu avec `retain: true`**
 > (§8.5.4ter, nouvelle) — incident de sécurité réel sur RFXCOM : ~21 messages de commande
 > (`.../set`) retenus sur le broker (probablement un `mosquitto_pub -r` manuel ancien), rejoués à
@@ -642,6 +658,50 @@ graph TD
 > 
 > **Résolution automatique** : `AppService` crée un `IAppConfigProvider` via `new AppConfigProvider(moduleId, configService)` et l'injecte dans chaque factory. Chaque service d'application reçoit donc un provider typé limitant l'accès à sa propre section de configuration.
 
+### 4.3bis Déploiement de dimotic-ha lui-même — `targets[]` (⭐ nouveau v4.31, 23/08/2026)
+
+`data/core/config.yaml` gagne un champ `targets: DeploymentTargetConfig[]` (schéma racine,
+`applications/core/src/infrastructure/config/schema.ts`) : les machines (ha2, orangepi, futures)
+sur lesquelles installer/mettre à jour dimotic-ha lui-même. Même patron `{ id, host, sshKeyPath,
+remoteDir }` que les cibles de déploiement des applications (`rpigpio`/`teleinfo`/`arexx`, voir
+leurs specs respectives §5.1bis/§7.1bis/§5.4bis) — `id` texte libre unique, toujours en root direct,
+clé SSH par cible sous `data/core/ssh/<id>/`.
+
+**`CoreDeployService.ts`** (nouveau, `applications/core/src/application/`) réutilise le socle
+SSH/SCP partagé (`core/infrastructure/remote/SshClient.ts`/`RemoteUnitController.ts`) — `core` étant
+lui-même la source de ce module, import relatif direct, pas via `core/dist/exports`.
+- `deploy(target)` : copie `compose.deploy.yaml` (renommé `compose.yaml` sur la cible — **pas**
+  `compose.yaml`, réservé à la machine de développement avec `build: .`, voir §11.4) ; sème
+  `data/core/config.yaml` **uniquement s'il est absent** (jamais écrasé sur une cible déjà
+  provisionnée) avec les valeurs `ha`/`web`/`logging` réelles de la machine déployante (identiques
+  pour tout le foyer, décision explicite de l'utilisateur) et `disabledApps` forcé à **toutes** les
+  applications connues sauf `core` (`ApplicationManager.listAll()`) — l'admin de la machine cible
+  active ensuite ce qu'il veut localement ; puis `docker compose pull && up -d` et attend l'état
+  `healthy` (jusqu'à 30×3s, repris de `docker/rebuild-and-deploy.sh`).
+- `start`/`stop`/`restart(target)` : `DockerContainerController` sur le conteneur `dimotic-ha`.
+
+**Hors périmètre, volontairement** : le build multi-arch + push Docker Hub
+(`docker/rebuild-and-deploy.sh --build-only`) reste manuel — pas une action par cible.
+
+**Protocole Socket.io** : `core:deployment:targets:get`/`:list`, `core:deployment:target:save`/
+`:delete`, `core:deployment:remote-op`/`:result` (`{targetId, action}`, même forme que les 3 apps).
+Contrairement à celles-ci, `core` n'a pas de `config-schema.ts`/`index.ts` (`XXX_UI_METADATA`) — sa
+propre config est éditée via des sections HTML statiques écrites à la main (`ConfigService`
+narrowing manuel avant chaque `save()`, voir §7.4) : `getTargets()`/`setTargets()` suivent le même
+narrowing défensif que `getDisabledApps()`/`setDisabledApps()` (préservent explicitement
+`ha`/`web`/`logging`/`disabledApps`/`targets` depuis l'état en mémoire, jamais depuis un payload
+client partiel — voir le corollaire découvert, résumé en tête de ce document).
+
+**IHM** : nouvelle section statique "Déploiement" (`#section-deployment`,
+`DeploymentManager.ts` — Web Component Shadow DOM calqué sur `ApplicationsManager.ts`, mais utilise
+directement `window.app.socketService.getSocket()` plutôt que la couche `window.app.appManager`).
+Formulaire d'ajout de cible dédié (pas le moteur générique `type:'array'` des 3 apps, `core` ne
+l'utilise pas pour sa propre config) + `TargetCards.js` (même composant que rpigpio/teleinfo/arexx,
+`core/src/presentation/ui/ts/components/TargetCards.ts`, servi en
+`/js/ts/components/TargetCards.js`) pour les 4 boutons Déployer/Démarrer/Arrêter/Redémarrer par
+cible. `TargetCards.js` gagne un `onDelete` optionnel (⭐ v4.31) — non utilisé par les 3 apps
+(suppression déjà possible via leur formulaire générique), utilisé par `DeploymentManager.ts`.
+
 ---
 
 
@@ -1219,6 +1279,16 @@ logging:
   rotate:
     max_size_mb: 10
     max_files: 5
+
+disabledApps: []                 # Applications désactivées (id de dossier sous applications/)
+
+# ⭐ nouveau v4.31 — machines sur lesquelles installer/mettre à jour dimotic-ha lui-même (voir
+# §4.3bis). Défaut [] — vide sur une installation neuve.
+targets: []
+#   - id: "ha2"
+#     host: "192.168.1.51"
+#     sshKeyPath: "data/core/ssh/ha2/id_ed25519"
+#     remoteDir: "/docker/dimotic-ha"
 
 # Chaque application dérivée a son propre data/{app}/config.yaml (objet nu, fusionné ici
 # en mémoire sous la clé {app} par ConfigLoader), intégré au schéma Zod de l'application
@@ -2368,6 +2438,13 @@ symptôme : `tsx` incapable de créer son dossier IPC dans `/tmp`, alors que rie
 touche `/tmp`). Un stockage USB (clé ou SSD) est préférable à une carte SD pour un déploiement de
 longue durée sur Raspberry Pi.
 
+**⭐ Automatisé depuis la v4.31** (§4.3bis) : la procédure manuelle ci-dessus (copier
+`compose.deploy.yaml`, créer `data/`/`logs/` vides, configurer via l'UI après premier boot) reste
+valable comme méthode de secours (ex: machine sans accès SSH encore configuré), mais
+`CoreDeployService`/section IHM "Déploiement" fait maintenant les 4 étapes automatiquement — y
+compris le pré-remplissage de `data/core/config.yaml` avec de vraies valeurs HA/MQTT (plus besoin
+de les ressaisir manuellement via l'UI après le premier démarrage).
+
 ---
 
 ## 12. Logging
@@ -2494,6 +2571,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.31** | 23/08/2026 | Claude | **Déploiement de dimotic-ha lui-même sur d'autres machines** (§4.3bis nouvelle, §7.1, §11.4) — nouveau `targets: DeploymentTargetConfig[]` sur le schéma config racine (`disabledApps` forcé à toutes les apps connues sauf `core` sur une machine neuve). Nouveau `CoreDeployService.ts` réutilisant le socle SSH/SCP partagé construit la session précédente pour rpigpio/teleinfo/arexx (même protocole `{targetId, action}`) — copie `compose.deploy.yaml` (pas `compose.yaml`), sème `data/core/config.yaml` uniquement s'il est absent, `docker compose pull && up -d`, attend "healthy". Remplace `docker/rebuild-and-deploy.sh` pour l'étape déploiement (build+push Docker Hub reste manuel) et automatise la procédure jusqu'ici manuelle du §11.4. Nouvelle section IHM "Déploiement" (`DeploymentManager.ts`, Web Component calqué sur `ApplicationsManager.ts` mais sans le moteur générique `type:'array'`, `core` n'en dispose pas pour sa propre config) réutilisant `TargetCards.js` (même composant que les 3 apps), étendu d'un `onDelete` optionnel. Corollaire trouvé en cours de route : `ConfigService.saveConfig()`/`setDisabledApps()` ne préservaient pas `targets` avant d'écrire — même classe de bug que l'incident `disabledApps` du 07/08/2026, corrigé préventivement avant mise en service. Testé en conditions réelles (navigateur) : ajout/suppression de cible, round-trip Socket.io, `data/core/config.yaml` réel confirmé intact (aucun champ existant écrasé). Aucun test de déploiement réel contre ha2/orangepi (machines de production). Ancienne version v4.30 archivée. |
 | **4.30** | 16/08/2026 | Claude | **`parseIncomingCommand()` rejette les commandes retenues** (§8.5.4ter, nouvelle) — incident de sécurité réel RFXCOM : ~21 messages `.../set` retenus sur le broker (probablement `mosquitto_pub -r` manuel ancien), rejoués à chaque redémarrage et exécutés comme de vraies commandes RF433 dès que le transceiver était connecté — maison éteinte de façon imprévisible. Correctif socle (`stateCommand.ts`), protège tous les modules (rfxcom, evoo7, arexx, nommage). Messages déjà présents nettoyés manuellement sur le broker. Ancienne version v4.29 archivée. |
 | **4.29** | 15/08/2026 | Claude | **Deux correctifs distincts, "navigation entre applications" (§6.1/§6.2)** : (1) `arbreouquoi` rejoint la convention `window.{id}App.init()` (laissé de côté en v4.28), écouteurs socket/DOM scindés (une fois vs à chaque revisite). (2) Bug réel `Sidebar.ts` : un module sans `menu.pages` (ESPDISPLAY, HAPLAN) était rendu avec `href="#moduleId"` au lieu de `entry.path`, désynchronisé du sélecteur d'attachement du clic — clic sans effet, corrigé. Toutes deux issues de bugs réels constatés par l'utilisateur. Ancienne version v4.28 archivée. |
 | **4.28** | 11/08/2026 | Claude | **Deux correctifs distincts, tous deux issus de bugs réels constatés par l'utilisateur** (1) `ModuleContainer` rappelle désormais `window.{moduleId}App.init()` après réaffichage d'un module depuis son cache (§6.1) — corrige des dashboards inertes après revisite (formulaire "Tester une commande" de IA sans effet, Planificateur bloqué sur "Chargement") : le HTML réinjecté par `innerHTML` ne rebranchait plus aucun écouteur pour les apps vanilla TS (`Alpine.initTree()` sans effet pour elles). `init()` rendu idempotent côté `setupEventListeners()` (drapeau `listenersReady`) dans `ia`/`planificateur`/`evoo7`/`arexx`/`rfxcom`/`nommage` — `arbreouquoi` non touché, hors périmètre. (2) **`HaStructureRegistry.getLieuCatalog()`** (§8.3.3 nouvelle) — catalogue de lieux statique (tous niveaux confondus), complément de `getQuoiCatalog()`, exposé côté `ia` (voir `fonctionnelles-ia_specs` v1.8) pour réduire les faux refus "quoi_introuvable" en fournissant une vérité de terrain stable, propice au cache de prompt côté fournisseur LLM. Toutes demandes utilisateur, session du 11/08/2026. Ancienne version v4.27 archivée. |
