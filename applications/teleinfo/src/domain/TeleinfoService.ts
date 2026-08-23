@@ -12,7 +12,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, RemoteAction } from '../../../core/dist/exports';
-import { MqttTransport, isRunningInDocker, ensureSshKey } from '../../../core/dist/exports';
+import { MqttTransport, isRunningInDocker, ensureGlobalSshKey } from '../../../core/dist/exports';
 import { teleinfoConfigSchema, type TeleinfoConfig } from './config-schema';
 import { compteursConfigSchema, DEFAULT_COMPTEURS_CONFIG, type CompteurDefinition, type CompteursConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
@@ -93,19 +93,11 @@ export class TeleinfoService implements ITeleinfoService {
 
   async start(): Promise<void> {
     this.logger.info('TeleinfoService', 'Démarrage du service teleinfo...');
-    this.ensureTargetSshKeys();
+    ensureGlobalSshKey();
     this.connectAgentPresence();
     this.emitStatus();
     this.emitCompteurs();
     this.logger.info('TeleinfoService', 'Service teleinfo démarré');
-  }
-
-  /** Génère la clé SSH de chaque cible configurée si elle n'existe pas encore (⭐ 24/08/2026) —
-   *  voir le commentaire équivalent dans rpigpio/RpigpioService.ts. */
-  private ensureTargetSshKeys(): void {
-    for (const target of this.config.targets) {
-      ensureSshKey('teleinfo', target.id, target.sshKeyPath);
-    }
   }
 
   async stop(): Promise<void> {

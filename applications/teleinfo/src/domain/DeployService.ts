@@ -20,19 +20,17 @@ import {
   runSsh,
   runScp,
   shellQuote,
-  ensureSshKey,
+  ensureGlobalSshKey,
   SystemdUnitController,
   type Logger,
   type RemoteOpResult,
 } from '../../../core/dist/exports';
 import type { TeleinfoTargetConfig } from './config-schema';
 
-const APP_ID = 'teleinfo';
-
-/** Résout le chemin de clé effectif (génère la clé si absente) avant toute opération SSH — voir
- *  ensureSshKey (core/infrastructure/remote/SshClient.ts). */
-function resolveTarget(target: TeleinfoTargetConfig): TeleinfoTargetConfig {
-  return { ...target, sshKeyPath: ensureSshKey(APP_ID, target.id, target.sshKeyPath) };
+/** Attache la clé SSH unique de l'installation (générée si absente) avant toute opération SSH —
+ *  voir ensureGlobalSshKey (core/infrastructure/remote/SshClient.ts). */
+function resolveTarget(target: TeleinfoTargetConfig): TeleinfoTargetConfig & { sshKeyPath: string } {
+  return { ...target, sshKeyPath: ensureGlobalSshKey() };
 }
 
 export interface DeployResult {

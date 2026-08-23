@@ -12,7 +12,7 @@ import { CoreDeployService } from './CoreDeployService';
 import { HaStackDeployService } from './HaStackDeployService';
 import type { DeploymentTargetConfig, HaStackTargetConfig } from '../infrastructure/config/schema';
 import type { RemoteAction } from '../infrastructure/remote/RemoteUnitController';
-import { ensureSshKey } from '../infrastructure/remote/SshClient';
+import { ensureGlobalSshKey } from '../infrastructure/remote/SshClient';
 import { isRunningInDocker } from '../infrastructure/runtime/docker';
 import { ProcessSupervisor, SupervisorEventBridge } from '../supervisor';
 import type { RestartManager } from './RestartManager';
@@ -285,12 +285,9 @@ export class AppService {
     // 2. Charger et valider la configuration
     await this.loadAndValidateConfig();
 
-    // 2.1. Génère la clé SSH de chaque cible de déploiement déjà configurée, si absente (⭐
-    // 24/08/2026) — core ne redémarre pas sur son propre changement de config (contrairement aux
-    // apps), donc handleDeploymentTargetSave() appelle aussi ensureSshKey immédiatement pour ne
-    // pas dépendre uniquement de ce passage au démarrage.
-    this.ensureDeploymentTargetSshKeys();
-    this.ensureHaStackTargetSshKeys();
+    // 2.1. Génère la clé SSH unique de l'installation si absente (⭐ 24/08/2026 — une seule clé
+    // pour toute l'application, partagée par toutes les cibles, voir SshClient.ts#ensureGlobalSshKey).
+    ensureGlobalSshKey();
 
     // 3. Émettre la liste des modules vers l'UI
     this.eventBus.emit('app:modules:registered', { modules: this.modules });
@@ -697,16 +694,7 @@ export class AppService {
     if (!result.success) {
       this.logger.error('AppService', `Échec de sauvegarde de la cible de déploiement ${target.id}: ${result.error}`);
     }
-    ensureSshKey('core', target.id, target.sshKeyPath);
     this.handleDeploymentTargetsGet();
-  }
-
-  /** Génère la clé SSH de chaque cible de déploiement déjà configurée si elle n'existe pas encore
-   *  (⭐ 24/08/2026) — voir le commentaire équivalent dans rpigpio/RpigpioService.ts. */
-  private ensureDeploymentTargetSshKeys(): void {
-    for (const target of this.configService.getTargets()) {
-      ensureSshKey('core', target.id, target.sshKeyPath);
-    }
   }
 
   private handleDeploymentTargetDelete(data: { id: string }): void {
@@ -777,7 +765,6 @@ export class AppService {
     if (!result.success) {
       this.logger.error('AppService', `Échec de sauvegarde de la cible HA+Mosquitto ${target.id}: ${result.error}`);
     }
-    ensureSshKey('core', target.id, target.sshKeyPath);
     this.handleHaStackTargetsGet();
   }
 
@@ -788,14 +775,6 @@ export class AppService {
       this.logger.error('AppService', `Échec de suppression de la cible HA+Mosquitto ${data.id}: ${result.error}`);
     }
     this.handleHaStackTargetsGet();
-  }
-
-  /** Génère la clé SSH de chaque cible HA+Mosquitto déjà configurée si elle n'existe pas encore
-   *  (⭐ 24/08/2026) — voir le commentaire équivalent dans rpigpio/RpigpioService.ts. */
-  private ensureHaStackTargetSshKeys(): void {
-    for (const target of this.configService.getHaStackTargets()) {
-      ensureSshKey('core', target.id, target.sshKeyPath);
-    }
   }
 
   /**

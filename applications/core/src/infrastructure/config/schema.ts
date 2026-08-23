@@ -75,13 +75,13 @@ const loggingSchema = z.object({
  * laquelle installer/mettre à jour l'application complète, en remplacement de
  * docker/rebuild-and-deploy.sh. Même patron multi-cible que rpigpio/teleinfo/arexx (voir leurs
  * config-schema.ts) : id texte libre unique, toujours en root direct (voir
- * core/infrastructure/remote/SshClient.ts pour le raisonnement), clé SSH sous
- * data/core/ssh/<id>/. Pas de .max() — plusieurs cibles réelles.
+ * core/infrastructure/remote/SshClient.ts pour le raisonnement). Pas de champ de clé SSH par
+ * cible : une seule clé pour toute l'installation (⭐ 24/08/2026, voir
+ * SshClient.ts#globalSshKeyPath). Pas de .max() — plusieurs cibles réelles.
  */
 const deploymentTargetSchema = z.object({
   id: z.string().min(1),
   host: z.string().default(''),
-  sshKeyPath: z.string().default(''),
   remoteDir: z.string().default('/docker/dimotic-ha')
 });
 
@@ -89,14 +89,11 @@ const deploymentTargetSchema = z.object({
  * Cible de déploiement d'un stack Home Assistant + Mosquitto (⭐ nouveau 24/08/2026) — liste
  * SÉPARÉE de `targets` (décidé avec l'utilisateur : pas forcément les mêmes machines que celles
  * qui hébergent dimotic-ha). Même forme que `deploymentTargetSchema`, seul le `remoteDir` par
- * défaut change. Clé SSH dans le même espace de noms que `targets` (`data/core/ssh/<id>/`) — si un
- * même `id` désigne la même machine physique dans les deux listes, la clé est partagée sans
- * conflit ; sinon deux clés distinctes cohabitent normalement.
+ * défaut change — même clé SSH globale que toute autre cible (SshClient.ts#globalSshKeyPath).
  */
 const haStackTargetSchema = z.object({
   id: z.string().min(1),
   host: z.string().default(''),
-  sshKeyPath: z.string().default(''),
   remoteDir: z.string().default('/docker/homeassistant')
 });
 

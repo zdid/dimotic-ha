@@ -110,7 +110,6 @@ export const AREXX_UI_METADATA: ModuleUiMetadata = {
           itemFields: [
             { name: 'id', label: 'Identifiant', type: 'text', required: true, placeholder: 'bs510', hint: 'Identifiant libre, unique parmi les cibles de cette app' },
             { name: 'host', label: 'Hôte', type: 'text', placeholder: '192.168.1.10' },
-            { name: 'sshKeyPath', label: 'Clé SSH privée (chemin)', type: 'text', placeholder: 'data/arexx/ssh/bs510/id_ed25519', hint: "Jamais le contenu de la clé, uniquement son chemin — sous data/ pour rester accessible en Docker" },
             { name: 'remoteDir', label: 'Répertoire distant de copie (data/arexx/drivers/)', type: 'text', default: '/root/arexx-drivers' }
           ]
         }

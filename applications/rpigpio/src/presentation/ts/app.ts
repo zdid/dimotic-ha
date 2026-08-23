@@ -2,7 +2,7 @@
  * Script TypeScript pour le tableau de bord RPI GPIO.
  */
 
-import { renderTargetCards, showTargetActionResult, type TargetActionResult, type RemoteAction } from '/js/ts/components/TargetCards.js';
+import { renderTargetCards, renderSshPrepSection, showTargetActionResult, type TargetActionResult, type RemoteAction } from '/js/ts/components/TargetCards.js';
 
 function moduleRoot(): ParentNode {
   return (window as any).__moduleContainerRoot || document;
@@ -104,13 +104,14 @@ function updateStatusDisplay(status: RpigpioStatus): void {
 
   const targetsSection = $('targets-section');
   const targetsContainer = $('targets-container');
+  const sshPrepContainer = $('ssh-prep-container');
   if (targetsSection) targetsSection.style.display = 'block';
+  if (sshPrepContainer) {
+    renderSshPrepSection(sshPrepContainer, { isRunningInDocker: status.isRunningInDocker, projectRoot: status.projectRoot });
+  }
   if (targetsContainer) {
     renderTargetCards(targetsContainer, {
-      appId: 'rpigpio',
       targets: status.targets,
-      isRunningInDocker: status.isRunningInDocker,
-      projectRoot: status.projectRoot,
       onAction: (targetId: string, action: RemoteAction) => {
         socket?.emit('rpigpio:remote-op', { targetId, action });
       }

@@ -1,10 +1,13 @@
 /**
  * TargetCards — rendu mutualisé d'une liste de cibles distantes (rpigpio/teleinfo/arexx/core, ⭐
- * 23/08/2026) : une carte par cible, avec l'instruction `ssh-copy-id` (clé déjà générée
- * automatiquement, ⭐ 24/08/2026 — voir `ensureSshKey`), adaptée si l'instance tourne dans un
- * conteneur Docker, et 4 boutons (Déployer/Démarrer/Arrêter/Redémarrer). Servi en
+ * 23/08/2026) : une carte par cible avec 4 boutons (Déployer/Démarrer/Arrêter/Redémarrer). Servi en
  * `/js/ts/components/TargetCards.js` (voir core/src/presentation/ui/tsconfig.ui.json), consommé
  * via ce chemin par les 3 apps ; utilisé en import relatif direct par `core` lui-même.
+ *
+ * L'instruction `ssh-copy-id` n'est plus répétée par carte (⭐ 24/08/2026) — une seule clé SSH pour
+ * toute l'installation (voir `ensureGlobalSshKey`, core/infrastructure/remote/SshClient.ts), donc
+ * une seule instruction suffit pour toute la page : voir `renderSshPrepSection` ci-dessous, à
+ * appeler une fois avant la liste des cartes.
  *
  * Ne connaît rien de Socket.io ni de la façon dont chaque app obtient sa connexion (rpigpio/
  * teleinfo : dashboard Shadow DOM, `window.app.socketService` ; arexx : page autonome,
@@ -28,14 +31,7 @@ export interface TargetActionResult {
 }
 
 export interface RenderTargetCardsOptions {
-  /** Identifiant de l'application (ex: "rpigpio") — utilisé pour le chemin de clé SSH affiché. */
-  appId: string;
   targets: TargetSummary[];
-  isRunningInDocker: boolean;
-  /** Racine réelle du projet sur l'hôte (`process.env.PROJECT_ROOT`), utilisée pour le `cd`
-   *  préalable à `ssh-copy-id` hors Docker — le chemin de clé affiché est relatif (`data/...`), il
-   *  ne se résout correctement que depuis ce répertoire. */
-  projectRoot: string;
   onAction: (targetId: string, action: RemoteAction) => void;
   /** Optionnel — affiche un bouton "Supprimer" par carte s'il est fourni. Pas utilisé par
    *  rpigpio/teleinfo/arexx (suppression déjà possible via le formulaire générique `type:'array'`,
@@ -63,7 +59,7 @@ function findCard(container: HTMLElement, targetId: string): HTMLElement | undef
 }
 
 export function renderTargetCards(container: HTMLElement, options: RenderTargetCardsOptions): void {
-  const { appId, targets, isRunningInDocker, projectRoot, onAction, onDelete } = options;
+  const { targets, onAction, onDelete } = options;
 
   if (targets.length === 0) {
     container.innerHTML = '<div class="empty">Aucune cible configurée — ajouter une cible dans les paramètres de l\'application.</div>';
@@ -71,30 +67,12 @@ export function renderTargetCards(container: HTMLElement, options: RenderTargetC
   }
 
   container.innerHTML = targets.map((target) => {
-    const keyPath = `data/${appId}/ssh/${escapeHtml(target.id)}/id_ed25519`;
-    const hostLabel = escapeHtml(target.host || '<hôte>');
-    // ⭐ 24/08/2026 : la clé est désormais générée automatiquement par l'application au démarrage
-    // (ensureSshKey) — plus de ssh-keygen à lancer soi-même, seul ssh-copy-id reste manuel
-    // (interactif, mot de passe). `cd` explicite : le chemin de clé affiché est relatif, il ne se
-    // résout que depuis la racine du projet — `/app` dans le conteneur (WORKDIR, data/ y est monté
-    // sur /app/data), sinon la vraie racine hôte transmise par le serveur.
-    const dockerHint = isRunningInDocker
-      ? `<div class="target-docker-hint">⚠️ Cette instance tourne dans un conteneur Docker — la clé (déjà générée automatiquement) doit être lisible par ce conteneur. Ouvrir d'abord un terminal <strong>dans</strong> le conteneur :<pre>docker exec -it &lt;nom du conteneur&gt; bash</pre></div>`
-      : '';
-    const cdCommand = isRunningInDocker ? 'cd /app' : `cd ${escapeHtml(projectRoot)}`;
-
     const deleteButton = onDelete ? `<button type="button" class="target-delete" data-delete="1">🗑️ Supprimer</button>` : '';
 
     return `
       <div class="target-card" data-target-id="${escapeHtml(target.id)}">
         <h4>${escapeHtml(target.id)} <span class="target-host">(${escapeHtml(target.host || '—')})</span></h4>
         ${deleteButton}
-        <details class="target-ssh-prep">
-          <summary>Copier la clé sur la cible (une fois par cible)</summary>
-          ${dockerHint}
-          <pre>${cdCommand}
-ssh-copy-id -i ${keyPath}.pub root@${hostLabel}</pre>
-        </details>
         <div class="target-actions">
           <button type="button" data-action="deploy">${ACTION_LABELS.deploy}</button>
           <button type="button" data-action="start">${ACTION_LABELS.start}</button>
@@ -128,6 +106,38 @@ ssh-copy-id -i ${keyPath}.pub root@${hostLabel}</pre>
       });
     });
   }
+}
+
+export interface RenderSshPrepSectionOptions {
+  isRunningInDocker: boolean;
+  /** Racine réelle du projet sur l'hôte (`process.env.PROJECT_ROOT`), utilisée pour le `cd`
+   *  préalable à `ssh-copy-id` hors Docker. */
+  projectRoot: string;
+}
+
+/**
+ * Section unique, affichée une fois en tête de page (⭐ 24/08/2026) — explique comment autoriser la
+ * clé SSH (désormais unique pour toute l'installation, voir `ensureGlobalSshKey`,
+ * core/infrastructure/remote/SshClient.ts) sur une nouvelle cible. Remplace le bloc "Copier la
+ * clé" auparavant répété identique sur chaque carte (seul l'hôte variait) — l'hôte reste à
+ * remplacer manuellement ici, un seul modèle de commande couvre toutes les cibles.
+ */
+export function renderSshPrepSection(container: HTMLElement, options: RenderSshPrepSectionOptions): void {
+  const { isRunningInDocker, projectRoot } = options;
+
+  const dockerHint = isRunningInDocker
+    ? `<div class="target-docker-hint">⚠️ Cette instance tourne dans un conteneur Docker — la clé (déjà générée automatiquement) doit être lisible par ce conteneur. Ouvrir d'abord un terminal <strong>dans</strong> le conteneur :<pre>docker exec -it &lt;nom du conteneur&gt; bash</pre></div>`
+    : '';
+  const cdCommand = isRunningInDocker ? 'cd /app' : `cd ${escapeHtml(projectRoot)}`;
+
+  container.innerHTML = `
+    <div class="ssh-prep-section">
+      <p>Une seule clé SSH est générée automatiquement au démarrage, partagée par toutes les applications et toutes les cibles. Avant le premier déploiement vers une nouvelle machine, y copier la clé publique (une fois par machine) :</p>
+      ${dockerHint}
+      <pre>${cdCommand}
+ssh-copy-id -i data/core/ssh/id_ed25519.pub root@&lt;hôte-de-la-cible&gt;</pre>
+    </div>
+  `;
 }
 
 export function showTargetActionResult(container: HTMLElement, result: TargetActionResult): void {

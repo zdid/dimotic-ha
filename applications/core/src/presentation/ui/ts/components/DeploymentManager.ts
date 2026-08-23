@@ -6,11 +6,13 @@
  * que la couche `window.app.appManager` — pas de restart-countdown ici, une cible distante n'a
  * aucun rapport avec le cycle de vie de CETTE instance.
  *
- * Réutilise `renderTargetCards`/`showTargetActionResult` (TargetCards.ts, même dossier) — mêmes
- * cartes de cible que rpigpio/teleinfo/arexx.
+ * Réutilise `renderTargetCards`/`renderSshPrepSection`/`showTargetActionResult` (TargetCards.ts,
+ * même dossier) — mêmes cartes de cible que rpigpio/teleinfo/arexx. Une seule clé SSH pour toute
+ * l'installation (⭐ 24/08/2026) : `renderSshPrepSection` n'est appelée qu'une fois, en tête de
+ * page, avant les deux sections (dimotic-ha et HA+Mosquitto partagent la même clé).
  */
 
-import { renderTargetCards, showTargetActionResult, type TargetActionResult, type RemoteAction } from './TargetCards.js';
+import { renderTargetCards, renderSshPrepSection, showTargetActionResult, type TargetActionResult, type RemoteAction } from './TargetCards.js';
 
 const createTemplate = (): HTMLTemplateElement => {
   const template = document.createElement('template');
@@ -43,6 +45,17 @@ const createTemplate = (): HTMLTemplateElement => {
 
       .empty { color: #7f8c8d; font-style: italic; padding: 10px; }
 
+      /* Section SSH préalable (TargetCards.ts#renderSshPrepSection) */
+      .ssh-prep-section {
+        margin-bottom: 20px; padding: 12px 15px; background: #34495e; border-radius: 8px;
+        font-size: 0.9em; color: #ecf0f1;
+      }
+      .ssh-prep-section p { margin: 0 0 8px; color: #bdc3c7; }
+      .ssh-prep-section pre {
+        background: #2c3e50; border: 1px solid #4a6278; border-radius: 4px;
+        padding: 10px; overflow-x: auto; font-size: 0.85em; color: #ecf0f1;
+      }
+
       /* Cartes de cibles (TargetCards.ts) */
       .target-card { background: #34495e; border-radius: 8px; padding: 15px; margin-bottom: 12px; }
       .target-card h4 { margin: 0 0 10px; display: inline-block; color: #ecf0f1; }
@@ -51,12 +64,6 @@ const createTemplate = (): HTMLTemplateElement => {
         background: transparent; color: #e74c3c; cursor: pointer; font-size: 0.8rem;
       }
       .target-card .target-host { color: #7f8c8d; font-weight: normal; }
-      .target-ssh-prep { margin-bottom: 12px; font-size: 0.9em; color: #ecf0f1; }
-      .target-ssh-prep summary { cursor: pointer; color: #bdc3c7; }
-      .target-ssh-prep pre {
-        background: #2c3e50; border: 1px solid #4a6278; border-radius: 4px;
-        padding: 10px; overflow-x: auto; font-size: 0.85em; color: #ecf0f1;
-      }
       .target-docker-hint {
         padding: 8px; border-radius: 4px; background: rgba(255,193,7,0.15);
         border: 1px solid #ffc107; margin: 8px 0; color: #ecf0f1;
@@ -71,6 +78,8 @@ const createTemplate = (): HTMLTemplateElement => {
       .target-result-error { background: rgba(231, 76, 60, 0.15); border: 1px solid #e74c3c; color: #e74c3c; }
     </style>
     <div class="deployment-management">
+      <div id="ssh-prep-container"></div>
+
       <h2>📦 Déploiement de dimotic-ha</h2>
       <p class="section-description">
         Installer/mettre à jour dimotic-ha lui-même sur une machine distante — suppose que l'image
@@ -86,10 +95,6 @@ const createTemplate = (): HTMLTemplateElement => {
         <div class="field">
           <label for="target-host">Hôte</label>
           <input type="text" id="target-host" placeholder="192.168.1.51">
-        </div>
-        <div class="field">
-          <label for="target-ssh-key">Clé SSH (chemin)</label>
-          <input type="text" id="target-ssh-key" placeholder="data/core/ssh/ha2/id_ed25519">
         </div>
         <button type="button" id="add-target-btn">➕ Ajouter</button>
       </div>
@@ -113,10 +118,6 @@ const createTemplate = (): HTMLTemplateElement => {
         <div class="field">
           <label for="ha-target-host">Hôte</label>
           <input type="text" id="ha-target-host" placeholder="192.168.1.60">
-        </div>
-        <div class="field">
-          <label for="ha-target-ssh-key">Clé SSH (chemin)</label>
-          <input type="text" id="ha-target-ssh-key" placeholder="data/core/ssh/maison2/id_ed25519">
         </div>
         <button type="button" id="add-ha-target-btn">➕ Ajouter</button>
       </div>
@@ -152,6 +153,7 @@ export class DeploymentManager extends HTMLElement {
     this.socket = window.app.socketService.getSocket();
 
     this.socket.on('core:deployment:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
+      this.renderSshPrep(data.isRunningInDocker, data.projectRoot);
       this.renderTargets(data);
     });
 
@@ -178,14 +180,16 @@ export class DeploymentManager extends HTMLElement {
     this.shadowRoot!.getElementById('add-ha-target-btn')?.addEventListener('click', () => this.addHaStackTarget());
   }
 
-  private renderTargets(data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }): void {
+  private renderSshPrep(isRunningInDocker: boolean, projectRoot: string): void {
+    const container = this.shadowRoot!.getElementById('ssh-prep-container');
+    if (container) renderSshPrepSection(container, { isRunningInDocker, projectRoot });
+  }
+
+  private renderTargets(data: { targets: { id: string; host: string }[] }): void {
     const container = this.shadowRoot!.getElementById('targets-container');
     if (!container) return;
     renderTargetCards(container, {
-      appId: 'core',
       targets: data.targets,
-      isRunningInDocker: data.isRunningInDocker,
-      projectRoot: data.projectRoot,
       onAction: (targetId: string, action: RemoteAction) => {
         const version = (this.shadowRoot!.getElementById('deploy-version') as HTMLInputElement | null)?.value.trim();
         this.socket.emit('core:deployment:remote-op', { targetId, action, version: version || undefined });
@@ -199,28 +203,22 @@ export class DeploymentManager extends HTMLElement {
   private addTarget(): void {
     const idEl = this.shadowRoot!.getElementById('target-id') as HTMLInputElement | null;
     const hostEl = this.shadowRoot!.getElementById('target-host') as HTMLInputElement | null;
-    const sshKeyEl = this.shadowRoot!.getElementById('target-ssh-key') as HTMLInputElement | null;
 
     const id = idEl?.value.trim() ?? '';
     const host = hostEl?.value.trim() ?? '';
-    const sshKeyPath = sshKeyEl?.value.trim() ?? '';
     if (!id || !host) return;
 
-    this.socket.emit('core:deployment:target:save', { id, host, sshKeyPath, remoteDir: '/docker/dimotic-ha' });
+    this.socket.emit('core:deployment:target:save', { id, host, remoteDir: '/docker/dimotic-ha' });
 
     if (idEl) idEl.value = '';
     if (hostEl) hostEl.value = '';
-    if (sshKeyEl) sshKeyEl.value = '';
   }
 
-  private renderHaStackTargets(data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }): void {
+  private renderHaStackTargets(data: { targets: { id: string; host: string }[] }): void {
     const container = this.shadowRoot!.getElementById('ha-targets-container');
     if (!container) return;
     renderTargetCards(container, {
-      appId: 'core',
       targets: data.targets,
-      isRunningInDocker: data.isRunningInDocker,
-      projectRoot: data.projectRoot,
       onAction: (targetId: string, action: RemoteAction) => {
         const version = (this.shadowRoot!.getElementById('ha-deploy-version') as HTMLInputElement | null)?.value.trim();
         this.socket.emit('core:deployment:ha-stack:remote-op', { targetId, action, version: version || undefined });
@@ -234,18 +232,15 @@ export class DeploymentManager extends HTMLElement {
   private addHaStackTarget(): void {
     const idEl = this.shadowRoot!.getElementById('ha-target-id') as HTMLInputElement | null;
     const hostEl = this.shadowRoot!.getElementById('ha-target-host') as HTMLInputElement | null;
-    const sshKeyEl = this.shadowRoot!.getElementById('ha-target-ssh-key') as HTMLInputElement | null;
 
     const id = idEl?.value.trim() ?? '';
     const host = hostEl?.value.trim() ?? '';
-    const sshKeyPath = sshKeyEl?.value.trim() ?? '';
     if (!id || !host) return;
 
-    this.socket.emit('core:deployment:ha-stack:target:save', { id, host, sshKeyPath, remoteDir: '/docker/homeassistant' });
+    this.socket.emit('core:deployment:ha-stack:target:save', { id, host, remoteDir: '/docker/homeassistant' });
 
     if (idEl) idEl.value = '';
     if (hostEl) hostEl.value = '';
-    if (sshKeyEl) sshKeyEl.value = '';
   }
 }
 

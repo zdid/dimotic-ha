@@ -17,9 +17,6 @@ const targetConfigSchema = z.object({
   // (teleinfo:remote-op { targetId, action }), voir TeleinfoService.ts.
   id: z.string().min(1),
   host: z.string().default(''),
-  // Chemin LOCAL vers la clé privée SSH dédiée à CETTE cible — sous data/teleinfo/ssh/<id>/, jamais
-  // ~/.ssh/... (non résolu dans le conteneur Docker, voir defaultSshKeyPath dans SshClient.ts).
-  sshKeyPath: z.string().default(''),
   // Répertoire sur la machine cible où déployer l'agent (device-agent/ + config.yaml généré).
   remoteDir: z.string().default('/opt/teleinfo'),
   // Chemin du binaire node sur la cible — RPi1 en ARMv6, Node officiel récent n'a plus de build

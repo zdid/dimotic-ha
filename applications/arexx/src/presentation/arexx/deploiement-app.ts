@@ -5,7 +5,7 @@
  */
 
 import { SocketService } from '/js/ts/services/SocketService.js';
-import { renderTargetCards, showTargetActionResult, type TargetActionResult, type RemoteAction } from '/js/ts/components/TargetCards.js';
+import { renderTargetCards, renderSshPrepSection, showTargetActionResult, type TargetActionResult, type RemoteAction } from '/js/ts/components/TargetCards.js';
 
 let socket: any | null = null;
 /** Distingue le chargement initial (pré-remplissage silencieux) de l'enregistrement explicite
@@ -29,13 +29,14 @@ function init(): void {
   });
 
   socket.on('arexx:status', (status: { isRunningInDocker: boolean; projectRoot: string; targets: { id: string; host: string }[] }) => {
+    const sshPrepContainer = document.getElementById('ssh-prep-container');
+    if (sshPrepContainer) {
+      renderSshPrepSection(sshPrepContainer, { isRunningInDocker: status.isRunningInDocker, projectRoot: status.projectRoot });
+    }
     const container = document.getElementById('targets-container');
     if (container) {
       renderTargetCards(container, {
-        appId: 'arexx',
         targets: status.targets,
-        isRunningInDocker: status.isRunningInDocker,
-        projectRoot: status.projectRoot,
         onAction: (targetId: string, action: RemoteAction) => {
           socket.emit('arexx:remote-op', { targetId, action });
         }

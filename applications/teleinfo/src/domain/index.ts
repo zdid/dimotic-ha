@@ -66,7 +66,6 @@ export const TELEINFO_UI_METADATA: ModuleUiMetadata = {
           itemFields: [
             { name: 'id', label: 'Identifiant', type: 'text', required: true, placeholder: 'rpi1', hint: 'Identifiant libre, unique parmi les cibles de cette app' },
             { name: 'host', label: 'Hôte', type: 'text', placeholder: '192.168.1.183' },
-            { name: 'sshKeyPath', label: 'Clé SSH privée (chemin)', type: 'text', placeholder: 'data/teleinfo/ssh/rpi1/id_ed25519', hint: "Jamais le contenu de la clé, uniquement son chemin — sous data/ pour rester accessible en Docker" },
             { name: 'remoteDir', label: "Répertoire distant de l'agent", type: 'text', default: '/opt/teleinfo' },
             { name: 'nodeBinPath', label: 'Chemin du binaire node sur la cible', type: 'text', default: '/usr/bin/node', hint: 'RPi1/ARMv6 : utiliser le node déjà installé et prouvé sur cette machine, pas un node générique' },
             { name: 'serviceName', label: 'Nom du service systemd', type: 'text', default: 'teleinfo' }

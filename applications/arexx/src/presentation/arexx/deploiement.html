@@ -43,8 +43,8 @@
     .target-card { background: var(--color-background); border-radius: var(--radius); padding: 15px; margin-bottom: 12px; }
     .target-card h4 { margin: 0 0 10px; }
     .target-card .target-host { color: var(--color-text-muted); font-weight: normal; }
-    .target-ssh-prep { margin-bottom: 12px; font-size: 0.9em; }
-    .target-ssh-prep summary { cursor: pointer; color: var(--color-text-muted); }
+    .ssh-prep-section { margin-bottom: 16px; padding: 12px 15px; background: var(--color-background); border-radius: var(--radius); font-size: 0.9em; }
+    .ssh-prep-section p { margin: 0 0 8px; color: var(--color-text-muted); }
     .target-docker-hint { padding: 8px; border-radius: var(--radius); background: rgba(255,193,7,0.1); border: 1px solid #ffc107; margin: 8px 0; }
     .target-actions { display: flex; gap: 8px; flex-wrap: wrap; }
     .target-result { padding: 10px; border-radius: var(--radius); margin-top: 10px; }
@@ -96,10 +96,11 @@
         Chaque émetteur listé ci-dessous est piloté directement depuis cette page : "Déployer" copie
         <code>data/arexx/drivers/</code> sur la machine cible et y lance <code>scripts/deploy-sender.sh</code>
         (détection d'architecture, dépendances, service systemd <code>arexx-sender.service</code>,
-        idempotent — inchangé). Avant le premier déploiement d'une cible, préparer son accès SSH
-        (une seule fois par cible, voir chaque carte ci-dessous). Pour ajouter/modifier une cible :
+        idempotent — inchangé). Avant le premier déploiement d'une nouvelle machine, préparer son
+        accès SSH (voir ci-dessous). Pour ajouter/modifier une cible :
         Paramètres Techniques → AREXX → Émetteurs USB.
       </p>
+      <div id="ssh-prep-container"></div>
       <div id="targets-container"></div>
     </div>
 

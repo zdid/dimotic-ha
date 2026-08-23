@@ -14,7 +14,7 @@
 
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import { runSsh, runScp, shellQuote, ensureSshKey, type RemoteOpResult } from '../infrastructure/remote/SshClient';
+import { runSsh, runScp, shellQuote, ensureGlobalSshKey, type RemoteOpResult } from '../infrastructure/remote/SshClient';
 import { DockerContainerController, type RemoteUnitController } from '../infrastructure/remote/RemoteUnitController';
 import type { ConfigService } from '../infrastructure/config/ConfigService';
 import type { ApplicationManager } from './ApplicationManager';
@@ -28,15 +28,14 @@ export interface DeployResult {
   output?: string;
 }
 
-const APP_ID = 'core';
 const CONTAINER_NAME = 'dimotic-ha';
 const HEALTH_CHECK_ATTEMPTS = 30;
 const HEALTH_CHECK_INTERVAL_MS = 3000;
 
-/** Résout le chemin de clé effectif (génère la clé si absente) avant toute opération SSH — voir
- *  ensureSshKey (core/infrastructure/remote/SshClient.ts). */
-function resolveTarget(target: DeploymentTargetConfig): DeploymentTargetConfig {
-  return { ...target, sshKeyPath: ensureSshKey(APP_ID, target.id, target.sshKeyPath) };
+/** Attache la clé SSH unique de l'installation (générée si absente) avant toute opération SSH —
+ *  voir ensureGlobalSshKey (core/infrastructure/remote/SshClient.ts). */
+function resolveTarget(target: DeploymentTargetConfig): DeploymentTargetConfig & { sshKeyPath: string } {
+  return { ...target, sshKeyPath: ensureGlobalSshKey() };
 }
 
 /**

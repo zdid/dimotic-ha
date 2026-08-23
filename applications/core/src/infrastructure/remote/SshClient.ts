@@ -27,35 +27,32 @@ export interface RemoteTarget {
 }
 
 /**
- * Chemin par défaut de la clé SSH privée d'une cible — `data/<appId>/ssh/<targetId>/id_ed25519`,
- * jamais `~/.ssh/...` : le conteneur Docker tourne en `USER node` (home `/home/node`, jamais
- * persisté, aucun volume SSH monté, voir Dockerfile/compose.yaml) — seul `data/` survit et reste
- * identique en dev local et en Docker. Une clé PAR CIBLE (pas partagée par application) : révoquer
- * une cible compromise ne doit pas obliger à re-clef toutes les autres cibles de la même app.
+ * Chemin de la clé SSH privée — UNIQUE pour toute l'installation, partagée par toutes les
+ * applications et toutes les cibles (⭐ 24/08/2026, revu sur demande explicite : le modèle
+ * précédent, une clé par application ET par cible, n'était pas ce qui était voulu — la
+ * granularité par cible ajoutait de la friction sans bénéfice retenu par l'utilisateur).
+ * `data/core/ssh/id_ed25519`, jamais `~/.ssh/...` : le conteneur Docker tourne en `USER node`
+ * (home `/home/node`, jamais persisté, aucun volume SSH monté, voir Dockerfile/compose.yaml) —
+ * seul `data/` survit et reste identique en dev local et en Docker. Rangée sous `data/core/`
+ * (pas un `data/ssh/` de premier niveau) parce que `core` est le seul module dont la présence est
+ * garantie (jamais désactivable, CLAUDE.md §7) — les autres apps la génèrent si besoin au
+ * démarrage mais ne la "possèdent" pas.
  */
-export function defaultSshKeyPath(appId: string, targetId: string): string {
-  const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', appId, 'ssh', targetId);
+export function globalSshKeyPath(): string {
+  const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'core', 'ssh');
   return path.join(dataDir, 'id_ed25519');
 }
 
-/** Chemin effectif d'une clé — celui configuré s'il est renseigné, sinon `defaultSshKeyPath()`. Le
- *  champ `sshKeyPath` d'une cible est habituellement laissé vide dans l'IHM (le chemin par défaut
- *  n'est qu'un indicatif) — sans cette résolution, `runSsh`/`runScp` ne recevaient aucun `-i` du
- *  tout dans ce cas (⭐ bug trouvé le 24/08/2026), retombant sur la découverte SSH par défaut du
- *  système plutôt que sur la clé dédiée à cette cible. */
-export function resolveSshKeyPath(appId: string, targetId: string, configuredPath: string): string {
-  return configuredPath || defaultSshKeyPath(appId, targetId);
-}
-
 /**
- * Génère la clé (paire ed25519, sans phrase de passe) au chemin effectif si le fichier n'existe pas
- * encore — appelée au démarrage de chaque service pour toutes ses cibles configurées (⭐
- * 24/08/2026, demande explicite : l'utilisateur ne doit plus avoir à lancer `ssh-keygen` lui-même).
+ * Génère la clé unique (paire ed25519, sans phrase de passe) si le fichier n'existe pas encore —
+ * appelée au démarrage de chaque application (⭐ 24/08/2026, demande explicite : l'utilisateur ne
+ * doit plus avoir à lancer `ssh-keygen` lui-même). Idempotente : peu importe laquelle des 4
+ * applications démarre en premier, les suivantes constatent juste que le fichier existe déjà.
  * `execFileSync` (pas `execSync` + interpolation de chaîne) — le chemin passe en argument de
  * tableau, jamais interprété par un shell.
  */
-export function ensureSshKey(appId: string, targetId: string, configuredPath: string): string {
-  const keyPath = resolveSshKeyPath(appId, targetId, configuredPath);
+export function ensureGlobalSshKey(): string {
+  const keyPath = globalSshKeyPath();
   if (!fs.existsSync(keyPath)) {
     fs.mkdirSync(path.dirname(keyPath), { recursive: true });
     execFileSync('ssh-keygen', ['-t', 'ed25519', '-f', keyPath, '-N', '', '-q']);

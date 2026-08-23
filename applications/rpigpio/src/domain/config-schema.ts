@@ -26,10 +26,6 @@ const targetConfigSchema = z.object({
   id: z.string().min(1),
   // Hôte SSH (ex: "192.168.1.53" pour stfort)
   host: z.string().default(''),
-  // Chemin LOCAL vers la clé privée SSH dédiée à CETTE cible — jamais son contenu. Par défaut,
-  // sous data/rpigpio/ssh/<id>/ (voir defaultSshKeyPath, core/infrastructure/remote/SshClient.ts),
-  // jamais ~/.ssh/... (non résolu dans le conteneur Docker, voir ce même fichier).
-  sshKeyPath: z.string().default(''),
   // Répertoire sur la machine CIBLE contenant compose.yaml + config.yml générés (voir
   // generator.ts::generateComposeFile) — mêmes conventions que /docker/<app>/ sur ha2/orangepi.
   hostDir: z.string().default('/docker/mqttio-rpigpio'),

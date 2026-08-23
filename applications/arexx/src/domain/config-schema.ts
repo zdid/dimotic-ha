@@ -19,9 +19,6 @@ const arexxTargetSchema = z.object({
   // (arexx:remote-op { targetId, action }), voir ArexxService.ts.
   id: z.string().min(1),
   host: z.string().default(''),
-  // Chemin LOCAL vers la clé privée SSH dédiée à CETTE cible — sous data/arexx/ssh/<id>/, jamais
-  // ~/.ssh/... (non résolu dans le conteneur Docker, voir defaultSshKeyPath dans SshClient.ts).
-  sshKeyPath: z.string().default(''),
   // Répertoire sur la machine cible où copier data/arexx/drivers/ (staging, avant exécution de
   // scripts/deploy-sender.sh — voir ArexxDeployService.ts).
   remoteDir: z.string().default('/root/arexx-drivers')

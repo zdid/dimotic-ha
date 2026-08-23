@@ -16,7 +16,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, RemoteAction } from '../../../core/dist/exports';
-import { generateRandomBridgeInstance, MqttTransport, isRunningInDocker, ensureSshKey } from '../../../core/dist/exports';
+import { generateRandomBridgeInstance, MqttTransport, isRunningInDocker, ensureGlobalSshKey } from '../../../core/dist/exports';
 import { rpigpioConfigSchema, type RpigpioConfig } from './config-schema';
 import { pinsConfigSchema, DEFAULT_PINS_CONFIG, type PinDefinition, type PinsConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
@@ -114,21 +114,11 @@ export class RpigpioService implements IRpigpioService {
 
   async start(): Promise<void> {
     this.logger.info('RpigpioService', 'Démarrage du service rpigpio...');
-    this.ensureTargetSshKeys();
+    ensureGlobalSshKey();
     this.connectAgentPresence();
     this.emitStatus();
     this.emitPins();
     this.logger.info('RpigpioService', 'Service rpigpio démarré');
-  }
-
-  /** Génère la clé SSH de chaque cible configurée si elle n'existe pas encore (⭐ 24/08/2026,
-   *  demande explicite : plus besoin de lancer ssh-keygen soi-même). rpigpio redémarre déjà
-   *  automatiquement après toute sauvegarde de config (spec socle §4.3) — suffisant pour couvrir
-   *  une cible tout juste ajoutée, sans hook de sauvegarde dédié. */
-  private ensureTargetSshKeys(): void {
-    for (const target of this.config.targets) {
-      ensureSshKey('rpigpio', target.id, target.sshKeyPath);
-    }
   }
 
   async stop(): Promise<void> {

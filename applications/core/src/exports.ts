@@ -149,9 +149,8 @@ export {
   runScp,
   shellQuote,
   expandHome,
-  defaultSshKeyPath,
-  resolveSshKeyPath,
-  ensureSshKey,
+  globalSshKeyPath,
+  ensureGlobalSshKey,
 } from './infrastructure/remote/SshClient';
 export type { RemoteTarget, RemoteOpResult } from './infrastructure/remote/SshClient';
 export {

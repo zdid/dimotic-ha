@@ -16,7 +16,7 @@
 import {
   runSsh,
   shellQuote,
-  ensureSshKey,
+  ensureGlobalSshKey,
   DockerContainerController,
   type Logger,
   type RemoteOpResult,
@@ -30,13 +30,12 @@ export interface DeployResult {
   output?: string;
 }
 
-const APP_ID = 'rpigpio';
 const unitController = new DockerContainerController();
 
-/** Résout le chemin de clé effectif (génère la clé si absente) avant toute opération SSH — voir
- *  ensureSshKey (core/infrastructure/remote/SshClient.ts). */
-function resolveTarget(target: RpigpioTargetConfig): RpigpioTargetConfig {
-  return { ...target, sshKeyPath: ensureSshKey(APP_ID, target.id, target.sshKeyPath) };
+/** Attache la clé SSH unique de l'installation (générée si absente) avant toute opération SSH —
+ *  voir ensureGlobalSshKey (core/infrastructure/remote/SshClient.ts). */
+function resolveTarget(target: RpigpioTargetConfig): RpigpioTargetConfig & { sshKeyPath: string } {
+  return { ...target, sshKeyPath: ensureGlobalSshKey() };
 }
 
 export class DeployService {
