@@ -37,6 +37,11 @@ export interface DeployResult {
 const MOSQUITTO_IMAGE = 'eclipse-mosquitto:latest';
 const HA_SUBDIR = 'homeassistant';
 const MOSQUITTO_SUBDIR = 'mosquitto';
+/** `docker compose pull` de `homeassistant/home-assistant` (image volumineuse, plusieurs centaines
+ *  de Mo) dépasse largement le timeout par défaut de runSsh (30s) — bug réel constaté au premier
+ *  déploiement réel (⭐ 24/08/2026, timeout sur ha2). 10 minutes, cohérent avec un lien réseau LAN
+ *  modeste et du matériel type Raspberry Pi. */
+const PULL_UP_TIMEOUT_MS = 600000;
 
 /** Attache la clé SSH unique de l'installation (générée si absente) avant toute opération SSH —
  *  voir ensureGlobalSshKey (core/infrastructure/remote/SshClient.ts). */
@@ -175,13 +180,13 @@ export class HaStackDeployService {
       this.logger.info('HaStackDeployService', `mosquitto.conf déjà présent sur ${target.host}, non écrasé`);
     }
 
-    const mqUp = await runSsh(target, `cd ${shellQuote(mqDir)} && docker compose pull && docker compose up -d`);
+    const mqUp = await runSsh(target, `cd ${shellQuote(mqDir)} && docker compose pull && docker compose up -d`, undefined, PULL_UP_TIMEOUT_MS);
     if (!mqUp.success) {
       this.logger.error('HaStackDeployService', `Échec de docker compose pull/up (mosquitto) sur ${target.host}: ${mqUp.error}`);
       return { success: false, step: 'pull-up', error: `mosquitto: ${mqUp.error}`, output: mqUp.output };
     }
 
-    const haUp = await runSsh(target, `cd ${shellQuote(haDir)} && docker compose pull && docker compose up -d`);
+    const haUp = await runSsh(target, `cd ${shellQuote(haDir)} && docker compose pull && docker compose up -d`, undefined, PULL_UP_TIMEOUT_MS);
     if (!haUp.success) {
       this.logger.error('HaStackDeployService', `Échec de docker compose pull/up (homeassistant) sur ${target.host}: ${haUp.error}`);
       return { success: false, step: 'pull-up', error: `homeassistant: ${haUp.error}`, output: haUp.output };

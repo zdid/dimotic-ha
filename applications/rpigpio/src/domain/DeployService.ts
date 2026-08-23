@@ -31,6 +31,10 @@ export interface DeployResult {
 }
 
 const unitController = new DockerContainerController();
+/** `docker compose up -d` pull implicitement l'image si absente localement — peut largement
+ *  dépasser le timeout par défaut de runSsh (30s) sur du matériel modeste (⭐ 24/08/2026, bug réel
+ *  constaté sur le premier déploiement HA+Mosquitto, voir HaStackDeployService.ts). */
+const COMPOSE_UP_TIMEOUT_MS = 600000;
 
 /** Attache la clé SSH unique de l'installation (générée si absente) avant toute opération SSH —
  *  voir ensureGlobalSshKey (core/infrastructure/remote/SshClient.ts). */
@@ -88,7 +92,7 @@ export class DeployService {
     const writeCompose = await this.writeRemoteFile(target, composePath, composeYaml);
     if (!writeCompose.success) return { ...writeCompose, step: 'write-compose' };
 
-    const composeUp = await runSsh(target, `cd ${shellQuote(target.hostDir)} && docker compose up -d`);
+    const composeUp = await runSsh(target, `cd ${shellQuote(target.hostDir)} && docker compose up -d`, undefined, COMPOSE_UP_TIMEOUT_MS);
     if (!composeUp.success) {
       this.logger.error('DeployService', `Échec de docker compose up sur ${target.host}: ${composeUp.error}`);
       return { success: false, step: 'compose-up', error: composeUp.error, output: composeUp.output };

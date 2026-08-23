@@ -31,6 +31,11 @@ export interface DeployResult {
 const CONTAINER_NAME = 'dimotic-ha';
 const HEALTH_CHECK_ATTEMPTS = 30;
 const HEALTH_CHECK_INTERVAL_MS = 3000;
+/** `docker compose pull` dépasse largement le timeout par défaut de runSsh (30s) sur du matériel
+ *  modeste — bug réel constaté sur le premier déploiement HA+Mosquitto (⭐ 24/08/2026, voir
+ *  HaStackDeployService.ts). Même valeur ici par cohérence, même si l'image dimotic-ha est plus
+ *  petite. */
+const PULL_UP_TIMEOUT_MS = 600000;
 
 /** Attache la clé SSH unique de l'installation (générée si absente) avant toute opération SSH —
  *  voir ensureGlobalSshKey (core/infrastructure/remote/SshClient.ts). */
@@ -87,7 +92,15 @@ export class CoreDeployService {
     const target = resolveTarget(rawTarget);
     const tag = version?.trim() || 'latest';
 
-    const mkdir = await runSsh(target, `mkdir -p ${shellQuote(target.remoteDir)}`);
+    // `logs/` et `data/` sont bind-montés dans le conteneur, qui tourne en `USER node` (uid/gid
+    // 1000, image officielle node:*-bookworm-slim — voir Dockerfile) — créés ici en root via SSH,
+    // ils doivent être chownés pour rester inscriptibles par ce user, sinon le conteneur crashe en
+    // boucle (EACCES sur logs/app.log.*, bug réel constaté au premier déploiement réel sur ha2,
+    // ⭐ 24/08/2026). `compose.yaml` lui-même reste root : jamais lu depuis l'intérieur du conteneur.
+    const mkdir = await runSsh(
+      target,
+      `mkdir -p ${shellQuote(target.remoteDir)} ${shellQuote(target.remoteDir + '/logs')} ${shellQuote(target.remoteDir + '/data')} && chown -R 1000:1000 ${shellQuote(target.remoteDir + '/logs')} ${shellQuote(target.remoteDir + '/data')}`
+    );
     if (!mkdir.success) {
       this.logger.error('CoreDeployService', `Échec de création de ${target.remoteDir} sur ${target.host}: ${mkdir.error}`);
       return { success: false, step: 'mkdir', error: mkdir.error };
@@ -108,8 +121,16 @@ export class CoreDeployService {
     const seedResult = await this.seedConfigIfAbsent(target);
     if (!seedResult.success) return seedResult;
 
+    // seedConfigIfAbsent() écrit via `tee` en root (nouveau sous-dossier data/core/) — re-chown
+    // après coup, le premier passage (avant cette étape) ne couvre pas ce qui vient d'être créé.
+    const rechown = await runSsh(target, `chown -R 1000:1000 ${shellQuote(target.remoteDir + '/data')}`);
+    if (!rechown.success) {
+      this.logger.error('CoreDeployService', `Échec de chown de ${target.remoteDir}/data sur ${target.host}: ${rechown.error}`);
+      return { success: false, step: 'seed-config', error: rechown.error };
+    }
+
     const envPrefix = `DIMOTIC_TAG=${shellQuote(tag)}`;
-    const pullUp = await runSsh(target, `cd ${shellQuote(target.remoteDir)} && ${envPrefix} docker compose pull && ${envPrefix} docker compose up -d`);
+    const pullUp = await runSsh(target, `cd ${shellQuote(target.remoteDir)} && ${envPrefix} docker compose pull && ${envPrefix} docker compose up -d`, undefined, PULL_UP_TIMEOUT_MS);
     if (!pullUp.success) {
       this.logger.error('CoreDeployService', `Échec de docker compose pull/up sur ${target.host}: ${pullUp.error}`);
       return { success: false, step: 'pull-up', error: pullUp.error, output: pullUp.output };
