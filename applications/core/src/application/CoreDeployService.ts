@@ -14,7 +14,7 @@
 
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import { runSsh, runScp, shellQuote, type RemoteOpResult } from '../infrastructure/remote/SshClient';
+import { runSsh, runScp, shellQuote, ensureSshKey, type RemoteOpResult } from '../infrastructure/remote/SshClient';
 import { DockerContainerController, type RemoteUnitController } from '../infrastructure/remote/RemoteUnitController';
 import type { ConfigService } from '../infrastructure/config/ConfigService';
 import type { ApplicationManager } from './ApplicationManager';
@@ -28,9 +28,16 @@ export interface DeployResult {
   output?: string;
 }
 
+const APP_ID = 'core';
 const CONTAINER_NAME = 'dimotic-ha';
 const HEALTH_CHECK_ATTEMPTS = 30;
 const HEALTH_CHECK_INTERVAL_MS = 3000;
+
+/** Résout le chemin de clé effectif (génère la clé si absente) avant toute opération SSH — voir
+ *  ensureSshKey (core/infrastructure/remote/SshClient.ts). */
+function resolveTarget(target: DeploymentTargetConfig): DeploymentTargetConfig {
+  return { ...target, sshKeyPath: ensureSshKey(APP_ID, target.id, target.sshKeyPath) };
+}
 
 /**
  * `compose.deploy.yaml`, PAS `compose.yaml` — ce dernier reste réservé à la machine de
@@ -53,26 +60,33 @@ export class CoreDeployService {
   ) {}
 
   start(target: DeploymentTargetConfig): Promise<RemoteOpResult> {
-    return this.unitController.start(target, CONTAINER_NAME);
+    return this.unitController.start(resolveTarget(target), CONTAINER_NAME);
   }
 
   stop(target: DeploymentTargetConfig): Promise<RemoteOpResult> {
-    return this.unitController.stop(target, CONTAINER_NAME);
+    return this.unitController.stop(resolveTarget(target), CONTAINER_NAME);
   }
 
   restart(target: DeploymentTargetConfig): Promise<RemoteOpResult> {
-    return this.unitController.restart(target, CONTAINER_NAME);
+    return this.unitController.restart(resolveTarget(target), CONTAINER_NAME);
   }
 
   /**
    * Copie compose.deploy.yaml (renommé compose.yaml sur la cible), sème data/core/config.yaml
    * UNIQUEMENT s'il est absent (jamais écrasé sur une cible déjà provisionnée — même principe que
    * target.txt/DriversBundle côté AREXX), puis `docker compose pull && up -d` et attend "healthy".
+   *
+   * `version` (⭐ 24/08/2026) : tag Docker Hub à déployer (ex: "2.1.0") — vide/absent = `latest`.
+   * `compose.deploy.yaml` référence `zdid2/dimotic-ha:${DIMOTIC_TAG:-latest}` (interpolation Docker
+   * Compose) : la variable est injectée sur `pull` ET `up -d` (compose relit le fichier à chaque
+   * invocation, les deux doivent voir la même valeur).
    */
-  async deploy(target: DeploymentTargetConfig): Promise<DeployResult> {
-    if (!target.host) {
+  async deploy(rawTarget: DeploymentTargetConfig, version?: string): Promise<DeployResult> {
+    if (!rawTarget.host) {
       return { success: false, step: 'mkdir', error: 'Aucun hôte cible configuré (target.host)' };
     }
+    const target = resolveTarget(rawTarget);
+    const tag = version?.trim() || 'latest';
 
     const mkdir = await runSsh(target, `mkdir -p ${shellQuote(target.remoteDir)}`);
     if (!mkdir.success) {
@@ -95,7 +109,8 @@ export class CoreDeployService {
     const seedResult = await this.seedConfigIfAbsent(target);
     if (!seedResult.success) return seedResult;
 
-    const pullUp = await runSsh(target, `cd ${shellQuote(target.remoteDir)} && docker compose pull && docker compose up -d`);
+    const envPrefix = `DIMOTIC_TAG=${shellQuote(tag)}`;
+    const pullUp = await runSsh(target, `cd ${shellQuote(target.remoteDir)} && ${envPrefix} docker compose pull && ${envPrefix} docker compose up -d`);
     if (!pullUp.success) {
       this.logger.error('CoreDeployService', `Échec de docker compose pull/up sur ${target.host}: ${pullUp.error}`);
       return { success: false, step: 'pull-up', error: pullUp.error, output: pullUp.output };

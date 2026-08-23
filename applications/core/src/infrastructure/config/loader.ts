@@ -14,6 +14,7 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   disabledApps: [],
   targets: [],
+  haStackTargets: [],
   ha: {
     ws_enable: false,
     mqtt_enable: false,

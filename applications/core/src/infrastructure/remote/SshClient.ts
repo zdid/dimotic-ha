@@ -16,7 +16,8 @@
  * privilège. `RemoteTarget` n'a donc plus de champ `sshUser`.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
@@ -35,6 +36,31 @@ export interface RemoteTarget {
 export function defaultSshKeyPath(appId: string, targetId: string): string {
   const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', appId, 'ssh', targetId);
   return path.join(dataDir, 'id_ed25519');
+}
+
+/** Chemin effectif d'une clé — celui configuré s'il est renseigné, sinon `defaultSshKeyPath()`. Le
+ *  champ `sshKeyPath` d'une cible est habituellement laissé vide dans l'IHM (le chemin par défaut
+ *  n'est qu'un indicatif) — sans cette résolution, `runSsh`/`runScp` ne recevaient aucun `-i` du
+ *  tout dans ce cas (⭐ bug trouvé le 24/08/2026), retombant sur la découverte SSH par défaut du
+ *  système plutôt que sur la clé dédiée à cette cible. */
+export function resolveSshKeyPath(appId: string, targetId: string, configuredPath: string): string {
+  return configuredPath || defaultSshKeyPath(appId, targetId);
+}
+
+/**
+ * Génère la clé (paire ed25519, sans phrase de passe) au chemin effectif si le fichier n'existe pas
+ * encore — appelée au démarrage de chaque service pour toutes ses cibles configurées (⭐
+ * 24/08/2026, demande explicite : l'utilisateur ne doit plus avoir à lancer `ssh-keygen` lui-même).
+ * `execFileSync` (pas `execSync` + interpolation de chaîne) — le chemin passe en argument de
+ * tableau, jamais interprété par un shell.
+ */
+export function ensureSshKey(appId: string, targetId: string, configuredPath: string): string {
+  const keyPath = resolveSshKeyPath(appId, targetId, configuredPath);
+  if (!fs.existsSync(keyPath)) {
+    fs.mkdirSync(path.dirname(keyPath), { recursive: true });
+    execFileSync('ssh-keygen', ['-t', 'ed25519', '-f', keyPath, '-N', '', '-q']);
+  }
+  return keyPath;
 }
 
 export interface RemoteOpResult {

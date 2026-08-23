@@ -242,7 +242,7 @@ export class SocketBridge {
     // DÉPLOIEMENT DE DIMOTIC-HA LUI-MÊME (⭐ 23/08/2026)
     // ======================================================================
 
-    this.eventBus.on('core:deployment:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean }) => {
+    this.eventBus.on('core:deployment:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
       this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:targets:list');
       this.broadcast('core:deployment:targets:list', data);
     });
@@ -250,6 +250,20 @@ export class SocketBridge {
     this.eventBus.on('core:deployment:remote-op:result', (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => {
       this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:remote-op:result');
       this.broadcast('core:deployment:remote-op:result', data);
+    });
+
+    // ======================================================================
+    // DÉPLOIEMENT HOME ASSISTANT + MOSQUITTO (⭐ 24/08/2026)
+    // ======================================================================
+
+    this.eventBus.on('core:deployment:ha-stack:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:ha-stack:targets:list');
+      this.broadcast('core:deployment:ha-stack:targets:list', data);
+    });
+
+    this.eventBus.on('core:deployment:ha-stack:remote-op:result', (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:ha-stack:remote-op:result');
+      this.broadcast('core:deployment:ha-stack:remote-op:result', data);
     });
   }
 
@@ -400,9 +414,37 @@ export class SocketBridge {
       });
 
       // @ts-ignore
-      socket.on('core:deployment:remote-op', (data: { targetId: string; action: string }) => {
+      socket.on('core:deployment:remote-op', (data: { targetId: string; action: string; version?: string }) => {
         this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:remote-op de ${socket.id}, ${data.targetId}/${data.action}`);
         this.eventBus.emit('core:deployment:remote-op', data);
+      });
+
+      // ===========================================================================
+      // DÉPLOIEMENT HOME ASSISTANT + MOSQUITTO (⭐ 24/08/2026)
+      // ===========================================================================
+
+      // @ts-ignore
+      socket.on('core:deployment:ha-stack:targets:get', () => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:ha-stack:targets:get de ${socket.id}`);
+        this.eventBus.emit('core:deployment:ha-stack:targets:get', undefined as void);
+      });
+
+      // @ts-ignore
+      socket.on('core:deployment:ha-stack:target:save', (data: unknown) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:ha-stack:target:save de ${socket.id}`);
+        this.eventBus.emit('core:deployment:ha-stack:target:save', data);
+      });
+
+      // @ts-ignore
+      socket.on('core:deployment:ha-stack:target:delete', (data: { id: string }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:ha-stack:target:delete de ${socket.id}, id: ${data.id}`);
+        this.eventBus.emit('core:deployment:ha-stack:target:delete', data);
+      });
+
+      // @ts-ignore
+      socket.on('core:deployment:ha-stack:remote-op', (data: { targetId: string; action: string; version?: string }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:ha-stack:remote-op de ${socket.id}, ${data.targetId}/${data.action}`);
+        this.eventBus.emit('core:deployment:ha-stack:remote-op', data);
       });
 
       // Gestion de la déconnexion

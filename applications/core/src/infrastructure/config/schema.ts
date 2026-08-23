@@ -86,6 +86,21 @@ const deploymentTargetSchema = z.object({
 });
 
 /**
+ * Cible de déploiement d'un stack Home Assistant + Mosquitto (⭐ nouveau 24/08/2026) — liste
+ * SÉPARÉE de `targets` (décidé avec l'utilisateur : pas forcément les mêmes machines que celles
+ * qui hébergent dimotic-ha). Même forme que `deploymentTargetSchema`, seul le `remoteDir` par
+ * défaut change. Clé SSH dans le même espace de noms que `targets` (`data/core/ssh/<id>/`) — si un
+ * même `id` désigne la même machine physique dans les deux listes, la clé est partagée sans
+ * conflit ; sinon deux clés distinctes cohabitent normalement.
+ */
+const haStackTargetSchema = z.object({
+  id: z.string().min(1),
+  host: z.string().default(''),
+  sshKeyPath: z.string().default(''),
+  remoteDir: z.string().default('/docker/homeassistant')
+});
+
+/**
  * Schéma principal de la configuration de l'application.
  * STRICT : tous les champs sont requis. Les valeurs par défaut sont appliquées
  * par ConfigLoader/ConfigWriter après validation.
@@ -106,11 +121,17 @@ export const configSchema = z.object({
   disabledApps: z.array(z.string()).default([]),
   // Cibles de déploiement de dimotic-ha lui-même (⭐ 23/08/2026) — voir deploymentTargetSchema.
   targets: z.array(deploymentTargetSchema).default([]),
+  // Cibles de déploiement Home Assistant + Mosquitto (⭐ 24/08/2026) — voir haStackTargetSchema.
+  haStackTargets: z.array(haStackTargetSchema).default([]),
   // Les sections spécifiques aux modules seront ajoutées dynamiquement
 }).passthrough()
   .refine(
     (config) => new Set(config.targets.map((t) => t.id)).size === config.targets.length,
     { message: 'Chaque cible doit avoir un id unique', path: ['targets'] }
+  )
+  .refine(
+    (config) => new Set(config.haStackTargets.map((t) => t.id)).size === config.haStackTargets.length,
+    { message: 'Chaque cible doit avoir un id unique', path: ['haStackTargets'] }
   );
 // ⚠️ .passthrough() est indispensable : sans lui, Zod strippe silencieusement toute clé de
 // premier niveau non déclarée ci-dessus (nommage/rfxcom/arbreouquoi/evoo7/...) à chaque
@@ -130,6 +151,7 @@ export type MqttConfig = z.infer<typeof mqttSchema>;
 export type WebConfig = z.infer<typeof webSchema>;
 export type LoggingConfig = z.infer<typeof loggingSchema>;
 export type DeploymentTargetConfig = z.infer<typeof deploymentTargetSchema>;
+export type HaStackTargetConfig = z.infer<typeof haStackTargetSchema>;
 export type AppConfig = z.infer<typeof configSchema>;
 
-export { coreSchema, haWsSchema, haStructureSchema, haConfigSchema, mqttSchema, webSchema, loggingSchema, deploymentTargetSchema };
+export { coreSchema, haWsSchema, haStructureSchema, haConfigSchema, mqttSchema, webSchema, loggingSchema, deploymentTargetSchema, haStackTargetSchema };

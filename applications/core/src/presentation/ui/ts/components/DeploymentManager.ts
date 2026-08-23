@@ -93,7 +93,38 @@ const createTemplate = (): HTMLTemplateElement => {
         </div>
         <button type="button" id="add-target-btn">➕ Ajouter</button>
       </div>
+      <div class="field" style="margin-bottom:12px;">
+        <label for="deploy-version">Version à déployer (vide = latest)</label>
+        <input type="text" id="deploy-version" placeholder="2.1.0" style="width:120px;">
+      </div>
       <div id="targets-container"><div class="empty">Chargement...</div></div>
+
+      <h2 style="margin-top:30px;">🏠 Déploiement Home Assistant + Mosquitto</h2>
+      <p class="section-description">
+        Provisionner un nouveau Home Assistant (Docker) accompagné d'un broker Mosquitto (config
+        minimale sans authentification, LAN de confiance) sur une machine distante — liste de
+        cibles séparée de celle de dimotic-ha ci-dessus.
+      </p>
+      <div class="add-target-form">
+        <div class="field">
+          <label for="ha-target-id">Identifiant</label>
+          <input type="text" id="ha-target-id" placeholder="maison2">
+        </div>
+        <div class="field">
+          <label for="ha-target-host">Hôte</label>
+          <input type="text" id="ha-target-host" placeholder="192.168.1.60">
+        </div>
+        <div class="field">
+          <label for="ha-target-ssh-key">Clé SSH (chemin)</label>
+          <input type="text" id="ha-target-ssh-key" placeholder="data/core/ssh/maison2/id_ed25519">
+        </div>
+        <button type="button" id="add-ha-target-btn">➕ Ajouter</button>
+      </div>
+      <div class="field" style="margin-bottom:12px;">
+        <label for="ha-deploy-version">Version Home Assistant à déployer (vide = latest)</label>
+        <input type="text" id="ha-deploy-version" placeholder="2026.8.0" style="width:120px;">
+      </div>
+      <div id="ha-targets-container"><div class="empty">Chargement...</div></div>
     </div>
   `;
   return template;
@@ -120,7 +151,7 @@ export class DeploymentManager extends HTMLElement {
     }
     this.socket = window.app.socketService.getSocket();
 
-    this.socket.on('core:deployment:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean }) => {
+    this.socket.on('core:deployment:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
       this.renderTargets(data);
     });
 
@@ -132,17 +163,32 @@ export class DeploymentManager extends HTMLElement {
     this.socket.emit('core:deployment:targets:get');
 
     this.shadowRoot!.getElementById('add-target-btn')?.addEventListener('click', () => this.addTarget());
+
+    this.socket.on('core:deployment:ha-stack:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
+      this.renderHaStackTargets(data);
+    });
+
+    this.socket.on('core:deployment:ha-stack:remote-op:result', (result: TargetActionResult) => {
+      const container = this.shadowRoot!.getElementById('ha-targets-container');
+      if (container) showTargetActionResult(container, result);
+    });
+
+    this.socket.emit('core:deployment:ha-stack:targets:get');
+
+    this.shadowRoot!.getElementById('add-ha-target-btn')?.addEventListener('click', () => this.addHaStackTarget());
   }
 
-  private renderTargets(data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean }): void {
+  private renderTargets(data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }): void {
     const container = this.shadowRoot!.getElementById('targets-container');
     if (!container) return;
     renderTargetCards(container, {
       appId: 'core',
       targets: data.targets,
       isRunningInDocker: data.isRunningInDocker,
+      projectRoot: data.projectRoot,
       onAction: (targetId: string, action: RemoteAction) => {
-        this.socket.emit('core:deployment:remote-op', { targetId, action });
+        const version = (this.shadowRoot!.getElementById('deploy-version') as HTMLInputElement | null)?.value.trim();
+        this.socket.emit('core:deployment:remote-op', { targetId, action, version: version || undefined });
       },
       onDelete: (targetId: string) => {
         this.socket.emit('core:deployment:target:delete', { id: targetId });
@@ -161,6 +207,41 @@ export class DeploymentManager extends HTMLElement {
     if (!id || !host) return;
 
     this.socket.emit('core:deployment:target:save', { id, host, sshKeyPath, remoteDir: '/docker/dimotic-ha' });
+
+    if (idEl) idEl.value = '';
+    if (hostEl) hostEl.value = '';
+    if (sshKeyEl) sshKeyEl.value = '';
+  }
+
+  private renderHaStackTargets(data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }): void {
+    const container = this.shadowRoot!.getElementById('ha-targets-container');
+    if (!container) return;
+    renderTargetCards(container, {
+      appId: 'core',
+      targets: data.targets,
+      isRunningInDocker: data.isRunningInDocker,
+      projectRoot: data.projectRoot,
+      onAction: (targetId: string, action: RemoteAction) => {
+        const version = (this.shadowRoot!.getElementById('ha-deploy-version') as HTMLInputElement | null)?.value.trim();
+        this.socket.emit('core:deployment:ha-stack:remote-op', { targetId, action, version: version || undefined });
+      },
+      onDelete: (targetId: string) => {
+        this.socket.emit('core:deployment:ha-stack:target:delete', { id: targetId });
+      }
+    });
+  }
+
+  private addHaStackTarget(): void {
+    const idEl = this.shadowRoot!.getElementById('ha-target-id') as HTMLInputElement | null;
+    const hostEl = this.shadowRoot!.getElementById('ha-target-host') as HTMLInputElement | null;
+    const sshKeyEl = this.shadowRoot!.getElementById('ha-target-ssh-key') as HTMLInputElement | null;
+
+    const id = idEl?.value.trim() ?? '';
+    const host = hostEl?.value.trim() ?? '';
+    const sshKeyPath = sshKeyEl?.value.trim() ?? '';
+    if (!id || !host) return;
+
+    this.socket.emit('core:deployment:ha-stack:target:save', { id, host, sshKeyPath, remoteDir: '/docker/homeassistant' });
 
     if (idEl) idEl.value = '';
     if (hostEl) hostEl.value = '';

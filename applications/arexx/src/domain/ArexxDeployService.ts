@@ -16,6 +16,7 @@ import {
   runSsh,
   runScp,
   shellQuote,
+  ensureSshKey,
   SystemdUnitController,
   type Logger,
   type RemoteOpResult,
@@ -30,35 +31,43 @@ export interface DeployResult {
   output?: string;
 }
 
+const APP_ID = 'arexx';
 const SENDER_SERVICE_NAME = 'arexx-sender.service';
 const unitController = new SystemdUnitController();
+
+/** Résout le chemin de clé effectif (génère la clé si absente) avant toute opération SSH — voir
+ *  ensureSshKey (core/infrastructure/remote/SshClient.ts). */
+function resolveTarget(target: ArexxTargetConfig): ArexxTargetConfig {
+  return { ...target, sshKeyPath: ensureSshKey(APP_ID, target.id, target.sshKeyPath) };
+}
 
 export class ArexxDeployService {
   constructor(private readonly logger: Logger) {}
 
   /** Démarre le service arexx-sender sur la machine cible. */
   start(target: ArexxTargetConfig): Promise<RemoteOpResult> {
-    return unitController.start(target, SENDER_SERVICE_NAME);
+    return unitController.start(resolveTarget(target), SENDER_SERVICE_NAME);
   }
 
   /** Arrête le service arexx-sender sur la machine cible. */
   stop(target: ArexxTargetConfig): Promise<RemoteOpResult> {
-    return unitController.stop(target, SENDER_SERVICE_NAME);
+    return unitController.stop(resolveTarget(target), SENDER_SERVICE_NAME);
   }
 
   /** Redémarre le service arexx-sender sur la machine cible sans rejouer le déploiement. */
   restart(target: ArexxTargetConfig): Promise<RemoteOpResult> {
-    return unitController.restart(target, SENDER_SERVICE_NAME);
+    return unitController.restart(resolveTarget(target), SENDER_SERVICE_NAME);
   }
 
   /**
    * Copie tout `data/arexx/drivers/` vers `target.remoteDir` puis lance `scripts/deploy-sender.sh`
    * à distance — installe/démarre `arexx-sender.service`, idempotent (ré-exécutable sans risque).
    */
-  async deploy(target: ArexxTargetConfig): Promise<DeployResult> {
-    if (!target.host) {
+  async deploy(rawTarget: ArexxTargetConfig): Promise<DeployResult> {
+    if (!rawTarget.host) {
       return { success: false, step: 'mkdir', error: 'Aucun hôte cible configuré (target.host)' };
     }
+    const target = resolveTarget(rawTarget);
 
     const mkdir = await runSsh(target, `mkdir -p ${shellQuote(target.remoteDir)}`);
     if (!mkdir.success) {

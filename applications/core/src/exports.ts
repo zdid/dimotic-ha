@@ -150,6 +150,8 @@ export {
   shellQuote,
   expandHome,
   defaultSshKeyPath,
+  resolveSshKeyPath,
+  ensureSshKey,
 } from './infrastructure/remote/SshClient';
 export type { RemoteTarget, RemoteOpResult } from './infrastructure/remote/SshClient';
 export {

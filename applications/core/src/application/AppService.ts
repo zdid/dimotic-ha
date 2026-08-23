@@ -9,8 +9,10 @@ import { pathToFileURL } from 'node:url';
 import { EventBus } from './EventBus';
 import { ApplicationManager } from './ApplicationManager';
 import { CoreDeployService } from './CoreDeployService';
-import type { DeploymentTargetConfig } from '../infrastructure/config/schema';
+import { HaStackDeployService } from './HaStackDeployService';
+import type { DeploymentTargetConfig, HaStackTargetConfig } from '../infrastructure/config/schema';
 import type { RemoteAction } from '../infrastructure/remote/RemoteUnitController';
+import { ensureSshKey } from '../infrastructure/remote/SshClient';
 import { isRunningInDocker } from '../infrastructure/runtime/docker';
 import { ProcessSupervisor, SupervisorEventBridge } from '../supervisor';
 import type { RestartManager } from './RestartManager';
@@ -55,6 +57,8 @@ export class AppService {
   public applicationManager: ApplicationManager;
   // Déploiement de dimotic-ha lui-même sur d'autres machines (⭐ 23/08/2026)
   private coreDeployService: CoreDeployService;
+  // Déploiement Home Assistant + Mosquitto sur une machine distante (⭐ 24/08/2026)
+  private haStackDeployService: HaStackDeployService;
   // ⭐ fonctionnelles-supervisor_specs v2.6 — applications tournant en process séparé (Phase 1 : espdisplay)
   private processSupervisor: ProcessSupervisor;
   private supervisorBridge: SupervisorEventBridge;
@@ -147,6 +151,7 @@ export class AppService {
     // Initialiser le gestionnaire d'applications
     this.applicationManager = new ApplicationManager(restartManager, logger, configService, this.processSupervisor);
     this.coreDeployService = new CoreDeployService(configService, this.applicationManager, logger);
+    this.haStackDeployService = new HaStackDeployService(logger);
 
     // Initialiser l'état WS depuis la config
     this.initializeWsState();
@@ -203,8 +208,18 @@ export class AppService {
     this.eventBus.on('core:deployment:target:save', (data: unknown) => this.handleDeploymentTargetSave(data as DeploymentTargetConfig));
     this.eventBus.on('core:deployment:target:delete', (data: unknown) => this.handleDeploymentTargetDelete(data as { id: string }));
     this.eventBus.on('core:deployment:remote-op', (data: unknown) => {
-      const { targetId, action } = data as { targetId: string; action: RemoteAction };
-      this.handleDeploymentRemoteOp(targetId, action);
+      const { targetId, action, version } = data as { targetId: string; action: RemoteAction; version?: string };
+      this.handleDeploymentRemoteOp(targetId, action, version);
+    });
+
+    // Déploiement Home Assistant + Mosquitto (⭐ nouveau 24/08/2026, voir HaStackDeployService.ts)
+    // — liste de cibles séparée de core:deployment:targets, même protocole sinon.
+    this.eventBus.on('core:deployment:ha-stack:targets:get', () => this.handleHaStackTargetsGet());
+    this.eventBus.on('core:deployment:ha-stack:target:save', (data: unknown) => this.handleHaStackTargetSave(data as HaStackTargetConfig));
+    this.eventBus.on('core:deployment:ha-stack:target:delete', (data: unknown) => this.handleHaStackTargetDelete(data as { id: string }));
+    this.eventBus.on('core:deployment:ha-stack:remote-op', (data: unknown) => {
+      const { targetId, action, version } = data as { targetId: string; action: RemoteAction; version?: string };
+      this.handleHaStackRemoteOp(targetId, action, version);
     });
 
     // Redémarrage manuel demandé depuis l'UI (Paramètres Techniques > Journalisation)
@@ -269,6 +284,13 @@ export class AppService {
 
     // 2. Charger et valider la configuration
     await this.loadAndValidateConfig();
+
+    // 2.1. Génère la clé SSH de chaque cible de déploiement déjà configurée, si absente (⭐
+    // 24/08/2026) — core ne redémarre pas sur son propre changement de config (contrairement aux
+    // apps), donc handleDeploymentTargetSave() appelle aussi ensureSshKey immédiatement pour ne
+    // pas dépendre uniquement de ce passage au démarrage.
+    this.ensureDeploymentTargetSshKeys();
+    this.ensureHaStackTargetSshKeys();
 
     // 3. Émettre la liste des modules vers l'UI
     this.eventBus.emit('app:modules:registered', { modules: this.modules });
@@ -661,6 +683,7 @@ export class AppService {
     this.eventBus.emit('core:deployment:targets:list', {
       targets: this.configService.getTargets().map((t) => ({ id: t.id, host: t.host })),
       isRunningInDocker: isRunningInDocker(),
+      projectRoot: process.env.PROJECT_ROOT || process.cwd(),
     });
   }
 
@@ -674,7 +697,16 @@ export class AppService {
     if (!result.success) {
       this.logger.error('AppService', `Échec de sauvegarde de la cible de déploiement ${target.id}: ${result.error}`);
     }
+    ensureSshKey('core', target.id, target.sshKeyPath);
     this.handleDeploymentTargetsGet();
+  }
+
+  /** Génère la clé SSH de chaque cible de déploiement déjà configurée si elle n'existe pas encore
+   *  (⭐ 24/08/2026) — voir le commentaire équivalent dans rpigpio/RpigpioService.ts. */
+  private ensureDeploymentTargetSshKeys(): void {
+    for (const target of this.configService.getTargets()) {
+      ensureSshKey('core', target.id, target.sshKeyPath);
+    }
   }
 
   private handleDeploymentTargetDelete(data: { id: string }): void {
@@ -690,7 +722,7 @@ export class AppService {
    * Point d'entrée unique pour toute intervention distante sur une cible de déploiement de
    * dimotic-ha — même protocole { targetId, action } que rpigpio/teleinfo/arexx.
    */
-  private async handleDeploymentRemoteOp(targetId: string, action: RemoteAction): Promise<void> {
+  private async handleDeploymentRemoteOp(targetId: string, action: RemoteAction, version?: string): Promise<void> {
     const target = this.configService.getTargets().find((t) => t.id === targetId);
     if (!target) {
       this.eventBus.emit('core:deployment:remote-op:result', {
@@ -704,7 +736,7 @@ export class AppService {
 
     try {
       const result = await (action === 'deploy'
-        ? this.coreDeployService.deploy(target)
+        ? this.coreDeployService.deploy(target, version)
         : action === 'start'
         ? this.coreDeployService.start(target)
         : action === 'stop'
@@ -715,6 +747,86 @@ export class AppService {
       this.eventBus.emit('core:deployment:remote-op:result', { targetId, action, ...result });
     } catch (error) {
       this.eventBus.emit('core:deployment:remote-op:result', {
+        targetId,
+        action,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // ===========================================================================
+  // DÉPLOIEMENT HOME ASSISTANT + MOSQUITTO (⭐ nouveau 24/08/2026, voir HaStackDeployService.ts)
+  // ===========================================================================
+
+  private handleHaStackTargetsGet(): void {
+    this.eventBus.emit('core:deployment:ha-stack:targets:list', {
+      targets: this.configService.getHaStackTargets().map((t) => ({ id: t.id, host: t.host })),
+      isRunningInDocker: isRunningInDocker(),
+      projectRoot: process.env.PROJECT_ROOT || process.cwd(),
+    });
+  }
+
+  private handleHaStackTargetSave(target: HaStackTargetConfig): void {
+    const targets = this.configService.getHaStackTargets();
+    const index = targets.findIndex((t) => t.id === target.id);
+    if (index === -1) targets.push(target);
+    else targets[index] = target;
+
+    const result = this.configService.setHaStackTargets(targets);
+    if (!result.success) {
+      this.logger.error('AppService', `Échec de sauvegarde de la cible HA+Mosquitto ${target.id}: ${result.error}`);
+    }
+    ensureSshKey('core', target.id, target.sshKeyPath);
+    this.handleHaStackTargetsGet();
+  }
+
+  private handleHaStackTargetDelete(data: { id: string }): void {
+    const targets = this.configService.getHaStackTargets().filter((t) => t.id !== data.id);
+    const result = this.configService.setHaStackTargets(targets);
+    if (!result.success) {
+      this.logger.error('AppService', `Échec de suppression de la cible HA+Mosquitto ${data.id}: ${result.error}`);
+    }
+    this.handleHaStackTargetsGet();
+  }
+
+  /** Génère la clé SSH de chaque cible HA+Mosquitto déjà configurée si elle n'existe pas encore
+   *  (⭐ 24/08/2026) — voir le commentaire équivalent dans rpigpio/RpigpioService.ts. */
+  private ensureHaStackTargetSshKeys(): void {
+    for (const target of this.configService.getHaStackTargets()) {
+      ensureSshKey('core', target.id, target.sshKeyPath);
+    }
+  }
+
+  /**
+   * Point d'entrée unique pour toute intervention distante sur une cible HA+Mosquitto — même
+   * protocole { targetId, action, version? } que core:deployment:remote-op.
+   */
+  private async handleHaStackRemoteOp(targetId: string, action: RemoteAction, version?: string): Promise<void> {
+    const target = this.configService.getHaStackTargets().find((t) => t.id === targetId);
+    if (!target) {
+      this.eventBus.emit('core:deployment:ha-stack:remote-op:result', {
+        targetId,
+        action,
+        success: false,
+        error: `Cible introuvable: ${targetId}`,
+      });
+      return;
+    }
+
+    try {
+      const result = await (action === 'deploy'
+        ? this.haStackDeployService.deploy(target, version)
+        : action === 'start'
+        ? this.haStackDeployService.start(target)
+        : action === 'stop'
+        ? this.haStackDeployService.stop(target)
+        : action === 'restart'
+        ? this.haStackDeployService.restart(target)
+        : Promise.resolve({ success: false, error: `Action distante inconnue: ${action}` }));
+      this.eventBus.emit('core:deployment:ha-stack:remote-op:result', { targetId, action, ...result });
+    } catch (error) {
+      this.eventBus.emit('core:deployment:ha-stack:remote-op:result', {
         targetId,
         action,
         success: false,

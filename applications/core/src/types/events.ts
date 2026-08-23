@@ -80,8 +80,12 @@ export interface ServerToClientEvents {
   'app:restart:result': (data: { success: boolean; error?: string }) => void;
 
   // Déploiement de dimotic-ha lui-même (⭐ 23/08/2026, voir CoreDeployService.ts)
-  'core:deployment:targets:list': (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean }) => void;
+  'core:deployment:targets:list': (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => void;
   'core:deployment:remote-op:result': (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => void;
+
+  // Déploiement Home Assistant + Mosquitto (⭐ nouveau 24/08/2026, voir HaStackDeployService.ts)
+  'core:deployment:ha-stack:targets:list': (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => void;
+  'core:deployment:ha-stack:remote-op:result': (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => void;
 }
 
 // ------ Événements Client → Server ------
@@ -128,7 +132,13 @@ export interface ClientToServerEvents {
   'core:deployment:targets:get': () => void;
   'core:deployment:target:save': (data: unknown) => void;
   'core:deployment:target:delete': (data: { id: string }) => void;
-  'core:deployment:remote-op': (data: { targetId: string; action: string }) => void;
+  'core:deployment:remote-op': (data: { targetId: string; action: string; version?: string }) => void;
+
+  // Déploiement Home Assistant + Mosquitto (⭐ 24/08/2026, voir HaStackDeployService.ts)
+  'core:deployment:ha-stack:targets:get': () => void;
+  'core:deployment:ha-stack:target:save': (data: unknown) => void;
+  'core:deployment:ha-stack:target:delete': (data: { id: string }) => void;
+  'core:deployment:ha-stack:remote-op': (data: { targetId: string; action: string; version?: string }) => void;
 }
 
 // ============================================================================
@@ -187,11 +197,19 @@ export interface AppEvents {
 
   // Déploiement de dimotic-ha lui-même (⭐ 23/08/2026, voir CoreDeployService.ts)
   'core:deployment:targets:get': void;
-  'core:deployment:targets:list': { targets: { id: string; host: string }[]; isRunningInDocker: boolean };
+  'core:deployment:targets:list': { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string };
   'core:deployment:target:save': unknown;
   'core:deployment:target:delete': { id: string };
-  'core:deployment:remote-op': { targetId: string; action: string };
+  'core:deployment:remote-op': { targetId: string; action: string; version?: string };
   'core:deployment:remote-op:result': { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string };
+
+  // Déploiement Home Assistant + Mosquitto (⭐ 24/08/2026, voir HaStackDeployService.ts)
+  'core:deployment:ha-stack:targets:get': void;
+  'core:deployment:ha-stack:targets:list': { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string };
+  'core:deployment:ha-stack:target:save': unknown;
+  'core:deployment:ha-stack:target:delete': { id: string };
+  'core:deployment:ha-stack:remote-op': { targetId: string; action: string; version?: string };
+  'core:deployment:ha-stack:remote-op:result': { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string };
 
   // ------ Extension libre par les applications ------
   // Les applications dérivées peuvent ajouter leurs propres événements

@@ -59,6 +59,9 @@ export interface ArexxStatus {
    *  Affecte le texte de la page Déploiement (préparation de l'accès SSH, §5.4bis) : la clé générée doit
    *  se trouver là où le conteneur peut la relire ensuite, pas seulement sur l'hôte. */
   isRunningInDocker: boolean;
+  /** Racine réelle du projet (process.env.PROJECT_ROOT) — utilisée pour le `cd` préalable à
+   *  ssh-copy-id hors Docker sur la page Déploiement (TargetCards.js, ⭐ 24/08/2026). */
+  projectRoot: string;
   /** Émetteurs USB pilotables à distance (⭐ multi-cible 23/08/2026) — voir ArexxDeployService.ts. */
   targets: { id: string; host: string }[];
 }

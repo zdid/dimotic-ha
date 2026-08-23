@@ -16,6 +16,7 @@
 import {
   runSsh,
   shellQuote,
+  ensureSshKey,
   DockerContainerController,
   type Logger,
   type RemoteOpResult,
@@ -29,24 +30,31 @@ export interface DeployResult {
   output?: string;
 }
 
+const APP_ID = 'rpigpio';
 const unitController = new DockerContainerController();
+
+/** Résout le chemin de clé effectif (génère la clé si absente) avant toute opération SSH — voir
+ *  ensureSshKey (core/infrastructure/remote/SshClient.ts). */
+function resolveTarget(target: RpigpioTargetConfig): RpigpioTargetConfig {
+  return { ...target, sshKeyPath: ensureSshKey(APP_ID, target.id, target.sshKeyPath) };
+}
 
 export class DeployService {
   constructor(private readonly logger: Logger) {}
 
   /** Démarre le conteneur sur la machine cible (docker start). */
   start(target: RpigpioTargetConfig): Promise<RemoteOpResult> {
-    return unitController.start(target, target.containerName);
+    return unitController.start(resolveTarget(target), target.containerName);
   }
 
   /** Arrête le conteneur sur la machine cible (docker stop). */
   stop(target: RpigpioTargetConfig): Promise<RemoteOpResult> {
-    return unitController.stop(target, target.containerName);
+    return unitController.stop(resolveTarget(target), target.containerName);
   }
 
   /** Redémarre le conteneur sur la machine cible (docker restart) sans réappliquer la config. */
   restart(target: RpigpioTargetConfig): Promise<RemoteOpResult> {
-    return unitController.restart(target, target.containerName);
+    return unitController.restart(resolveTarget(target), target.containerName);
   }
 
   /** Écrit un fichier sur la machine cible (tee, écrase l'existant, crée le répertoire au besoin). */
@@ -66,10 +74,11 @@ export class DeployService {
    * (docker compose up -d — crée au premier déploiement, sans effet sinon) puis force un
    * redémarrage pour que le nouveau config.yml soit effectivement relu.
    */
-  async deploy(target: RpigpioTargetConfig, mqttIoConfigYaml: string, composeYaml: string): Promise<DeployResult> {
-    if (!target.host) {
+  async deploy(rawTarget: RpigpioTargetConfig, mqttIoConfigYaml: string, composeYaml: string): Promise<DeployResult> {
+    if (!rawTarget.host) {
       return { success: false, step: 'write-config', error: 'Aucun hôte cible configuré (target.host)' };
     }
+    const target = resolveTarget(rawTarget);
 
     const configPath = `${target.hostDir}/config.yml`;
     const composePath = `${target.hostDir}/compose.yaml`;

@@ -28,13 +28,14 @@ function init(): void {
     }
   });
 
-  socket.on('arexx:status', (status: { isRunningInDocker: boolean; targets: { id: string; host: string }[] }) => {
+  socket.on('arexx:status', (status: { isRunningInDocker: boolean; projectRoot: string; targets: { id: string; host: string }[] }) => {
     const container = document.getElementById('targets-container');
     if (container) {
       renderTargetCards(container, {
         appId: 'arexx',
         targets: status.targets,
         isRunningInDocker: status.isRunningInDocker,
+        projectRoot: status.projectRoot,
         onAction: (targetId: string, action: RemoteAction) => {
           socket.emit('arexx:remote-op', { targetId, action });
         }

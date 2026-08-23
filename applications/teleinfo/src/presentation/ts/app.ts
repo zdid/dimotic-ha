@@ -25,6 +25,7 @@ interface TeleinfoStatus {
   compteursCount: number;
   targets: { id: string; host: string; serviceName: string }[];
   isRunningInDocker: boolean;
+  projectRoot: string;
   agentOnline: boolean | null;
   agentLastSeenAt: string | null;
 }
@@ -109,6 +110,7 @@ function updateStatusDisplay(status: TeleinfoStatus): void {
       appId: 'teleinfo',
       targets: status.targets,
       isRunningInDocker: status.isRunningInDocker,
+      projectRoot: status.projectRoot,
       onAction: (targetId: string, action: RemoteAction) => {
         socket?.emit('teleinfo:remote-op', { targetId, action });
       }

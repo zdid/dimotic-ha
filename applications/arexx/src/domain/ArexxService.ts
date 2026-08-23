@@ -12,7 +12,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData, RemoteAction } from '../../../core/dist/exports';
-import { generateRandomBridgeInstance, isRunningInDocker } from '../../../core/dist/exports';
+import { generateRandomBridgeInstance, isRunningInDocker, ensureSshKey } from '../../../core/dist/exports';
 import { arexxConfigSchema, type ArexxConfig } from './config-schema';
 import type { ArexxSensorsConfigFile } from './devices-config-schema';
 import type { ArexxRawReading, ArexxSensorInfo, ArexxStatus } from './types';
@@ -90,6 +90,7 @@ export class ArexxService implements IArexxService {
     this.sensorRegistry.loadConfigured(this.sensorsConfig.arexx_sensors as Record<string, ArexxSensorInfo>);
 
     ensureDriversBundle(this.config, this.logger);
+    this.ensureTargetSshKeys();
 
     this.setupSocketEventListeners();
 
@@ -256,6 +257,7 @@ export class ArexxService implements IArexxService {
       lastReadingAt: this.lastReadingAt,
       httpservPort: this.config.httpservPort,
       isRunningInDocker: isRunningInDocker(),
+      projectRoot: process.env.PROJECT_ROOT || process.cwd(),
       targets: this.config.targets.map((t) => ({ id: t.id, host: t.host }))
     };
   }
@@ -326,6 +328,14 @@ export class ArexxService implements IArexxService {
 
   private emitDriverTarget(): void {
     this.eventBus.emitGeneric('arexx:driver-target', readDriverTarget(this.config));
+  }
+
+  /** Génère la clé SSH de chaque émetteur configuré si elle n'existe pas encore (⭐ 24/08/2026) —
+   *  voir le commentaire équivalent dans rpigpio/RpigpioService.ts. */
+  private ensureTargetSshKeys(): void {
+    for (const target of this.config.targets) {
+      ensureSshKey('arexx', target.id, target.sshKeyPath);
+    }
   }
 
   /**

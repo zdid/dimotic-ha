@@ -1,9 +1,10 @@
 /**
- * TargetCards — rendu mutualisé d'une liste de cibles distantes (rpigpio/teleinfo/arexx, ⭐
- * 23/08/2026) : une carte par cible, avec les instructions de préparation SSH (ssh-keygen +
- * ssh-copy-id, adaptées si l'instance tourne dans un conteneur Docker) et 4 boutons
- * (Déployer/Démarrer/Arrêter/Redémarrer). Servi en `/js/ts/components/TargetCards.js` (voir
- * core/src/presentation/ui/tsconfig.ui.json), consommé via ce chemin par les 3 apps.
+ * TargetCards — rendu mutualisé d'une liste de cibles distantes (rpigpio/teleinfo/arexx/core, ⭐
+ * 23/08/2026) : une carte par cible, avec l'instruction `ssh-copy-id` (clé déjà générée
+ * automatiquement, ⭐ 24/08/2026 — voir `ensureSshKey`), adaptée si l'instance tourne dans un
+ * conteneur Docker, et 4 boutons (Déployer/Démarrer/Arrêter/Redémarrer). Servi en
+ * `/js/ts/components/TargetCards.js` (voir core/src/presentation/ui/tsconfig.ui.json), consommé
+ * via ce chemin par les 3 apps ; utilisé en import relatif direct par `core` lui-même.
  *
  * Ne connaît rien de Socket.io ni de la façon dont chaque app obtient sa connexion (rpigpio/
  * teleinfo : dashboard Shadow DOM, `window.app.socketService` ; arexx : page autonome,
@@ -31,6 +32,10 @@ export interface RenderTargetCardsOptions {
   appId: string;
   targets: TargetSummary[];
   isRunningInDocker: boolean;
+  /** Racine réelle du projet sur l'hôte (`process.env.PROJECT_ROOT`), utilisée pour le `cd`
+   *  préalable à `ssh-copy-id` hors Docker — le chemin de clé affiché est relatif (`data/...`), il
+   *  ne se résout correctement que depuis ce répertoire. */
+  projectRoot: string;
   onAction: (targetId: string, action: RemoteAction) => void;
   /** Optionnel — affiche un bouton "Supprimer" par carte s'il est fourni. Pas utilisé par
    *  rpigpio/teleinfo/arexx (suppression déjà possible via le formulaire générique `type:'array'`,
@@ -58,7 +63,7 @@ function findCard(container: HTMLElement, targetId: string): HTMLElement | undef
 }
 
 export function renderTargetCards(container: HTMLElement, options: RenderTargetCardsOptions): void {
-  const { appId, targets, isRunningInDocker, onAction, onDelete } = options;
+  const { appId, targets, isRunningInDocker, projectRoot, onAction, onDelete } = options;
 
   if (targets.length === 0) {
     container.innerHTML = '<div class="empty">Aucune cible configurée — ajouter une cible dans les paramètres de l\'application.</div>';
@@ -68,9 +73,15 @@ export function renderTargetCards(container: HTMLElement, options: RenderTargetC
   container.innerHTML = targets.map((target) => {
     const keyPath = `data/${appId}/ssh/${escapeHtml(target.id)}/id_ed25519`;
     const hostLabel = escapeHtml(target.host || '<hôte>');
+    // ⭐ 24/08/2026 : la clé est désormais générée automatiquement par l'application au démarrage
+    // (ensureSshKey) — plus de ssh-keygen à lancer soi-même, seul ssh-copy-id reste manuel
+    // (interactif, mot de passe). `cd` explicite : le chemin de clé affiché est relatif, il ne se
+    // résout que depuis la racine du projet — `/app` dans le conteneur (WORKDIR, data/ y est monté
+    // sur /app/data), sinon la vraie racine hôte transmise par le serveur.
     const dockerHint = isRunningInDocker
-      ? `<div class="target-docker-hint">⚠️ Cette instance tourne dans un conteneur Docker — la clé générée doit être lisible par ce conteneur. Ouvrir d'abord un terminal <strong>dans</strong> le conteneur :<pre>docker exec -it &lt;nom du conteneur&gt; bash</pre></div>`
+      ? `<div class="target-docker-hint">⚠️ Cette instance tourne dans un conteneur Docker — la clé (déjà générée automatiquement) doit être lisible par ce conteneur. Ouvrir d'abord un terminal <strong>dans</strong> le conteneur :<pre>docker exec -it &lt;nom du conteneur&gt; bash</pre></div>`
       : '';
+    const cdCommand = isRunningInDocker ? 'cd /app' : `cd ${escapeHtml(projectRoot)}`;
 
     const deleteButton = onDelete ? `<button type="button" class="target-delete" data-delete="1">🗑️ Supprimer</button>` : '';
 
@@ -79,9 +90,9 @@ export function renderTargetCards(container: HTMLElement, options: RenderTargetC
         <h4>${escapeHtml(target.id)} <span class="target-host">(${escapeHtml(target.host || '—')})</span></h4>
         ${deleteButton}
         <details class="target-ssh-prep">
-          <summary>Préparer l'accès SSH (une fois par cible)</summary>
+          <summary>Copier la clé sur la cible (une fois par cible)</summary>
           ${dockerHint}
-          <pre>ssh-keygen -t ed25519 -f ${keyPath} -N "" -q
+          <pre>${cdCommand}
 ssh-copy-id -i ${keyPath}.pub root@${hostLabel}</pre>
         </details>
         <div class="target-actions">

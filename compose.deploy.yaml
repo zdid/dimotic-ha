@@ -23,11 +23,17 @@
 # chaque réglage (network_mode: host, privileged + volume /dev pour RFXCOM — voir
 # techniques-socle-ha-mqtt_specs §11) : ce fichier reprend exactement la même
 # configuration de service, seule la source de l'image change.
+#
+# DIMOTIC_TAG (⭐ 24/08/2026) : tag Docker Hub à déployer, ex. `DIMOTIC_TAG=2.1.0
+# docker compose pull && DIMOTIC_TAG=2.1.0 docker compose up -d` — non défini ou
+# vide, retombe sur `latest` (interpolation Docker Compose standard). Piloté
+# automatiquement par CoreDeployService.ts (champ "Version" de la page Déploiement)
+# quand ce fichier est déployé via l'IHM plutôt qu'à la main.
 # =============================================================================
 
 services:
   app:
-    image: zdid2/dimotic-ha:latest
+    image: zdid2/dimotic-ha:${DIMOTIC_TAG:-latest}
     container_name: dimotic-ha
     restart: unless-stopped
 

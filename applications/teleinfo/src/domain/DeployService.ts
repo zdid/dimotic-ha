@@ -20,11 +20,20 @@ import {
   runSsh,
   runScp,
   shellQuote,
+  ensureSshKey,
   SystemdUnitController,
   type Logger,
   type RemoteOpResult,
 } from '../../../core/dist/exports';
 import type { TeleinfoTargetConfig } from './config-schema';
+
+const APP_ID = 'teleinfo';
+
+/** Résout le chemin de clé effectif (génère la clé si absente) avant toute opération SSH — voir
+ *  ensureSshKey (core/infrastructure/remote/SshClient.ts). */
+function resolveTarget(target: TeleinfoTargetConfig): TeleinfoTargetConfig {
+  return { ...target, sshKeyPath: ensureSshKey(APP_ID, target.id, target.sshKeyPath) };
+}
 
 export interface DeployResult {
   success: boolean;
@@ -54,23 +63,24 @@ export class DeployService {
 
   /** Démarre le service systemd sur la machine cible. */
   start(target: TeleinfoTargetConfig): Promise<RemoteOpResult> {
-    return unitController.start(target, target.serviceName);
+    return unitController.start(resolveTarget(target), target.serviceName);
   }
 
   /** Arrête le service systemd sur la machine cible. */
   stop(target: TeleinfoTargetConfig): Promise<RemoteOpResult> {
-    return unitController.stop(target, target.serviceName);
+    return unitController.stop(resolveTarget(target), target.serviceName);
   }
 
   /** Redémarre le service systemd sur la machine cible sans réappliquer la config/l'agent. */
   restart(target: TeleinfoTargetConfig): Promise<RemoteOpResult> {
-    return unitController.restart(target, target.serviceName);
+    return unitController.restart(resolveTarget(target), target.serviceName);
   }
 
-  async deploy(target: TeleinfoTargetConfig, agentConfigYaml: string): Promise<DeployResult> {
-    if (!target.host) {
+  async deploy(rawTarget: TeleinfoTargetConfig, agentConfigYaml: string): Promise<DeployResult> {
+    if (!rawTarget.host) {
       return { success: false, step: 'copy-agent', error: 'Aucun hôte cible configuré (target.host)' };
     }
+    const target = resolveTarget(rawTarget);
 
     const mkdir = await runSsh(target, `mkdir -p ${shellQuote(target.remoteDir)}`);
     if (!mkdir.success) return { success: false, step: 'copy-agent', error: mkdir.error };

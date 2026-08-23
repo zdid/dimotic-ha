@@ -28,6 +28,7 @@ interface RpigpioStatus {
   pinsCount: number;
   targets: { id: string; host: string; containerName: string }[];
   isRunningInDocker: boolean;
+  projectRoot: string;
   agentOnline: boolean | null;
   agentLastSeenAt: string | null;
 }
@@ -109,6 +110,7 @@ function updateStatusDisplay(status: RpigpioStatus): void {
       appId: 'rpigpio',
       targets: status.targets,
       isRunningInDocker: status.isRunningInDocker,
+      projectRoot: status.projectRoot,
       onAction: (targetId: string, action: RemoteAction) => {
         socket?.emit('rpigpio:remote-op', { targetId, action });
       }

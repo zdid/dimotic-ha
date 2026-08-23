@@ -16,7 +16,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, RemoteAction } from '../../../core/dist/exports';
-import { generateRandomBridgeInstance, MqttTransport, isRunningInDocker } from '../../../core/dist/exports';
+import { generateRandomBridgeInstance, MqttTransport, isRunningInDocker, ensureSshKey } from '../../../core/dist/exports';
 import { rpigpioConfigSchema, type RpigpioConfig } from './config-schema';
 import { pinsConfigSchema, DEFAULT_PINS_CONFIG, type PinDefinition, type PinsConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
@@ -30,6 +30,9 @@ export interface RpigpioStatus {
   /** true si CETTE instance tourne dans un conteneur Docker — voir core/infrastructure/runtime/docker.ts.
    *  Affecte le texte de préparation SSH affiché par cible (TargetCards.js). */
   isRunningInDocker: boolean;
+  /** Racine réelle du projet (process.env.PROJECT_ROOT) — utilisée pour le `cd` préalable à
+   *  ssh-copy-id hors Docker sur la page Déploiement (TargetCards.js, ⭐ 24/08/2026). */
+  projectRoot: string;
   /** Présence de l'agent mqtt-io distant — null tant qu'aucun message n'a encore été reçu du
    *  topic status (ni "running" ni "dead" retenu). */
   agentOnline: boolean | null;
@@ -111,10 +114,21 @@ export class RpigpioService implements IRpigpioService {
 
   async start(): Promise<void> {
     this.logger.info('RpigpioService', 'Démarrage du service rpigpio...');
+    this.ensureTargetSshKeys();
     this.connectAgentPresence();
     this.emitStatus();
     this.emitPins();
     this.logger.info('RpigpioService', 'Service rpigpio démarré');
+  }
+
+  /** Génère la clé SSH de chaque cible configurée si elle n'existe pas encore (⭐ 24/08/2026,
+   *  demande explicite : plus besoin de lancer ssh-keygen soi-même). rpigpio redémarre déjà
+   *  automatiquement après toute sauvegarde de config (spec socle §4.3) — suffisant pour couvrir
+   *  une cible tout juste ajoutée, sans hook de sauvegarde dédié. */
+  private ensureTargetSshKeys(): void {
+    for (const target of this.config.targets) {
+      ensureSshKey('rpigpio', target.id, target.sshKeyPath);
+    }
   }
 
   async stop(): Promise<void> {
@@ -284,6 +298,7 @@ export class RpigpioService implements IRpigpioService {
       pinsCount: this.pins.length,
       targets: this.config.targets.map((t) => ({ id: t.id, host: t.host, containerName: t.containerName })),
       isRunningInDocker: isRunningInDocker(),
+      projectRoot: process.env.PROJECT_ROOT || process.cwd(),
       agentOnline: this.agentOnline,
       agentLastSeenAt: this.agentLastSeenAt
     };
