@@ -3,7 +3,7 @@ import type { Logger } from '../../../core/dist/infrastructure/logger/index';
 import type { IAppConfigProvider } from '../../../core/dist/infrastructure/config/IAppConfigProvider';
 import type { HaStructuredEntity } from '../../../core/dist/ha/types/ha-entity';
 import type { HaArea, HaDevice, HaQuoiDefinition } from '../../../core/dist/ha/types/ha-structure';
-import type { HaStructureRegistry } from '../../../core/dist/ha/sync/HaStructureRegistry';
+import type { HaBridgeClient } from '../../../core/dist/application/HaBridgeClient';
 import { arbreouquoiConfigSchema, type ArbreouquoiConfig } from './config-schema';
 import type {
   OuNode,
@@ -38,8 +38,10 @@ export class ArbreouquoiService {
     private eventBus: IEventBus,
     private logger: Logger,
     private configService: IAppConfigProvider<ArbreouquoiConfig>,
-    /** Absent si ha.ws_enable=false — le référentiel structuré n'existe alors pas du tout. */
-    private haStructureRegistry: HaStructureRegistry | undefined
+    /** Façade générique vers le référentiel HA détenu par `core` (⭐ 24/08/2026, voir
+     *  HaBridgeClient.ts) — plus de HaStructureRegistry en direct depuis la migration en process
+     *  séparé. isAvailable() reflète ha.ws_enable=false côté core, même état normal qu'avant. */
+    private haBridgeClient: HaBridgeClient
   ) {
     this.setupEventListeners();
   }
@@ -54,34 +56,18 @@ export class ArbreouquoiService {
   }
 
   /**
-   * Accès au référentiel structuré avec message d'erreur clair s'il est absent (ha.ws_enable=false)
-   * plutôt qu'un "Cannot read properties of undefined" cryptique — les appelants sont déjà dans un
-   * try/catch qui convertit l'exception en événement ARBREOUQUOI_SOCKET_EVENTS.ERROR côté client.
+   * Accès au bridge avec message d'erreur clair s'il n'est pas disponible (ha.ws_enable=false côté
+   * core) plutôt qu'un échec cryptique plus loin — les appelants sont déjà dans un try/catch qui
+   * convertit l'exception en événement ARBREOUQUOI_SOCKET_EVENTS.ERROR côté client. Le
+   * sanitizing device/area (cycle HaStructuredEntity.device.entities, cf. historique) est
+   * désormais fait une fois pour toutes côté core (HaQueryBridge) avant de traverser l'IPC — plus
+   * besoin de le refaire ici.
    */
-  private requireRegistry(): HaStructureRegistry {
-    if (!this.haStructureRegistry) {
+  private requireBridge(): HaBridgeClient {
+    if (!this.haBridgeClient.isAvailable()) {
       throw new Error('Référentiel HA indisponible (ha.ws_enable=false)');
     }
-    return this.haStructureRegistry;
-  }
-
-  /**
-   * `HaStructuredEntity.device`/`.area` (peuplés par `HaStructureRegistry`) sont des références
-   * d'objets complets, pas de simples ID — `device.entities`/`area.entities` pointent en retour
-   * vers cette même entité (et toutes ses "sœurs") : un graphe réellement circulaire. Envoyée
-   * telle quelle sur le socket, cette structure fait boucler indéfiniment `socket.io-parser`
-   * (`hasBinary`, qui parcourt tout objet sans détection de cycle contrairement à
-   * `JSON.stringify`) — `RangeError: Maximum call stack size exceeded`, jamais atteint le
-   * client. On ne garde que les champs id/name réellement utiles côté UI.
-   */
-  private sanitizeEntity(entity: HaStructuredEntity): HaStructuredEntity {
-    const device = entity.device as { device_id?: string; name?: string } | undefined;
-    const area = entity.area as { area_id?: string; name?: string } | undefined;
-    return {
-      ...entity,
-      device: device ? { device_id: device.device_id, name: device.name } : undefined,
-      area: area ? { area_id: area.area_id, name: area.name } : undefined
-    };
+    return this.haBridgeClient;
   }
 
   // ⭐ OBLIGATOIRE : Méthode start() asynchrone
@@ -96,7 +82,8 @@ export class ArbreouquoiService {
       // Le référentiel structuré n'existe que si ha.ws_enable=true (voir techniques-socle-ha-mqtt_specs
       // §8.1) — arbreouquoi en dépend entièrement (requiredHaWs: true), mais son absence est un état
       // normal (WS désactivé), pas une erreur : on le signale proprement plutôt que de planter.
-      if (!this.haStructureRegistry) {
+      await this.haBridgeClient.start();
+      if (!this.haBridgeClient.isAvailable()) {
         this.logger.warn('ArbreouquoiService',
           'Référentiel HA indisponible (ha.ws_enable=false) — Arbre Où Quoi ne peut pas fonctionner sans lui');
         this.emitStatus('error', 'Référentiel HA indisponible : activez ha.ws_enable pour utiliser cette application');
@@ -104,7 +91,7 @@ export class ArbreouquoiService {
         return;
       }
 
-      const entityCount = this.haStructureRegistry.getAllEntities().length;
+      const entityCount = this.haBridgeClient.getAllEntities().length;
       this.logger.info('ArbreouquoiService', `Référentiel HA initialisé avec ${entityCount} entités`);
 
       // Démarrer le rafraîchissement automatique si activé
@@ -280,7 +267,7 @@ export class ArbreouquoiService {
 
   private emitStats(): void {
     try {
-      const allEntities = this.requireRegistry().getAllEntities();
+      const allEntities = this.requireBridge().getAllEntities();
       const ouPaths = new Set<string>();
       for (const entity of allEntities) {
         const path = this.extractOuSegments(entity).map(s => s.id).join('/');
@@ -315,8 +302,8 @@ export class ArbreouquoiService {
   // ============ BUILD OÙ-FIRST TREE ============
 
   private buildOuFirstTree(): OuFirstTree {
-    const allEntities = this.requireRegistry().getAllEntities().map(e => this.sanitizeEntity(e));
-    const catalog = this.requireRegistry().getQuoiCatalog();
+    const allEntities = this.requireBridge().getAllEntities();
+    const catalog = this.requireBridge().getQuoiCatalog();
 
     const entitiesWithOu: Array<{ entity: HaStructuredEntity; segments: OuSegment[] }> = [];
 
@@ -364,12 +351,12 @@ export class ArbreouquoiService {
   }
 
   private buildOuFirstTreeFiltered(filterOptions: FilterOptions): OuFirstTree {
-    const allEntities = this.requireRegistry().getAllEntities().map(e => this.sanitizeEntity(e));
+    const allEntities = this.requireBridge().getAllEntities();
     let filtered = filterOptions.showOnlyActive !== false
       ? allEntities.filter(e => e.state !== 'unavailable')
       : allEntities;
 
-    const catalog = this.requireRegistry().getQuoiCatalog();
+    const catalog = this.requireBridge().getQuoiCatalog();
     const entitiesWithOu: Array<{ entity: HaStructuredEntity; segments: OuSegment[] }> = [];
 
     for (const entity of filtered) {
@@ -408,8 +395,8 @@ export class ArbreouquoiService {
   // ============ BUILD QUOI-FIRST TREE ============
 
   private buildQuoiFirstTree(): QuoiFirstTree {
-    const allEntities = this.requireRegistry().getAllEntities().map(e => this.sanitizeEntity(e));
-    const catalog = this.requireRegistry().getQuoiCatalog();
+    const allEntities = this.requireBridge().getAllEntities();
+    const catalog = this.requireBridge().getQuoiCatalog();
 
     const quoiGroups: QuiGroupWithOu[] = [];
     const quoiMap = new Map<string, QuiGroupWithOu>();
@@ -447,12 +434,12 @@ export class ArbreouquoiService {
   }
 
   private buildQuoiFirstTreeFiltered(filterOptions: FilterOptions): QuoiFirstTree {
-    const allEntities = this.requireRegistry().getAllEntities().map(e => this.sanitizeEntity(e));
+    const allEntities = this.requireBridge().getAllEntities();
     let filtered = filterOptions.showOnlyActive !== false
       ? allEntities.filter(e => e.state !== 'unavailable')
       : allEntities;
 
-    const catalog = this.requireRegistry().getQuoiCatalog();
+    const catalog = this.requireBridge().getQuoiCatalog();
     const quoiGroups: QuiGroupWithOu[] = [];
     const quoiMap = new Map<string, QuiGroupWithOu>();
 
@@ -573,8 +560,8 @@ export class ArbreouquoiService {
   }
 
   private buildQuoiCatalog(): QuoiCatalogWithCounts[] {
-    const catalog = this.requireRegistry().getQuoiCatalog();
-    const allEntities = this.requireRegistry().getAllEntities();
+    const catalog = this.requireBridge().getQuoiCatalog();
+    const allEntities = this.requireBridge().getAllEntities();
     return catalog.map(quoiDef => {
       const entities = allEntities.filter(e => e.quoi_ids.includes(quoiDef.quoi_id));
       const paths = new Set<string>();
@@ -588,17 +575,15 @@ export class ArbreouquoiService {
 
   private emitEntityDetails(entityId: string): void {
     try {
-      const rawEntity = this.requireRegistry().getEntity(entityId);
-      if (!rawEntity) {
+      const entity = this.requireBridge().getEntity(entityId);
+      if (!entity) {
         this.eventBus.emit(ARBREOUQUOI_SOCKET_EVENTS.ERROR, { message: `Entité non trouvée: ${entityId}` });
         return;
       }
-      const entity = this.sanitizeEntity(rawEntity);
       const ouSegments = this.extractOuSegments(entity);
       const myPath = ouSegments.map(s => s.id).join('/');
-      const related = this.requireRegistry().getAllEntities()
-        .map(e => this.sanitizeEntity(e))
-        .filter(e => e.entity_id !== entityId)
+      const related = this.requireBridge().getAllEntities()
+                .filter(e => e.entity_id !== entityId)
         .filter(e => {
           const ePath = this.extractOuSegments(e).map(s => s.id).join('/');
           if (ePath === myPath) return true;
@@ -633,19 +618,16 @@ export class ArbreouquoiService {
 }
 
 /**
- * Factory à 4 paramètres : AppService.startApplicationService() détecte l'arité (factory.length)
- * et fournit haStructureRegistry en 4ème argument (undefined si ha.ws_enable=false — voir
- * requireRegistry() ci-dessus pour la gestion de cette absence).
- *
- * ⚠️ Avant ce correctif, cette factory n'existait qu'à 3 paramètres et castait `configProvider`
- * en `HaStructureRegistry` (`as unknown as HaStructureRegistry`) faute de mécanisme d'injection —
- * plantait immédiatement (`getAllEntities is not a function`) dès le premier accès au référentiel.
+ * Factory appelée par standalone.ts (⭐ 24/08/2026, app en process séparé — voir
+ * fonctionnelles-supervisor_specs) — reçoit un `HaBridgeClient` (façade générique vers le
+ * référentiel HA détenu par `core`) plutôt que `HaStructureRegistry` en direct, jamais transportable
+ * tel quel hors du process de `core`. `requireBridge()` gère l'indisponibilité (ha.ws_enable=false).
  */
 export function createArbreouquoiService(
   eventBus: IEventBus,
   logger: Logger,
   configProvider: IAppConfigProvider<ArbreouquoiConfig>,
-  haStructureRegistry: HaStructureRegistry | undefined
+  haBridgeClient: HaBridgeClient
 ): ArbreouquoiService {
-  return new ArbreouquoiService(eventBus, logger, configProvider, haStructureRegistry);
+  return new ArbreouquoiService(eventBus, logger, configProvider, haBridgeClient);
 }

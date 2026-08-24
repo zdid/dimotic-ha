@@ -2,8 +2,9 @@
  * Module principal de l'application planificateur.
  *
  * Scanné par AppService pour la détection automatique. Exporte PLANIFICATEUR_APP (métadonnées) et
- * createPlanificateurService (factory à 5 paramètres — reçoit HaStructureRegistry ET HaWsClient,
- * nécessaires pour résoudre et exécuter réellement les actions HA, voir AppService.ts).
+ * createPlanificateurService — reçoit un HaBridgeClient (⭐ 24/08/2026, façade générique vers le
+ * référentiel HA et les commandes détenus par `core`, voir HaBridgeClient.ts), nécessaire pour
+ * résoudre et exécuter réellement les actions HA.
  */
 
 import {
@@ -14,8 +15,7 @@ import {
   IAppConfigProvider,
   ConfigService,
   AppConfigProvider,
-  HaStructureRegistry,
-  HaWsClient
+  HaBridgeClient
 } from '../../../core/dist/exports';
 import { PLANIFICATEUR_ALL_EVENTS, PLANIFICATEUR_PERSISTENT_EVENTS } from './socket-events';
 import { PlanificateurService, type IPlanificateurService } from './PlanificateurService';
@@ -112,6 +112,10 @@ export const PLANIFICATEUR_APP: ApplicationModule & { menu?: ApplicationMenuConf
   configurable: true,
   requiredMqtt: false,
   requiredHaWs: true,
+  // ⭐ 24/08/2026 — migration en process séparé (découplage HaStructureRegistry/HaWsClient via
+  // HaBridgeClient, voir PlanificateurService.ts) : résout le redémarrage complet de core à la
+  // désactivation depuis Gestion des applications (superviseur Phase 2).
+  runsAsSeparateProcess: true,
   configSection: 'planificateur',
   configUi: PLANIFICATEUR_UI_METADATA,
   socketEvents: PLANIFICATEUR_ALL_EVENTS
@@ -125,10 +129,9 @@ export function createPlanificateurService(
   eventBus: IEventBus,
   logger: Logger,
   configProvider: IAppConfigProvider<PlanificateurConfig>,
-  haStructureRegistry?: HaStructureRegistry,
-  haWsClient?: HaWsClient
+  haBridgeClient: HaBridgeClient
 ): IPlanificateurService {
-  const service = PlanificateurService.create(eventBus, logger, configProvider, haStructureRegistry, haWsClient);
+  const service = PlanificateurService.create(eventBus, logger, configProvider, haBridgeClient);
 
   eventBus.emit('app:socket-events:registered', {
     appId: 'planificateur',
@@ -148,11 +151,10 @@ export function createPlanificateurServiceWithConfig(
   eventBus: IEventBus,
   logger: Logger,
   configService: ConfigService,
-  haStructureRegistry?: HaStructureRegistry,
-  haWsClient?: HaWsClient
+  haBridgeClient: HaBridgeClient
 ): IPlanificateurService {
   const configProvider = new AppConfigProvider<PlanificateurConfig>('planificateur', configService);
-  return createPlanificateurService(eventBus, logger, configProvider, haStructureRegistry, haWsClient);
+  return createPlanificateurService(eventBus, logger, configProvider, haBridgeClient);
 }
 
 // Exporter les composants

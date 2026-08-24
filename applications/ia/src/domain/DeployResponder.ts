@@ -12,7 +12,7 @@
  * processConversation — comportement correct, pas une erreur d'implémentation ici.
  */
 
-import type { Logger, IEventBus, HaStructureRegistry } from '../../../core/dist/exports';
+import type { Logger, IEventBus, HaBridgeClient } from '../../../core/dist/exports';
 import type { DeployRequest, DeployReply, ExecutionStep, OllamaMessage } from './types';
 import type { MistralClient } from './MistralClient';
 import { MISTRAL_PROMPT_CACHE_KEY } from './MistralClient';
@@ -31,7 +31,7 @@ export class DeployResponder {
     // — "d'où qu'ils viennent" (demande utilisateur, 12/08/2026) : ce chemin-ci (réinterprétation à
     // l'exécution, specs §10) produit aussi du JSON structuré, jamais vérifié jusqu'ici contre le
     // référentiel HA réel avant transmission à planificateur.
-    private readonly haStructureRegistry?: HaStructureRegistry
+    private readonly haBridgeClient: HaBridgeClient
   ) {}
 
   wire(): void {
@@ -95,7 +95,7 @@ export class DeployResponder {
     // Pas de boucle de relance ici (contrairement à IaService.runChatRounds) — DeployResponder est
     // un aller-retour unique, pas une boucle d'outils. Référence non vérifiée → on refuse plutôt
     // que d'exécuter une étape sur une entité inventée.
-    const problems = validateReferences(parsed, this.haStructureRegistry);
+    const problems = await validateReferences(parsed, this.haBridgeClient);
     if (problems.length > 0) {
       this.logger.warn('DeployResponder', `Référence(s) non vérifiée(s) dans la séquence produite (${problems.map((p) => p.detail).join(' | ')}) — refusée.`);
       // ⭐ invalidReferences=true (demande utilisateur, 12/08/2026) — distingue ce refus précis

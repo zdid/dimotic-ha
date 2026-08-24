@@ -14,7 +14,7 @@
  * (execution.ts, HaWsClient.processConversation) prend le relais.
  */
 
-import type { HaStructureRegistry } from '../../../core/dist/exports';
+import type { HaBridgeClient } from '../../../core/dist/exports';
 import type { ResolvedServiceCall } from './types';
 
 // Verbes sans valeur → services génériques HA (routent eux-mêmes vers le domaine réel de
@@ -64,24 +64,25 @@ function slugify(text: string): string {
  *  lieu_grand_pere), voir le graphe de lieux dans HaStructureRegistry (demande utilisateur
  *  10/08/2026, généralise le repli lieu_precis initial : "salon" comme "toilettes de l'étage"
  *  passent par le même mécanisme, sans que ce module ait à savoir à quel niveau chacun est codifié). */
-export function resolveEntityIds(
-  registry: HaStructureRegistry,
+export async function resolveEntityIds(
+  registry: HaBridgeClient,
   quoi: string,
   lieux: string[] = []
-): string[] {
+): Promise<string[]> {
   const quoiId = slugify(quoi);
-  return registry.getEntitiesByQuoiAndLieux(quoiId, lieux).map((e) => e.entity_id);
+  const entities = await registry.getEntitiesByQuoiAndLieux(quoiId, lieux);
+  return entities.map((e) => e.entity_id);
 }
 
 /** Résout une intention (verbe/quoi/lieux/valeur) en resolved_service_call, ou undefined. */
-export function resolveAction(
-  registry: HaStructureRegistry,
+export async function resolveAction(
+  registry: HaBridgeClient,
   verbe: string,
   quoi: string,
   lieux: string[] = [],
   valeur?: string | number
-): ResolvedServiceCall | undefined {
-  const entityIds = resolveEntityIds(registry, quoi, lieux);
+): Promise<ResolvedServiceCall | undefined> {
+  const entityIds = await resolveEntityIds(registry, quoi, lieux);
   if (entityIds.length === 0) return undefined;
 
   const normalizedVerb = normalizeVerb(verbe);

@@ -2,9 +2,11 @@
  * Module principal de l'application ia.
  *
  * Scanné par AppService pour la détection automatique. Exporte IA_APP (métadonnées) et
- * createIaService (factory à 5 paramètres — reçoit HaStructureRegistry pour résoudre localement
- * les outils de lecture, specs §1/§8 ; HaWsClient reçu mais non utilisé directement, ia n'exécute
- * jamais d'action elle-même — seul planificateur le fait, point d'exécution unique).
+ * createIaService — reçoit un HaBridgeClient (⭐ 24/08/2026, façade générique vers le référentiel
+ * HA détenu par `core`, voir HaBridgeClient.ts) pour résoudre localement les outils de lecture,
+ * specs §1/§8. `ia` n'exécute jamais d'action HA elle-même (seul `planificateur` le fait, point
+ * d'exécution unique) — HaBridgeClient.sendCommand/processConversation ne lui sont donc pas utiles,
+ * comme HaWsClient ne l'était déjà pas avant cette migration.
  */
 
 import {
@@ -15,8 +17,7 @@ import {
   IAppConfigProvider,
   ConfigService,
   AppConfigProvider,
-  HaStructureRegistry,
-  HaWsClient
+  HaBridgeClient
 } from '../../../core/dist/exports';
 import { IA_ALL_EVENTS, IA_PERSISTENT_EVENTS } from './socket-events';
 import { IaService, type IIaService } from './IaService';
@@ -132,6 +133,10 @@ export const IA_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   configurable: true,
   requiredMqtt: false,
   requiredHaWs: true,
+  // ⭐ 24/08/2026 — migration en process séparé (découplage HaStructureRegistry/HaWsClient via
+  // HaBridgeClient, voir IaService.ts) : résout le redémarrage complet de core à la désactivation
+  // depuis Gestion des applications (superviseur Phase 2).
+  runsAsSeparateProcess: true,
   configSection: 'ia',
   configUi: IA_UI_METADATA,
   socketEvents: IA_ALL_EVENTS
@@ -145,10 +150,9 @@ export function createIaService(
   eventBus: IEventBus,
   logger: Logger,
   configProvider: IAppConfigProvider<IaConfig>,
-  haStructureRegistry?: HaStructureRegistry,
-  haWsClient?: HaWsClient
+  haBridgeClient: HaBridgeClient
 ): IIaService {
-  const service = IaService.create(eventBus, logger, configProvider, haStructureRegistry, haWsClient);
+  const service = IaService.create(eventBus, logger, configProvider, haBridgeClient);
 
   eventBus.emit('app:socket-events:registered', {
     appId: 'ia',
@@ -168,11 +172,10 @@ export function createIaServiceWithConfig(
   eventBus: IEventBus,
   logger: Logger,
   configService: ConfigService,
-  haStructureRegistry?: HaStructureRegistry,
-  haWsClient?: HaWsClient
+  haBridgeClient: HaBridgeClient
 ): IIaService {
   const configProvider = new AppConfigProvider<IaConfig>('ia', configService);
-  return createIaService(eventBus, logger, configProvider, haStructureRegistry, haWsClient);
+  return createIaService(eventBus, logger, configProvider, haBridgeClient);
 }
 
 // Exporter les composants

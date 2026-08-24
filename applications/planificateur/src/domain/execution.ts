@@ -7,14 +7,16 @@
  * quelle.
  *
  * Exécution : pour chaque étape, résolution déterministe du service HA (resolution.ts, jamais
- * faite par Mistral) puis exécution directe via HaCommandService (chemin principal) ou repli sur
- * HaWsClient.processConversation (verbe non couvert par la table §7).
+ * faite par Mistral) puis exécution directe via HaBridgeClient.sendCommand (chemin principal,
+ * ⭐ 24/08/2026 remplace HaCommandService — retry/timeout déjà couverts par CorrelatedRequester
+ * côté IPC, pas besoin d'un service dédié en plus) ou repli sur
+ * HaBridgeClient.processConversation (verbe non couvert par la table §7).
  */
 
-import type { HaCommandService, HaStructureRegistry, HaWsClient, Logger, IEventBus } from '../../../core/dist/exports';
+import type { HaBridgeClient, Logger, IEventBus } from '../../../core/dist/exports';
+import { CorrelatedRequester } from '../../../core/dist/exports';
 import type { DeployContext, ExecutionStep, MacroDefinition, ResolvedServiceCall } from './types';
 import { resolveAction } from './resolution';
-import { CorrelatedRequester } from './correlation';
 import { PLANIFICATEUR_SOCKET_EVENTS } from './socket-events';
 
 interface DeployReply {
@@ -62,9 +64,7 @@ export class ExecutionEngine {
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
-    private readonly registry: HaStructureRegistry | undefined,
-    private readonly haCommandService: HaCommandService | undefined,
-    private readonly haWsClient: HaWsClient | undefined,
+    private readonly registry: HaBridgeClient,
     private readonly deployTimeoutMs: number
   ) {
     this.deployRequester = new CorrelatedRequester<DeployContext, DeployReply>(
@@ -103,7 +103,7 @@ export class ExecutionEngine {
       // du haut") partagent le même quoi générique, seul lieu_pere (étage/rez-de-chaussée) les
       // distingue. Permet à Mistral de résoudre lui-même vers le nom d'area réel avant même
       // d'appeler l'outil, plutôt que de transmettre un terme ambigu — voir regles_mistral.txt §4.
-      entities_snapshot: this.registry ? this.registry.getAllEntities().map((e) => ({
+      entities_snapshot: this.registry.isAvailable() ? this.registry.getAllEntities().map((e) => ({
         entity_id: e.entity_id,
         friendly_name: e.friendly_name,
         state: e.state,
@@ -193,31 +193,31 @@ export class ExecutionEngine {
 
   private async executeAction(step: ExecutionStep, trigger: string, triggeredByEntityId?: string, nextFireAt?: string): Promise<void> {
     const stepSummary = { verbe: step.verbe, quoi: step.quoi, lieux: step.lieux, valeur: step.valeur, order: step.order };
-    const resolved = this.registry && step.verbe && step.quoi
-      ? resolveAction(this.registry, step.verbe, step.quoi, step.lieux, step.valeur)
+    const resolved = this.registry.isAvailable() && step.verbe && step.quoi
+      ? await resolveAction(this.registry, step.verbe, step.quoi, step.lieux, step.valeur)
       : undefined;
 
-    if (resolved && this.haCommandService) {
+    if (resolved) {
       this.logger.info('ExecutionEngine', `Exécution directe: ${resolved.domain}.${resolved.service} → ${resolved.entity_id}`);
-      const result = await this.haCommandService.sendCommand({
-        entity_id: resolved.entity_id,
-        domain: resolved.domain,
-        service: resolved.service,
-        service_data: resolved.data
-      });
-      if (!result.success) {
-        this.logger.warn('ExecutionEngine', `Échec commande directe, pas de nouvelle tentative: ${result.error}`);
+      let success = true;
+      let error: string | undefined;
+      try {
+        await this.registry.sendCommand(resolved.domain, resolved.service, { entity_id: resolved.entity_id }, resolved.data);
+      } catch (err) {
+        success = false;
+        error = err instanceof Error ? err.message : String(err);
+        this.logger.warn('ExecutionEngine', `Échec commande directe, pas de nouvelle tentative: ${error}`);
       }
-      this.recordHaCommand({ trigger, step: stepSummary, outcome: 'resolved', resolved, success: result.success, error: result.error, triggeredByEntityId, nextFireAt });
+      this.recordHaCommand({ trigger, step: stepSummary, outcome: 'resolved', resolved, success, error, triggeredByEntityId, nextFireAt });
       return;
     }
 
     // Repli : verbe non couvert par resolution.ts (specs §8, filet de sécurité, pas le chemin
     // principal) — l'agent de conversation natif de HA reste responsable de la traduction.
-    if (step.order && this.haWsClient) {
+    if (step.order && this.registry.isAvailable()) {
       this.logger.info('ExecutionEngine', `Repli conversation.process (aucun resolved_service_call): "${step.order}"`);
       try {
-        await this.haWsClient.processConversation(step.order);
+        await this.registry.processConversation(step.order);
         this.recordHaCommand({ trigger, step: stepSummary, outcome: 'fallback_conversation', success: true, triggeredByEntityId, nextFireAt });
       } catch (error) {
         this.logger.error('ExecutionEngine', `Échec du repli conversation.process: ${error}`);

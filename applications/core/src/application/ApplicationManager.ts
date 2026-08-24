@@ -189,7 +189,7 @@ export class ApplicationManager {
   /**
    * Active une application (retire son id de `disabledApps`)
    */
-  enable(appId: string): { success: boolean; error?: string } {
+  enable(appId: string): { success: boolean; error?: string; restarting?: boolean } {
     try {
       if (!this.isValidAppId(appId)) {
         return { success: false, error: `Nom d'application invalide: ${appId}` };
@@ -213,14 +213,15 @@ export class ApplicationManager {
       // sans redémarrer tout core (objectif même de la migration) — contrairement au comportement
       // par défaut ci-dessous (§8.1, redémarrage complet du process, toujours utilisé pour les
       // apps in-process tant qu'elles n'ont pas été migrées).
-      if (this.processSupervisor?.isRegistered(appId)) {
-        this.processSupervisor.start(appId);
+      const separateProcess = !!this.processSupervisor?.isRegistered(appId);
+      if (separateProcess) {
+        this.processSupervisor!.start(appId);
       } else {
         this.restartManager.scheduleRestart(APPLICATION_TOGGLE_RESTART_DELAY_MS, `Application ${appId} activée`);
       }
       this.logger.info('ApplicationManager', `Application ${appId} activée`);
 
-      return { success: true };
+      return { success: true, restarting: !separateProcess };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.logger.error('ApplicationManager', `Erreur lors de l'activation de ${appId}: ${errorMessage}`);
@@ -231,7 +232,7 @@ export class ApplicationManager {
   /**
    * Désactive une application (ajoute son id à `disabledApps`)
    */
-  disable(appId: string): { success: boolean; error?: string } {
+  disable(appId: string): { success: boolean; error?: string; restarting?: boolean } {
     try {
       if (!this.isValidAppId(appId)) {
         return { success: false, error: `Nom d'application invalide: ${appId}` };
@@ -256,14 +257,15 @@ export class ApplicationManager {
       }
 
       // ⭐ fonctionnelles-supervisor_specs v2.6 §8.2 — voir enable() ci-dessus.
-      if (this.processSupervisor?.isRegistered(appId)) {
-        this.processSupervisor.stop(appId);
+      const separateProcess = !!this.processSupervisor?.isRegistered(appId);
+      if (separateProcess) {
+        this.processSupervisor!.stop(appId);
       } else {
         this.restartManager.scheduleRestart(APPLICATION_TOGGLE_RESTART_DELAY_MS, `Application ${appId} désactivée`);
       }
       this.logger.info('ApplicationManager', `Application ${appId} désactivée`);
 
-      return { success: true };
+      return { success: true, restarting: !separateProcess };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.logger.error('ApplicationManager', `Erreur lors de la désactivation de ${appId}: ${errorMessage}`);

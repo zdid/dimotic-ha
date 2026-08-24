@@ -1,5 +1,31 @@
 # Spécifications Fonctionnelles - Supervision Multi-Machines (SUPERVISOR)
 
+*Version 2.7 - 24 Août 2026*
+*⭐ Migration en process séparé terminée pour `ia`/`planificateur`/`haplan`/`arbreouquoi` —
+dernières applications restées in-process, différée en v2.6 (16/08/2026) faute de mécanisme pour
+transporter `haStructureRegistry`/`haWsClient` (objets vivants) hors du process de `core`. Reprise
+en constatant que `CorrelatedRequester` (corrélation + timeout au-dessus de `IEventBus`, construit
+pour le dialogue `ia`↔`planificateur`, jusque-là dupliqué dans les deux apps) est directement
+réutilisable pour ce besoin — centralisé dans le socle (`core/application/CorrelatedRequester.ts`).
+Deux nouvelles pièces socle : `HaQueryBridge` (côté `core`, dispatche un canal générique
+`ha:bridge:request`/`:reply` vers les méthodes réelles de `haStructureRegistry`/`haWsClient`,
+assainit toute `HaStructuredEntity` sortante — voir `sanitizeHaEntity`, cycle `device`/`area` déjà
+rencontré) et `HaBridgeClient` (façade côté app, seul type importé désormais — jamais les classes
+concrètes). `getAllEntities`/`getEntity`/`getQuoiCatalog`/`getLieuCatalog` servis depuis un cache
+local (peuplé au démarrage, tenu à jour par les événements déjà existants `ha:entity:state_changed`/
+`ha:ready`, sans aller-retour réseau à chaque lecture) ; `getEntitiesByQuoiAndLieux` (graphe de
+containment non trivial) et `sendCommand`/`processConversation` restent de vraies requêtes/commandes
+asynchrones. `HaCommandService` (retry/timeout dédié) retiré de `planificateur` — redondant avec le
+timeout déjà porté par `CorrelatedRequester` côté IPC. Les 12 applications de ce socle tournent
+désormais toutes en process séparé — désactiver n'importe laquelle depuis *Gestion des
+applications* n'entraîne plus de redémarrage de `core` (vérifié en conditions réelles : uptime de
+`core` ininterrompu pendant tout le cycle désactivation/réactivation de `haplan`). Vérifié aussi en
+conditions réelles pour la lecture (arbreouquoi : arbre HA complet ; ia : `obtenir_etat` résolu via
+Mistral ; planificateur : planifications `state_change` actives ; haplan : plan avec états en
+direct) — commandes d'écriture réelles (`sendCommand`) non testées sur cette session (prudence
+matérielle, cohérente avec la politique déjà appliquée aux incidents RFXCOM). Ancienne version v2.6
+archivée.*
+
 *Version 2.6 - 16 Août 2026*
 *⭐ Phase 2 — migration terminée pour toutes les applications prévues (`rpigpio`, `teleinfo`,
 `arexx`, `evoo7`, `nommage`, `rfxcom` — en plus d'`espdisplay`, Phase 1) + révision d'architecture
@@ -995,21 +1021,24 @@ aucune application, alors que `Sidebar.ts` attend cet événement pour permettre
 rejeu aux nouvelles connexions). Vérifié en direct : le client reçoit désormais l'événement pour
 chaque app qui l'émet, aucune régression visuelle du menu.
 
-### 14.10 Migration différée : ia/planificateur/haplan/arbreouquoi (⭐ nouveau v2.6, 16/08/2026)
+### 14.10 Migration différée : ia/planificateur/haplan/arbreouquoi (v2.6, 16/08/2026) — reprise et close en v2.7, voir §14.12
 
-**Décision explicite**, discutée avec l'utilisateur avant d'attaquer ces 4 applications : elles
-dépendent de `haStructureRegistry`/`haWsClient`, objets vivants (connexion WebSocket HA réelle,
+**Décision explicite d'origine**, discutée avec l'utilisateur avant d'attaquer ces 4 applications :
+elles dépendent de `haStructureRegistry`/`haWsClient`, objets vivants (connexion WebSocket HA réelle,
 méthodes `.sendCommand()`/`.onStateChanged()`) construits par `core`, non transportables tels quels
-par IPC ni MQTT. Les migrer exigerait de concevoir un proxy de commandes HA (`planificateur`/
-`haplan` exécutent réellement des actions HA — même classe de risque que les incidents de sécurité
-RFXCOM traités cette session) pour un bénéfice nul tant que ces apps restent sur la même machine que
-`core` : tout l'intérêt de la séparation MQTT/multi-machine est l'isolement/le déploiement
-cross-machine — aucun des deux n'est utile ici aujourd'hui, ces 4 apps n'ayant pas vocation à tourner
-ailleurs dans l'immédiat.
+par IPC ni MQTT. Les migrer semblait exiger de concevoir un proxy de commandes HA dédié
+(`planificateur`/`haplan` exécutent réellement des actions HA — même classe de risque que les
+incidents de sécurité RFXCOM traités cette session) pour un bénéfice initialement jugé nul tant que
+ces apps restent sur la même machine que `core`.
 
-**Décision** : pas de migration pour l'instant, ni de conception de proxy. Option explicitement
-laissée ouverte (pas fermée dans les specs) pour le jour où l'une de ces apps devrait tourner sur
-une autre machine.
+**Décision d'origine** : pas de migration, ni de conception de proxy — option laissée ouverte, pas
+fermée dans les specs.
+
+**Reprise le 24/08/2026** (voir §14.12) : la prémisse "il faut construire un proxy" s'est révélée
+fausse une fois le code réexaminé — le mécanisme nécessaire existait déjà (`CorrelatedRequester`),
+construit entre-temps pour un autre besoin. Le bénéfice n'était pas nul non plus : au-delà du
+cross-machine, ces 4 apps étaient les seules à encore forcer un redémarrage complet de `core` à
+chaque activation/désactivation.
 
 ### 14.11 Vérifié en conditions réelles (v2.6)
 
@@ -1020,6 +1049,77 @@ démarrage d'aucune app (vigilance particulière pour `rfxcom`/`evoo7`, historiq
 cette session), `teleinfo` vérifié de bout en bout sur le RPi1 physique réel (présence + lecture des
 2 compteurs), `nommage` vérifié de bout en bout à travers le pont mosquitto local↔ha2 avec du trafic
 réel continu.
+
+### 14.12 Migration `ia`/`planificateur`/`haplan`/`arbreouquoi` (⭐ nouveau v2.7, 24/08/2026)
+
+**Déclencheur** : question utilisateur sur pourquoi désactiver l'une de ces 4 apps redémarre encore
+tout `core`, alors que les 8 autres s'arrêtent proprement — a mené à rouvrir la décision de §14.10.
+
+**Mécanisme retenu** — pas de proxy dédié, réutilisation de `CorrelatedRequester` (jusque-là
+dupliqué dans `ia`/`planificateur` pour leur dialogue mutuel, désormais centralisé dans
+`core/application/CorrelatedRequester.ts`, exporté par `exports.ts`) :
+- **`HaQueryBridge`** (`core/application/HaQueryBridge.ts`) : construit avec des *fournisseurs*
+  `() => haStructureRegistry | undefined`/`() => haWsClient | undefined` (jamais une valeur figée —
+  `haWsClient` redevient `undefined` sur désactivation WS, une valeur captée à la construction
+  serait restée obsolète). Écoute un seul événement générique `ha:bridge:request`
+  (`{correlation_id, method, args}`, `method` ∈ `getEntity | getAllEntities |
+  getEntitiesByQuoiAndLieux | getQuoiCatalog | getLieuCatalog | sendCommand |
+  processConversation`), dispatche vers la méthode réelle, répond sur `ha:bridge:reply`
+  (`{correlation_id, ok, result|error}`). Toute `HaStructuredEntity` sortante passe par
+  `sanitizeHaEntity`/`sanitizeHaEntities` (déplacées de `ArbreouquoiService` vers
+  `ha/types/ha-entity.ts`, partagées) — le cycle `device.entities`→...→entité elle-même, qui avait
+  déjà fait planter `socket.io-parser` une fois, aurait tout aussi bien fait planter la
+  sérialisation IPC.
+- **`HaBridgeClient`** (`core/application/HaBridgeClient.ts`) : façade côté app, construite avec
+  juste un `IEventBus` — plus aucune classe `core` nommée. `getEntity`/`getAllEntities`/
+  `getQuoiCatalog` sont **synchrones**, servies par un cache local peuplé par `start()` et tenu à
+  jour par deux événements **déjà émis par `AppService`** (aucun nouveau signal nécessaire) :
+  `ha:entity:state_changed` (patch state/attributes/last_updated de l'entité concernée) et
+  `ha:ready` (rechargement complet après chaque `HaStructureRegistry.rebuild()`, connexion et
+  reconnexion). `getLieuCatalog` also synchrone : dérivation simple sur le cache local, logique
+  dupliquée volontairement (contrairement à `getEntitiesByQuoiAndLieux`, ci-dessous) car c'est un
+  simple ensemble de valeurs distinctes sans graphe ni état privé à reproduire.
+  `getEntitiesByQuoiAndLieux` (graphe de containment lieu/aire, état privé non exposé par
+  `HaStructureRegistry`) et `sendCommand`/`processConversation` (actions) restent de vraies
+  requêtes/commandes asynchrones vers `core`.
+- **Câblage `AppService`** : `HaQueryBridge` instancié/démarré comme les autres services
+  applicatifs (`TargetGossipService`, `HaPostInstallService`). Dans le bloc d'enregistrement des
+  apps séparées, pontage systématique (toute app, pas seulement ces 4 — même principe que
+  `app:module:config:saved`) de `ha:bridge:reply`/`ha:entity:state_changed`/`ha:ready`.
+
+**Rétrofit trouvé en cours de route** : `HaCommandService` (retry/timeout/statut dédiés autour de
+`HaWsClient.sendCommand`, utilisé par `planificateur`) retiré — redondant avec le timeout déjà porté
+par `CorrelatedRequester` côté IPC ; `planificateur` appelle désormais `HaBridgeClient.sendCommand`
+directement.
+
+**Les 4 apps** : `runsAsSeparateProcess: true` ajouté à chaque manifeste, nouveau `standalone.ts` par
+app (même squelette que `rpigpio`/`ia` existants — `IpcEventBus` + `HaBridgeClient` + factory
+`create*ServiceWithConfig`). `haplan` (seule des 4 sans `createXxxServiceWithConfig` préexistant ni
+émission `app:socket-events:registered`/`app:menu:register`, jamais nécessaire tant qu'elle restait
+in-process) alignée sur le même patron que `ia`/`planificateur` — `app:socket-events:registered`
+déjà émis par `HaplanService.registerSocketEvents()`, seul `app:menu:register` manquait réellement.
+
+**Vérifié en conditions réelles** (navigateur, cette machine) :
+- Les 4 process séparés démarrent sans erreur aux côtés des 8 déjà migrés.
+- `arbreouquoi` : arbre complet (136 entités, 55 chemins OÙ, 8 types QUOI), aucune erreur console.
+- `ia` : "combien de lumières sont allumées ?" → appel réel `obtenir_etat` via `HaBridgeClient`,
+  réponse correcte ("21 lumières, toutes éteintes").
+- `planificateur` : dashboard affichant 3 planifications réelles dont 2 déclencheurs `state_change`
+  actifs (confirme `StateWatcher` opérationnel sur `HaBridgeClient.onStateChanged`).
+- `haplan` : plan affiché avec états en direct de toutes les entités positionnées ; **commande
+  d'écriture réelle testée par l'utilisateur directement depuis le plan** (extinction d'une lumière)
+  — confirmée fonctionnelle, `HaBridgeClient.sendCommand` → `HaQueryBridge` → `HaWsClient.sendCommand`
+  de bout en bout à travers l'IPC.
+- **Objectif du chantier confirmé** : désactivation de `haplan` depuis *Gestion des applications*
+  puis réactivation — uptime de `core` ininterrompu tout du long (jamais retombé à 0), cycle
+  SIGTERM propre → nouveau PID confirmé dans les logs. Les 12 applications du socle tournent
+  désormais toutes en process séparé.
+
+**Effet de bord découvert, non corrigé** : le bandeau UI de *Gestion des applications*
+("Redémarrage en cours...") reste affiché indéfiniment après la désactivation d'une app séparée —
+texte hérité de l'époque où désactiver *toute* app redémarrait `core` ; reste maintenant vrai
+uniquement en apparence, jamais de désagrément réel constaté (l'app se désactive bien, sans jamais
+couper la connexion), mais trompeur. Signalé, correction non demandée cette session.
 
 ## 15. Annexes
 

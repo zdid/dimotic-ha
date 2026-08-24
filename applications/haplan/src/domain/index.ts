@@ -2,8 +2,9 @@
  * Module principal de l'application HAPLAN
  *
  * Scanné par AppService pour la détection automatique. Exporte HAPLAN_APP (métadonnées) et
- * createHaplanService (factory à 5 paramètres — reçoit HaStructureRegistry ET HaWsClient, voir
- * AppService.ts détection par arité de factory). Portage de haplanserver
+ * createHaplanService — reçoit un HaBridgeClient (⭐ 24/08/2026, façade générique vers le
+ * référentiel HA et les commandes détenus par `core`, voir HaBridgeClient.ts), nécessaire pour
+ * afficher l'état en direct et piloter réellement les entités. Portage de haplanserver
  * (github.com/zdid/haplanserver, voir plan de portage) — Phase 1.
  */
 
@@ -15,8 +16,7 @@ import {
   IAppConfigProvider,
   ConfigService,
   AppConfigProvider,
-  HaStructureRegistry,
-  HaWsClient
+  HaBridgeClient
 } from '../../../core/dist/exports';
 import { HAPLAN_SOCKET_EVENTS } from './socket-events';
 import { HaplanService, type IHaplanService } from './HaplanService';
@@ -94,35 +94,48 @@ export const HAPLAN_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = 
   configurable: true,
   requiredMqtt: false,
   requiredHaWs: true,
+  // ⭐ 24/08/2026 — migration en process séparé (découplage HaStructureRegistry/HaWsClient via
+  // HaBridgeClient, voir HaplanService.ts) : résout le redémarrage complet de core à la
+  // désactivation depuis Gestion des applications (superviseur Phase 2).
+  runsAsSeparateProcess: true,
   configSection: 'haplan',
   configUi: HAPLAN_UI_METADATA,
   socketEvents: HAPLAN_SOCKET_EVENTS
 };
 
 // ============================================================================
-// Factory du service — 5 paramètres : reçoit HaStructureRegistry ET HaWsClient (voir
-// AppService.ts, dispatch par arité de factory). Peuvent être undefined si ha.ws_enable=false.
+// Factory du service — reçoit un HaBridgeClient (⭐ 24/08/2026, remplace HaStructureRegistry/
+// HaWsClient en direct, non transportables hors du process de `core`).
 // ============================================================================
 
 export function createHaplanService(
   eventBus: IEventBus,
   logger: Logger,
   configProvider: IAppConfigProvider<HaplanConfig>,
-  haStructureRegistry: HaStructureRegistry | undefined,
-  haWsClient: HaWsClient | undefined
+  haBridgeClient: HaBridgeClient
 ): IHaplanService {
-  return HaplanService.create(eventBus, logger, configProvider, haStructureRegistry, haWsClient);
+  const service = HaplanService.create(eventBus, logger, configProvider, haBridgeClient);
+
+  // ⭐ 24/08/2026 — app en process séparé : app:socket-events:registered déjà émis par
+  // HaplanService.registerSocketEvents() (HAPLAN_ALL_EVENTS, plus complet que le HAPLAN_SOCKET_EVENTS
+  // statique du manifeste) ; app:menu:register en revanche n'était émis nulle part jusqu'ici
+  // (jamais nécessaire tant que l'app tournait in-process, le menu venait directement du manifeste).
+  eventBus.emit('app:menu:register', {
+    appId: 'haplan',
+    menuConfig: HAPLAN_MENU_CONFIG
+  });
+
+  return service;
 }
 
 export function createHaplanServiceWithConfig(
   eventBus: IEventBus,
   logger: Logger,
   configService: ConfigService,
-  haStructureRegistry: HaStructureRegistry | undefined,
-  haWsClient: HaWsClient | undefined
+  haBridgeClient: HaBridgeClient
 ): IHaplanService {
   const configProvider = new AppConfigProvider<HaplanConfig>('haplan' as any, configService);
-  return createHaplanService(eventBus, logger, configProvider, haStructureRegistry, haWsClient);
+  return createHaplanService(eventBus, logger, configProvider, haBridgeClient);
 }
 
 // ============================================================================

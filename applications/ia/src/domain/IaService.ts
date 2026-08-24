@@ -15,7 +15,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Response } from 'express';
-import type { IEventBus, Logger, IAppConfigProvider, HaStructureRegistry, HaWsClient } from '../../../core/dist/exports';
+import type { IEventBus, Logger, IAppConfigProvider, HaBridgeClient } from '../../../core/dist/exports';
 import { iaConfigSchema, type IaConfig } from './config-schema';
 import { MistralClient, MISTRAL_PROMPT_CACHE_KEY } from './MistralClient';
 import { RulesProvider } from './rules';
@@ -109,15 +109,14 @@ export class IaService implements IIaService {
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
     private readonly configProvider: IAppConfigProvider<IaConfig>,
-    private readonly haStructureRegistry?: HaStructureRegistry,
-    _haWsClient?: HaWsClient // non utilisé directement : ia n'exécute jamais d'action elle-même
+    private readonly haBridgeClient: HaBridgeClient
   ) {
     this.config = iaConfigSchema.parse(configProvider.getAppConfig());
     this.mistralClient = new MistralClient(() => this.config, this.logger);
-    this.rulesProvider = new RulesProvider(this.resolveRulesPath(), this.logger, this.haStructureRegistry, () => this.config.excludedQuoiIds);
-    this.toolExecutor = new ToolExecutor(this.eventBus, this.logger, this.haStructureRegistry, this.config.toolExecuteTimeoutMs);
+    this.rulesProvider = new RulesProvider(this.resolveRulesPath(), this.logger, this.haBridgeClient, () => this.config.excludedQuoiIds);
+    this.toolExecutor = new ToolExecutor(this.eventBus, this.logger, this.haBridgeClient, this.config.toolExecuteTimeoutMs);
     this.structuredRouter = new StructuredRouter(this.eventBus, this.logger, this.config.commandTimeoutMs);
-    this.deployResponder = new DeployResponder(this.eventBus, this.logger, this.mistralClient, this.rulesProvider, this.config.defaultMistralModel, this.haStructureRegistry);
+    this.deployResponder = new DeployResponder(this.eventBus, this.logger, this.mistralClient, this.rulesProvider, this.config.defaultMistralModel, this.haBridgeClient);
   }
 
   private resolveRulesPath(): string {
@@ -175,8 +174,9 @@ export class IaService implements IIaService {
   async start(): Promise<void> {
     this.logger.info('IaService', 'Démarrage du service ia...');
 
-    if (!this.haStructureRegistry) {
-      this.logger.warn('IaService', 'HaStructureRegistry indisponible — outils de lecture (lister_entites/obtenir_etat) désactivés.');
+    await this.haBridgeClient.start();
+    if (!this.haBridgeClient.isAvailable()) {
+      this.logger.warn('IaService', 'Référentiel HA indisponible — outils de lecture (lister_entites/obtenir_etat) désactivés.');
     }
 
     this.rulesProvider.load();
@@ -332,7 +332,7 @@ export class IaService implements IIaService {
         // jamais, en silence. Même principe qu'isUnverifiedQuoiIntrouvable ci-dessus : un seul
         // essai de rattrapage forcé (tool_choice=any), sinon on refuse et on demande une correction
         // plutôt que de créer/exécuter sur une référence non vérifiée.
-        const problems = validateReferences(structured, this.haStructureRegistry);
+        const problems = await validateReferences(structured, this.haBridgeClient);
         if (problems.length > 0 && !verificationRetried) {
           verificationRetried = true;
           forceToolChoice = 'any';
@@ -586,10 +586,9 @@ export class IaService implements IIaService {
     eventBus: IEventBus,
     logger: Logger,
     configProvider: IAppConfigProvider<IaConfig>,
-    haStructureRegistry?: HaStructureRegistry,
-    haWsClient?: HaWsClient
+    haBridgeClient: HaBridgeClient
   ): IaService {
-    return new IaService(eventBus, logger, configProvider, haStructureRegistry, haWsClient);
+    return new IaService(eventBus, logger, configProvider, haBridgeClient);
   }
 }
 

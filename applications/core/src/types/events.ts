@@ -75,8 +75,8 @@ export interface ServerToClientEvents {
 
   // Gestion des applications (NOUVEAU v4.4)
   'app:applications:list:result': (data: { activated: string[]; disabled: string[] }) => void;
-  'app:applications:enable:result': (data: { appId: string; success: boolean; error?: string }) => void;
-  'app:applications:disable:result': (data: { appId: string; success: boolean; error?: string }) => void;
+  'app:applications:enable:result': (data: { appId: string; success: boolean; error?: string; restarting?: boolean }) => void;
+  'app:applications:disable:result': (data: { appId: string; success: boolean; error?: string; restarting?: boolean }) => void;
 
   // Redémarrage manuel de l'application (Paramètres Techniques)
   'app:restart:result': (data: { success: boolean; error?: string }) => void;
@@ -195,9 +195,9 @@ export interface AppEvents {
   'app:applications:list': void;
   'app:applications:list:result': { activated: string[]; disabled: string[] };
   'app:applications:enable': { appId: string };
-  'app:applications:enable:result': { appId: string; success: boolean; error?: string };
+  'app:applications:enable:result': { appId: string; success: boolean; error?: string; restarting?: boolean };
   'app:applications:disable': { appId: string };
-  'app:applications:disable:result': { appId: string; success: boolean; error?: string };
+  'app:applications:disable:result': { appId: string; success: boolean; error?: string; restarting?: boolean };
   'app:applications:restart-now': void;
 
   // Redémarrage manuel de l'application (Paramètres Techniques)

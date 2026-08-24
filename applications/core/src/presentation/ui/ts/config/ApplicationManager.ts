@@ -12,6 +12,9 @@ interface ApplicationEnableResult {
   appId: string;
   success: boolean;
   error?: string;
+  /** false pour une app en process séparé (superviseur Phase 2) : elle démarre/s'arrête seule,
+   *  sans jamais redémarrer core — voir ApplicationManager.enable()/disable() côté serveur. */
+  restarting?: boolean;
 }
 
 export class ApplicationManager {
@@ -51,7 +54,7 @@ export class ApplicationManager {
         // Rafraîchir la liste
         this.socket.emit('app:applications:list');
         console.log(`[ApplicationManager] Application ${data.appId} activée avec succès`);
-        this.notifyRestartPending();
+        this.notifyActionCompleted(data.appId, 'activée', data.restarting);
       } else {
         this.error = `Erreur lors de l'activation: ${data.error || 'Inconnu'}`;
         console.error(`[ApplicationManager] Erreur activation ${data.appId}:`, data.error);
@@ -69,7 +72,7 @@ export class ApplicationManager {
         // Rafraîchir la liste
         this.socket.emit('app:applications:list');
         console.log(`[ApplicationManager] Application ${data.appId} désactivée avec succès`);
-        this.notifyRestartPending();
+        this.notifyActionCompleted(data.appId, 'désactivée', data.restarting);
       } else {
         this.error = `Erreur lors de la désactivation: ${data.error || 'Inconnu'}`;
         console.error(`[ApplicationManager] Erreur désactivation ${data.appId}:`, data.error);
@@ -82,16 +85,24 @@ export class ApplicationManager {
   }
 
   /**
-   * Fenêtre de 15s avant redémarrage (voir ApplicationManager.ts côté serveur —
-   * RestartManager.scheduleRestart, réinitialisé à chaque nouvelle activation/désactivation).
-   * Diffusé à tous les onglets ouverts sur cet écran (le résultat est broadcast par le serveur à
-   * toutes les connexions Socket.io, pas seulement à celle d'origine) pour que leur compte à
-   * rebours affiché reste cohérent entre eux.
+   * `restarting` (⭐ 24/08/2026, voir ApplicationManager.enable()/disable() côté serveur) distingue
+   * les deux issues possibles : une app en process séparé (superviseur Phase 2 — toutes les apps du
+   * socle aujourd'hui) démarre/s'arrête seule, sans jamais redémarrer core — pas de compte à rebours
+   * à afficher, juste une confirmation. Une app encore in-process (aucune actuellement, mécanisme
+   * conservé pour une future app non migrée) déclenche le vrai redémarrage complet — fenêtre de 15s
+   * (RestartManager.scheduleRestart), diffusée à tous les onglets ouverts sur cet écran pour que
+   * leur compte à rebours reste cohérent entre eux.
    */
-  private notifyRestartPending(): void {
-    window.dispatchEvent(new CustomEvent('applications:restart-pending', {
-      detail: { delaySeconds: 15 }
-    }));
+  private notifyActionCompleted(appId: string, action: 'activée' | 'désactivée', restarting?: boolean): void {
+    if (restarting) {
+      window.dispatchEvent(new CustomEvent('applications:restart-pending', {
+        detail: { delaySeconds: 15 }
+      }));
+    } else {
+      window.dispatchEvent(new CustomEvent('applications:action-completed', {
+        detail: { appId, action }
+      }));
+    }
   }
 
   /**

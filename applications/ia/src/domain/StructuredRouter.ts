@@ -5,8 +5,8 @@
  */
 
 import type { Logger, IEventBus } from '../../../core/dist/exports';
+import { CorrelatedRequester } from '../../../core/dist/exports';
 import type { CorrelatedReponse } from './types';
-import { CorrelatedRequester } from './correlation';
 
 export class StructuredRouter {
   private readonly requester: CorrelatedRequester<Record<string, unknown>, CorrelatedReponse>;

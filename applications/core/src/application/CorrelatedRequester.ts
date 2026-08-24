@@ -1,12 +1,15 @@
 /**
  * Petit helper de corrélation (id + Promise + timeout) au-dessus de
- * EventBus.emitGeneric/onGeneric — aucun mécanisme requête/réponse générique n'existe dans le
- * socle (InterAppClient confirmé absent du code réel). Dupliqué côté `ia` (même pattern), pas
- * partagé : cohérent avec le reste du projet (ex: taxonomy.ts déjà dupliqué par application).
+ * IEventBus.emitGeneric/onGeneric/offGeneric — jusqu'au 24/08/2026 dupliqué à l'identique dans
+ * `ia`/`planificateur` (dialogue ia↔planificateur : StructuredRouter, ToolExecutor, execution.ts),
+ * centralisé ici pour être aussi réutilisé par HaQueryBridge/HaBridgeClient (découplage
+ * HaStructureRegistry/HaWsClient, voir fonctionnelles-supervisor_specs). Fonctionne à l'identique
+ * qu'un IEventBus soit in-process (EventBus) ou inter-process (IpcEventBus) — c'est cette
+ * transparence qui permet à un même code de fonctionner avant et après migration en process séparé.
  */
 
 import { randomUUID } from 'node:crypto';
-import type { IEventBus } from '../../../core/dist/exports';
+import type { IEventBus } from './IEventBus';
 
 interface Correlated {
   correlation_id: string;

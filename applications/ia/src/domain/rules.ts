@@ -5,7 +5,7 @@
  */
 
 import * as fs from 'node:fs';
-import type { Logger, HaStructureRegistry } from '../../../core/dist/exports';
+import type { Logger, HaBridgeClient } from '../../../core/dist/exports';
 import type { OllamaMessage } from './types';
 
 export class RulesProvider {
@@ -15,9 +15,7 @@ export class RulesProvider {
   constructor(
     private readonly filePath: string,
     private readonly logger: Logger,
-    // Optionnel : sans lui, le catalogue quoi/lieux n'est simplement pas injecté (comportement
-    // antérieur inchangé) — voir buildCatalogText.
-    private readonly registry?: HaStructureRegistry,
+    private readonly registry: HaBridgeClient,
     // Callback plutôt qu'une valeur figée : lu à CHAQUE appel de buildCatalogText(), reflète donc
     // toujours la config `ia` courante — y compris après un rechargement à chaud
     // (IaService.excludedQuoiIds, surveillance de data/ia/config.yaml) sans que RulesProvider
@@ -88,7 +86,7 @@ export class RulesProvider {
    * reste du message system.
    */
   private buildCatalogText(): string {
-    if (!this.registry) return '';
+    if (!this.registry.isAvailable()) return '';
 
     // Config `ia` (excludedQuoiIds, config-schema.ts) — quoi pas adressables par une commande
     // domotique (déclencheurs physiques, accessoires, infrastructure technique), et dont le lieu

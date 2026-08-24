@@ -159,6 +159,29 @@ export interface HaStructuredEntity {
 }
 
 /**
+ * `HaStructuredEntity.device`/`.area` sont des références d'objets complets, pas de simples ID —
+ * `device.entities`/`area.entities` pointent en retour vers cette même entité (et toutes ses
+ * "sœurs") : un graphe réellement circulaire. Envoyée telle quelle sur un canal qui sérialise
+ * (socket.io-parser, IPC `process.send`), cette structure boucle indéfiniment
+ * (`RangeError: Maximum call stack size exceeded`, déjà rencontré et corrigé une fois dans
+ * arbreouquoi) — ne garder que les champs id/name réellement utiles côté consommateur avant de
+ * franchir toute frontière de sérialisation. Partagé par ArbreouquoiService et HaQueryBridge.
+ */
+export function sanitizeHaEntity(entity: HaStructuredEntity): HaStructuredEntity {
+  const device = entity.device as { device_id?: string; name?: string } | undefined;
+  const area = entity.area as { area_id?: string; name?: string } | undefined;
+  return {
+    ...entity,
+    device: device ? { device_id: device.device_id, name: device.name } : undefined,
+    area: area ? { area_id: area.area_id, name: area.name } : undefined
+  };
+}
+
+export function sanitizeHaEntities(entities: HaStructuredEntity[]): HaStructuredEntity[] {
+  return entities.map(sanitizeHaEntity);
+}
+
+/**
  * Message de type "state_changed" reçu via WebSocket HA.
  */
 export interface HaStateChangedMessage extends HaWsMessage {

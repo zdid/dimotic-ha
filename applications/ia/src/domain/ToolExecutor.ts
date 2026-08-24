@@ -7,9 +7,9 @@
  *    fonctionnelles-planificateur_specs §6/§7/§8).
  */
 
-import type { HaStructureRegistry, Logger, IEventBus } from '../../../core/dist/exports';
+import type { HaBridgeClient, Logger, IEventBus } from '../../../core/dist/exports';
+import { CorrelatedRequester } from '../../../core/dist/exports';
 import type { MistralToolCall, ExecuterActionParams, CorrelatedReponse } from './types';
-import { CorrelatedRequester } from './correlation';
 
 function slugify(text: string): string {
   return text
@@ -25,9 +25,9 @@ function slugify(text: string): string {
 // indépendant du niveau taxonomique — voir applications/planificateur/src/domain/resolution.ts
 // pour la même logique côté exécution) : évite de dupliquer ici un matching area-seule qui ne
 // couvrait ni lieu_precis ni lieu_pere.
-function resolveEntities(registry: HaStructureRegistry, quoi?: string, lieux?: string[]): Array<{ entity_id: string; state?: string; name?: string }> {
+async function resolveEntities(registry: HaBridgeClient, quoi?: string, lieux?: string[]): Promise<Array<{ entity_id: string; state?: string; name?: string }>> {
   const quoiId = quoi ? slugify(quoi) : undefined;
-  const entities = registry.getEntitiesByQuoiAndLieux(quoiId, lieux ?? []);
+  const entities = await registry.getEntitiesByQuoiAndLieux(quoiId, lieux ?? []);
   return entities.map((e) => ({ entity_id: e.entity_id, state: e.state, name: e.friendly_name }));
 }
 
@@ -37,7 +37,7 @@ export class ToolExecutor {
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
-    private readonly registry: HaStructureRegistry | undefined,
+    private readonly registry: HaBridgeClient,
     private readonly toolExecuteTimeoutMs: number
   ) {
     this.toolExecuteRequester = new CorrelatedRequester<ExecuterActionParams, CorrelatedReponse>(
@@ -59,14 +59,14 @@ export class ToolExecutor {
 
     switch (call.function.name) {
       case 'lister_entites': {
-        if (!this.registry) return JSON.stringify({ error: 'référentiel HA indisponible' });
-        const entities = resolveEntities(this.registry, args?.quoi as string | undefined, args?.lieux as string[] | undefined);
+        if (!this.registry.isAvailable()) return JSON.stringify({ error: 'référentiel HA indisponible' });
+        const entities = await resolveEntities(this.registry, args?.quoi as string | undefined, args?.lieux as string[] | undefined);
         return JSON.stringify({ entities: entities.map((e) => ({ entity_id: e.entity_id, name: e.name })) });
       }
 
       case 'obtenir_etat': {
-        if (!this.registry) return JSON.stringify({ error: 'référentiel HA indisponible' });
-        const entities = resolveEntities(this.registry, args?.quoi as string | undefined, args?.lieux as string[] | undefined);
+        if (!this.registry.isAvailable()) return JSON.stringify({ error: 'référentiel HA indisponible' });
+        const entities = await resolveEntities(this.registry, args?.quoi as string | undefined, args?.lieux as string[] | undefined);
         return JSON.stringify({ entities });
       }
 
@@ -86,8 +86,8 @@ export class ToolExecutor {
           // et correctement refusé). Même principe que referenceValidator.ts pour le JSON structuré
           // — ici directement au point d'exécution de l'outil, seul endroit qui voit params
           // vraiment résolus.
-          const resolved = this.registry ? resolveEntities(this.registry, params.quoi, params.lieux) : [];
-          if (this.registry && resolved.length === 0) {
+          const resolved = this.registry.isAvailable() ? await resolveEntities(this.registry, params.quoi, params.lieux) : [];
+          if (this.registry.isAvailable() && resolved.length === 0) {
             return JSON.stringify({
               success: false,
               message: `Aucune entité trouvée pour quoi="${params.quoi}" dans ${JSON.stringify(params.lieux)} — vérifie via lister_entites/obtenir_etat avant de conclure, ne réponds pas "quoi_introuvable" sans l'avoir fait.`

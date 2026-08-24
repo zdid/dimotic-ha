@@ -20,7 +20,7 @@
  * scheduler-runtime.ts), pas de fenêtre de rattrapage/`missed` ici en v1 (voir plan).
  */
 
-import type { Logger, HaWsClient, HaRawEntity } from '../../../core/dist/exports';
+import type { Logger, HaBridgeClient, HaRawEntity } from '../../../core/dist/exports';
 import type { PlanificationDefinition } from './types';
 
 export type StateFireCallback = (plan: PlanificationDefinition, entityId: string, signal: AbortSignal) => Promise<void>;
@@ -31,7 +31,7 @@ export class StateWatcher {
   private plans: PlanificationDefinition[] = [];
 
   constructor(
-    private readonly haWsClient: HaWsClient,
+    private readonly haBridgeClient: HaBridgeClient,
     private readonly logger: Logger,
     private readonly onFire: StateFireCallback,
     private readonly onPendingChanged: PendingChangedCallback
@@ -42,7 +42,7 @@ export class StateWatcher {
    *  limitation de précision documentée en tête de fichier). */
   start(plans: PlanificationDefinition[]): void {
     this.setPlans(plans);
-    this.haWsClient.onStateChanged((entity) => this.handleStateChanged(entity));
+    this.haBridgeClient.onStateChanged((entity) => this.handleStateChanged(entity));
 
     for (const plan of plans) {
       if (plan.trigger.type !== 'state_change' || !plan.active || !plan.pending) continue;

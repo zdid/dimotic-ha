@@ -214,7 +214,8 @@ const createTemplate = (): HTMLTemplateElement => {
     <div class="applications-management">
       <h2>📦 Gestion des applications</h2>
       <p class="section-description">
-        Activez ou désactivez les applications. Un restart est nécessaire pour appliquer les changements.
+        Activez ou désactivez les applications. Chaque application démarre/s'arrête indépendamment,
+        sans redémarrage de l'application principale.
       </p>
       
       <!-- Alertes -->
@@ -314,6 +315,14 @@ export class ApplicationsManager extends HTMLElement {
       const customEvent = e as CustomEvent<{ delaySeconds: number }>;
       this.hasPendingRestart = true;
       this.startRestartCountdown(customEvent.detail?.delaySeconds ?? 15);
+    }) as EventListener);
+
+    // Une app en process séparé (superviseur Phase 2, toutes les apps du socle aujourd'hui) démarre/
+    // s'arrête seule — pas de redémarrage de core, donc pas de compte à rebours à afficher.
+    window.addEventListener('applications:action-completed', ((e: Event) => {
+      const customEvent = e as CustomEvent<{ appId: string; action: 'activée' | 'désactivée' }>;
+      const { appId, action } = customEvent.detail;
+      this.showAlert('info', `Application ${appId} ${action} avec succès.`);
     }) as EventListener);
 
     // Écouter le chargement des applications

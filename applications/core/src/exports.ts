@@ -87,6 +87,10 @@ export {
 // Interface EventBus
 export type { IEventBus, DefaultAppEvents } from './application/IEventBus';
 
+// CorrelatedRequester - helper générique requête/réponse (corrélation + timeout) au-dessus de
+// IEventBus, partagé par le dialogue ia↔planificateur et par HaQueryBridge/HaBridgeClient
+export { CorrelatedRequester } from './application/CorrelatedRequester';
+
 // MqttEventBus - Implémentation de IEventBus backée par MQTT, non utilisée par le pont supervisor
 // actuel (voir IpcEventBus ci-dessous) — disponible pour un futur besoin cross-machine
 export { MqttEventBus } from './application/MqttEventBus';
@@ -108,6 +112,12 @@ export { RestartManager } from './application/RestartManager';
 
 // AppService - Service principal de coordination
 export { AppService } from './application/AppService';
+
+// HaQueryBridge/HaBridgeClient - découplage HaStructureRegistry/HaWsClient pour les apps en
+// process séparé (⭐ 24/08/2026) — HaQueryBridge côté core, HaBridgeClient façade côté app
+export { HaQueryBridge } from './application/HaQueryBridge';
+export type { HaBridgeMethod } from './application/HaQueryBridge';
+export { HaBridgeClient } from './application/HaBridgeClient';
 
 // ApplicationManager - Gestion dynamique des modules
 export { ApplicationManager } from './application/ApplicationManager';
@@ -177,6 +187,7 @@ export type {
   HaStructuredRegistry,
   HaQuoiDefinition,
 } from './ha/types/index';
+export { sanitizeHaEntity, sanitizeHaEntities } from './ha/types/ha-entity';
 
 // Command types
 export type {

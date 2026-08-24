@@ -12,6 +12,7 @@ import { CoreDeployService } from './CoreDeployService';
 import { HaStackDeployService } from './HaStackDeployService';
 import { TargetGossipService } from './TargetGossipService';
 import { HaPostInstallService, type PostInstallRequest } from './HaPostInstallService';
+import { HaQueryBridge } from './HaQueryBridge';
 import type { DeploymentTargetConfig, HaStackTargetConfig } from '../infrastructure/config/schema';
 import type { RemoteAction } from '../infrastructure/remote/RemoteUnitController';
 import { ensureGlobalSshKey } from '../infrastructure/remote/SshClient';
@@ -78,6 +79,9 @@ export class AppService {
   private targetGossipService: TargetGossipService;
   // Services post-installation HA (MQTT/Whisper/Piper/openWakeWord/Ollama), ⭐ 24/08/2026
   private haPostInstallService: HaPostInstallService;
+  // Découplage HaStructureRegistry/HaWsClient pour les apps en process séparé (⭐ 24/08/2026, voir
+  // HaQueryBridge.ts) — ia/planificateur/haplan/arbreouquoi
+  private haQueryBridge: HaQueryBridge;
   // ⭐ fonctionnelles-supervisor_specs v2.6 — applications tournant en process séparé (Phase 1 : espdisplay)
   private processSupervisor: ProcessSupervisor;
   private supervisorBridge: SupervisorEventBridge;
@@ -173,6 +177,7 @@ export class AppService {
     this.haStackDeployService = new HaStackDeployService(logger);
     this.targetGossipService = new TargetGossipService(configService, eventBus, logger);
     this.haPostInstallService = new HaPostInstallService(configService, logger);
+    this.haQueryBridge = new HaQueryBridge(eventBus, logger, () => this.haStructureRegistry, () => this.haWsClient);
 
     // Initialiser l'état WS depuis la config
     this.initializeWsState();
@@ -319,6 +324,10 @@ export class AppService {
     // 2.2. Démarre la synchronisation des cibles connues entre instances (⭐ 24/08/2026, voir
     // TargetGossipService.ts) — indépendant de HA WS/des services applicatifs, peut démarrer tôt.
     this.targetGossipService.start();
+
+    // 2.3. Démarre le pont générique de requêtes HA pour les apps en process séparé (⭐ 24/08/2026,
+    // voir HaQueryBridge.ts) — indépendant de l'état HA WS, la vérification se fait par requête.
+    this.haQueryBridge.start();
 
     // 3. Émettre la liste des modules vers l'UI
     this.eventBus.emit('app:modules:registered', { modules: this.modules });
@@ -477,6 +486,14 @@ export class AppService {
               this.processSupervisor.register(appModule.id, appDir);
               this.supervisorBridge.autoBridgeSocketEvents(appModule.id);
               this.supervisorBridge.bridgeEvent(appModule.id, 'app:module:config:saved');
+              // Découplage HaStructureRegistry/HaWsClient (⭐ 24/08/2026, voir HaQueryBridge.ts) —
+              // ha:bridge:reply pour le canal requête/réponse générique (HaBridgeClient),
+              // ha:entity:state_changed/ha:ready déjà émis par AppService, simplement pontés en
+              // plus vers toute app séparée (harmless si elle n'écoute pas, même principe que
+              // app:module:config:saved ci-dessus).
+              this.supervisorBridge.bridgeEvent(appModule.id, 'ha:bridge:reply');
+              this.supervisorBridge.bridgeEvent(appModule.id, 'ha:entity:state_changed');
+              this.supervisorBridge.bridgeEvent(appModule.id, 'ha:ready');
               if (appModule.type === 'integration') {
                 // Émis par IntegrationBridge (core, in-process) vers le module enregistré —
                 // toujours ces 4 mêmes noms, paramétrés par moduleId, quel que soit le module
@@ -687,6 +704,7 @@ export class AppService {
       appId: data.appId,
       success: result.success,
       error: result.error,
+      restarting: result.restarting,
     });
   }
 
@@ -700,6 +718,7 @@ export class AppService {
       appId: data.appId,
       success: result.success,
       error: result.error,
+      restarting: result.restarting,
     });
   }
 

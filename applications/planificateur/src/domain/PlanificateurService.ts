@@ -3,18 +3,18 @@
  *
  * Point d'exécution unique du système (specs §1) : reçoit le JSON structuré et les appels d'outil
  * résolus depuis `ia` (EventBus), gère le cycle de vie des minuteurs, et exécute réellement les
- * actions sur HA (resolution.ts + HaCommandService, ou repli HaWsClient.processConversation).
+ * actions sur HA (resolution.ts + HaBridgeClient.sendCommand, ou repli
+ * HaBridgeClient.processConversation — ⭐ 24/08/2026, façade générique vers `core`, voir
+ * HaBridgeClient.ts).
  */
 
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import {
-  HaCommandService,
   type IEventBus,
   type Logger,
   type IAppConfigProvider,
-  type HaStructureRegistry,
-  type HaWsClient
+  type HaBridgeClient
 } from '../../../core/dist/exports';
 import { planificateurConfigSchema, type PlanificateurConfig } from './config-schema';
 import { macrosConfigSchema, planificationsConfigSchema, DEFAULT_MACROS_CONFIG, DEFAULT_PLANIFICATIONS_CONFIG, type MacrosConfigFile, type PlanificationsConfigFile } from './storage-schema';
@@ -48,7 +48,6 @@ export class PlanificateurService implements IPlanificateurService {
   private readonly stateWatcher?: StateWatcher;
   private readonly executionEngine: ExecutionEngine;
   private readonly handler: CommandHandler;
-  private readonly haCommandService?: HaCommandService;
   private readonly recentActions: PlanificateurAction[] = [];
   // ⭐ Purge périodique des planifications terminées depuis plus de 2 jours (demande utilisateur,
   // 12/08/2026) — cleanupCompletedPlanifications() tourne déjà une fois au chargement (handler.load()),
@@ -59,8 +58,7 @@ export class PlanificateurService implements IPlanificateurService {
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
     configProvider: IAppConfigProvider<PlanificateurConfig>,
-    private readonly haStructureRegistry?: HaStructureRegistry,
-    private readonly haWsClient?: HaWsClient
+    private readonly haBridgeClient: HaBridgeClient
   ) {
     this.config = planificateurConfigSchema.parse(configProvider.getAppConfig());
 
@@ -80,14 +78,6 @@ export class PlanificateurService implements IPlanificateurService {
       'planifications'
     );
 
-    this.haCommandService = this.haWsClient
-      ? new HaCommandService(this.haWsClient, {}, this.logger)
-      : undefined;
-
-    if (!this.haCommandService) {
-      this.logger.warn('PlanificateurService', 'HaWsClient indisponible — exécution directe désactivée (ha.ws_enable=false ?), seul le repli conversation.process aurait pu être tenté, également indisponible.');
-    }
-
     this.schedulerRuntime = new SchedulerRuntime(
       this.logger,
       (plan) => {
@@ -96,28 +86,21 @@ export class PlanificateurService implements IPlanificateurService {
       () => this.handler.persistPlanifications()
     );
 
-    // Triggers state_change — nécessite le WebSocket HA (Mode A), même garde que haCommandService.
-    // Sans lui, les planifications state_change restent inertes (dégradation cohérente avec le
-    // reste de l'app quand ha.ws_enable=false).
-    this.stateWatcher = this.haWsClient
-      ? new StateWatcher(
-          this.haWsClient,
-          this.logger,
-          (plan, entityId, signal) => this.handler.handleTriggerFired(plan, entityId, signal),
-          () => this.handler.persistPlanifications()
-        )
-      : undefined;
-
-    if (!this.stateWatcher) {
-      this.logger.warn('PlanificateurService', 'HaWsClient indisponible — triggers state_change désactivés (ha.ws_enable=false ?).');
-    }
+    // Construit inconditionnellement (⭐ 24/08/2026) : HaBridgeClient existe toujours, même quand
+    // ha.ws_enable=false côté core — onStateChanged() ne fera simplement jamais rien dans ce cas
+    // (aucun state_changed n'est jamais poussé), dégradation cohérente sans avoir besoin d'un
+    // conditionnement explicite ici.
+    this.stateWatcher = new StateWatcher(
+      this.haBridgeClient,
+      this.logger,
+      (plan, entityId, signal) => this.handler.handleTriggerFired(plan, entityId, signal),
+      () => this.handler.persistPlanifications()
+    );
 
     this.executionEngine = new ExecutionEngine(
       this.eventBus,
       this.logger,
-      this.haStructureRegistry,
-      this.haCommandService,
-      this.haWsClient,
+      this.haBridgeClient,
       this.config.deployTimeoutMs
     );
 
@@ -135,6 +118,7 @@ export class PlanificateurService implements IPlanificateurService {
   async start(): Promise<void> {
     this.logger.info('PlanificateurService', 'Démarrage du service planificateur...');
 
+    await this.haBridgeClient.start();
     this.handler.load();
     this.stateWatcher?.start(this.handler.listPlanifications());
     this.wireEventBus();
@@ -270,9 +254,8 @@ export class PlanificateurService implements IPlanificateurService {
     eventBus: IEventBus,
     logger: Logger,
     configProvider: IAppConfigProvider<PlanificateurConfig>,
-    haStructureRegistry?: HaStructureRegistry,
-    haWsClient?: HaWsClient
+    haBridgeClient: HaBridgeClient
   ): PlanificateurService {
-    return new PlanificateurService(eventBus, logger, configProvider, haStructureRegistry, haWsClient);
+    return new PlanificateurService(eventBus, logger, configProvider, haBridgeClient);
   }
 }

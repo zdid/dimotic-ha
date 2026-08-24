@@ -6,17 +6,18 @@
  * définis (positions importées), état en direct et commandes sur les entités déjà placées.
  *
  * Contrairement à RFXCOM/EVOO7, cette application ne publie AUCUNE découverte MQTT : elle
- * lit/écrit directement des entités HA déjà existantes via HaWsClient (factory à 5 paramètres,
- * voir domain/index.ts) — HaStructureRegistry sert uniquement à obtenir un instantané initial des
- * états (déjà peuplé par AppService au démarrage), HaWsClient à envoyer des commandes et à
- * recevoir les changements d'état en direct.
+ * lit/écrit directement des entités HA déjà existantes via HaBridgeClient (⭐ 24/08/2026, façade
+ * générique vers `core`, voir HaBridgeClient.ts — remplace HaStructureRegistry/HaWsClient en
+ * direct, non transportables hors du process de `core`) — getAllEntities() pour l'instantané
+ * initial des états, sendCommand()/onStateChanged() pour piloter et recevoir les changements en
+ * direct.
  *
  * Couche : Domaine (Métier) — orchestration uniquement, délègue à ConfigFileManager.
  */
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import type { IEventBus, Logger, IAppConfigProvider, HaStructureRegistry, HaWsClient, HaRawEntity } from '../../../core/dist/exports';
+import type { IEventBus, Logger, IAppConfigProvider, HaBridgeClient, HaRawEntity } from '../../../core/dist/exports';
 import { createHaplanError } from '../../../core/dist/exports';
 import { haplanConfigSchema, type HaplanConfig } from './config-schema';
 import { DEFAULT_FLOORPLANS_CONFIG, type HaplanFloorplansConfigFile } from './floorplans-config-schema';
@@ -72,8 +73,7 @@ export class HaplanService implements IHaplanService {
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
     private readonly configProvider: IAppConfigProvider<HaplanConfig>,
-    private readonly haStructureRegistry: HaStructureRegistry | undefined,
-    private readonly haWsClient: HaWsClient | undefined
+    private readonly haBridgeClient: HaBridgeClient
   ) {
     this.config = this.loadConfig();
     this.configFileManager = new ConfigFileManager(this.resolveFloorplansConfigPath(), this.logger);
@@ -102,6 +102,7 @@ export class HaplanService implements IHaplanService {
   async start(): Promise<void> {
     this.logger.info('HaplanService', 'Démarrage du service HAPLAN...');
 
+    await this.haBridgeClient.start();
     this.floorplansConfig = this.configFileManager.load();
     this.recomputeTrackedEntityIds();
 
@@ -130,11 +131,11 @@ export class HaplanService implements IHaplanService {
       }
     );
 
-    if (this.haWsClient) {
-      this.haWsClient.onStateChanged((entity) => this.handleHaStateChanged(entity));
+    if (this.haBridgeClient.isAvailable()) {
+      this.haBridgeClient.onStateChanged((entity) => this.handleHaStateChanged(entity));
     } else {
       this.logger.warn('HaplanService',
-        'HaWsClient indisponible (ha.ws_enable=false ?) — aucun état/commande en direct possible.');
+        'Référentiel HA indisponible (ha.ws_enable=false ?) — aucun état/commande en direct possible.');
     }
 
     this.emitStatus();
@@ -152,7 +153,7 @@ export class HaplanService implements IHaplanService {
 
   getStatus(): HaplanStatus {
     return {
-      haWsConnected: !!this.haWsClient,
+      haWsConnected: this.haBridgeClient.isAvailable(),
       floorplansCount: Object.keys(this.floorplansConfig.floorplans).length,
       entitiesCount: this.trackedEntityIds.size
     };
@@ -184,14 +185,14 @@ export class HaplanService implements IHaplanService {
     });
   }
 
-  /** Instantané initial des états, filtré aux seules entités présentes sur un plan — depuis
-   *  HaStructureRegistry (déjà peuplé par AppService au démarrage, pas de requête HA redondante). */
+  /** Instantané initial des états, filtré aux seules entités présentes sur un plan — depuis le
+   *  cache local de HaBridgeClient (peuplé au démarrage, pas de requête réseau redondante). */
   private emitEntitiesStateBulk(): void {
-    if (!this.haStructureRegistry) {
+    if (!this.haBridgeClient.isAvailable()) {
       this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.ENTITIES_STATE_BULK, { states: [] });
       return;
     }
-    const states = this.haStructureRegistry.getAllEntities()
+    const states = this.haBridgeClient.getAllEntities()
       .filter((entity) => this.trackedEntityIds.has(entity.entity_id))
       .map((entity) => ({ entity_id: entity.entity_id, state: entity.state, attributes: entity.attributes }));
     this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.ENTITIES_STATE_BULK, { states });
@@ -202,8 +203,8 @@ export class HaplanService implements IHaplanService {
   // ==========================================================================
 
   private async handleEntityCommand(payload: EntityCommandPayload): Promise<void> {
-    if (!this.haWsClient) {
-      this.logger.warn('HaplanService', `Commande reçue pour ${payload.entity_id} mais HaWsClient indisponible`);
+    if (!this.haBridgeClient.isAvailable()) {
+      this.logger.warn('HaplanService', `Commande reçue pour ${payload.entity_id} mais référentiel HA indisponible`);
       this.eventBus.emitGeneric('haplan:error',
         createHaplanError('HAPLAN_HA_UNAVAILABLE', 'Connexion Home Assistant indisponible', 'haplan:command', { entityId: payload.entity_id }));
       return;
@@ -219,7 +220,7 @@ export class HaplanService implements IHaplanService {
     }
 
     try {
-      await this.haWsClient.sendCommand(payload.domain, payload.service, { entity_id: payload.entity_id }, payload.serviceData);
+      await this.haBridgeClient.sendCommand(payload.domain, payload.service, { entity_id: payload.entity_id }, payload.serviceData);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error('HaplanService', `Échec de la commande ${payload.domain}.${payload.service} sur ${payload.entity_id}: ${message}`);
@@ -267,7 +268,7 @@ export class HaplanService implements IHaplanService {
   /** Sélecteur d'entité (voir plan de portage Phase 2, taxonomy-tree.ts) — construit depuis
    *  attributs_taxonomie de chaque entité, pas depuis les areas HA (plates, sans hiérarchie). */
   private emitTaxonomyTree(): void {
-    const entities = this.haStructureRegistry?.getAllEntities() ?? [];
+    const entities = this.haBridgeClient.getAllEntities();
     this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.TAXONOMY_TREE, { areas: buildEntityPickerTree(entities) });
   }
 
@@ -429,9 +430,8 @@ export class HaplanService implements IHaplanService {
     eventBus: IEventBus,
     logger: Logger,
     configProvider: IAppConfigProvider<HaplanConfig>,
-    haStructureRegistry: HaStructureRegistry | undefined,
-    haWsClient: HaWsClient | undefined
+    haBridgeClient: HaBridgeClient
   ): HaplanService {
-    return new HaplanService(eventBus, logger, configProvider, haStructureRegistry, haWsClient);
+    return new HaplanService(eventBus, logger, configProvider, haBridgeClient);
   }
 }

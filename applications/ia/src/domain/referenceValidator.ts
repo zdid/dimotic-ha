@@ -15,7 +15,7 @@
  * en silence.
  */
 
-import type { HaStructureRegistry } from '../../../core/dist/exports';
+import type { HaBridgeClient } from '../../../core/dist/exports';
 
 function slugify(text: string): string {
   return text
@@ -36,20 +36,20 @@ export interface ReferenceProblem {
  *  parcourt comme un objet en JS) à la recherche de couples {quoi, lieux} et de déclencheurs
  *  state_change, et vérifie chacun contre le référentiel HA réel. Registre absent (ia sans accès
  *  HA en lecture) → aucune vérification possible, retourne [] plutôt que de bloquer à tort. */
-export function validateReferences(data: unknown, registry: HaStructureRegistry | undefined): ReferenceProblem[] {
-  if (!registry) return [];
+export async function validateReferences(data: unknown, registry: HaBridgeClient | undefined): Promise<ReferenceProblem[]> {
+  if (!registry || !registry.isAvailable()) return [];
   const problems: ReferenceProblem[] = [];
-  walk(data, '', registry, problems);
+  await walk(data, '', registry, problems);
   return problems;
 }
 
-function walk(node: unknown, path: string, registry: HaStructureRegistry, problems: ReferenceProblem[]): void {
+async function walk(node: unknown, path: string, registry: HaBridgeClient, problems: ReferenceProblem[]): Promise<void> {
   if (!node || typeof node !== 'object') return;
   const obj = node as Record<string, unknown>;
 
   if (typeof obj.quoi === 'string' && obj.quoi.trim()) {
     const lieux = Array.isArray(obj.lieux) ? (obj.lieux as unknown[]).filter((l): l is string => typeof l === 'string') : [];
-    const entities = registry.getEntitiesByQuoiAndLieux(slugify(obj.quoi), lieux);
+    const entities = await registry.getEntitiesByQuoiAndLieux(slugify(obj.quoi), lieux);
     if (entities.length === 0) {
       problems.push({
         path: path || 'racine',
@@ -63,7 +63,7 @@ function walk(node: unknown, path: string, registry: HaStructureRegistry, proble
   }
 
   for (const [key, value] of Object.entries(obj)) {
-    if (value && typeof value === 'object') walk(value, path ? `${path}.${key}` : key, registry, problems);
+    if (value && typeof value === 'object') await walk(value, path ? `${path}.${key}` : key, registry, problems);
   }
 }
 
