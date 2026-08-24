@@ -24,6 +24,11 @@ ${r?'Expression: "'+r+`"
 // — la contrainte "même balise" ne s'applique qu'à cette déclaration initiale.
 document.addEventListener('alpine:init', () => {
   window.Alpine.store('ws', { connected: false });
-  window.Alpine.store('mqtt', { connected: false });
+  // haWs : statut HA WebSocket, tri-état (⭐ 24/08/2026 — remplace l'ancien usage conflatoire de
+  // `ws.connected`, qui mélangeait la connexion Socket.io locale et la connexion HA). `enabled`
+  // reflète ha.ws_enable, `connected` reflète ha:connected/ha:disconnected — voir Sidebar.ts pour
+  // le rendu tri-état (rouge/orange/vert) et TechnicalConfigManager.ts pour l'écriture.
+  window.Alpine.store('haWs', { enabled: false, connected: false });
+  window.Alpine.store('mqtt', { enabled: false, connected: false });
   window.Alpine.store('modules', { list: [], active: null });
 });

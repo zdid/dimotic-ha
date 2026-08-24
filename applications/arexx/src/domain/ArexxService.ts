@@ -26,6 +26,11 @@ import { ensureDriversBundle, readDriverTarget, writeDriverTarget } from './Driv
 import { ArexxDeployService } from './ArexxDeployService';
 
 const MODULE_NAME = 'arexx';
+/** ⭐ 24/08/2026, demande explicite : une entité AREXX température/humidité doit passer
+ *  "indisponible" côté HA si son capteur cesse d'émettre — `expire_after` (secondes) est un champ
+ *  de découverte MQTT natif de HA (pas une propriété du protocole MQTT lui-même, fonctionne quelle
+ *  que soit la version négociée), voir publishSensorDiscovery ci-dessous. */
+const SENSOR_EXPIRE_AFTER_SECONDS = 15 * 60;
 
 export interface IArexxService {
   start(): Promise<void>;
@@ -216,7 +221,10 @@ export class ArexxService implements IArexxService {
         manufacturer: 'AREXX',
         model: 'BS1000/BS500',
         suggested_area: taxonomy.nomLieu ?? undefined
-      }
+      },
+      // ⭐ 24/08/2026 : HA marque l'entité "indisponible" si aucun état n'arrive dans ce délai —
+      // couvre température et humidité (seul type de capteur publié par cette méthode).
+      extra: { expire_after: SENSOR_EXPIRE_AFTER_SECONDS }
     };
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {

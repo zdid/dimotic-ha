@@ -23,7 +23,7 @@ import type { Logger } from '../infrastructure/logger';
 
 export interface DeployResult {
   success: boolean;
-  step?: 'mkdir' | 'copy-compose' | 'seed-config' | 'pull-up' | 'health-check';
+  step?: 'ha-ws-check' | 'mkdir' | 'copy-compose' | 'seed-config' | 'pull-up' | 'health-check';
   error?: string;
   output?: string;
 }
@@ -89,6 +89,22 @@ export class CoreDeployService {
     if (!rawTarget.host) {
       return { success: false, step: 'mkdir', error: 'Aucun hôte cible configuré (target.host)' };
     }
+
+    // seedConfigIfAbsent() copie ha.ws tel quel (voir plus bas) — refuser de propager un HA WS
+    // voulu (ws_enable) mais sans token utilisable évite de reproduire sur la nouvelle machine le
+    // même échec ("Invalid HA token") que celui déjà constaté ici (⭐ 24/08/2026, demande
+    // explicite, suite à l'incident réel du déploiement sur ha2 le 24/08/2026). ws_enable=false :
+    // HA WS n'est simplement pas utilisé, rien à bloquer.
+    const haWs = this.configService.getHaWsConfig();
+    const haConfig = this.configService.getHaConfig();
+    if (haConfig?.ws_enable && !haWs?.token) {
+      return {
+        success: false,
+        step: 'ha-ws-check',
+        error: "HA WebSocket est activé (ws_enable) sur cette machine mais sans token valide — configurez-le d'abord (ou désactivez HA WS) avant de déployer sur une nouvelle machine, pour ne pas y propager un accès HA cassé."
+      };
+    }
+
     const target = resolveTarget(rawTarget);
     const tag = version?.trim() || 'latest';
 

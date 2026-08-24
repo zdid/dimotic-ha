@@ -160,6 +160,121 @@ action:
 `;
 }
 
+const REPORT_SCRIPT_ID = 'rapport_entites_indisponibles_et_piles_faibles_matin_soir';
+const REPORT_SCRIPT_TITLE = 'Rapport entités indisponibles et piles faibles - matin/soir';
+const REPORT_SCRIPT_DESCRIPTION =
+  'Notifie chaque matin et soir les entités indisponibles et les capteurs à pile faible ' +
+  '(pourcentage ou millivolts).';
+// ⭐ 24/08/2026 : contenu entièrement statique (pas de liste régénérée par l'app comme pour la
+// minuterie) — service notify cible `notify.mobile_app_TON_TELEPHONE`, placeholder à remplacer par
+// l'utilisateur après déploiement sur une machine donnée (un seul téléphone par machine).
+function buildReportAutomationYaml(): string {
+  return `alias: "Rapport entités indisponibles et piles faibles - matin/soir"
+description: >-
+  Notifie chaque matin et soir les entités indisponibles et les capteurs à pile
+  faible (pourcentage ou millivolts).
+trigger:
+  - platform: time
+    at: "08:00:00"
+  - platform: time
+    at: "20:00:00"
+action:
+  - variables:
+      domaines_exclus:
+        - automation
+        - script
+        - scene
+        - zone
+        - person
+        - update
+        - tag
+        - image
+        - sun
+      seuil_batterie_pct: 20
+      seuil_batterie_mv: 2700
+      unavailable_entities: >
+        {{ states
+           | rejectattr('domain', 'in', domaines_exclus)
+           | selectattr('state', 'eq', 'unavailable')
+           | map(attribute='name')
+           | list }}
+      low_battery_pct: >
+        {{ [s.name for s in states.sensor
+             if s.attributes.get('device_class') == 'battery'
+             and s.attributes.get('unit_of_measurement') == '%'
+             and s.state not in ['unknown', 'unavailable']
+             and s.state | float(-1) < seuil_batterie_pct] }}
+      low_battery_mv: >
+        {{ [s.name for s in states.sensor
+             if s.attributes.get('unit_of_measurement') == 'mV'
+             and s.state not in ['unknown', 'unavailable']
+             and s.state | float(-1) < seuil_batterie_mv] }}
+  - condition: template
+    value_template: >
+      {{ (unavailable_entities | count > 0)
+         or (low_battery_pct | count > 0)
+         or (low_battery_mv | count > 0) }}
+  - service: notify.mobile_app_TON_TELEPHONE
+    data:
+      title: "Rapport maison"
+      message: >
+        {% if unavailable_entities | count > 0 %}
+        🔴 Indisponibles ({{ unavailable_entities | count }}) : {{ unavailable_entities | join(', ') }}
+        {% endif %}
+        {% if low_battery_pct | count > 0 %}
+        🔋 Piles faibles % ({{ low_battery_pct | count }}) : {{ low_battery_pct | join(', ') }}
+        {% endif %}
+        {% if low_battery_mv | count > 0 %}
+        🔋 Piles faibles mV ({{ low_battery_mv | count }}) : {{ low_battery_mv | join(', ') }}
+        {% endif %}
+mode: single
+`;
+}
+
+/**
+ * Registre des scripts embarqués dans l'application (⭐ 24/08/2026, demande explicite : les
+ * scripts mis au point avec l'utilisateur doivent voyager avec le code, pas rester une donnée
+ * locale à une seule machine — voir seedBuiltinScripts). `buildYaml()` retourne le contenu de
+ * référence pour un dépôt neuf ; `normalize()` neutralise les parties légitimement régénérées par
+ * l'app elle-même (ex: liste de lumières de la minuterie, tenue à jour par
+ * syncExampleAutomationTrigger) avant toute comparaison — sans cette neutralisation, la première
+ * réconciliation réussie ferait apparaître une "divergence" alors qu'il ne s'agit que du
+ * fonctionnement normal de l'app, pas d'une modification de l'utilisateur.
+ */
+interface BuiltinScriptDef {
+  id: string;
+  title: string;
+  description: string;
+  haDomain: 'script' | 'automation';
+  provisioning?: ProvisioningConfig;
+  buildYaml: () => string;
+  normalize?: (yamlText: string) => string;
+}
+
+const BUILTIN_SCRIPTS: BuiltinScriptDef[] = [
+  {
+    id: EXAMPLE_SCRIPT_ID,
+    title: EXAMPLE_SCRIPT_TITLE,
+    description: EXAMPLE_SCRIPT_DESCRIPTION,
+    haDomain: 'automation',
+    provisioning: {
+      watchDomain: 'light',
+      helperDomain: 'timer',
+      namePrefix: 'Minuterie',
+      helperData: { duration: '24:00:00' }
+    },
+    buildYaml: () => buildExampleAutomationYaml([]),
+    normalize: (text) => text.replace(/^ {4}entity_id:\n(?: {6}- .*\n)*/m, '    entity_id: []\n')
+  },
+  {
+    id: REPORT_SCRIPT_ID,
+    title: REPORT_SCRIPT_TITLE,
+    description: REPORT_SCRIPT_DESCRIPTION,
+    haDomain: 'automation',
+    buildYaml: buildReportAutomationYaml
+  }
+];
+
 export class ScriptsHaService implements IScriptsHaService {
   private readonly scriptsManager: ConfigFileManager<ScriptsConfigFile>;
   private readonly scriptsDir: string;
@@ -202,7 +317,7 @@ export class ScriptsHaService implements IScriptsHaService {
 
   async start(): Promise<void> {
     this.logger.info('ScriptsHaService', 'Démarrage du service scriptsha...');
-    this.seedExampleIfEmpty();
+    this.seedBuiltinScripts();
     this.emitScripts();
     this.logger.info('ScriptsHaService', 'Service scriptsha démarré');
   }
@@ -227,37 +342,76 @@ export class ScriptsHaService implements IScriptsHaService {
   }
 
   // ==========================================================================
-  // Amorçage de l'exemple
+  // Amorçage des scripts embarqués
   // ==========================================================================
 
-  private seedExampleIfEmpty(): void {
-    if (this.scripts.length > 0) return;
-
-    const now = new Date().toISOString();
+  /**
+   * Dépose chaque script du registre BUILTIN_SCRIPTS s'il est absent, et signale toute divergence
+   * entre le fichier sur disque et le modèle actuel pour les scripts déjà déposés (jamais réécrit
+   * automatiquement — juste signalé, voir driftsFromBuiltin). Un id de script correspondant à un
+   * du registre est traité comme builtin même si l'entrée existante datait d'avant ce champ.
+   */
+  private seedBuiltinScripts(): void {
     fs.mkdirSync(this.scriptsDir, { recursive: true });
-    // Liste de lumières vide au départ (déclencheur inerte tant qu'aucune n'est détectée) — voir
-    // syncExampleAutomationTrigger(), qui la maintient à jour dès la première diffusion.
-    fs.writeFileSync(path.join(this.scriptsDir, `${EXAMPLE_SCRIPT_ID}.yaml`), buildExampleAutomationYaml([]), 'utf8');
+    let changed = false;
 
-    this.scripts.push({
-      id: EXAMPLE_SCRIPT_ID,
-      title: EXAMPLE_SCRIPT_TITLE,
-      description: EXAMPLE_SCRIPT_DESCRIPTION,
-      originalFilename: `${EXAMPLE_SCRIPT_ID}.yaml`,
-      haDomain: 'automation',
-      deployed: false,
-      createdAt: now,
-      provisioning: {
-        watchDomain: 'light',
-        helperDomain: 'timer',
-        namePrefix: 'Minuterie',
-        // 24h par défaut (demande utilisateur) — réglable ensuite timer par timer directement
-        // dans HA (Paramètres > Appareils et services > Aides), jamais recalculé par ce service.
-        helperData: { duration: '24:00:00' }
+    for (const def of BUILTIN_SCRIPTS) {
+      const filePath = path.join(this.scriptsDir, `${def.id}.yaml`);
+      const existing = this.scripts.find((s) => s.id === def.id);
+
+      if (!existing) {
+        fs.writeFileSync(filePath, def.buildYaml(), 'utf8');
+        this.scripts.push({
+          id: def.id,
+          title: def.title,
+          description: def.description,
+          originalFilename: `${def.id}.yaml`,
+          haDomain: def.haDomain,
+          deployed: false,
+          createdAt: new Date().toISOString(),
+          provisioning: def.provisioning,
+          builtin: true,
+          driftsFromBuiltin: false
+        });
+        changed = true;
+        this.logger.info('ScriptsHaService', `Script intégré "${def.title}" déposé`);
+        continue;
       }
-    });
-    this.scriptsManager.save({ scripts: this.scripts });
-    this.logger.info('ScriptsHaService', `Script d'exemple "${EXAMPLE_SCRIPT_TITLE}" créé`);
+
+      // Un id de script correspond à un slug de titre unique (voir generateId) — en pratique
+      // seul le registre lui-même produit cet id exact. Traité comme builtin même si l'entrée
+      // existante ne l'était pas encore explicitement (migration : ce champ n'existait pas avant
+      // la généralisation de ce mécanisme, ⭐ 24/08/2026).
+      if (!existing.builtin) {
+        existing.builtin = true;
+        changed = true;
+      }
+
+      const drifts = this.computeBuiltinDrift(def, filePath);
+      if (existing.driftsFromBuiltin !== drifts) {
+        existing.driftsFromBuiltin = drifts;
+        changed = true;
+        if (drifts) {
+          this.logger.warn('ScriptsHaService', `Script intégré "${def.title}" : le contenu sur disque diverge du modèle actuel`);
+        }
+      }
+    }
+
+    if (changed) this.scriptsManager.save({ scripts: this.scripts });
+  }
+
+  /** Compare le fichier sur disque au modèle de référence, après neutralisation des parties
+   *  dynamiques (voir BuiltinScriptDef#normalize). Fichier absent (supprimé manuellement sans
+   *  retirer l'entrée du manifeste) : pas de divergence signalée, rien à comparer. */
+  private computeBuiltinDrift(def: BuiltinScriptDef, filePath: string): boolean {
+    let onDisk: string;
+    try {
+      onDisk = fs.readFileSync(filePath, 'utf8');
+    } catch {
+      return false;
+    }
+    const normalize = def.normalize ?? ((text: string) => text);
+    return normalize(onDisk) !== normalize(def.buildYaml());
   }
 
   // ==========================================================================
@@ -314,6 +468,16 @@ export class ScriptsHaService implements IScriptsHaService {
         return;
       }
 
+      // ⭐ 24/08/2026 : détection automatique script vs automation — seule une automation a un
+      // déclencheur propre (`trigger`/`triggers`), c'est justement ce qui la distingue d'un script
+      // HA (qui exécute une `sequence` uniquement à la demande). Avant ce correctif, tout dépôt via
+      // ce formulaire était classé "script" sans exception, y compris une automation en bonne et
+      // due forme (bug réel constaté en usage : la publication vers HA ciblait le mauvais domaine).
+      const haDomain: 'script' | 'automation' =
+        'trigger' in (parsed as Record<string, unknown>) || 'triggers' in (parsed as Record<string, unknown>)
+          ? 'automation'
+          : 'script';
+
       const id = this.generateId(title);
       const now = new Date().toISOString();
       fs.mkdirSync(this.scriptsDir, { recursive: true });
@@ -324,9 +488,11 @@ export class ScriptsHaService implements IScriptsHaService {
         title,
         description,
         originalFilename: data.filename,
-        haDomain: 'script',
+        haDomain,
         deployed: false,
-        createdAt: now
+        createdAt: now,
+        builtin: false,
+        driftsFromBuiltin: false
       });
       const result = this.scriptsManager.save({ scripts: this.scripts });
       if (!result.success) {

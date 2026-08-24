@@ -24,6 +24,9 @@ export interface HaMqttBrokerConfig {
   keepalive?: number;
   /** Délai de reconnexion en secondes (défaut : 5). */
   reconnectDelay?: number;
+  /** Voir MqttTransportConfig#protocolVersion — décidé par appelant (IntegrationBridge, par
+   *  moduleName), jamais de défaut ici. */
+  protocolVersion?: 3 | 4 | 5;
 }
 
 type CommandCallback = (event: ParsedIncomingCommand) => void;
@@ -68,6 +71,7 @@ export class HaMqttIntegrationService {
         password: broker.password ?? '',
         keepalive: broker.keepalive ?? 60,
         reconnectDelay: broker.reconnectDelay ?? 5,
+        protocolVersion: broker.protocolVersion,
         willTopic: getBridgeStatusTopic(moduleName, bridgeInstance),
       },
       this.logger

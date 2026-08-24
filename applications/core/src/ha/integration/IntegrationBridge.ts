@@ -411,7 +411,7 @@ export class IntegrationBridge {
   }
 
   private connectBridge(registration: BridgeRegisterEvent): void {
-    const broker = this.getBrokerConfig();
+    const broker = this.getBrokerConfig(registration.moduleName);
     if (!broker) {
       this.logger.warn('bridge', 'Impossible de connecter le bridge : configuration ha.mqtt absente');
       return;
@@ -424,7 +424,13 @@ export class IntegrationBridge {
       });
   }
 
-  private getBrokerConfig(): HaMqttBrokerConfig | undefined {
+  /**
+   * MQTT 5 partout, SAUF le pont RFXCOM (⭐ 24/08/2026, décision explicite) : il doit rester
+   * joignable en 3.1.1, seule version parlée par l'ancienne domotique côté RFXCOM. rpigpio (l'autre
+   * pont de compatibilité) ne passe pas par ce service — voir RpigpioService.ts, connexion MQTT
+   * séparée, laissée au défaut mqtt.js pour la même raison.
+   */
+  private getBrokerConfig(moduleName: string): HaMqttBrokerConfig | undefined {
     const mqttConfig = this.configService.getMqttConfig();
     if (!mqttConfig) return undefined;
 
@@ -435,6 +441,7 @@ export class IntegrationBridge {
       password: mqttConfig.password || undefined,
       keepalive: mqttConfig.keepalive,
       reconnectDelay: mqttConfig.reconnect_delay,
+      protocolVersion: moduleName === 'rfxcom' ? undefined : 5,
     };
   }
 

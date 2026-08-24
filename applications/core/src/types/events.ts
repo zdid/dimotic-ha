@@ -52,6 +52,8 @@ export interface ServerToClientEvents {
   'ha:entity:updated': (entity: unknown) => void; // HaEntity (à typer)
   'ha:sync:ready': (data: { entityCount: number }) => void;
   'ha:status': (data: { connected: boolean }) => void;
+  'ha:connected': () => void;
+  'ha:disconnected': () => void;
   
   // Configuration
   'config:current': (config: TechnicalConfig) => void;

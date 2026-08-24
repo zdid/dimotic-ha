@@ -176,7 +176,8 @@ export class ProcessSupervisor {
       username: broker.username ?? '',
       password: broker.password ?? '',
       keepalive: 60,
-      reconnectDelay: 5
+      reconnectDelay: 5,
+      protocolVersion: 5
     };
     this.commandTransport = new MqttTransport(config, this.logger);
     this.commandTransport.onMessage((message) => this.handleCommandMessage(machineId, message.topic, message.payload));

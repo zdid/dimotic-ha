@@ -137,6 +137,10 @@ const createTemplate = (): HTMLTemplateElement => {
         transition: background-color 0.3s;
       }
       
+      .status-indicator.pending .status-dot {
+        background-color: #f39c12;
+      }
+
       .status-indicator.connected .status-dot {
         background-color: #2ecc71;
       }
@@ -348,11 +352,11 @@ const createTemplate = (): HTMLTemplateElement => {
       </nav>
 
       <div class="sidebar-footer">
-        <div class="status-indicator" id="status-indicator" :class="{ connected: $store.ws.connected }">
+        <div class="status-indicator" id="status-indicator" :class="{ pending: $store.haWs.enabled && !$store.haWs.connected, connected: $store.haWs.enabled && $store.haWs.connected }">
           <span class="status-dot"></span>
-          <span>Web-Services</span>
+          <span>HA WebSocket</span>
         </div>
-        <div class="status-indicator" id="mqtt-status-indicator" :class="{ connected: $store.mqtt.connected }">
+        <div class="status-indicator" id="mqtt-status-indicator" :class="{ pending: $store.mqtt.enabled && !$store.mqtt.connected, connected: $store.mqtt.enabled && $store.mqtt.connected }">
           <span class="status-dot"></span>
           <span>MQTT</span>
         </div>
@@ -438,9 +442,12 @@ export class Sidebar extends HTMLElement {
     // Installer l'écouteur
     setupSocketMenuListener();
 
-    // L'indicateur de connexion (ha:status:changed / socket:connected / socket:disconnected)
-    // est désormais piloté par $store.ws.connected directement dans le template — voir
-    // SocketService.ts et TechnicalConfigManager.ts, qui écrivent dans ce store.
+    // Les indicateurs HA WebSocket / MQTT sont pilotés directement dans le template par
+    // $store.haWs.{enabled,connected} / $store.mqtt.{enabled,connected} (⭐ 24/08/2026, tri-état
+    // rouge/orange/vert — désactivé / activé mais non connecté / connecté) — voir
+    // TechnicalConfigManager.ts, qui écrit dans ces stores. $store.ws.connected (écrit par
+    // SocketService.ts) reste la connexion Socket.io locale au navigateur, volontairement
+    // distincte et non affichée ici — non conflatée avec le statut HA depuis ce correctif.
 
     // Écouter l'uptime
     window.addEventListener('app:started', (e: CustomEvent) => {
@@ -546,7 +553,17 @@ export class Sidebar extends HTMLElement {
       // Forcer la réinitialisation en changeant data-section
       htmlForm.setAttribute('data-section', sectionId);
     });
-    
+    // ⭐ 24/08/2026, correctif bug réel constaté : setAttribute() ci-dessus ne déclenche
+    // attributeChangedCallback() QUE si la valeur change textuellement (comportement natif des
+    // Web Components) — revenir sur la MÊME section statique après un détour par showModuleConfig()
+    // (qui ne touche jamais data-section, seulement l'événement module:config:show) laisse
+    // ConfigForm bloqué en "mode module" indéfiniment : la section affichée montre le formulaire du
+    // dernier module consulté plutôt que ses propres champs statiques. `scroll-to-section` est un
+    // vrai CustomEvent (toujours redéclenché, pas de garde sur une valeur inchangée) — ConfigForm y
+    // réinitialise déjà correctement son mode module (voir son listener dédié), donc le réutiliser
+    // ici couvre aussi ce cas sans dépendre de la comparaison de l'attribut.
+    window.dispatchEvent(new CustomEvent('scroll-to-section', { detail: { sectionId } }));
+
     // Mapper les sections du menu aux IDs des div de contenu
     const sectionMappings: Record<string, string> = {
       'ha': 'section-ha',

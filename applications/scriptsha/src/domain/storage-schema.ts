@@ -43,7 +43,18 @@ export const scriptEntrySchema = z.object({
   deployedAt: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string().optional(),
-  provisioning: provisioningSchema.optional()
+  provisioning: provisioningSchema.optional(),
+  /** Vrai si ce script vient du registre intégré à l'application (BUILTIN_SCRIPTS,
+   *  ScriptsHaService.ts) — déposé automatiquement au démarrage s'il est absent. Un script
+   *  téléversé par l'utilisateur qui réutiliserait le même id n'est jamais marqué ainsi (voir
+   *  seedBuiltinScripts) : seul un script réellement issu du registre peut ensuite être comparé/
+   *  signalé comme divergent. */
+  builtin: z.boolean().default(false),
+  /** Vrai si le contenu sur disque diffère du modèle intégré actuel (comparaison normalisée — les
+   *  parties légitimement régénérées par l'app, ex: liste de lumières de la minuterie, sont
+   *  neutralisées avant comparaison). Recalculé à chaque démarrage, affiché comme avertissement
+   *  dans l'IHM — jamais utilisé pour écraser automatiquement une modification locale. */
+  driftsFromBuiltin: z.boolean().default(false)
 });
 
 export type ScriptEntry = z.infer<typeof scriptEntrySchema>;

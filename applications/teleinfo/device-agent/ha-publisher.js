@@ -120,6 +120,7 @@ function createHaPublisher(mqttConfig, discoveryPrefix) {
     client = mqtt.connect(mqttConfig.url, {
       username: mqttConfig.user || undefined,
       password: mqttConfig.password || undefined,
+      protocolVersion: 5,
       will: {
         topic: PRESENCE_TOPIC,
         payload: JSON.stringify({ status: 'offline', timestamp: new Date().toISOString() }),

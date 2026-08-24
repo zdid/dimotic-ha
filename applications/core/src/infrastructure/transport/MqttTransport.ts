@@ -19,6 +19,11 @@ export interface MqttTransportConfig {
   clean?: boolean;
   /** Topic du LWT (Last Will and Testament). Défaut : `app/{clientId}/status`. */
   willTopic?: string;
+  /** Version du protocole MQTT (3 = 3.1, 4 = 3.1.1, 5 = 5.0) — passé tel quel à mqtt.js. Absent =
+   *  défaut de la librairie (3.1.1). ⭐ 24/08/2026 : passage général à MQTT 5, SAUF les deux ponts
+   *  de compatibilité vers l'ancienne domotique (rpigpio, rfxcom) qui doivent rester en 3.1.1 — ne
+   *  jamais fixer cette valeur par défaut ici, chaque appelant décide explicitement. */
+  protocolVersion?: 3 | 4 | 5;
 }
 
 /**
@@ -287,6 +292,7 @@ export class MqttTransport {
       // nouveau) — tempête de reconnexions constatée en conditions réelles le 07/08/2026
       // ("session taken over" en boucle sur mosquitto, des dizaines de fois par seconde).
       reconnectPeriod: 0,
+      protocolVersion: this.config.protocolVersion,
       username: this.config.username || undefined,
       password: this.config.password || undefined,
       // Configuration du LWT (Last Will and Testament)

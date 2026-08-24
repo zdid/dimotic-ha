@@ -85,6 +85,34 @@ export class ConfigService {
   }
 
   /**
+   * Efface entièrement `ha.ws` (host/port/token) — appelé quand HaWsClient signale un rejet
+   * d'authentification ("Invalid HA token", ⭐ 24/08/2026, demande explicite : un token connu
+   * invalide ne doit pas rester affiché comme "configuré" indéfiniment, voir AppService.ts). On
+   * efface tout le bloc plutôt que le seul token : `ws.host`/`ws.port` sans `ws.token` échouerait
+   * la validation du schéma (token min(1)) au prochain save() — et un host orphelin sans token
+   * valide n'a de toute façon plus rien d'utilisable. `ws_enable` reste inchangé : s'il était à
+   * true, le fait qu'il n'y ait plus de token dit "HA WS voulu mais cassé", un signal exploité par
+   * CoreDeployService pour refuser de propager cet état sur une nouvelle machine.
+   */
+  clearHaWsToken(): SaveResult {
+    if (!this.config.ha?.ws) return { success: true };
+    const ha = { ...this.config.ha, ws: undefined };
+    const socleConfig = {
+      ha,
+      web: this.config.web,
+      logging: this.config.logging,
+      disabledApps: this.config.disabledApps,
+      targets: this.config.targets,
+      haStackTargets: this.config.haStackTargets,
+    } as AppConfig;
+    const result = this.writer.save(socleConfig);
+    if (result.success) {
+      this.config = { ...this.config, ha };
+    }
+    return result;
+  }
+
+  /**
    * Retourne la configuration de structuration HA.
    */
   getHaStructureConfig() {

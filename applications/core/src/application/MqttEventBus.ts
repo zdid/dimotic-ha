@@ -69,6 +69,7 @@ export class MqttEventBus implements IEventBus<AppEvents> {
         password: config.mqttConfig.password ?? '',
         keepalive: config.mqttConfig.keepalive ?? 60,
         reconnectDelay: config.mqttConfig.reconnectDelay ?? 5,
+        protocolVersion: 5,
         willTopic: `${TOPIC_PREFIX}/${this.machineId}/app/${this.appId}/eventbus-status`
       },
       config.logger

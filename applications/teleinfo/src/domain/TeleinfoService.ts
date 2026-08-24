@@ -119,7 +119,8 @@ export class TeleinfoService implements ITeleinfoService {
         username: this.config.mqtt.user || '',
         password: this.config.mqtt.password || '',
         keepalive: 60,
-        reconnectDelay: 5
+        reconnectDelay: 5,
+        protocolVersion: 5
       },
       this.logger
     );

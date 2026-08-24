@@ -150,16 +150,24 @@ export class ConfigLoader {
    * (`min(1)`), même si `ws_enable: false` — la connexion WS n'a pourtant aucune importance tant
    * qu'elle est désactivée.
    *
-   * Retire `ws`/`mqtt` juste avant validation **uniquement** quand leur flag `_enable`
-   * correspondant est `false` ET que la section n'a jamais été réellement renseignée (tous ses
-   * champs obligatoires encore vides) — jamais si l'utilisateur a de vraies données en attente
-   * (désactivé temporairement mais prêt à être réactivé) : dans ce cas la validation stricte reste
-   * utile pour signaler une saisie partielle/invalide, comme avant ce correctif.
+   * Retire `mqtt` uniquement quand `mqtt_enable` est `false` ET que la section n'a jamais été
+   * réellement renseignée (tous ses champs obligatoires encore vides) — jamais si l'utilisateur a
+   * de vraies données en attente (désactivé temporairement mais prêt à être réactivé) : dans ce
+   * cas la validation stricte reste utile pour signaler une saisie partielle/invalide.
+   *
+   * `ws` est retiré dès qu'il est intégralement vide, **même si `ws_enable: true`** (⭐ 24/08/2026,
+   * revu suite à un vrai crash au démarrage) : ConfigService.clearHaWsToken() efface tout le bloc
+   * `ws` sur un token invalidé par HA lui-même, sans toucher à `ws_enable` (signal exploité par
+   * CoreDeployService pour refuser de déployer avec un HA WS voulu-mais-cassé) — sans cet
+   * assouplissement, le *prochain* redémarrage validerait `ws` intégralement vide contre le schéma
+   * strict (`host`/`token` min(1)) et ferait planter TOUTE l'application au lieu de simplement ne
+   * pas se connecter à HA. Un `ws` PARTIELLEMENT rempli (ex: host renseigné, token oublié) reste lui
+   * validé strictement dans tous les cas — seule l'absence totale est tolérée.
    */
   private omitDisabledHaSections(config: Record<string, unknown>): void {
     const ha = config.ha as Record<string, unknown> | undefined;
     if (!ha) return;
-    if (ha.ws_enable !== true && this.isUnconfigured(ha.ws, ['host', 'token'])) delete ha.ws;
+    if (this.isUnconfigured(ha.ws, ['host', 'token'])) delete ha.ws;
     if (ha.mqtt_enable !== true && this.isUnconfigured(ha.mqtt, ['host', 'client_id'])) delete ha.mqtt;
   }
 

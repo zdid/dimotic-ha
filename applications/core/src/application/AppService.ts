@@ -38,6 +38,18 @@ import { AppConfigProvider } from '../infrastructure/config/AppConfigProvider';
 import { SOCLE_SOCKET_EVENTS } from '../types/events';
 
 /**
+ * ⭐ 24/08/2026, correctif d'un bug réel : une app requiredHaWs peut attendre `ha:ready`
+ * indéfiniment PAR CONCEPTION (décision utilisateur du 08/08/2026, voir wsRegistryReady plus bas —
+ * volontairement PAS touchée par ce correctif, ces apps ne doivent toujours jamais démarrer sans
+ * synchro HA réelle). Le bug : ça bloquait aussi la FIN de startApplicationServices() (Promise.all
+ * attend que TOUTES les promesses se résolvent), et donc tout le reste du démarrage — AppService.
+ * start() ne se terminait jamais, Bootstrap n'émettait jamais app:started, uptime figé à 0s côté
+ * IHM. Voir startApplicationServices() : seul le SIGNAL "démarrage terminé" cesse d'attendre après
+ * ce délai, les apps concernées continuent d'attendre ha:ready en tâche de fond, sans limite.
+ */
+const STARTUP_SERVICES_TIMEOUT_MS = 30000;
+
+/**
  * AppService - Orchestre le cycle de vie de l'application
  * 
  * Responsabilités (conforme §6.1 specs-presentation-v2.0) :
@@ -853,7 +865,21 @@ export class AppService {
         })
       );
 
-    await Promise.all(startups);
+    // ⭐ 24/08/2026 : une app requiredHaWs peut rester en attente de ha:ready indéfiniment PAR
+    // CONCEPTION (décision du 08/08/2026 ci-dessus) — sans borne ici, ça bloquait aussi le reste
+    // du démarrage de dimotic-ha lui-même (AppService.start()/Bootstrap.start()/app:started).
+    // Course avec un timeout : rien n'est annulé, les apps concernées continuent d'attendre en
+    // tâche de fond (démarreront normalement si HA finit par répondre) — seul le SIGNAL "démarrage
+    // des services terminé" cesse d'attendre après ce délai.
+    const allStarted = Promise.all(startups).then(() => true as const);
+    const timedOut = new Promise<false>((resolve) => setTimeout(() => resolve(false), STARTUP_SERVICES_TIMEOUT_MS));
+    const completed = await Promise.race([allStarted, timedOut]);
+    if (!completed) {
+      this.logger.warn(
+        'AppService',
+        `Démarrage des services : au moins une application (requiredHaWs ?) n'a pas terminé après ${STARTUP_SERVICES_TIMEOUT_MS / 1000}s — poursuite du démarrage sans attendre plus longtemps`
+      );
+    }
 
     this.logger.info('AppService', 'Services des applications démarrés');
   }
@@ -1273,6 +1299,18 @@ export class AppService {
     // @ts-ignore
     this.haWsClient.onError((error: Error) => {
       this.logger.error('AppService', `Erreur HA WebSocket: ${error.message}`);
+      // ⭐ 24/08/2026, demande explicite : un token confirmé invalide par HA lui-même ne doit
+      // jamais rester tel quel dans la config — voir ConfigService.clearHaWsToken(). Empêche
+      // aussi une future diffusion de dimotic-ha (CoreDeployService) de propager ce token mort
+      // sur une nouvelle machine.
+      if (error.message === 'Invalid HA token') {
+        const result = this.configService.clearHaWsToken();
+        if (result.success) {
+          this.logger.warn('AppService', 'Token HA WS invalide — effacé de la configuration (ha.ws)');
+        } else {
+          this.logger.error('AppService', `Échec d'effacement du token HA WS invalide: ${result.error}`);
+        }
+      }
     });
   }
 

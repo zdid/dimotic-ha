@@ -20,6 +20,8 @@ interface ScriptEntry {
   createdAt: string;
   updatedAt?: string;
   pending: boolean;
+  builtin: boolean;
+  driftsFromBuiltin: boolean;
 }
 
 let socket: any | null = null;
@@ -98,6 +100,10 @@ function renderScripts(): void {
         ? '<span class="badge deployed">diffusé</span>'
         : '<span class="badge not-deployed">non diffusé</span>';
 
+    const driftBadge = s.driftsFromBuiltin
+      ? '<span class="badge drift" title="Le contenu sur disque diffère du modèle intégré à l\'application">⚠️ diverge du modèle intégré</span>'
+      : '';
+
     const toggleBtn = s.pending
       ? ''
       : s.deployed
@@ -111,7 +117,7 @@ function renderScripts(): void {
     return `
     <div class="script-row">
       <div class="script-info">
-        <div class="script-title">${escapeHtml(s.title)}${badge}</div>
+        <div class="script-title">${escapeHtml(s.title)}${badge}${driftBadge}</div>
         <div class="script-desc">${escapeHtml(s.description || 'Pas de description')}</div>
       </div>
       <div class="script-actions">
@@ -170,8 +176,56 @@ function showContentModal(id: string, content: string): void {
 // Dépôt de fichier
 // ==========================================================================
 
+/**
+ * Extrait un champ scalaire de tête d'un YAML brut (⭐ 24/08/2026 — pas un vrai parseur, juste de
+ * quoi préremplir le formulaire depuis alias/description quand ils sont déjà dans le fichier
+ * déposé : ni titre ni description ne devraient être obligatoires à retaper si le fichier les a
+ * déjà). Gère la valeur simple (avec guillemets optionnels) et le bloc replié/littéral
+ * (`>`/`>-`/`|`/`|-` suivi de lignes indentées) — suffisant pour alias/description, pas un besoin
+ * de gérer tout YAML ici (aucun parseur YAML côté navigateur dans cette app).
+ */
+function extractYamlField(text: string, field: string): string {
+  const lines = text.split(/\r?\n/);
+  const re = new RegExp(`^${field}:\\s*(.*)$`);
+  const idx = lines.findIndex((l) => re.test(l));
+  if (idx === -1) return '';
+  const rest = (lines[idx].match(re)?.[1] ?? '').trim();
+  if (/^[|>][-+]?\s*$/.test(rest)) {
+    const blockLines: string[] = [];
+    for (let i = idx + 1; i < lines.length; i++) {
+      if (/^\s+\S/.test(lines[i])) blockLines.push(lines[i].trim());
+      else break;
+    }
+    return blockLines.join(' ').trim();
+  }
+  return rest.replace(/^['"]|['"]$/g, '');
+}
+
 function setupUploadForm(): void {
   $('upload-submit')?.addEventListener('click', () => void submitUpload());
+
+  $('upload-file')?.addEventListener('change', () => {
+    const fileInput = $('upload-file') as HTMLInputElement | null;
+    const titleInput = $('upload-title') as HTMLInputElement | null;
+    const descriptionInput = $('upload-description') as HTMLTextAreaElement | null;
+    const file = fileInput?.files?.[0];
+    if (!file) return;
+
+    file.text().then((text) => {
+      // Ne jamais écraser ce que l'utilisateur a déjà tapé — seulement combler un champ vide.
+      if (titleInput && !titleInput.value.trim()) {
+        const alias = extractYamlField(text, 'alias');
+        if (alias) titleInput.value = alias;
+      }
+      if (descriptionInput && !descriptionInput.value.trim()) {
+        const description = extractYamlField(text, 'description');
+        if (description) descriptionInput.value = description;
+      }
+    }).catch(() => {
+      // Fichier illisible côté client : pas bloquant, submitUpload() re-tentera côté serveur et
+      // affichera l'erreur réelle si le fichier est vraiment invalide.
+    });
+  });
 }
 
 async function submitUpload(): Promise<void> {

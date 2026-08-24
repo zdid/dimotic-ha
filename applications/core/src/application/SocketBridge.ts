@@ -153,6 +153,44 @@ export class SocketBridge {
       this.broadcast('config:current', config);
     });
 
+    // Connexion HA / MQTT — ⭐ 24/08/2026, correctif : ces 4 événements étaient émis côté
+    // eventBus interne (AppService.startHaWsClient, IntegrationBridge.updateAggregateMqttStatus)
+    // mais jamais relayés vers Socket.io — aucune entrée ici ni dans les socketEvents déclarés
+    // par une application. Résultat : $store.haWs.connected/$store.mqtt.connected (Sidebar,
+    // indicateur tri-state) ne passaient jamais à `true`, quel que soit l'état réel de connexion
+    // (constaté en conditions réelles : HA WS authentifié et une diffusion scriptsha réussie,
+    // indicateur toujours orange). Persistant (comme config:current) pour qu'un client qui se
+    // connecte/reconnecte APRÈS l'établissement de la connexion reçoive l'état réel, pas seulement
+    // les transitions futures.
+    this.eventBus.on('ha:connected', () => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: ha:connected');
+      this.persistentEvents.set('ha:connected', { appId: 'core', eventName: 'ha:connected', lastData: undefined });
+      this.persistentEvents.delete('ha:disconnected');
+      this.broadcast('ha:connected', undefined);
+    });
+
+    this.eventBus.on('ha:disconnected', () => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: ha:disconnected');
+      this.persistentEvents.set('ha:disconnected', { appId: 'core', eventName: 'ha:disconnected', lastData: undefined });
+      this.persistentEvents.delete('ha:connected');
+      this.broadcast('ha:disconnected', undefined);
+    });
+
+    this.eventBus.onGeneric('mqtt:connected', () => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: mqtt:connected');
+      this.persistentEvents.set('mqtt:connected', { appId: 'core', eventName: 'mqtt:connected', lastData: undefined });
+      this.persistentEvents.delete('mqtt:disconnected');
+      this.broadcast('mqtt:connected', undefined);
+    });
+
+    this.eventBus.onGeneric('mqtt:disconnected', (data) => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: mqtt:disconnected');
+      const typed = data as { reason: string };
+      this.persistentEvents.set('mqtt:disconnected', { appId: 'core', eventName: 'mqtt:disconnected', lastData: typed });
+      this.persistentEvents.delete('mqtt:connected');
+      this.broadcast('mqtt:disconnected', typed);
+    });
+
     // Liste des modules
     this.eventBus.on('app:modules:registered', ({ modules }: { modules: ApplicationModule[] }) => {
       this.logger.info('SocketBridge', 'EventBus → Socket.io: app:modules:registered');

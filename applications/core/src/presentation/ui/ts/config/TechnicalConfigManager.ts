@@ -359,6 +359,14 @@ export class TechnicalConfigManager {
     window.dispatchEvent(new CustomEvent('config:updated', {
       detail: { config: this.config }
     }));
+    // ⭐ 24/08/2026 : synchronise les indicateurs "activé" (rouge/orange/vert, voir Sidebar.ts) —
+    // ws_enable/mqtt_enable ne voyagent que dans config:current, jamais dans ha:connected/
+    // mqtt:connected eux-mêmes, donc c'est ici (à chaque mise à jour de config, pas seulement au
+    // premier chargement) qu'il faut les recopier vers les stores.
+    if (window.Alpine) {
+      window.Alpine.store('haWs').enabled = this.config.ha?.ws_enable === true;
+      window.Alpine.store('mqtt').enabled = this.config.ha?.mqtt_enable === true;
+    }
   }
   
   private notifyValidationUpdated(): void {
@@ -371,7 +379,7 @@ export class TechnicalConfigManager {
     window.dispatchEvent(new CustomEvent('ha:status:changed', {
       detail: { isConnected: this.isHaConnected }
     }));
-    if (window.Alpine) window.Alpine.store('ws').connected = this.isHaConnected;
+    if (window.Alpine) window.Alpine.store('haWs').connected = this.isHaConnected;
   }
 
   private notifyMqttStatusChanged(): void {
