@@ -329,6 +329,12 @@ const createTemplate = (): HTMLTemplateElement => {
                   <span class="nav-label">Déploiement</span>
                 </a>
               </li>
+              <li class="nav-item">
+                <a href="#post-install" class="nav-link" data-section="post-install">
+                  <span class="nav-icon">🔧</span>
+                  <span class="nav-label">Services post-installation</span>
+                </a>
+              </li>
               <!-- Sous-menus générés pour chaque application -->
               <div id="app-params-submenu"></div>
             </ul>
@@ -571,7 +577,8 @@ export class Sidebar extends HTMLElement {
       'web': 'section-web',
       'logging': 'section-logging',
       'applications-manager': 'section-applications-manager',
-      'deployment': 'section-deployment'
+      'deployment': 'section-deployment',
+      'post-install': 'section-post-install'
     };
     
     // Pour les applications dynamiques (app-nom)

@@ -303,6 +303,15 @@ export class SocketBridge {
       this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:ha-stack:remote-op:result');
       this.broadcast('core:deployment:ha-stack:remote-op:result', data);
     });
+
+    // ======================================================================
+    // SERVICES POST-INSTALLATION HA (⭐ 24/08/2026)
+    // ======================================================================
+
+    this.eventBus.on('core:post-install:result', (data: { results: Array<{ kind: string; success: boolean; title?: string; error?: string }> }) => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: core:post-install:result');
+      this.broadcast('core:post-install:result', data);
+    });
   }
 
   /**
@@ -483,6 +492,16 @@ export class SocketBridge {
       socket.on('core:deployment:ha-stack:remote-op', (data: { targetId: string; action: string; version?: string }) => {
         this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:ha-stack:remote-op de ${socket.id}, ${data.targetId}/${data.action}`);
         this.eventBus.emit('core:deployment:ha-stack:remote-op', data);
+      });
+
+      // ===========================================================================
+      // SERVICES POST-INSTALLATION HA (⭐ 24/08/2026)
+      // ===========================================================================
+
+      // @ts-ignore
+      socket.on('core:post-install:apply', (data: { requests: unknown[] }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:post-install:apply de ${socket.id}, ${data.requests?.length ?? 0} service(s)`);
+        this.eventBus.emit('core:post-install:apply', data as { requests: any[] });
       });
 
       // Gestion de la déconnexion

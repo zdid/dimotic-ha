@@ -15,6 +15,7 @@ import './components/ConfigForm';
 import './components/ModuleContainer';
 import './components/ApplicationsManager';
 import './components/DeploymentManager';
+import './components/PostInstallManager';
 import './components/LogsModal';
 
 // Étendre l'interface Window

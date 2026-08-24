@@ -11,6 +11,7 @@ import { ApplicationManager } from './ApplicationManager';
 import { CoreDeployService } from './CoreDeployService';
 import { HaStackDeployService } from './HaStackDeployService';
 import { TargetGossipService } from './TargetGossipService';
+import { HaPostInstallService, type PostInstallRequest } from './HaPostInstallService';
 import type { DeploymentTargetConfig, HaStackTargetConfig } from '../infrastructure/config/schema';
 import type { RemoteAction } from '../infrastructure/remote/RemoteUnitController';
 import { ensureGlobalSshKey } from '../infrastructure/remote/SshClient';
@@ -75,6 +76,8 @@ export class AppService {
   // Synchronisation "sans maître" des cibles connues (dimotic-ha + HA/Mosquitto) entre toutes les
   // instances du foyer via MQTT retenu (⭐ 24/08/2026, voir TargetGossipService.ts)
   private targetGossipService: TargetGossipService;
+  // Services post-installation HA (MQTT/Whisper/Piper/openWakeWord/Ollama), ⭐ 24/08/2026
+  private haPostInstallService: HaPostInstallService;
   // ⭐ fonctionnelles-supervisor_specs v2.6 — applications tournant en process séparé (Phase 1 : espdisplay)
   private processSupervisor: ProcessSupervisor;
   private supervisorBridge: SupervisorEventBridge;
@@ -169,6 +172,7 @@ export class AppService {
     this.coreDeployService = new CoreDeployService(configService, this.applicationManager, logger);
     this.haStackDeployService = new HaStackDeployService(logger);
     this.targetGossipService = new TargetGossipService(configService, eventBus, logger);
+    this.haPostInstallService = new HaPostInstallService(configService, logger);
 
     // Initialiser l'état WS depuis la config
     this.initializeWsState();
@@ -237,6 +241,12 @@ export class AppService {
     this.eventBus.on('core:deployment:ha-stack:remote-op', (data: unknown) => {
       const { targetId, action, version } = data as { targetId: string; action: RemoteAction; version?: string };
       this.handleHaStackRemoteOp(targetId, action, version);
+    });
+
+    // Services post-installation HA (⭐ 24/08/2026, voir HaPostInstallService.ts)
+    this.eventBus.on('core:post-install:apply', (data: unknown) => {
+      const { requests } = data as { requests: PostInstallRequest[] };
+      void this.handlePostInstallApply(requests);
     });
 
     // Redémarrage manuel demandé depuis l'UI (Paramètres Techniques > Journalisation)
@@ -843,6 +853,16 @@ export class AppService {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  /**
+   * Installe les services post-installation demandés (MQTT/Whisper/Piper/openWakeWord/Ollama) sur
+   * la HA actuellement connectée via `ha.ws` — voir HaPostInstallService.ts pour le détail des
+   * flux REST utilisés (vérifiés en conditions réelles avant d'écrire ce code).
+   */
+  private async handlePostInstallApply(requests: PostInstallRequest[]): Promise<void> {
+    const results = await this.haPostInstallService.apply(requests);
+    this.eventBus.emit('core:post-install:result', { results });
   }
 
   /**

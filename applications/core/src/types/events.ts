@@ -88,6 +88,9 @@ export interface ServerToClientEvents {
   // Déploiement Home Assistant + Mosquitto (⭐ nouveau 24/08/2026, voir HaStackDeployService.ts)
   'core:deployment:ha-stack:targets:list': (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => void;
   'core:deployment:ha-stack:remote-op:result': (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => void;
+
+  // Services post-installation HA (⭐ 24/08/2026, voir HaPostInstallService.ts)
+  'core:post-install:result': (data: { results: Array<{ kind: string; success: boolean; title?: string; error?: string }> }) => void;
 }
 
 // ------ Événements Client → Server ------
@@ -141,6 +144,10 @@ export interface ClientToServerEvents {
   'core:deployment:ha-stack:target:save': (data: unknown) => void;
   'core:deployment:ha-stack:target:delete': (data: { id: string }) => void;
   'core:deployment:ha-stack:remote-op': (data: { targetId: string; action: string; version?: string }) => void;
+
+  // Services post-installation HA (⭐ 24/08/2026, voir HaPostInstallService.ts) — agit toujours sur
+  // la HA déjà connectée via ha.ws, jamais sur une cible distante par token dédié.
+  'core:post-install:apply': (data: { requests: Array<{ kind: string; host?: string; port?: number; username?: string; password?: string; url?: string; model?: string }> }) => void;
 }
 
 // ============================================================================
@@ -212,6 +219,10 @@ export interface AppEvents {
   'core:deployment:ha-stack:target:delete': { id: string };
   'core:deployment:ha-stack:remote-op': { targetId: string; action: string; version?: string };
   'core:deployment:ha-stack:remote-op:result': { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string };
+
+  // Services post-installation HA (⭐ 24/08/2026, voir HaPostInstallService.ts)
+  'core:post-install:apply': { requests: Array<{ kind: string; host?: string; port?: number; username?: string; password?: string; url?: string; model?: string }> };
+  'core:post-install:result': { results: Array<{ kind: string; success: boolean; title?: string; error?: string }> };
 
   // ------ Extension libre par les applications ------
   // Les applications dérivées peuvent ajouter leurs propres événements
