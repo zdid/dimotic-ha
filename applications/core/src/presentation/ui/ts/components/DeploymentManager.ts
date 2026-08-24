@@ -125,14 +125,6 @@ const createTemplate = (): HTMLTemplateElement => {
         <label for="ha-deploy-version">Version Home Assistant à déployer (vide = latest)</label>
         <input type="text" id="ha-deploy-version" placeholder="2026.8.0" style="width:120px;">
       </div>
-      <div class="field" style="margin-bottom:12px;">
-        <label>Services post-installation (optionnel, format hôte:port — vide = même machine que HA)</label>
-        <div style="display:flex; gap:16px; flex-wrap:wrap;">
-          <div><label for="ha-target-whisper" style="font-weight:normal;">Whisper (STT)</label><br><input type="text" id="ha-target-whisper" placeholder="192.168.1.60:10300" style="width:190px;"></div>
-          <div><label for="ha-target-piper" style="font-weight:normal;">Piper (TTS)</label><br><input type="text" id="ha-target-piper" placeholder="192.168.1.60:10200" style="width:190px;"></div>
-          <div><label for="ha-target-ia" style="font-weight:normal;">IA (dimotic-ha)</label><br><input type="text" id="ha-target-ia" placeholder="192.168.1.60:11434" style="width:190px;"></div>
-        </div>
-      </div>
       <div id="ha-targets-container"><div class="empty">Chargement...</div></div>
     </div>
   `;
@@ -238,40 +230,18 @@ export class DeploymentManager extends HTMLElement {
     });
   }
 
-  /** "hôte:port" (port optionnel) → {host, port} ; vide → undefined (même machine que HA, voir
-   *  haStackServiceEndpointSchema). */
-  private parseServiceEndpoint(raw: string): { host: string; port?: number } | undefined {
-    const trimmed = raw.trim();
-    if (!trimmed) return undefined;
-    const [host, portStr] = trimmed.split(':');
-    const port = portStr ? Number.parseInt(portStr, 10) : undefined;
-    return { host, port: Number.isFinite(port) ? port : undefined };
-  }
-
   private addHaStackTarget(): void {
     const idEl = this.shadowRoot!.getElementById('ha-target-id') as HTMLInputElement | null;
     const hostEl = this.shadowRoot!.getElementById('ha-target-host') as HTMLInputElement | null;
-    const whisperEl = this.shadowRoot!.getElementById('ha-target-whisper') as HTMLInputElement | null;
-    const piperEl = this.shadowRoot!.getElementById('ha-target-piper') as HTMLInputElement | null;
-    const iaEl = this.shadowRoot!.getElementById('ha-target-ia') as HTMLInputElement | null;
 
     const id = idEl?.value.trim() ?? '';
     const host = hostEl?.value.trim() ?? '';
     if (!id || !host) return;
 
-    const services = {
-      whisper: this.parseServiceEndpoint(whisperEl?.value ?? ''),
-      piper: this.parseServiceEndpoint(piperEl?.value ?? ''),
-      ia: this.parseServiceEndpoint(iaEl?.value ?? '')
-    };
-
-    this.socket.emit('core:deployment:ha-stack:target:save', { id, host, remoteDir: '/docker/homeassistant', services });
+    this.socket.emit('core:deployment:ha-stack:target:save', { id, host, remoteDir: '/docker/homeassistant' });
 
     if (idEl) idEl.value = '';
     if (hostEl) hostEl.value = '';
-    if (whisperEl) whisperEl.value = '';
-    if (piperEl) piperEl.value = '';
-    if (iaEl) iaEl.value = '';
   }
 }
 

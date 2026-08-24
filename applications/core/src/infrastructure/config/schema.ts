@@ -96,32 +96,11 @@ const deploymentTargetSchema = z.object({
  * qui hébergent dimotic-ha). Même forme que `deploymentTargetSchema`, seul le `remoteDir` par
  * défaut change — même clé SSH globale que toute autre cible (SshClient.ts#globalSshKeyPath).
  */
-/**
- * Un service post-installation HA (⭐ 24/08/2026) — MQTT n'y figure pas : par construction déjà
- * co-localisé avec HA sur cette même cible (HaStackDeployService y déploie systématiquement
- * Mosquitto), donc rien à qualifier. `host` vide = même machine que la cible HA elle-même (décision
- * utilisateur, 17/08/2026) ; renseigné = adresse:port explicite. Simple carnet d'adresses partagé
- * par gossip — ne configure jamais HA lui-même (aucun appel à ses `config_entries`/`flow`, qui
- * resterait de toute façon bloqué tant que l'onboarding initial n'a pas été fait à la main, voir
- * échange du 17/08/2026).
- */
-const haStackServiceEndpointSchema = z.object({
-  host: z.string().default(''),
-  port: z.number().int().min(1).max(65535).optional()
-});
-
-const haStackServicesSchema = z.object({
-  whisper: haStackServiceEndpointSchema.optional(),
-  piper: haStackServiceEndpointSchema.optional(),
-  ia: haStackServiceEndpointSchema.optional()
-}).default({});
-
 const haStackTargetSchema = z.object({
   id: z.string().min(1),
   host: z.string().default(''),
   remoteDir: z.string().default('/docker/homeassistant'),
-  origin: z.enum(['local', 'gossip']).default('local'),
-  services: haStackServicesSchema
+  origin: z.enum(['local', 'gossip']).default('local')
 });
 
 /**
@@ -176,7 +155,6 @@ export type WebConfig = z.infer<typeof webSchema>;
 export type LoggingConfig = z.infer<typeof loggingSchema>;
 export type DeploymentTargetConfig = z.infer<typeof deploymentTargetSchema>;
 export type HaStackTargetConfig = z.infer<typeof haStackTargetSchema>;
-export type HaStackServices = z.infer<typeof haStackServicesSchema>;
 export type AppConfig = z.infer<typeof configSchema>;
 
 export { coreSchema, haWsSchema, haStructureSchema, haConfigSchema, mqttSchema, webSchema, loggingSchema, deploymentTargetSchema, haStackTargetSchema };
