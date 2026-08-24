@@ -23,7 +23,7 @@ import type { Logger } from '../infrastructure/logger';
 
 export interface DeployResult {
   success: boolean;
-  step?: 'ha-ws-check' | 'mkdir' | 'copy-compose' | 'seed-config' | 'pull-up' | 'health-check';
+  step?: 'ha-ws-check' | 'mkdir' | 'copy-compose' | 'seed-config' | 'pull-up' | 'health-check' | 'push-config' | 'restart';
   error?: string;
   output?: string;
 }
@@ -194,6 +194,67 @@ export class CoreDeployService {
 
     this.logger.info('CoreDeployService', `data/core/config.yaml semé sur ${target.host} (${seeded.disabledApps.length} application(s) désactivée(s) par défaut)`);
     return { success: true, step: 'seed-config' };
+  }
+
+  /**
+   * Diffuse UNIQUEMENT la section `ha` (WebSocket + MQTT, section partagée par tout le foyer)
+   * vers une machine DÉJÀ déployée, sans y republier ni redémarrer via `docker compose up` — juste
+   * réécrire `data/core/config.yaml` puis redémarrer (⭐ 24/08/2026, demande explicite :
+   * re-synchroniser des installations existantes après un changement local, ex. un token HA WS
+   * régénéré, sans repasser par un déploiement complet).
+   *
+   * Périmètre volontairement restreint à `ha` seul (pas `web`/`logging`/`disabledApps`) — décision
+   * explicite après avoir constaté en vérifiant ha2 avant un premier essai que diffuser
+   * `disabledApps` y aurait activé RFXCOM/AREXX/etc. dans le conteneur dimotic-ha, alors que ces
+   * applications y tournent déjà en production via l'ancien système, hors dimotic-ha : quelles
+   * applications sont activées reste une décision propre à chaque machine, jamais écrasée par une
+   * diffusion de config. Lit d'abord le fichier distant pour PRÉSERVER tout le reste (`web`/
+   * `logging`/`disabledApps`/`targets`/`haStackTargets`/`core.machineId`/sections par application,
+   * déjà en place sur la cible) — un remplacement intégral du fichier les perdrait.
+   */
+  async pushConfig(rawTarget: DeploymentTargetConfig): Promise<DeployResult> {
+    if (!rawTarget.host) {
+      return { success: false, step: 'push-config', error: 'Aucun hôte cible configuré (target.host)' };
+    }
+
+    const target = resolveTarget(rawTarget);
+    const remoteConfigPath = `${target.remoteDir}/data/core/config.yaml`;
+
+    const read = await runSsh(target, `cat ${shellQuote(remoteConfigPath)}`);
+    if (!read.success || !read.output.trim()) {
+      return {
+        success: false,
+        step: 'push-config',
+        error: `Impossible de lire ${remoteConfigPath} sur ${target.host} (${read.error || 'fichier absent ou vide'}) — la machine doit déjà avoir été déployée au moins une fois avant de pouvoir y diffuser la config seule.`
+      };
+    }
+
+    let remoteConfig: Record<string, unknown>;
+    try {
+      remoteConfig = (yaml.load(read.output) as Record<string, unknown>) || {};
+    } catch (error) {
+      return { success: false, step: 'push-config', error: `Config distante illisible (YAML invalide): ${error instanceof Error ? error.message : String(error)}` };
+    }
+
+    const current = this.configService.getConfig();
+    const merged = {
+      ...remoteConfig,
+      ha: current.ha
+    };
+    const mergedYaml = yaml.dump(merged, { indent: 2, sortKeys: false });
+
+    const write = await runSsh(target, `tee ${shellQuote(remoteConfigPath)} > /dev/null`, mergedYaml);
+    if (!write.success) {
+      this.logger.error('CoreDeployService', `Échec de diffusion de la config sur ${target.host}: ${write.error}`);
+      return { success: false, step: 'push-config', error: write.error };
+    }
+    this.logger.info('CoreDeployService', `Section ha (WebSocket + MQTT) diffusée vers ${target.host}, reste du fichier préservé`);
+
+    const restart = await this.unitController.restart(target, CONTAINER_NAME);
+    if (!restart.success) {
+      return { success: false, step: 'restart', error: restart.error };
+    }
+    return { success: true, step: 'restart', output: restart.output };
   }
 
   private async waitHealthy(target: DeploymentTargetConfig): Promise<DeployResult> {

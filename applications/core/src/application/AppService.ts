@@ -743,6 +743,8 @@ export class AppService {
         ? this.coreDeployService.stop(target)
         : action === 'restart'
         ? this.coreDeployService.restart(target)
+        : action === 'push-config'
+        ? this.coreDeployService.pushConfig(target)
         : Promise.resolve({ success: false, error: `Action distante inconnue: ${action}` }));
       this.eventBus.emit('core:deployment:remote-op:result', { targetId, action, ...result });
     } catch (error) {

@@ -15,7 +15,10 @@
 
 import { runSsh, shellQuote, type RemoteTarget, type RemoteOpResult } from './SshClient';
 
-export type RemoteAction = 'deploy' | 'start' | 'stop' | 'restart';
+// 'push-config' (⭐ 24/08/2026) : propre à CoreDeployService (diffusion du paramétrage socle vers
+// une installation déjà déployée) — pas géré par RemoteUnitController lui-même (aucune méthode
+// dédiée ici), juste partagé pour que AppService.ts type correctement le protocole remote-op commun.
+export type RemoteAction = 'deploy' | 'start' | 'stop' | 'restart' | 'push-config';
 
 export interface RemoteUnitController {
   start(target: RemoteTarget, unitName: string): Promise<RemoteOpResult>;

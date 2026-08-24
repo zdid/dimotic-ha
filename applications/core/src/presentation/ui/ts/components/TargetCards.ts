@@ -14,7 +14,7 @@
  * `SocketService` importée) — un simple callback `onAction` déclenche l'émission côté appelant.
  */
 
-export type RemoteAction = 'deploy' | 'start' | 'stop' | 'restart';
+export type RemoteAction = 'deploy' | 'start' | 'stop' | 'restart' | 'push-config';
 
 export interface TargetSummary {
   id: string;
@@ -38,13 +38,18 @@ export interface RenderTargetCardsOptions {
    *  §core/src/types/config.ts) ; utilisé par `core` (DeploymentManager.ts), qui n'a pas ce moteur
    *  générique pour sa propre config. */
   onDelete?: (targetId: string) => void;
+  /** Optionnel — actions supplémentaires ajoutées après les 4 boutons standard, propres à un seul
+   *  appelant (⭐ 24/08/2026 : `push-config`, dimotic-ha uniquement — sans objet pour rpigpio/
+   *  teleinfo/arexx/HA-stack, qui n'ont pas la notion de `data/core/config.yaml`). */
+  extraActions?: RemoteAction[];
 }
 
 const ACTION_LABELS: Record<RemoteAction, string> = {
   deploy: '🚀 Déployer',
   start: '▶️ Démarrer',
   stop: '⏹️ Arrêter',
-  restart: '🔄 Redémarrer'
+  restart: '🔄 Redémarrer',
+  'push-config': '📤 Diffuser la config'
 };
 
 function escapeHtml(text: string): string {
@@ -59,12 +64,16 @@ function findCard(container: HTMLElement, targetId: string): HTMLElement | undef
 }
 
 export function renderTargetCards(container: HTMLElement, options: RenderTargetCardsOptions): void {
-  const { targets, onAction, onDelete } = options;
+  const { targets, onAction, onDelete, extraActions } = options;
 
   if (targets.length === 0) {
     container.innerHTML = '<div class="empty">Aucune cible configurée — ajouter une cible dans les paramètres de l\'application.</div>';
     return;
   }
+
+  const extraButtons = (extraActions || [])
+    .map((action) => `<button type="button" data-action="${action}">${ACTION_LABELS[action]}</button>`)
+    .join('');
 
   container.innerHTML = targets.map((target) => {
     const deleteButton = onDelete ? `<button type="button" class="target-delete" data-delete="1">🗑️ Supprimer</button>` : '';
@@ -78,6 +87,7 @@ export function renderTargetCards(container: HTMLElement, options: RenderTargetC
           <button type="button" data-action="start">${ACTION_LABELS.start}</button>
           <button type="button" data-action="stop">${ACTION_LABELS.stop}</button>
           <button type="button" data-action="restart">${ACTION_LABELS.restart}</button>
+          ${extraButtons}
         </div>
         <div class="target-result target-result-success" style="display:none;"></div>
         <div class="target-result target-result-error" style="display:none;"></div>

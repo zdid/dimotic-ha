@@ -190,6 +190,7 @@ export class DeploymentManager extends HTMLElement {
     if (!container) return;
     renderTargetCards(container, {
       targets: data.targets,
+      extraActions: ['push-config'],
       onAction: (targetId: string, action: RemoteAction) => {
         const version = (this.shadowRoot!.getElementById('deploy-version') as HTMLInputElement | null)?.value.trim();
         this.socket.emit('core:deployment:remote-op', { targetId, action, version: version || undefined });
