@@ -10,6 +10,7 @@ import { EventBus } from './EventBus';
 import { ApplicationManager } from './ApplicationManager';
 import { CoreDeployService } from './CoreDeployService';
 import { HaStackDeployService } from './HaStackDeployService';
+import { TargetGossipService } from './TargetGossipService';
 import type { DeploymentTargetConfig, HaStackTargetConfig } from '../infrastructure/config/schema';
 import type { RemoteAction } from '../infrastructure/remote/RemoteUnitController';
 import { ensureGlobalSshKey } from '../infrastructure/remote/SshClient';
@@ -71,6 +72,9 @@ export class AppService {
   private coreDeployService: CoreDeployService;
   // Déploiement Home Assistant + Mosquitto sur une machine distante (⭐ 24/08/2026)
   private haStackDeployService: HaStackDeployService;
+  // Synchronisation "sans maître" des cibles connues (dimotic-ha + HA/Mosquitto) entre toutes les
+  // instances du foyer via MQTT retenu (⭐ 24/08/2026, voir TargetGossipService.ts)
+  private targetGossipService: TargetGossipService;
   // ⭐ fonctionnelles-supervisor_specs v2.6 — applications tournant en process séparé (Phase 1 : espdisplay)
   private processSupervisor: ProcessSupervisor;
   private supervisorBridge: SupervisorEventBridge;
@@ -164,6 +168,7 @@ export class AppService {
     this.applicationManager = new ApplicationManager(restartManager, logger, configService, this.processSupervisor);
     this.coreDeployService = new CoreDeployService(configService, this.applicationManager, logger);
     this.haStackDeployService = new HaStackDeployService(logger);
+    this.targetGossipService = new TargetGossipService(configService, eventBus, logger);
 
     // Initialiser l'état WS depuis la config
     this.initializeWsState();
@@ -300,6 +305,10 @@ export class AppService {
     // 2.1. Génère la clé SSH unique de l'installation si absente (⭐ 24/08/2026 — une seule clé
     // pour toute l'application, partagée par toutes les cibles, voir SshClient.ts#ensureGlobalSshKey).
     ensureGlobalSshKey();
+
+    // 2.2. Démarre la synchronisation des cibles connues entre instances (⭐ 24/08/2026, voir
+    // TargetGossipService.ts) — indépendant de HA WS/des services applicatifs, peut démarrer tôt.
+    this.targetGossipService.start();
 
     // 3. Émettre la liste des modules vers l'UI
     this.eventBus.emit('app:modules:registered', { modules: this.modules });
@@ -705,6 +714,8 @@ export class AppService {
     const result = this.configService.setTargets(targets);
     if (!result.success) {
       this.logger.error('AppService', `Échec de sauvegarde de la cible de déploiement ${target.id}: ${result.error}`);
+    } else {
+      this.targetGossipService.republish();
     }
     this.handleDeploymentTargetsGet();
   }
@@ -714,6 +725,8 @@ export class AppService {
     const result = this.configService.setTargets(targets);
     if (!result.success) {
       this.logger.error('AppService', `Échec de suppression de la cible de déploiement ${data.id}: ${result.error}`);
+    } else {
+      this.targetGossipService.republish();
     }
     this.handleDeploymentTargetsGet();
   }
@@ -778,6 +791,8 @@ export class AppService {
     const result = this.configService.setHaStackTargets(targets);
     if (!result.success) {
       this.logger.error('AppService', `Échec de sauvegarde de la cible HA+Mosquitto ${target.id}: ${result.error}`);
+    } else {
+      this.targetGossipService.republish();
     }
     this.handleHaStackTargetsGet();
   }
@@ -787,6 +802,8 @@ export class AppService {
     const result = this.configService.setHaStackTargets(targets);
     if (!result.success) {
       this.logger.error('AppService', `Échec de suppression de la cible HA+Mosquitto ${data.id}: ${result.error}`);
+    } else {
+      this.targetGossipService.republish();
     }
     this.handleHaStackTargetsGet();
   }

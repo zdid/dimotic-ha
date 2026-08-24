@@ -71,7 +71,12 @@ export const SCRIPTSHA_APP: ApplicationModule = {
     // Événement générique existant (AppService.ts, émis pour tout entity_registry_updated), pas
     // préfixé scriptsha — utilisé pour détecter une nouvelle entité surveillée en continu, voir
     // ScriptsHaService::reconcileEntityHelpers.
-    'ha:entity:updated'
+    'ha:entity:updated',
+    // Synchronisation "sans maître" entre instances (⭐ 24/08/2026, voir TargetGossipService.ts
+    // côté core) — sens core→scriptsha uniquement, le sens scriptsha→core (scriptsha:gossip:changed/
+    // :list:result) est automatique (tout ce qu'un enfant envoie arrive à core sans déclaration).
+    'scriptsha:gossip:list:get',
+    'scriptsha:gossip:learned'
   ]
 };
 

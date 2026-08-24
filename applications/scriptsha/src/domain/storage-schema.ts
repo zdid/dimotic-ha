@@ -54,7 +54,13 @@ export const scriptEntrySchema = z.object({
    *  parties légitimement régénérées par l'app, ex: liste de lumières de la minuterie, sont
    *  neutralisées avant comparaison). Recalculé à chaque démarrage, affiché comme avertissement
    *  dans l'IHM — jamais utilisé pour écraser automatiquement une modification locale. */
-  driftsFromBuiltin: z.boolean().default(false)
+  driftsFromBuiltin: z.boolean().default(false),
+  /** ⭐ 24/08/2026 : 'local' = déposé/créé sur CETTE machine, 'gossip' = appris via l'annonce MQTT
+   *  d'une autre instance dimotic-ha (voir ScriptGossip côté ScriptsHaService/TargetGossipService
+   *  côté core) — jamais réannoncé par cette machine (évite tout écho entre instances). Sans objet
+   *  pour un script `builtin` (déjà identique sur toute installation par construction, jamais
+   *  gossipé). */
+  origin: z.enum(['local', 'gossip']).default('local')
 });
 
 export type ScriptEntry = z.infer<typeof scriptEntrySchema>;

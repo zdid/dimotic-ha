@@ -34,6 +34,23 @@ interface UploadEventPayload {
   fields: Record<string, unknown>;
 }
 
+/** Un script tel qu'annoncé/appris par gossip entre instances (⭐ 24/08/2026) — contenu YAML brut
+ *  inclus (pas seulement les métadonnées), sans quoi une autre instance ne pourrait rien déployer
+ *  du script qu'elle apprend. */
+interface GossipableScript {
+  id: string;
+  title: string;
+  description: string;
+  originalFilename: string;
+  haDomain: 'script' | 'automation';
+  content: string;
+}
+
+interface GossipLearnedPayload {
+  sourceMachineId: string;
+  scripts: GossipableScript[];
+}
+
 interface HaRestResultPayload {
   id: string;
   success: boolean;
@@ -319,6 +336,11 @@ export class ScriptsHaService implements IScriptsHaService {
     this.logger.info('ScriptsHaService', 'Démarrage du service scriptsha...');
     this.seedBuiltinScripts();
     this.emitScripts();
+    // Annonce initiale (⭐ 24/08/2026) — core peut démarrer TargetGossipService avant même que ce
+    // process séparé soit prêt (ordre non garanti entre processus) ; c'est donc à scriptsha
+    // d'annoncer proactivement son état une fois réellement démarré, plutôt que d'attendre une
+    // sollicitation de core qui pourrait arriver trop tôt.
+    this.notifyGossipChanged();
     this.logger.info('ScriptsHaService', 'Service scriptsha démarré');
   }
 
@@ -339,6 +361,12 @@ export class ScriptsHaService implements IScriptsHaService {
     this.eventBus.onGeneric<HaHelperResultPayload>('scriptsha:ha:helper:result', (data) => this.handleHaHelperResult(data));
     this.eventBus.onGeneric<HaEntitiesListResultPayload>('scriptsha:ha:entities:list:result', (data) => this.handleEntitiesListResult(data));
     this.eventBus.onGeneric<HaEntityUpdatedPayload>('ha:entity:updated', (data) => this.handleEntityUpdated(data));
+
+    // Synchronisation "sans maître" entre instances dimotic-ha (⭐ 24/08/2026, voir
+    // TargetGossipService.ts côté core — scriptsha tourne en process séparé, sans accès direct au
+    // broker MQTT ni à ConfigService, donc core relaie via IPC dans les deux sens).
+    this.eventBus.onGeneric('scriptsha:gossip:list:get', () => this.handleGossipListGet());
+    this.eventBus.onGeneric<GossipLearnedPayload>('scriptsha:gossip:learned', (data) => this.handleGossipLearned(data));
   }
 
   // ==========================================================================
@@ -371,7 +399,8 @@ export class ScriptsHaService implements IScriptsHaService {
           createdAt: new Date().toISOString(),
           provisioning: def.provisioning,
           builtin: true,
-          driftsFromBuiltin: false
+          driftsFromBuiltin: false,
+          origin: 'local'
         });
         changed = true;
         this.logger.info('ScriptsHaService', `Script intégré "${def.title}" déposé`);
@@ -492,7 +521,8 @@ export class ScriptsHaService implements IScriptsHaService {
         deployed: false,
         createdAt: now,
         builtin: false,
-        driftsFromBuiltin: false
+        driftsFromBuiltin: false,
+        origin: 'local'
       });
       const result = this.scriptsManager.save({ scripts: this.scripts });
       if (!result.success) {
@@ -502,6 +532,7 @@ export class ScriptsHaService implements IScriptsHaService {
 
       this.logger.info('ScriptsHaService', `Script déposé: ${id} ("${title}")`);
       this.emitScripts();
+      this.notifyGossipChanged();
     } catch (error) {
       this.emitError(`Erreur lors du dépôt du fichier: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -608,6 +639,7 @@ export class ScriptsHaService implements IScriptsHaService {
     this.scripts = this.scripts.filter((s) => s.id !== id);
     this.scriptsManager.save({ scripts: this.scripts });
     this.emitScripts();
+    if (entry.origin !== 'gossip') this.notifyGossipChanged();
   }
 
   private handleGetContent(id: string): void {
@@ -835,6 +867,83 @@ export class ScriptsHaService implements IScriptsHaService {
     } finally {
       this.reconcilingProvisioning = false;
     }
+  }
+
+  // ==========================================================================
+  // Synchronisation entre instances (gossip, ⭐ 24/08/2026)
+  // ==========================================================================
+
+  /** core republie l'annonce dès réception — jamais un script `builtin` (déjà identique sur toute
+   *  installation par construction) ni un script déjà appris ailleurs (`origin:'gossip'`, pour
+   *  éviter tout écho entre instances). */
+  private handleGossipListGet(): void {
+    const scripts: GossipableScript[] = this.scripts
+      .filter((s) => !s.builtin && s.origin !== 'gossip')
+      .map((s) => this.toGossipableScript(s));
+    this.logger.info('ScriptsHaService', `scriptsha:gossip:list:get reçu — envoi de ${scripts.length} script(s)`);
+    this.eventBus.emitGeneric('scriptsha:gossip:list:result', { scripts });
+  }
+
+  private toGossipableScript(entry: ScriptEntry): GossipableScript {
+    let content = '';
+    try {
+      content = fs.readFileSync(path.join(this.scriptsDir, `${entry.id}.yaml`), 'utf8');
+    } catch (error) {
+      this.logger.warn('ScriptsHaService', `Contenu introuvable pour ${entry.id}, exclu du gossip: ${error}`);
+    }
+    return {
+      id: entry.id,
+      title: entry.title,
+      description: entry.description,
+      originalFilename: entry.originalFilename,
+      haDomain: entry.haDomain,
+      content
+    };
+  }
+
+  /** Fusionne les scripts annoncés par une autre instance — id renommé `{machineId}::{id}` (les
+   *  id ne sont uniques qu'au sein d'une seule installation), jamais déployé automatiquement (une
+   *  machine décide seule de ce qu'elle diffuse réellement vers SA HA). Idempotent : un script déjà
+   *  connu (même id namespacé) n'est jamais réécrit. */
+  private handleGossipLearned(data: GossipLearnedPayload): void {
+    if (!data?.sourceMachineId || !Array.isArray(data.scripts) || data.scripts.length === 0) return;
+
+    const known = new Set(this.scripts.map((s) => s.id));
+    const newOnes = data.scripts.filter((s) => !known.has(`${data.sourceMachineId}::${s.id}`));
+    if (newOnes.length === 0) return;
+
+    fs.mkdirSync(this.scriptsDir, { recursive: true });
+    const now = new Date().toISOString();
+    for (const s of newOnes) {
+      const id = `${data.sourceMachineId}::${s.id}`;
+      fs.writeFileSync(path.join(this.scriptsDir, `${id}.yaml`), s.content, 'utf8');
+      this.scripts.push({
+        id,
+        title: s.title,
+        description: s.description,
+        originalFilename: s.originalFilename,
+        haDomain: s.haDomain,
+        deployed: false,
+        createdAt: now,
+        builtin: false,
+        driftsFromBuiltin: false,
+        origin: 'gossip'
+      });
+    }
+    const result = this.scriptsManager.save({ scripts: this.scripts });
+    if (result.success) {
+      this.logger.info('ScriptsHaService', `${newOnes.length} script(s) appris de ${data.sourceMachineId}: ${newOnes.map((s) => s.title).join(', ')}`);
+      this.emitScripts();
+    } else {
+      this.logger.error('ScriptsHaService', `Échec d'enregistrement des scripts appris de ${data.sourceMachineId}: ${result.error}`);
+    }
+  }
+
+  /** À appeler après tout changement d'un script `origin:'local'` — signale à core (process
+   *  parent) qu'il doit redemander la liste et republier son annonce MQTT. Pas d'effet si core n'a
+   *  pas de TargetGossipService actif côté écoute (événement simplement ignoré). */
+  private notifyGossipChanged(): void {
+    this.eventBus.emitGeneric('scriptsha:gossip:changed', undefined);
   }
 
   // ==========================================================================
