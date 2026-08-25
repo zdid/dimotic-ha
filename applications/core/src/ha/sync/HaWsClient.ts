@@ -318,7 +318,18 @@ export class HaWsClient {
       headers: { Authorization: `Bearer ${this.currentConfig.token}` },
     });
     if (!response.ok) {
-      throw new Error(`DELETE ${url} → HTTP ${response.status}`);
+      // ⭐ 25/08/2026, bug réel corrigé : HA répond HTTP 400 (pas 404) avec {"message":"Resource
+      // not found"} quand l'id n'existe déjà plus (ex: supprimé manuellement dans HA entre-temps,
+      // constaté en conditions réelles — applications/scriptsha). Sans ce cas, le retrait échouait
+      // systématiquement dans ce scénario, laissant l'app appelante avec un drapeau "déployé"
+      // périmé (déjà vrai côté HA, jamais mis à jour côté app faute de succès rapporté) — traité
+      // ici comme un succès idempotent (l'état voulu, "absent de HA", est déjà atteint).
+      const bodyText = await response.text().catch(() => '');
+      if (response.status === 400 && bodyText.includes('Resource not found')) {
+        this.logger.info('ha:ws', `DELETE ${url} : déjà absent côté HA, traité comme succès`);
+        return;
+      }
+      throw new Error(`DELETE ${url} → HTTP ${response.status}${bodyText ? `: ${bodyText}` : ''}`);
     }
   }
 
