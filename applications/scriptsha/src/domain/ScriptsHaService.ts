@@ -215,17 +215,34 @@ action:
            | selectattr('state', 'eq', 'unavailable')
            | map(attribute='name')
            | list }}
+      # ⭐ 25/08/2026, bug réel corrigé : ces deux variables utilisaient une compréhension de liste
+      # Python ([x for x in ... if ...]), invalide en Jinja2 (moteur de HA) — rejetée à la
+      # sauvegarde avec TemplateSyntaxError (POST /api/config/automation/config/... → HTTP 400),
+      # jamais détecté avant un vrai déploiement car aucune validation locale de template Jinja2.
+      # Récrit avec namespace()+for, seule construction Jinja2 permettant d'accumuler une liste
+      # depuis une boucle (pas d'équivalent direct aux filtres selectattr/map ici, la condition
+      # combine plusieurs attributs ET une comparaison numérique après conversion de state).
       low_battery_pct: >
-        {{ [s.name for s in states.sensor
-             if s.attributes.get('device_class') == 'battery'
-             and s.attributes.get('unit_of_measurement') == '%'
-             and s.state not in ['unknown', 'unavailable']
-             and s.state | float(-1) < seuil_batterie_pct] }}
+        {% set ns_pct = namespace(items=[]) %}
+        {% for s in states.sensor %}
+        {% if s.attributes.get('device_class') == 'battery'
+              and s.attributes.get('unit_of_measurement') == '%'
+              and s.state not in ['unknown', 'unavailable']
+              and s.state | float(-1) < seuil_batterie_pct %}
+        {% set ns_pct.items = ns_pct.items + [s.name] %}
+        {% endif %}
+        {% endfor %}
+        {{ ns_pct.items }}
       low_battery_mv: >
-        {{ [s.name for s in states.sensor
-             if s.attributes.get('unit_of_measurement') == 'mV'
-             and s.state not in ['unknown', 'unavailable']
-             and s.state | float(-1) < seuil_batterie_mv] }}
+        {% set ns_mv = namespace(items=[]) %}
+        {% for s in states.sensor %}
+        {% if s.attributes.get('unit_of_measurement') == 'mV'
+              and s.state not in ['unknown', 'unavailable']
+              and s.state | float(-1) < seuil_batterie_mv %}
+        {% set ns_mv.items = ns_mv.items + [s.name] %}
+        {% endif %}
+        {% endfor %}
+        {{ ns_mv.items }}
   - condition: template
     value_template: >
       {{ (unavailable_entities | count > 0)
