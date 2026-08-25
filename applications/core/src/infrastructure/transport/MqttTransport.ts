@@ -72,6 +72,11 @@ type ErrorCallback = (error: Error) => void;
 // =============================================================================
 
 const MAX_RECONNECT_DELAY_MS = 60000; // 60 secondes max
+// ⭐ 25/08/2026 : délai avant de considérer une connexion comme stable (voir handleConnect) — en
+// dessous de ce seuil, une coupure ne doit PAS remettre le backoff à zéro (voir le commentaire sur
+// stableTimeout : bug réel constaté en conditions réelles sur stfort, boucle connexion/coupure par
+// le broker toutes les ~1-2s indéfiniment, sans jamais ralentir, faute de ce garde-fou).
+const STABLE_CONNECTION_MS = 5000;
 const LWT_TOPIC_PREFIX = 'app';
 const LWT_PAYLOAD_OFFLINE = 'offline';
 const LWT_PAYLOAD_ONLINE = 'online';
@@ -97,6 +102,8 @@ export class MqttTransport {
   private isConnected = false;
   private reconnectAttempts = 0;
   private reconnectTimeout: NodeJS.Timeout | null = null;
+  /** Programmée à la connexion, annulée à la déconnexion — voir handleConnect/STABLE_CONNECTION_MS. */
+  private stableTimeout: NodeJS.Timeout | null = null;
 
   // Callbacks
   private messageCallbacks: MessageCallback[] = [];
@@ -157,6 +164,7 @@ export class MqttTransport {
    */
   disconnect(): void {
     this.clearReconnectTimeout();
+    this.clearStableTimeout();
 
     if (this.client) {
       // Publier le LWT offline avant de se déconnecter
@@ -319,8 +327,19 @@ export class MqttTransport {
    */
   private handleConnect(): void {
     this.isConnected = true;
-    this.reconnectAttempts = 0;
     this.clearReconnectTimeout();
+
+    // ⭐ 25/08/2026 : ne remet reconnectAttempts à zéro qu'après STABLE_CONNECTION_MS de connexion
+    // ininterrompue — pas immédiatement ici. Sinon une connexion coupée par le broker presque
+    // aussitôt après chaque tentative (bug réel constaté sur stfort, "Connection closed by broker"
+    // ~1s après chaque connexion) fait repartir le backoff à son délai minimal à chaque cycle, sans
+    // jamais ralentir — la boucle tourne alors indéfiniment au lieu de finir par espacer ses
+    // tentatives. Annulée dans handleClose/handleOffline/handleEnd si la coupure survient avant.
+    this.clearStableTimeout();
+    this.stableTimeout = setTimeout(() => {
+      this.stableTimeout = null;
+      this.reconnectAttempts = 0;
+    }, STABLE_CONNECTION_MS);
 
     // Publier le LWT online
     this.publishLwt(LWT_PAYLOAD_ONLINE, true);
@@ -354,6 +373,7 @@ export class MqttTransport {
   private handleClose(): void {
     this.isConnected = false;
     this.clearReconnectTimeout();
+    this.clearStableTimeout();
     this.notifyDisconnect('Connection closed by broker');
     this.scheduleReconnect();
   }
@@ -445,6 +465,13 @@ export class MqttTransport {
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
+    }
+  }
+
+  private clearStableTimeout(): void {
+    if (this.stableTimeout) {
+      clearTimeout(this.stableTimeout);
+      this.stableTimeout = null;
     }
   }
 

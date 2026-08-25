@@ -177,6 +177,12 @@ export class SocketBridge {
     });
 
     this.eventBus.onGeneric('mqtt:connected', () => {
+      // ⭐ 25/08/2026 : garde d'idempotence — cet événement a été observé émis deux fois de suite en
+      // conditions réelles (stfort, boucle de reconnexion RFXCOM), sans qu'un second point d'émission
+      // n'ait pu être localisé dans le code (un seul emitGeneric, dans IntegrationBridge.ts). Plutôt
+      // que de laisser passer une diffusion redondante en attendant d'en comprendre la cause exacte,
+      // on ignore toute émission qui ne change rien à l'état persistant déjà connu (déjà "connecté").
+      if (this.persistentEvents.has('mqtt:connected')) return;
       this.logger.info('SocketBridge', 'EventBus → Socket.io: mqtt:connected');
       this.persistentEvents.set('mqtt:connected', { appId: 'core', eventName: 'mqtt:connected', lastData: undefined });
       this.persistentEvents.delete('mqtt:disconnected');
@@ -184,6 +190,8 @@ export class SocketBridge {
     });
 
     this.eventBus.onGeneric('mqtt:disconnected', (data) => {
+      // Même garde d'idempotence que mqtt:connected ci-dessus.
+      if (this.persistentEvents.has('mqtt:disconnected')) return;
       this.logger.info('SocketBridge', 'EventBus → Socket.io: mqtt:disconnected');
       const typed = data as { reason: string };
       this.persistentEvents.set('mqtt:disconnected', { appId: 'core', eventName: 'mqtt:disconnected', lastData: typed });
