@@ -148,7 +148,16 @@ export const IA_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   // 4 tentatives, ToolExecutor logue "Timeout (10000ms) en attente de réponse sur
   // ia:tool:execute:reply" — planificateur répondait bien, la réponse n'était simplement jamais
   // relayée jusqu'au process ia.
-  bridgedEvents: ['ia:tool:execute:reply', 'ia:command:reply']
+  //
+  // ⭐ 25/08/2026 (suite, même jour) : planificateur:deploy manqué au premier passage — 3e canal de
+  // corrélation (ExecutionEngine.deployRequester → DeployResponder.ts), sens INVERSE des deux
+  // premiers (planificateur émet, ia répond) : planificateur:deploy doit donc être ponté vers `ia`
+  // (émission reçue ici), pas planificateur:deploy:reply (voir planificateur/domain/index.ts pour
+  // le sens inverse). Constaté en conditions réelles : repli sur deployAndExecute (verbe/lieu non
+  // résolu par resolution.ts, ex: "sac" — lieu inconnu) systématiquement en échec, ExecutionEngine
+  // logue "Timeout (15000ms) en attente de réponse sur planificateur:deploy:reply" — ia ne
+  // recevait jamais la demande de réinterprétation, ne pouvait donc jamais répondre.
+  bridgedEvents: ['ia:tool:execute:reply', 'ia:command:reply', 'planificateur:deploy']
 };
 
 // ============================================================================

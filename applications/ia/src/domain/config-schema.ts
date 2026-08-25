@@ -86,7 +86,14 @@ export const iaConfigSchema = z.object({
 
   // Délais d'attente pour les échanges de corrélation avec planificateur
   commandTimeoutMs: z.number().int().positive().default(2000),
-  toolExecuteTimeoutMs: z.number().int().positive().default(10000),
+  // ⭐ 25/08/2026 : 10000 -> 20000 — executer_action retombe sur planificateur:deploy (réinterprétation
+  // Mistral complète, planificateur/config-schema.ts::deployTimeoutMs = 15000) quand resolution.ts
+  // ne sait pas résoudre verbe/lieu déterministe (ex: lieu inconnu). Un timeout externe plus court
+  // que l'interne fait toujours abandonner ia avant que planificateur n'ait fini, même quand ce
+  // dernier finit par répondre correctement — constaté en conditions réelles ("éteins le sac",
+  // lieu inconnu : ToolExecutor timeout à 10s, ExecutionEngine timeout à 15s cinq secondes plus
+  // tard sur la MÊME requête).
+  toolExecuteTimeoutMs: z.number().int().positive().default(20000),
 
   // ⭐ Quoi exclus du catalogue quoi/lieux statique injecté dans le prompt système (rules.ts,
   // techniques-socle-ha-mqtt_specs §8.3.3) — demande utilisateur : certains quoi ne désignent pas
@@ -128,6 +135,6 @@ export const DEFAULT_IA_CONFIG: IaConfig = {
   ollamaHttpPort: 11434,
   rulesFile: '../../data/ia/regles_mistral.txt',
   commandTimeoutMs: 2000,
-  toolExecuteTimeoutMs: 10000,
+  toolExecuteTimeoutMs: 20000,
   excludedQuoiIds: ['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge']
 };

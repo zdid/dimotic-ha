@@ -123,7 +123,12 @@ export const PLANIFICATEUR_APP: ApplicationModule & { menu?: ApplicationMenuConf
   // corrélées émises par `ia` (ToolExecutor.ts/StructuredRouter.ts) n'atteignaient jamais
   // `planificateur` depuis leur migration en process séparé, pour la même raison (ni motif
   // générique integration:*/ha:*, ni déclaré ici jusqu'ici).
-  bridgedEvents: ['ia:tool:execute', 'ia:command']
+  //
+  // ⭐ 25/08/2026 (suite) : planificateur:deploy:reply manqué au premier passage — réponse du 3e
+  // canal de corrélation (ExecutionEngine.deployRequester → DeployResponder.ts côté ia), sens
+  // INVERSE des deux premiers : c'est ici, côté planificateur, que la réponse doit être pontée
+  // (voir ia/domain/index.ts pour l'émission de la requête planificateur:deploy elle-même).
+  bridgedEvents: ['ia:tool:execute', 'ia:command', 'planificateur:deploy:reply']
 };
 
 // ============================================================================
