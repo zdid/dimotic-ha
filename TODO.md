@@ -707,22 +707,27 @@
 
 ---
 
-### 🟡 Services post-installation : groupe de notification "tous les téléphones" — Question ouverte, pas encore une action décidée
+### 🟢 Services post-installation : groupe de notification "tous les téléphones" — Tranché : hors périmètre
 - **Constat (2026-08-25)**, en corrigeant le script scriptsha "Rapport entités indisponibles/piles
   faibles" (`notify.mobile_app_TON_TELEPHONE`, placeholder à personnaliser par machine) : un seul
   téléphone existe aujourd'hui (`notify.mobile_app_telephone_de_didier`), donc l'appel direct
   suffit — mais dès qu'un deuxième arrivera, chaque script/automatisation visant "tout le monde"
   devra soit lister chaque service individuellement, soit passer par un groupe de notification HA
-  (`configuration.yaml`, `notify: - platform: group ...`, voir l'échange qui a donné lieu à cette
-  entrée pour la déclaration exacte).
-- **Question à trancher, pas encore une action** : est-ce que `HaPostInstallService.ts`/Services
-  post-installation devrait pouvoir écrire cette déclaration de groupe dans `configuration.yaml`
-  (ou la maintenir à jour automatiquement à partir des `notify.mobile_app_*` détectés), ou est-ce
-  hors périmètre de dimotic-ha (config HA native, à faire à la main comme aujourd'hui) ? Contrairement aux
-  autres entrées de Services post-installation, ceci touche `configuration.yaml` directement, pas
-  un flux `config_entries` — mécanisme d'écriture différent, jamais utilisé ailleurs dans ce projet.
-- **Statut** : Non traité — un seul téléphone actuellement, pas encore un besoin réel
-- **Priorité** : Basse (pas de second téléphone à ce jour)
+  (`configuration.yaml`, `notify: - platform: group ...`).
+- **Décision (2026-08-25)** : dimotic-ha ne doit PAS écrire dans `configuration.yaml`, pour trois
+  raisons — (1) mécanisme fondamentalement différent et plus risqué que les flux `config_entries/
+  flow` déjà utilisés par Services post-installation : `configuration.yaml` est un fichier
+  monolithique édité à la main par l'utilisateur, une fusion mal faite (ex: bloc `notify:` déjà
+  existant écrasé au lieu d'être fusionné) peut casser tout le démarrage de HA, pas juste ce
+  réglage ; (2) dimotic-ha n'a aujourd'hui aucun accès filesystem à HA (conteneur séparé) — il
+  faudrait un nouveau mécanisme SSH+fusion prudente, plus complexe que mosquitto.conf déjà géré
+  par `HaStackDeployService` (fichier de conf simple, pas un YAML aussi personnalisable) ;
+  (3) faible valeur d'automatisation — contrairement à MQTT/Whisper/Piper (à refaire à chaque
+  nouvelle machine/site), un groupe de notification se règle une seule fois pour toute une
+  installation HA. À faire à la main dans HA, comme documenté dans l'échange qui a donné lieu à
+  cette entrée (déclaration `notify: - platform: group ...` exacte).
+- **Statut** : Tranché — restera manuel
+- **Priorité** : N/A (pas une tâche à reprendre)
 
 ---
 
