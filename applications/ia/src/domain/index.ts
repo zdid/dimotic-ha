@@ -139,7 +139,16 @@ export const IA_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   runsAsSeparateProcess: true,
   configSection: 'ia',
   configUi: IA_UI_METADATA,
-  socketEvents: IA_ALL_EVENTS
+  socketEvents: IA_ALL_EVENTS,
+  // ⭐ 25/08/2026, bug réel corrigé : les réponses corrélées de `planificateur` (ToolExecutor.ts/
+  // StructuredRouter.ts, CorrelatedRequester) n'atteignaient jamais `ia` depuis la migration en
+  // process séparé des deux apps — aucun des deux ne fait partie des motifs génériques déjà pontés
+  // (integration:*/ha:*), c'est l'échappatoire bridgedEvents prévue pour ce cas (voir
+  // SupervisorEventBridge.ts). Constaté en conditions réelles : "allume le salon" timeout après
+  // 4 tentatives, ToolExecutor logue "Timeout (10000ms) en attente de réponse sur
+  // ia:tool:execute:reply" — planificateur répondait bien, la réponse n'était simplement jamais
+  // relayée jusqu'au process ia.
+  bridgedEvents: ['ia:tool:execute:reply', 'ia:command:reply']
 };
 
 // ============================================================================

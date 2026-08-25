@@ -78,6 +78,55 @@ export class ExecutionEngine {
     return this.recentHaCommands;
   }
 
+  /**
+   * ⭐ 25/08/2026, demande utilisateur : exécution directe d'une action déjà structurée par `ia`
+   * (verbe/quoi/lieux/valeur, executer_action) — SANS repasser par deployAndExecute (donc sans
+   * second aller-retour Mistral). resolution.ts est déjà déterministe et ne dépend d'aucune
+   * réinterprétation IA ; la plupart des ordres reçus par ia:tool:execute sont des actions
+   * immédiates, pas des planifications, ce second passage était donc un travail redondant qui
+   * ajoutait ~10-15s de latence pour rien dans le cas courant.
+   *
+   * Retourne `undefined` si resolution.ts ne sait pas couvrir ce verbe (ou registry indisponible)
+   * — l'appelant (handler.ts::handleToolExecute) doit alors retomber sur deployAndExecute, seul
+   * chemin qui sait produire un repli conversation.process (verbe non couvert par la table §7).
+   */
+  async executeImmediateAction(
+    verbe: string,
+    quoi: string,
+    lieux: string[] = [],
+    valeur?: string | number
+  ): Promise<{ success: boolean; message: string } | undefined> {
+    if (!this.registry.isAvailable() || !verbe || !quoi) return undefined;
+
+    const resolved = await resolveAction(this.registry, verbe, quoi, lieux, valeur);
+    if (!resolved) return undefined;
+
+    this.logger.info('ExecutionEngine', `Exécution directe (action_immediate, sans repasser par ia): ${resolved.domain}.${resolved.service} → ${resolved.entity_id}`);
+    let success = true;
+    let error: string | undefined;
+    try {
+      await this.registry.sendCommand(resolved.domain, resolved.service, { entity_id: resolved.entity_id }, resolved.data);
+    } catch (err) {
+      success = false;
+      error = err instanceof Error ? err.message : String(err);
+      this.logger.warn('ExecutionEngine', `Échec commande directe (action_immediate), pas de nouvelle tentative: ${error}`);
+    }
+    this.recordHaCommand({
+      trigger: 'action_immediate',
+      step: { verbe, quoi, lieux, valeur },
+      outcome: 'resolved',
+      resolved,
+      success,
+      error
+    });
+
+    const target = Array.isArray(resolved.entity_id) ? resolved.entity_id.join(', ') : resolved.entity_id;
+    return {
+      success,
+      message: success ? `${resolved.domain}.${resolved.service} exécuté sur ${target}.` : `Échec de la commande: ${error}`
+    };
+  }
+
   private recordHaCommand(trace: Omit<HaCommandTrace, 'at'>): void {
     this.recentHaCommands.unshift({ at: new Date().toISOString(), ...trace });
     if (this.recentHaCommands.length > 20) this.recentHaCommands.length = 20;

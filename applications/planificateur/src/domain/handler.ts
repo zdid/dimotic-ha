@@ -232,6 +232,16 @@ export class CommandHandler {
       || `${params.verbe} ${params.quoi}${params.lieux?.length ? ' ' + params.lieux.join(' ') : ''}`;
 
     try {
+      // ⭐ 25/08/2026, demande utilisateur : chemin rapide en premier — verbe/quoi/lieux/valeur sont
+      // déjà structurés par ia (executer_action), resolution.ts sait souvent les résoudre sans
+      // aucun appel Mistral supplémentaire (voir ExecutionEngine.executeImmediateAction). Repli sur
+      // deployAndExecute (réinterprétation Mistral complète) UNIQUEMENT si le verbe n'est pas
+      // couvert par la table déterministe — comportement inchangé pour ces cas-là.
+      const fast = await this.executionEngine.executeImmediateAction(params.verbe, params.quoi, params.lieux, params.valeur);
+      if (fast) {
+        return fast.success ? ok(corr, fast.message) : err(corr, fast.message);
+      }
+
       const result = await this.executionEngine.deployAndExecute('action_immediate', phrase, this.listMacros());
       return result.success
         ? ok(corr, `Action "${phrase}" exécutée.`)

@@ -118,7 +118,12 @@ export const PLANIFICATEUR_APP: ApplicationModule & { menu?: ApplicationMenuConf
   runsAsSeparateProcess: true,
   configSection: 'planificateur',
   configUi: PLANIFICATEUR_UI_METADATA,
-  socketEvents: PLANIFICATEUR_ALL_EVENTS
+  socketEvents: PLANIFICATEUR_ALL_EVENTS,
+  // ⭐ 25/08/2026 : symétrique du bridgedEvents ajouté côté ia/domain/index.ts — les requêtes
+  // corrélées émises par `ia` (ToolExecutor.ts/StructuredRouter.ts) n'atteignaient jamais
+  // `planificateur` depuis leur migration en process séparé, pour la même raison (ni motif
+  // générique integration:*/ha:*, ni déclaré ici jusqu'ici).
+  bridgedEvents: ['ia:tool:execute', 'ia:command']
 };
 
 // ============================================================================

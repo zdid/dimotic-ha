@@ -48,10 +48,17 @@ export class SupervisorEventBridge {
    *  vers chaque app intéressée plutôt que de compter sur une diffusion native. */
   private readonly interestedApps: Map<string, Set<string>> = new Map();
   private readonly localListenerAttached: Set<string> = new Set();
-  /** Noms d'événements actuellement en cours d'injection app→local — le relais local→app les
-   *  ignore pendant ce temps (synchrone : posé juste avant emitGeneric() local, retiré juste
-   *  après, la totalité des listeners synchrones se déclenchent entre les deux). */
-  private readonly currentlyInjecting: Set<string> = new Set();
+  /** Nom d'événement → appId d'origine, pour les injections app→local actuellement en cours
+   *  (synchrone : posé juste avant emitGeneric() local, retiré juste après, la totalité des
+   *  listeners synchrones se déclenchent entre les deux). ⭐ 25/08/2026, bug réel corrigé : c'était
+   *  un simple Set<string> (nom d'événement seul) — le relais local→app ignorait ALORS TOUTE
+   *  retransmission pendant l'injection, pas seulement le retour vers l'app d'origine. Résultat :
+   *  un événement envoyé par l'app A et intéressant l'app B (ex: ia:tool:execute, A=ia, B=
+   *  planificateur) n'atteignait jamais B — seul le cas "A intéressée par son propre événement"
+   *  était le scénario prévu à l'origine, jamais celui-ci. Constaté en conditions réelles :
+   *  ToolExecutor.ts timeout systématique sur ia:tool:execute:reply malgré planificateur qui
+   *  répondait bien (vérifié en log) — le pont supprimait le relais avant même qu'il parte. */
+  private readonly currentlyInjecting: Map<string, string> = new Map();
   private readonly socketEventsAutoBridged: Set<string> = new Set();
 
   constructor(localEventBus: IEventBus, logger?: Logger) {
@@ -68,7 +75,7 @@ export class SupervisorEventBridge {
     this.children.set(appId, child);
     child.on('message', (message: IpcEnvelope) => {
       if (!message || typeof message.event !== 'string') return;
-      this.currentlyInjecting.add(message.event);
+      this.currentlyInjecting.set(message.event, appId);
       try {
         this.localEventBus.emitGeneric(message.event, message.data);
       } finally {
@@ -99,8 +106,9 @@ export class SupervisorEventBridge {
     this.localListenerAttached.add(eventName);
 
     this.localEventBus.onGeneric(eventName, (data) => {
-      if (this.currentlyInjecting.has(eventName)) return; // écho de notre propre injection app→local
+      const originAppId = this.currentlyInjecting.get(eventName);
       for (const targetAppId of this.interestedApps.get(eventName) ?? []) {
+        if (targetAppId === originAppId) continue; // écho de notre propre injection app→local
         this.children.get(targetAppId)?.send({ event: eventName, data } satisfies IpcEnvelope);
       }
     });
