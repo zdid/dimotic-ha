@@ -23,7 +23,10 @@ build_app() {
     cd "applications/${app}"
     npm install --no-audit --no-fund
     npm run build
-    npm run build:ui
+    # --if-present : espdisplay n'a pas de couche presentation/UI (pas de script build:ui déclaré,
+    # voir son package.json) — sans ce flag, `npm run build:ui` échoue avec "missing script" et
+    # casse tout le build (set -e) pour un cas parfaitement normal, pas une erreur.
+    npm run build:ui --if-present
   )
 }
 
@@ -31,7 +34,15 @@ echo "=== Construction de core (préalable obligatoire) ==="
 build_app core
 
 echo "=== Construction des applications métier ==="
-for app in arbreouquoi arexx evoo7 haplan ia nommage planificateur rfxcom; do
+# ⭐ 25/08/2026 : espdisplay/rpigpio/scriptsha/teleinfo ajoutées — absentes de cette liste depuis
+# leur création, jamais construites par le build Docker. Sans dist/domain/index.js, AppService
+# retombe sur src/domain/index.ts (lecture des métadonnées) et ProcessSupervisor sur
+# src/standalone.ts (exécution) — les deux nécessitent tsx. Le bug était invisible car un dist/
+# local (construit à la main sur la machine de dev) traîne dans le contexte de build malgré
+# .dockerignore (qui liste bien dist/, mais ne l'exclut pas pour applications/*/dist/ imbriqués —
+# cause exacte non creusée) : un build Docker sur un clone strictement neuf, sans ce dist/ résiduel,
+# aurait révélé le problème immédiatement.
+for app in arbreouquoi arexx espdisplay evoo7 haplan ia nommage planificateur rfxcom rpigpio scriptsha teleinfo; do
   build_app "${app}"
 done
 
