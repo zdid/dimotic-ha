@@ -10,7 +10,13 @@
 export const SCRIPTSHA_SOCKET_EVENTS = {
   SCRIPTS_LIST: 'scriptsha:scripts:list',
   SCRIPT_CONTENT: 'scriptsha:script:content',
-  ERROR: 'scriptsha:error'
+  ERROR: 'scriptsha:error',
+  // ⭐ 25/08/2026 : import de scripts/automatisations déjà présents dans HA (créés à la main,
+  // hérités d'une installation antérieure...) — voir ScriptsHaService.handleImportCandidatesGet/
+  // handleImportApply. Une fois importé (origin:'local'), un script bénéficie automatiquement du
+  // gossip inter-instances déjà existant (voir plus bas dans ce service) : visible sur toutes les
+  // machines dimotic-ha sans mécanisme supplémentaire.
+  IMPORT_CANDIDATES: 'scriptsha:import:candidates'
 } as const;
 
 export const SCRIPTSHA_CLIENT_EVENTS = {
@@ -18,7 +24,9 @@ export const SCRIPTSHA_CLIENT_EVENTS = {
   SCRIPT_DEPLOY: 'scriptsha:script:deploy',
   SCRIPT_UNDEPLOY: 'scriptsha:script:undeploy',
   SCRIPT_DELETE: 'scriptsha:script:delete',
-  SCRIPT_GET_CONTENT: 'scriptsha:script:get_content'
+  SCRIPT_GET_CONTENT: 'scriptsha:script:get_content',
+  IMPORT_CANDIDATES_GET: 'scriptsha:import:candidates:get',
+  IMPORT_APPLY: 'scriptsha:import:apply'
 } as const;
 
 export const SCRIPTSHA_ALL_EVENTS = {

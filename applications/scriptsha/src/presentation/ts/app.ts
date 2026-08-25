@@ -24,9 +24,16 @@ interface ScriptEntry {
   driftsFromBuiltin: boolean;
 }
 
+interface ImportCandidate {
+  id: string;
+  domain: 'script' | 'automation';
+  title: string;
+}
+
 let socket: any | null = null;
 let listenersReady = false;
 let scripts: ScriptEntry[] = [];
+let importCandidates: ImportCandidate[] = [];
 
 function init(): void {
   try {
@@ -38,6 +45,7 @@ function init(): void {
     }
     setupUploadForm();
     setupContentModal();
+    setupImportModal();
     requestInitialList();
     hideLoading();
 
@@ -62,6 +70,11 @@ function setupEventListeners(): void {
 
   socket.on('scriptsha:error', (data: { message: string; id?: string }) => {
     showListError(data.message);
+  });
+
+  socket.on('scriptsha:import:candidates', (data: { candidates: ImportCandidate[] }) => {
+    importCandidates = data.candidates;
+    renderImportCandidates();
   });
 }
 
@@ -170,6 +183,69 @@ function showContentModal(id: string, content: string): void {
   if (title) title.textContent = script ? `Contenu — ${script.title}` : 'Contenu du script';
   if (body) body.textContent = content;
   $('content-overlay')?.classList.add('active');
+}
+
+// ==========================================================================
+// Import depuis HA (⭐ 25/08/2026)
+// ==========================================================================
+
+function setupImportModal(): void {
+  const overlay = $('import-overlay');
+  $('import-open')?.addEventListener('click', () => {
+    importCandidates = [];
+    const listEl = $('import-list');
+    if (listEl) listEl.innerHTML = '<div class="empty">Recherche en cours...</div>';
+    const submitBtn = $('import-submit') as HTMLButtonElement | null;
+    if (submitBtn) submitBtn.disabled = true;
+    overlay?.classList.add('active');
+    socket?.emit('scriptsha:import:candidates:get');
+  });
+  $('import-close')?.addEventListener('click', () => overlay?.classList.remove('active'));
+  overlay?.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('active'); });
+  $('import-submit')?.addEventListener('click', () => submitImport());
+}
+
+function renderImportCandidates(): void {
+  const listEl = $('import-list');
+  const submitBtn = $('import-submit') as HTMLButtonElement | null;
+  if (!listEl) return;
+
+  if (importCandidates.length === 0) {
+    listEl.innerHTML = '<div class="empty">Rien à importer — tout ce qui existe dans HA est déjà connu de scriptsha.</div>';
+    if (submitBtn) submitBtn.disabled = true;
+    return;
+  }
+
+  listEl.innerHTML = importCandidates.map((c) => `
+    <label class="import-row">
+      <input type="checkbox" data-import-id="${escapeHtml(c.id)}">
+      <span class="import-title">${escapeHtml(c.title)}</span>
+      <span class="import-domain">${c.domain === 'automation' ? 'automatisation' : 'script'}</span>
+    </label>
+  `).join('');
+
+  const updateSubmitState = (): void => {
+    if (!submitBtn) return;
+    submitBtn.disabled = listEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked').length === 0;
+  };
+  listEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((cb) => {
+    cb.addEventListener('change', updateSubmitState);
+  });
+  updateSubmitState();
+}
+
+function submitImport(): void {
+  const listEl = $('import-list');
+  if (!listEl) return;
+  const selectedIds = new Set(
+    Array.from(listEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked'))
+      .map((cb) => cb.dataset.importId)
+  );
+  const selected = importCandidates.filter((c) => selectedIds.has(c.id));
+  if (selected.length === 0) return;
+
+  socket?.emit('scriptsha:import:apply', { candidates: selected });
+  $('import-overlay')?.classList.remove('active');
 }
 
 // ==========================================================================

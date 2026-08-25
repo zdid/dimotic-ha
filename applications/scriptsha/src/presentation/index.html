@@ -67,6 +67,14 @@
       overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow-y: auto;
     }
     .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px; }
+
+    .import-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; background: var(--color-background); border-radius: var(--radius); margin-bottom: 6px;
+    }
+    .import-row input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; }
+    .import-row .import-title { font-weight: bold; color: var(--color-text); }
+    .import-row .import-domain { font-size: 0.8em; color: var(--color-text-muted); }
   </style>
 </head>
 <body>
@@ -100,6 +108,7 @@
       <div class="section">
         <div class="section-header">
           <h2>Scripts</h2>
+          <button class="btn btn-secondary" id="import-open">📥 Importer depuis HA</button>
         </div>
         <div class="alert alert-error" id="list-error"></div>
         <div id="scripts-list"><div class="empty">Chargement...</div></div>
@@ -116,6 +125,22 @@
       <pre id="content-body"></pre>
       <div class="modal-actions">
         <button class="btn btn-secondary" id="content-close">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modale d'import depuis HA -->
+  <div class="modal-overlay" id="import-overlay">
+    <div class="card">
+      <h2>📥 Importer depuis HA</h2>
+      <p class="description">Scripts et automatisations présents dans HA mais pas encore connus de
+        scriptsha (créés à la main dans HA, ou hérités d'une installation antérieure). Une fois
+        importé, un élément est propagé automatiquement à toutes les instances dimotic-ha (même
+        mécanisme que les scripts déposés localement).</p>
+      <div id="import-list"><div class="empty">Recherche en cours...</div></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="import-close">Annuler</button>
+        <button class="btn btn-primary" id="import-submit" disabled>Importer la sélection</button>
       </div>
     </div>
   </div>

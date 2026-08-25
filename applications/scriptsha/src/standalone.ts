@@ -15,7 +15,8 @@ import {
   ConfigWriter,
   ConfigService,
   createLogger,
-  IpcEventBus
+  IpcEventBus,
+  HaBridgeClient
 } from '../../core/dist/exports';
 import { createScriptshaServiceWithConfig } from './domain';
 
@@ -35,8 +36,12 @@ async function main(): Promise<void> {
 
   const machineId = configService.getConfig().core.machineId;
   const eventBus = new IpcEventBus();
+  // ⭐ 25/08/2026 : nécessaire pour l'import de scripts/automatisations déjà présents dans HA
+  // (liste des entités automation.*/script.*, voir ScriptsHaService::handleImportCandidatesGet) —
+  // même patron que haplan/ia/planificateur/rfxcom.
+  const haBridgeClient = new HaBridgeClient(eventBus, logger);
 
-  const service = createScriptshaServiceWithConfig(eventBus, logger, configService);
+  const service = createScriptshaServiceWithConfig(eventBus, logger, configService, haBridgeClient);
 
   await service.start();
   logger.info('scriptsha:standalone', `scriptsha démarré en process séparé (pid ${process.pid}, machine ${machineId})`);

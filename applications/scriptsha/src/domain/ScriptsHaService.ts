@@ -16,7 +16,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as yaml from 'js-yaml';
-import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
+import type { IEventBus, Logger, IAppConfigProvider, HaBridgeClient } from '../../../core/dist/exports';
 import { scriptsConfigSchema, DEFAULT_SCRIPTS_CONFIG, type ScriptEntry, type ScriptsConfigFile, type ProvisioningConfig } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { SCRIPTSHA_SOCKET_EVENTS, SCRIPTSHA_CLIENT_EVENTS } from './socket-events';
@@ -56,6 +56,14 @@ interface HaRestResultPayload {
   success: boolean;
   result?: unknown;
   error?: string;
+}
+
+/** Un script/automatisation détecté dans HA mais pas encore connu de scriptsha — voir
+ *  handleImportCandidatesGet/handleImportApply. */
+interface ImportCandidate {
+  id: string;
+  domain: 'script' | 'automation';
+  title: string;
 }
 
 interface HaHelperResultPayload {
@@ -316,6 +324,10 @@ export class ScriptsHaService implements IScriptsHaService {
   /** Action en vol par id de script — permet à handleHaRestResult() de savoir si le résultat reçu
    *  correspond à un déploiement ou un retrait (HaRestBridge ne renvoie que {id, success, ...}). */
   private readonly pendingAction = new Map<string, 'deploy' | 'undeploy'>();
+  /** Résolveurs des requêtes ha:rest:request en vol pour un import (voir fetchHaConfig) — map
+   *  séparée de pendingAction pour ne jamais collisionner avec un déploiement/retrait en cours sur
+   *  le même id. */
+  private readonly pendingImportFetch = new Map<string, (result: HaRestResultPayload) => void>();
   /** Résolveurs des requêtes ha:helper:request en vol, corrélés par requestId (plusieurs peuvent
    *  être simultanées — une par lumière manquante lors d'une réconciliation). */
   private readonly pendingHelperRequests = new Map<string, (result: HaHelperResultPayload) => void>();
@@ -326,7 +338,8 @@ export class ScriptsHaService implements IScriptsHaService {
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
-    private readonly configProvider: IAppConfigProvider<ScriptshaConfig>
+    private readonly configProvider: IAppConfigProvider<ScriptshaConfig>,
+    private readonly haBridgeClient: HaBridgeClient
   ) {
     // Chargée mais non utilisée activement au-delà de enabled — voir config-schema.ts.
     this.configProvider.getAppConfig();
@@ -345,12 +358,18 @@ export class ScriptsHaService implements IScriptsHaService {
     this.setupEventListeners();
   }
 
-  static create(eventBus: IEventBus, logger: Logger, configProvider: IAppConfigProvider<ScriptshaConfig>): ScriptsHaService {
-    return new ScriptsHaService(eventBus, logger, configProvider);
+  static create(
+    eventBus: IEventBus,
+    logger: Logger,
+    configProvider: IAppConfigProvider<ScriptshaConfig>,
+    haBridgeClient: HaBridgeClient
+  ): ScriptsHaService {
+    return new ScriptsHaService(eventBus, logger, configProvider, haBridgeClient);
   }
 
   async start(): Promise<void> {
     this.logger.info('ScriptsHaService', 'Démarrage du service scriptsha...');
+    await this.haBridgeClient.start();
     this.seedBuiltinScripts();
     this.emitScripts();
     // Annonce initiale (⭐ 24/08/2026) — core peut démarrer TargetGossipService avant même que ce
@@ -371,6 +390,8 @@ export class ScriptsHaService implements IScriptsHaService {
     this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.SCRIPT_UNDEPLOY, (data: unknown) => this.handleUndeploy((data as { id: string }).id));
     this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.SCRIPT_DELETE, (data: unknown) => this.handleDeleteRecord((data as { id: string }).id));
     this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.SCRIPT_GET_CONTENT, (data: unknown) => this.handleGetContent((data as { id: string }).id));
+    this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.IMPORT_CANDIDATES_GET, () => this.handleImportCandidatesGet());
+    this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.IMPORT_APPLY, (data: unknown) => void this.handleImportApply((data as { candidates: ImportCandidate[] }).candidates));
 
     // Événements internes core↔enfant (pas des événements Socket.io) — voir SCRIPTSHA_APP.bridgedEvents.
     this.eventBus.onGeneric<UploadEventPayload>('scriptsha:internal:upload', (data) => this.handleUpload(data));
@@ -604,6 +625,13 @@ export class ScriptsHaService implements IScriptsHaService {
   }
 
   private handleHaRestResult(data: HaRestResultPayload): void {
+    const importResolver = this.pendingImportFetch.get(data.id);
+    if (importResolver) {
+      this.pendingImportFetch.delete(data.id);
+      importResolver(data);
+      return;
+    }
+
     const action = this.pendingAction.get(data.id);
     this.pendingAction.delete(data.id);
     if (!action) return; // résultat inattendu/périmé, ignoré
@@ -884,6 +912,100 @@ export class ScriptsHaService implements IScriptsHaService {
     } finally {
       this.reconcilingProvisioning = false;
     }
+  }
+
+  // ==========================================================================
+  // Import de scripts/automatisations déjà présents dans HA (⭐ 25/08/2026, demande explicite —
+  // capturer tout ce qui existe déjà dans une HA en place, créé à la main ou hérité de l'ancien
+  // système, plutôt que de laisser cet état invisible de scriptsha). Un import réussi obtient
+  // origin:'local' — il bénéficie donc automatiquement du gossip inter-instances déjà en place
+  // ci-dessous, sans mécanisme de propagation supplémentaire à écrire : une fois importé sur UNE
+  // machine, visible sur toutes.
+  // ==========================================================================
+
+  /** Liste les entités automation.* et script.* du référentiel HA (déjà en cache côté
+   *  HaBridgeClient, aucun aller-retour réseau) non encore connues de scriptsha (comparaison par
+   *  id, pas par entity_id — voir HaRestBridge, qui adresse par id de config, pas par entity_id HA). */
+  private handleImportCandidatesGet(): void {
+    const known = new Set(this.scripts.map((s) => s.id));
+    const candidates: ImportCandidate[] = this.haBridgeClient
+      .getAllEntities()
+      .filter((e) => e.domain === 'automation' || e.domain === 'script')
+      .map((e) => ({
+        id: String(e.attributes.id ?? ''),
+        domain: e.domain as 'automation' | 'script',
+        title: e.friendly_name
+      }))
+      .filter((c) => c.id && !known.has(c.id));
+
+    this.logger.info('ScriptsHaService', `Import: ${candidates.length} candidat(s) trouvé(s) dans HA`);
+    this.eventBus.emit(SCRIPTSHA_SOCKET_EVENTS.IMPORT_CANDIDATES, { candidates });
+  }
+
+  /** Récupère séquentiellement la config réelle de chaque candidat sélectionné (GET générique via
+   *  HaRestBridge) et la dépose comme un script local ordinaire (origin:'local', deployed:true —
+   *  elle l'est déjà, HA en est la source). Idempotent : un id déjà connu entre-temps est ignoré
+   *  sans erreur plutôt que dupliqué. Séquentiel (pas Promise.all) pour rester dans le même patron
+   *  de corrélation à un seul résultat en vol que le reste du service (pendingAction) — volumes
+   *  attendus faibles, pas besoin de paralléliser. */
+  private async handleImportApply(candidates: ImportCandidate[]): Promise<void> {
+    if (!Array.isArray(candidates) || candidates.length === 0) return;
+
+    fs.mkdirSync(this.scriptsDir, { recursive: true });
+    const now = new Date().toISOString();
+    let imported = 0;
+
+    for (const candidate of candidates) {
+      if (this.scripts.some((s) => s.id === candidate.id)) continue;
+
+      const result = await this.fetchHaConfig(candidate.domain, candidate.id);
+      if (!result.success) {
+        this.emitError(`Échec de l'import de "${candidate.title}": ${result.error}`, candidate.id);
+        continue;
+      }
+      try {
+        const content = yaml.dump(result.result, { lineWidth: -1 });
+        fs.writeFileSync(path.join(this.scriptsDir, `${candidate.id}.yaml`), content, 'utf8');
+        this.scripts.push({
+          id: candidate.id,
+          title: candidate.title,
+          description: '',
+          originalFilename: `${candidate.id}.yaml`,
+          haDomain: candidate.domain,
+          deployed: true,
+          deployedAt: now,
+          createdAt: now,
+          updatedAt: now,
+          builtin: false,
+          driftsFromBuiltin: false,
+          origin: 'local'
+        });
+        imported++;
+      } catch (error) {
+        this.emitError(`Échec d'écriture de "${candidate.title}": ${error instanceof Error ? error.message : String(error)}`, candidate.id);
+      }
+    }
+
+    if (imported > 0) {
+      const saveResult = this.scriptsManager.save({ scripts: this.scripts });
+      if (saveResult.success) {
+        this.logger.info('ScriptsHaService', `${imported} script(s)/automatisation(s) importé(s) depuis HA`);
+        this.notifyGossipChanged();
+      } else {
+        this.emitError(`Échec d'enregistrement après import: ${saveResult.error}`);
+      }
+    }
+    this.emitScripts();
+  }
+
+  /** Requête ha:rest:request corrélée par Promise plutôt que par le pendingAction deploy/undeploy
+   *  existant (map séparée : un import peut être en vol pour un id pendant qu'un déploiement l'est
+   *  pour un autre, sans risque de collision de corrélation). */
+  private fetchHaConfig(domain: 'script' | 'automation', id: string): Promise<HaRestResultPayload> {
+    return new Promise((resolve) => {
+      this.pendingImportFetch.set(id, resolve);
+      this.eventBus.emitGeneric('ha:rest:request', { appId: 'scriptsha', method: 'get', domain, id });
+    });
   }
 
   // ==========================================================================

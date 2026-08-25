@@ -27,7 +27,8 @@ import {
   Logger,
   IAppConfigProvider,
   ConfigService,
-  AppConfigProvider
+  AppConfigProvider,
+  HaBridgeClient
 } from '../../../core/dist/exports';
 import { SCRIPTSHA_SOCKET_EVENTS, SCRIPTSHA_ALL_EVENTS, SCRIPTSHA_PERSISTENT_EVENTS } from './socket-events';
 import { ScriptsHaService, IScriptsHaService } from './ScriptsHaService';
@@ -87,9 +88,10 @@ export const SCRIPTSHA_APP: ApplicationModule = {
 export function createScriptshaService(
   eventBus: IEventBus,
   logger: Logger,
-  configProvider: IAppConfigProvider<ScriptshaConfig>
+  configProvider: IAppConfigProvider<ScriptshaConfig>,
+  haBridgeClient: HaBridgeClient
 ): IScriptsHaService {
-  const service = ScriptsHaService.create(eventBus, logger, configProvider);
+  const service = ScriptsHaService.create(eventBus, logger, configProvider, haBridgeClient);
 
   eventBus.emit('app:socket-events:registered', {
     appId: 'scriptsha',
@@ -103,10 +105,11 @@ export function createScriptshaService(
 export function createScriptshaServiceWithConfig(
   eventBus: IEventBus,
   logger: Logger,
-  configService: ConfigService
+  configService: ConfigService,
+  haBridgeClient: HaBridgeClient
 ): IScriptsHaService {
   const configProvider = new AppConfigProvider<ScriptshaConfig>('scriptsha' as any, configService);
-  return createScriptshaService(eventBus, logger, configProvider);
+  return createScriptshaService(eventBus, logger, configProvider, haBridgeClient);
 }
 
 // ============================================================================
