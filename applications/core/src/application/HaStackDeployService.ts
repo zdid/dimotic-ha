@@ -148,7 +148,19 @@ export class HaStackDeployService {
     const haDir = `${target.remoteDir}/${HA_SUBDIR}`;
     const mqDir = `${target.remoteDir}/${MOSQUITTO_SUBDIR}`;
 
-    const mkdir = await runSsh(target, `mkdir -p ${shellQuote(haDir)} ${shellQuote(mqDir + '/config')}`);
+    // ⭐ 25/08/2026, bug réel constaté sur ha2 : sans ce chown, `./log` est auto-créé par Docker au
+    // premier démarrage (bind-mount source manquant) et reste root:root — l'image mosquitto tourne
+    // en uid 1883 (contrairement à `./data`, que l'entrypoint de l'image chown lui-même vers 1883,
+    // usage attendu/documenté ; `./log` n'est pas concerné par ce mécanisme, cas d'usage propre à
+    // buildMosquittoConf() ci-dessous). Résultat observé : mosquitto démarre quand même mais
+    // n'écrit jamais mosquitto.log ("Unable to open log file... for writing"), silencieusement —
+    // aucun log de connexion/déconnexion disponible pour diagnostiquer quoi que ce soit ensuite.
+    // Toujours root@ (voir SshClient.ts), le chown vers un uid arbitraire ne peut pas échouer pour
+    // une raison de droits ; idempotent, sûr à rejouer sur une cible déjà déployée.
+    const mkdir = await runSsh(
+      target,
+      `mkdir -p ${shellQuote(haDir)} ${shellQuote(mqDir + '/config')} ${shellQuote(mqDir + '/log')} && chown -R 1883:1883 ${shellQuote(mqDir + '/log')}`
+    );
     if (!mkdir.success) {
       this.logger.error('HaStackDeployService', `Échec de création des répertoires sur ${target.host}: ${mkdir.error}`);
       return { success: false, step: 'mkdir', error: mkdir.error };
