@@ -690,7 +690,10 @@
   `homeassistant`/`homeassistant.service:` dans le YAML généré par
   `applications/haplan/tools/generate_esphome_floorplan.py`, voir son en-tête pour la confirmation
   qu'aucun token HA n'est jamais embarqué côté firmware — c'est HA qui se connecte VERS l'appareil).
-  Ajoutée à la main dans HA en attendant (2026-08-25).
+  Ajoutée à la main dans HA en attendant (2026-08-25). ⭐ Documentée dans la section "Étapes
+  manuelles restantes" de l'écran Services post-installation depuis le 25/08/2026 (voir
+  `PostInstallManager.ts`) — objectif du projet : que l'écran capture TOUTE la mise en œuvre d'une
+  HA reconstruite de zéro, automatisée ou non, pour ne rien oublier (précisé par l'utilisateur).
 - **Pourquoi pas codé tout de suite** : contrairement à Wyoming/Ollama/MQTT ci-dessus (flux
   `config_entries/flow` vérifiés en conditions réelles avant d'écrire le code, voir l'en-tête de
   `HaPostInstallService.ts`), le flux d'ajout ESPHome n'a pas été vérifié en direct — il implique
@@ -713,7 +716,11 @@
   téléphone existe aujourd'hui (`notify.mobile_app_telephone_de_didier`), donc l'appel direct
   suffit — mais dès qu'un deuxième arrivera, chaque script/automatisation visant "tout le monde"
   devra soit lister chaque service individuellement, soit passer par un groupe de notification HA
-  (`configuration.yaml`, `notify: - platform: group ...`).
+  (`configuration.yaml`, `notify: - platform: group ...`). ⭐ Documentée dans la section "Étapes
+  manuelles restantes" de l'écran Services post-installation depuis le 25/08/2026 (voir
+  `PostInstallManager.ts`) — même principe que l'entrée ESPHome ci-dessus : ne pas automatiser
+  n'exempte pas de documenter l'étape sur l'écran, l'objectif étant de capturer toute la mise en
+  œuvre pour ne rien oublier lors d'une reconstruction.
 - **Décision (2026-08-25)** : dimotic-ha ne doit PAS écrire dans `configuration.yaml`, pour trois
   raisons — (1) mécanisme fondamentalement différent et plus risqué que les flux `config_entries/
   flow` déjà utilisés par Services post-installation : `configuration.yaml` est un fichier

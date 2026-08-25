@@ -67,6 +67,18 @@ const createTemplate = (): HTMLTemplateElement => {
       .result-line { padding: 8px 12px; border-radius: 4px; font-size: 0.9rem; }
       .result-line.success { background: #1e4620; color: #a8e6a3; }
       .result-line.error { background: #5e2020; color: #f0a8a3; }
+
+      .manual-steps { margin-top: 28px; padding-top: 20px; border-top: 1px solid #4a6278; }
+      .manual-steps h2 { color: #ecf0f1; margin-bottom: 4px; }
+      .manual-step {
+        padding: 15px; background: #34495e; border-radius: 8px; margin-bottom: 12px;
+      }
+      .manual-step h4 { margin: 0 0 6px 0; color: #ecf0f1; }
+      .manual-step p { margin: 4px 0; font-size: 0.9rem; color: #bdc3c7; }
+      .manual-step pre {
+        background: #2c3e50; padding: 10px; border-radius: 4px; overflow-x: auto;
+        font-size: 0.85rem; color: #a8e6a3; margin: 8px 0 0 0;
+      }
     </style>
 
     <div class="post-install">
@@ -138,6 +150,59 @@ const createTemplate = (): HTMLTemplateElement => {
       <button type="button" class="apply-btn" id="apply-btn">Installer la sélection</button>
 
       <div class="results" id="results"></div>
+
+      <div class="manual-steps">
+        <h2>📋 Étapes manuelles restantes</h2>
+        <p class="section-description">
+          Ce qui ne peut pas (ou pas encore) être automatisé depuis ici — à faire une fois, à la main,
+          dans HA. Listé ici pour ne rien oublier lors d'une reconstruction complète (voir TODO.md
+          pour le détail de chaque décision).
+        </p>
+
+        <div class="manual-step">
+          <h4>1. Assistant vocal (pipeline Assist)</h4>
+          <p>Les intégrations ci-dessus (Whisper/Piper/openWakeWord/Ollama) ne se combinent pas
+          automatiquement en un pipeline utilisable. <strong>Paramètres → Voix → Assistants</strong> →
+          créer un assistant : langue française, agent de conversation = Ollama, reconnaissance vocale
+          = Whisper, synthèse vocale = Piper.</p>
+        </div>
+
+        <div class="manual-step">
+          <h4>2. Intégration ESPHome (par appareil)</h4>
+          <p><strong>Paramètres → Appareils et services → Ajouter une intégration → ESPHome</strong> —
+          une fois par écran/satellite vocal (découverte automatique probable, sinon IP + port 6053).
+          Si l'appareil a une clé de chiffrement API (voir <code>data/esphome/secrets.yaml</code>,
+          entrée <code>api_&lt;nom-appareil&gt;</code>), HA la demande à ce moment-là.</p>
+        </div>
+
+        <div class="manual-step">
+          <h4>3. Application HA Companion (par téléphone)</h4>
+          <p>Préalable à toute notification : installer l'app <strong>Home Assistant</strong> sur
+          chaque téléphone et s'y connecter — crée automatiquement l'entité
+          <code>notify.mobile_app_&lt;nom&gt;</code> correspondante côté HA.</p>
+        </div>
+
+        <div class="manual-step">
+          <h4>4. Groupe de notification "tous les téléphones"</h4>
+          <p>Dans <code>configuration.yaml</code> de HA (redémarrage ou rechargement YAML requis
+          ensuite) — un seul point à modifier quand un nouveau téléphone arrive, au lieu de chaque
+          script/automatisation qui vise "tout le monde" :</p>
+          <pre>notify:
+  - platform: group
+    name: tous_les_telephones
+    services:
+      - service: mobile_app_&lt;nom_1&gt;
+      - service: mobile_app_&lt;nom_2&gt;</pre>
+        </div>
+
+        <div class="manual-step">
+          <h4>5. Broker MQTT correctement paramétré dans HA</h4>
+          <p>Vérifier que l'intégration MQTT de HA pointe vers le <strong>même broker</strong> que
+          celui utilisé par dimotic-ha/RFXCOM (host:port dans Paramètres Techniques → Web-Services
+          de ce socle) — un mauvais broker configuré dans HA fait échouer silencieusement toute
+          découverte/commande, sans message d'erreur explicite (vécu en conditions réelles).</p>
+        </div>
+      </div>
     </div>
   `;
   return template;
