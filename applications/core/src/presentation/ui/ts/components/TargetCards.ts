@@ -145,6 +145,10 @@ export interface RenderSshPrepSectionOptions {
  * core/infrastructure/remote/SshClient.ts) sur une nouvelle cible. Remplace le bloc "Copier la
  * clé" auparavant répété identique sur chaque carte (seul l'hôte variait) — l'hôte reste à
  * remplacer manuellement ici, un seul modèle de commande couvre toutes les cibles.
+ *
+ * ⭐ 25/08/2026 : `mkdir -p ~/.ssh` ajouté avant `ssh-copy-id` — dans le conteneur, ce dossier
+ * n'existe pas pour l'utilisateur `node` ; sans lui, `ssh-copy-id` échoue avec "failed to create
+ * required temporary directory under ~/.ssh" (constaté en conditions réelles).
  */
 export function renderSshPrepSection(container: HTMLElement, options: RenderSshPrepSectionOptions): void {
   const { isRunningInDocker, projectRoot } = options;
@@ -159,6 +163,7 @@ export function renderSshPrepSection(container: HTMLElement, options: RenderSshP
       <p>Une seule clé SSH est générée automatiquement au démarrage, partagée par toutes les applications et toutes les cibles. Avant le premier déploiement vers une nouvelle machine, y copier la clé publique (une fois par machine) :</p>
       ${dockerHint}
       <pre>${cdCommand}
+mkdir -p ~/.ssh
 ssh-copy-id -i data/core/ssh/id_ed25519.pub root@&lt;hôte-de-la-cible&gt;</pre>
     </div>
   `;
