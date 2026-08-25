@@ -683,6 +683,30 @@
 
 ---
 
+### 🟡 Services post-installation : ajouter l'intégration ESPHome — À concevoir
+- **Constat (2026-08-25)**, en préparant le passage en production et le test réel des écrans HAPLAN
+  (ESP32-S3) : `HaPostInstallService.ts` couvre MQTT/Whisper/Piper/openWakeWord/Ollama, mais pas
+  l'intégration ESPHome elle-même — nécessaire pour que HA puisse lire/piloter chaque écran (device
+  `homeassistant`/`homeassistant.service:` dans le YAML généré par
+  `applications/haplan/tools/generate_esphome_floorplan.py`, voir son en-tête pour la confirmation
+  qu'aucun token HA n'est jamais embarqué côté firmware — c'est HA qui se connecte VERS l'appareil).
+  Ajoutée à la main dans HA en attendant (2026-08-25).
+- **Pourquoi pas codé tout de suite** : contrairement à Wyoming/Ollama/MQTT ci-dessus (flux
+  `config_entries/flow` vérifiés en conditions réelles avant d'écrire le code, voir l'en-tête de
+  `HaPostInstallService.ts`), le flux d'ajout ESPHome n'a pas été vérifié en direct — il implique
+  potentiellement une découverte zeroconf/mDNS de l'appareil plutôt qu'un simple host/port, à
+  confirmer contre une vraie HA avant d'écrire un handler `esphome` par simple analogie avec les
+  autres (risque réel de deviner un flux faux, cf. la règle déjà établie dans ce fichier).
+- **À faire** : vérifier manuellement le flux `config_entries/flow` avec `handler: 'esphome'` contre
+  une HA réelle (probablement host+port comme Wyoming, éventuellement une étape de confirmation
+  supplémentaire liée à la clé de chiffrement native déjà présente dans le YAML), puis ajouter
+  `'esphome'` à `PostInstallServiceKind` + une méthode `installEsphome()` dans
+  `HaPostInstallService.ts`, et l'entrée correspondante dans `PostInstallManager.ts` (UI).
+- **Statut** : Non traité — ajout manuel en attendant
+- **Priorité** : Basse (contournement manuel simple et déjà en place)
+
+---
+
 ## Notes techniques
 
 ### Package npm utilisé
