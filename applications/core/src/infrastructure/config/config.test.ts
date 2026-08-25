@@ -49,7 +49,7 @@ describe('ConfigLoader', () => {
     expect(result.ha.ws.port).toBe(8123);
     expect(result.ha.ws.reconnect_delay).toBe(5);
     expect(result.ha.structure.include_unassigned).toBe(false);
-    expect(result.web.port).toBe(8080);
+    expect(result.web.port).toBe(8087);
     expect(result.logging.level).toBe('info');
   });
 
@@ -61,7 +61,7 @@ describe('ConfigLoader', () => {
     const loader = new ConfigLoader(configPath);
     const result = loader.load();
     expect(fs.existsSync(configPath)).toBe(true);
-    expect(result.web.port).toBe(8080);
+    expect(result.web.port).toBe(8087);
     expect(result.ha.ws_enable).toBe(false);
     expect(result.ha.mqtt_enable).toBe(false);
   });

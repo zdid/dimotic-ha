@@ -89,6 +89,7 @@ export function renderTargetCards(container: HTMLElement, options: RenderTargetC
           <button type="button" data-action="restart">${ACTION_LABELS.restart}</button>
           ${extraButtons}
         </div>
+        <pre class="target-progress" style="display:none;"></pre>
         <div class="target-result target-result-success" style="display:none;"></div>
         <div class="target-result target-result-error" style="display:none;"></div>
       </div>
@@ -101,7 +102,20 @@ export function renderTargetCards(container: HTMLElement, options: RenderTargetC
       const targetId = card?.dataset.targetId;
       const action = btn.dataset.action as RemoteAction | undefined;
       if (!targetId || !action) return;
+
+      // ⭐ 24/08/2026 — désactive immédiatement tous les boutons de CETTE carte (corrige le bug de
+      // double-clic/opérations concurrentes : sans ça, rien n'empêchait de recliquer "Déployer"
+      // pendant qu'un déploiement était déjà en cours). Réactivés par showTargetActionResult().
+      card?.querySelectorAll<HTMLButtonElement>('button[data-action], button[data-delete]').forEach((b) => { b.disabled = true; });
+
       card?.querySelectorAll<HTMLElement>('.target-result').forEach((el) => { el.style.display = 'none'; });
+      if (action === 'deploy') {
+        const progressEl = card?.querySelector<HTMLElement>('.target-progress');
+        if (progressEl) {
+          progressEl.textContent = '';
+          progressEl.style.display = 'block';
+        }
+      }
       onAction(targetId, action);
     });
   });
@@ -150,9 +164,24 @@ ssh-copy-id -i data/core/ssh/id_ed25519.pub root@&lt;hôte-de-la-cible&gt;</pre>
   `;
 }
 
+/** Ajoute une ligne de progression pendant l'étape pull-up d'un déploiement (⭐ 24/08/2026, voir
+ *  runSshStreaming côté serveur) — défilement automatique vers le bas. */
+export function appendTargetProgress(container: HTMLElement, targetId: string, chunk: string): void {
+  const card = findCard(container, targetId);
+  const progressEl = card?.querySelector<HTMLElement>('.target-progress');
+  if (!progressEl) return;
+  progressEl.style.display = 'block';
+  progressEl.textContent += (progressEl.textContent ? '\n' : '') + chunk;
+  progressEl.scrollTop = progressEl.scrollHeight;
+}
+
 export function showTargetActionResult(container: HTMLElement, result: TargetActionResult): void {
   const card = findCard(container, result.targetId);
   if (!card) return;
+
+  // Réactive les boutons désactivés au clic (voir renderTargetCards) — plus jamais bloqués
+  // grisés indéfiniment, que l'opération ait réussi ou échoué.
+  card.querySelectorAll<HTMLButtonElement>('button[data-action], button[data-delete]').forEach((b) => { b.disabled = false; });
 
   const successEl = card.querySelector<HTMLElement>('.target-result-success');
   const errorEl = card.querySelector<HTMLElement>('.target-result-error');

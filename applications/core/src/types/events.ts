@@ -84,10 +84,19 @@ export interface ServerToClientEvents {
   // Déploiement de dimotic-ha lui-même (⭐ 23/08/2026, voir CoreDeployService.ts)
   'core:deployment:targets:list': (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => void;
   'core:deployment:remote-op:result': (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => void;
+  /** Ligne de progression pendant l'étape pull-up d'un déploiement (⭐ 24/08/2026) — flux éphémère,
+   *  non persistant (pas de rejeu à la reconnexion), voir runSshStreaming (SshClient.ts). */
+  'core:deployment:remote-op:progress': (data: { targetId: string; chunk: string }) => void;
 
   // Déploiement Home Assistant + Mosquitto (⭐ nouveau 24/08/2026, voir HaStackDeployService.ts)
   'core:deployment:ha-stack:targets:list': (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => void;
   'core:deployment:ha-stack:remote-op:result': (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => void;
+  'core:deployment:ha-stack:remote-op:progress': (data: { targetId: string; chunk: string }) => void;
+
+  // Déploiement zigbee2mqtt (⭐ nouveau 24/08/2026, voir Zigbee2mqttDeployService.ts)
+  'core:deployment:zigbee2mqtt:targets:list': (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => void;
+  'core:deployment:zigbee2mqtt:remote-op:result': (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => void;
+  'core:deployment:zigbee2mqtt:remote-op:progress': (data: { targetId: string; chunk: string }) => void;
 
   // Services post-installation HA (⭐ 24/08/2026, voir HaPostInstallService.ts)
   'core:post-install:result': (data: { results: Array<{ kind: string; success: boolean; title?: string; error?: string }> }) => void;
@@ -144,6 +153,12 @@ export interface ClientToServerEvents {
   'core:deployment:ha-stack:target:save': (data: unknown) => void;
   'core:deployment:ha-stack:target:delete': (data: { id: string }) => void;
   'core:deployment:ha-stack:remote-op': (data: { targetId: string; action: string; version?: string }) => void;
+
+  // Déploiement zigbee2mqtt (⭐ nouveau 24/08/2026)
+  'core:deployment:zigbee2mqtt:targets:get': () => void;
+  'core:deployment:zigbee2mqtt:target:save': (data: unknown) => void;
+  'core:deployment:zigbee2mqtt:target:delete': (data: { id: string }) => void;
+  'core:deployment:zigbee2mqtt:remote-op': (data: { targetId: string; action: string; version?: string }) => void;
 
   // Services post-installation HA (⭐ 24/08/2026, voir HaPostInstallService.ts) — agit toujours sur
   // la HA déjà connectée via ha.ws, jamais sur une cible distante par token dédié.
@@ -211,6 +226,7 @@ export interface AppEvents {
   'core:deployment:target:delete': { id: string };
   'core:deployment:remote-op': { targetId: string; action: string; version?: string };
   'core:deployment:remote-op:result': { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string };
+  'core:deployment:remote-op:progress': { targetId: string; chunk: string };
 
   // Déploiement Home Assistant + Mosquitto (⭐ 24/08/2026, voir HaStackDeployService.ts)
   'core:deployment:ha-stack:targets:get': void;
@@ -219,6 +235,16 @@ export interface AppEvents {
   'core:deployment:ha-stack:target:delete': { id: string };
   'core:deployment:ha-stack:remote-op': { targetId: string; action: string; version?: string };
   'core:deployment:ha-stack:remote-op:result': { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string };
+  'core:deployment:ha-stack:remote-op:progress': { targetId: string; chunk: string };
+
+  // Déploiement zigbee2mqtt (⭐ nouveau 24/08/2026)
+  'core:deployment:zigbee2mqtt:targets:get': void;
+  'core:deployment:zigbee2mqtt:targets:list': { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string };
+  'core:deployment:zigbee2mqtt:target:save': unknown;
+  'core:deployment:zigbee2mqtt:target:delete': { id: string };
+  'core:deployment:zigbee2mqtt:remote-op': { targetId: string; action: string; version?: string };
+  'core:deployment:zigbee2mqtt:remote-op:result': { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string };
+  'core:deployment:zigbee2mqtt:remote-op:progress': { targetId: string; chunk: string };
 
   // Services post-installation HA (⭐ 24/08/2026, voir HaPostInstallService.ts)
   'core:post-install:apply': { requests: Array<{ kind: string; host?: string; port?: number; username?: string; password?: string; url?: string; model?: string }> };

@@ -27,7 +27,8 @@ services:
     # rend joignables tels quels, sans toucher à la configuration existante ni
     # dupliquer MQTT/HA dans des conteneurs séparés. `ports:` est sans effet avec ce
     # mode et volontairement omis — voir le Dockerfile (EXPOSE) pour la liste des
-    # ports réellement utilisés (8080 core, 49161 AREXX, 11434 ia).
+    # ports réellement utilisés (8087 core par défaut — configurable via web.port,
+    # voir Dockerfile#HEALTHCHECK qui suit ce même réglage —, 49161 AREXX, 11434 ia).
     #
     # ⚠️ Port 11434 (ia, émulation Ollama pour l'intégration HA — voir
     # fonctionnelles-ia_specs) : si un vrai serveur Ollama tourne déjà sur cette

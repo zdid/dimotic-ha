@@ -15,6 +15,7 @@ const DEFAULT_CONFIG: AppConfig = {
   disabledApps: [],
   targets: [],
   haStackTargets: [],
+  zigbee2mqttTargets: [],
   ha: {
     ws_enable: false,
     mqtt_enable: false,
@@ -30,7 +31,13 @@ const DEFAULT_CONFIG: AppConfig = {
     },
   },
   web: {
-    port: 8080,
+    // ⭐ 25/08/2026 : 8080 → 8087. Rencontré en réel sur stfort — l'ancien système dimotic legacy
+    // occupe déjà 8080 sur cette machine (network_mode: host, pas de remapping possible), ce qui
+    // faisait échouer le HEALTHCHECK Docker (ciblait 8080 en dur, voir Dockerfile) même quand
+    // dimotic-ha tournait correctement sur un port différent. Le HEALTHCHECK lit maintenant le
+    // port réellement configuré (voir Dockerfile) — ce changement de défaut réduit surtout le
+    // risque de collision avec d'autres services déjà installés sur 8080.
+    port: 8087,
     host: '0.0.0.0',
   },
   logging: {

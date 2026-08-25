@@ -63,6 +63,7 @@ echo "=== 1/2 Build + push ${DOCKER_IMAGE}:${VERSION} (+ :latest) ==="
 docker buildx build \
   --builder dimotic-builder \
   --platform linux/amd64,linux/arm64,linux/arm/v7 \
+  --build-arg APP_VERSION="${VERSION}" \
   -t "${DOCKER_IMAGE}:${VERSION}" \
   -t "${DOCKER_IMAGE}:latest" \
   --push \

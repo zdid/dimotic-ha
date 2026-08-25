@@ -150,6 +150,12 @@ const createTemplate = (): HTMLTemplateElement => {
         color: #bdc3c7;
         margin-top: 10px;
       }
+
+      .host-info {
+        font-size: 0.75rem;
+        color: #7f8c8d;
+        margin-top: 4px;
+      }
       
       .app-item {
         display: flex;
@@ -369,6 +375,7 @@ const createTemplate = (): HTMLTemplateElement => {
         <div class="uptime">
           Uptime: <span id="uptime">0s</span>
         </div>
+        <div class="host-info" id="host-info"></div>
       </div>
     </aside>
   `;
@@ -380,6 +387,10 @@ export class Sidebar extends HTMLElement {
   private activeModule: string | null = null;
   private uptime: number = 0;
   private customMenus: Record<string, ApplicationMenuConfig> = {};
+  // ⭐ 24/08/2026 — version déployée + hôte, affichés sous Uptime (voir updateHostInfo()).
+  private appVersion: string | null = null;
+  private machineId: string | null = null;
+  private hostAddress: string | null = null;
 
   constructor() {
     super();
@@ -455,13 +466,22 @@ export class Sidebar extends HTMLElement {
     // SocketService.ts) reste la connexion Socket.io locale au navigateur, volontairement
     // distincte et non affichée ici — non conflatée avec le statut HA depuis ce correctif.
 
-    // Écouter l'uptime
+    // Écouter l'uptime (+ version, ⭐ 24/08/2026)
     window.addEventListener('app:started', (e: CustomEvent) => {
       this.uptime = e.detail.uptime || Date.now();
       this.updateUptime();
-      
+      this.appVersion = e.detail.version || null;
+      this.updateHostInfo();
+
       // Mettre à jour l'uptime toutes les secondes
       setInterval(() => this.updateUptime(), 1000);
+    });
+
+    // Identité de la machine hôte (⭐ 24/08/2026, voir app.ts — dispatché depuis app:machine-id)
+    window.addEventListener('app:machine-id', (e: CustomEvent) => {
+      this.machineId = e.detail.machineId || null;
+      this.hostAddress = e.detail.address || null;
+      this.updateHostInfo();
     });
     
     // Scroll vers une section
@@ -919,7 +939,23 @@ export class Sidebar extends HTMLElement {
       uptimeEl.textContent = '0s';
     }
   }
-  
+
+  /** Version + hôte (⭐ 24/08/2026) — nom de machine si connu, sinon adresse IP ; les deux si les
+   *  deux sont disponibles. Rien affiché tant qu'aucune des deux sources (app:started,
+   *  app:machine-id) n'a répondu. */
+  private updateHostInfo(): void {
+    const el = this.shadowRoot!.getElementById('host-info');
+    if (!el) return;
+
+    const parts: string[] = [];
+    if (this.appVersion) parts.push(this.appVersion);
+    if (this.machineId && this.hostAddress) parts.push(`${this.machineId} (${this.hostAddress})`);
+    else if (this.machineId) parts.push(this.machineId);
+    else if (this.hostAddress) parts.push(this.hostAddress);
+
+    el.textContent = parts.join(' · ');
+  }
+
   private scrollToSection(sectionId: string): void {
     const el = document.getElementById(sectionId);
     if (el) {

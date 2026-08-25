@@ -73,6 +73,11 @@ RUN chmod +x docker/build-apps.sh && ./docker/build-apps.sh
 # ---------------------------------------------------------------------------
 FROM node:20-bookworm-slim AS runtime
 
+# Version déployée (⭐ 24/08/2026) — passée par docker/rebuild-and-deploy.sh via --build-arg,
+# reprend le même tag que celui poussé sur Docker Hub. `dev` par défaut si construit sans cet
+# argument (ex: build local manuel) — index.ts s'en sert comme repli explicite.
+ARG APP_VERSION=dev
+
 # openssh-client : requis par applications/espdisplay (EspDisplayService.runPipelineRemote) pour
 # déléguer le pipeline ESPHome à une machine distante (ex: falbala depuis ha2, qui n'a lui-même ni
 # python3 ni le conteneur Docker esphome — Pi4, RAM insuffisante pour ESP-IDF, voir
@@ -84,7 +89,8 @@ RUN apt-get update \
 
 ENV NODE_ENV=production \
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
+    LC_ALL=C.UTF-8 \
+    APP_VERSION=$APP_VERSION
 
 WORKDIR /app
 
@@ -104,14 +110,22 @@ USER node
 
 # Purement informatif (network_mode: host en usage réel, voir compose.yaml — EXPOSE n'a alors
 # aucun effet sur la publication des ports, mais documente ce que l'image écoute) :
-#   8080  : core — UI web + API Socket.io (fixe)
+#   8087  : core — UI web + API Socket.io (défaut, configurable via web.port dans
+#           data/core/config.yaml — voir HEALTHCHECK ci-dessous, qui suit ce même réglage)
 #   49161 : AREXX — serveur HTTP local, modes push/usb (configurable, data/arexx/config.yaml)
 #   11434 : ia — serveur HTTP émulant le protocole Ollama pour l'intégration HA (configurable,
 #           data/ia/config.yaml) — ⚠️ collision possible avec un vrai serveur Ollama sur le même
 #           hôte (même port par défaut), voir compose.yaml.
-EXPOSE 8080 49161 11434
+EXPOSE 8087 49161 11434
 
+# ⭐ 25/08/2026 : lit web.port dans data/core/config.yaml plutôt qu'un port codé en dur — bug réel
+# constaté sur stfort (l'ancien système dimotic legacy occupe déjà 8080 sur cette machine,
+# web.port y est donc réglé à une autre valeur ; le HEALTHCHECK visait toujours 8080, tapait sur
+# le vieux système, et rapportait "unhealthy" en permanence malgré un dimotic-ha parfaitement
+# fonctionnel). Repli sur 8087 (nouveau défaut, voir loader.ts) si le fichier est absent/illisible
+# ou si aucune section web/port n'y figure — pas de dépendance à js-yaml (absent de /app,
+# uniquement sous applications/core/node_modules) : extraction ligne à ligne volontairement simple.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "const fs=require('fs');let port=8087;try{const lines=fs.readFileSync('data/core/config.yaml','utf8').split('\n');const i=lines.findIndex(l=>l.startsWith('web:'));if(i>=0){for(let j=i+1;j<lines.length;j++){if(/^\S/.test(lines[j]))break;const m=lines[j].match(/port:\s*(\d+)/);if(m){port=parseInt(m[1],10);break;}}}}catch(e){}fetch('http://localhost:'+port+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1));"
 
 CMD ["node", "applications/core/scripts/supervisor.js"]

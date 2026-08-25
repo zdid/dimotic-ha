@@ -10,13 +10,15 @@ import { EventBus } from './EventBus';
 import { ApplicationManager } from './ApplicationManager';
 import { CoreDeployService } from './CoreDeployService';
 import { HaStackDeployService } from './HaStackDeployService';
+import { Zigbee2mqttDeployService } from './Zigbee2mqttDeployService';
 import { TargetGossipService } from './TargetGossipService';
 import { HaPostInstallService, type PostInstallRequest } from './HaPostInstallService';
 import { HaQueryBridge } from './HaQueryBridge';
-import type { DeploymentTargetConfig, HaStackTargetConfig } from '../infrastructure/config/schema';
+import type { DeploymentTargetConfig, HaStackTargetConfig, Zigbee2mqttTargetConfig } from '../infrastructure/config/schema';
 import type { RemoteAction } from '../infrastructure/remote/RemoteUnitController';
 import { ensureGlobalSshKey } from '../infrastructure/remote/SshClient';
 import { isRunningInDocker } from '../infrastructure/runtime/docker';
+import { getPrimaryIPv4Address } from '../infrastructure/runtime/network';
 import { ProcessSupervisor, SupervisorEventBridge } from '../supervisor';
 import type { RestartManager } from './RestartManager';
 import type { SocketBridge } from './SocketBridge';
@@ -74,6 +76,7 @@ export class AppService {
   private coreDeployService: CoreDeployService;
   // Déploiement Home Assistant + Mosquitto sur une machine distante (⭐ 24/08/2026)
   private haStackDeployService: HaStackDeployService;
+  private zigbee2mqttDeployService: Zigbee2mqttDeployService;
   // Synchronisation "sans maître" des cibles connues (dimotic-ha + HA/Mosquitto) entre toutes les
   // instances du foyer via MQTT retenu (⭐ 24/08/2026, voir TargetGossipService.ts)
   private targetGossipService: TargetGossipService;
@@ -175,6 +178,7 @@ export class AppService {
     this.applicationManager = new ApplicationManager(restartManager, logger, configService, this.processSupervisor);
     this.coreDeployService = new CoreDeployService(configService, this.applicationManager, logger);
     this.haStackDeployService = new HaStackDeployService(logger);
+    this.zigbee2mqttDeployService = new Zigbee2mqttDeployService(logger);
     this.targetGossipService = new TargetGossipService(configService, eventBus, logger);
     this.haPostInstallService = new HaPostInstallService(configService, logger);
     this.haQueryBridge = new HaQueryBridge(eventBus, logger, () => this.haStructureRegistry, () => this.haWsClient);
@@ -246,6 +250,16 @@ export class AppService {
     this.eventBus.on('core:deployment:ha-stack:remote-op', (data: unknown) => {
       const { targetId, action, version } = data as { targetId: string; action: RemoteAction; version?: string };
       this.handleHaStackRemoteOp(targetId, action, version);
+    });
+
+    // Déploiement zigbee2mqtt (⭐ nouveau 24/08/2026, voir Zigbee2mqttDeployService.ts) — liste de
+    // cibles séparée de haStackTargets, même protocole sinon.
+    this.eventBus.on('core:deployment:zigbee2mqtt:targets:get', () => this.handleZigbee2mqttTargetsGet());
+    this.eventBus.on('core:deployment:zigbee2mqtt:target:save', (data: unknown) => this.handleZigbee2mqttTargetSave(data as Zigbee2mqttTargetConfig));
+    this.eventBus.on('core:deployment:zigbee2mqtt:target:delete', (data: unknown) => this.handleZigbee2mqttTargetDelete(data as { id: string }));
+    this.eventBus.on('core:deployment:zigbee2mqtt:remote-op', (data: unknown) => {
+      const { targetId, action, version } = data as { targetId: string; action: RemoteAction; version?: string };
+      this.handleZigbee2mqttRemoteOp(targetId, action, version);
     });
 
     // Services post-installation HA (⭐ 24/08/2026, voir HaPostInstallService.ts)
@@ -665,7 +679,10 @@ export class AppService {
 
     // ⭐ fonctionnelles-supervisor_specs v2.6 — identité de cette machine, une seule fois (valeur
     // stable pour toute la durée de vie du process, voir schema.ts::coreSchema).
-    this.eventBus.emitGeneric(SOCLE_SOCKET_EVENTS.MACHINE_ID, { machineId: this.configService.getConfig().core.machineId });
+    this.eventBus.emitGeneric(SOCLE_SOCKET_EVENTS.MACHINE_ID, {
+      machineId: this.configService.getConfig().core.machineId,
+      address: getPrimaryIPv4Address(),
+    });
 
     this.logger.info('AppService', `Événements Socket.io du socle enregistrés: ${Object.keys(SOCLE_SOCKET_EVENTS).length} événements, ${persistentCoreEvents.length} persistants`);
   }
@@ -778,7 +795,9 @@ export class AppService {
 
     try {
       const result = await (action === 'deploy'
-        ? this.coreDeployService.deploy(target, version)
+        ? this.coreDeployService.deploy(target, version, (chunk) => {
+            this.eventBus.emit('core:deployment:remote-op:progress', { targetId, chunk });
+          })
         : action === 'start'
         ? this.coreDeployService.start(target)
         : action === 'stop'
@@ -855,7 +874,9 @@ export class AppService {
 
     try {
       const result = await (action === 'deploy'
-        ? this.haStackDeployService.deploy(target, version)
+        ? this.haStackDeployService.deploy(target, version, (chunk) => {
+            this.eventBus.emit('core:deployment:ha-stack:remote-op:progress', { targetId, chunk });
+          })
         : action === 'start'
         ? this.haStackDeployService.start(target)
         : action === 'stop'
@@ -866,6 +887,84 @@ export class AppService {
       this.eventBus.emit('core:deployment:ha-stack:remote-op:result', { targetId, action, ...result });
     } catch (error) {
       this.eventBus.emit('core:deployment:ha-stack:remote-op:result', {
+        targetId,
+        action,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // ===========================================================================
+  // DÉPLOIEMENT ZIGBEE2MQTT (⭐ nouveau 24/08/2026, voir Zigbee2mqttDeployService.ts) — liste de
+  // cibles séparée de haStackTargets, même patron sinon.
+  // ===========================================================================
+
+  private handleZigbee2mqttTargetsGet(): void {
+    this.eventBus.emit('core:deployment:zigbee2mqtt:targets:list', {
+      targets: this.configService.getZigbee2mqttTargets().map((t) => ({ id: t.id, host: t.host })),
+      isRunningInDocker: isRunningInDocker(),
+      projectRoot: process.env.PROJECT_ROOT || process.cwd(),
+    });
+  }
+
+  private handleZigbee2mqttTargetSave(target: Zigbee2mqttTargetConfig): void {
+    const targets = this.configService.getZigbee2mqttTargets();
+    const index = targets.findIndex((t) => t.id === target.id);
+    if (index === -1) targets.push(target);
+    else targets[index] = target;
+
+    const result = this.configService.setZigbee2mqttTargets(targets);
+    if (!result.success) {
+      this.logger.error('AppService', `Échec de sauvegarde de la cible zigbee2mqtt ${target.id}: ${result.error}`);
+    } else {
+      this.targetGossipService.republish();
+    }
+    this.handleZigbee2mqttTargetsGet();
+  }
+
+  private handleZigbee2mqttTargetDelete(data: { id: string }): void {
+    const targets = this.configService.getZigbee2mqttTargets().filter((t) => t.id !== data.id);
+    const result = this.configService.setZigbee2mqttTargets(targets);
+    if (!result.success) {
+      this.logger.error('AppService', `Échec de suppression de la cible zigbee2mqtt ${data.id}: ${result.error}`);
+    } else {
+      this.targetGossipService.republish();
+    }
+    this.handleZigbee2mqttTargetsGet();
+  }
+
+  /**
+   * Point d'entrée unique pour toute intervention distante sur une cible zigbee2mqtt — même
+   * protocole { targetId, action, version? } que core:deployment:remote-op.
+   */
+  private async handleZigbee2mqttRemoteOp(targetId: string, action: RemoteAction, version?: string): Promise<void> {
+    const target = this.configService.getZigbee2mqttTargets().find((t) => t.id === targetId);
+    if (!target) {
+      this.eventBus.emit('core:deployment:zigbee2mqtt:remote-op:result', {
+        targetId,
+        action,
+        success: false,
+        error: `Cible introuvable: ${targetId}`,
+      });
+      return;
+    }
+
+    try {
+      const result = await (action === 'deploy'
+        ? this.zigbee2mqttDeployService.deploy(target, version, (chunk) => {
+            this.eventBus.emit('core:deployment:zigbee2mqtt:remote-op:progress', { targetId, chunk });
+          })
+        : action === 'start'
+        ? this.zigbee2mqttDeployService.start(target)
+        : action === 'stop'
+        ? this.zigbee2mqttDeployService.stop(target)
+        : action === 'restart'
+        ? this.zigbee2mqttDeployService.restart(target)
+        : Promise.resolve({ success: false, error: `Action distante inconnue: ${action}` }));
+      this.eventBus.emit('core:deployment:zigbee2mqtt:remote-op:result', { targetId, action, ...result });
+    } catch (error) {
+      this.eventBus.emit('core:deployment:zigbee2mqtt:remote-op:result', {
         targetId,
         action,
         success: false,

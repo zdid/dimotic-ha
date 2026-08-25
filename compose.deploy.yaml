@@ -14,8 +14,8 @@
 #      (applications/core/src/infrastructure/config/loader.ts) sans faire planter
 #      le démarrage.
 #   3. docker compose pull && docker compose up -d
-#   4. Ouvrir l'UI (http://<IP du Pi>:8080) → Paramètres Techniques → Web Services,
-#      y saisir la connexion MQTT et HA WebSocket DE CETTE machine (probablement
+#   4. Ouvrir l'UI (http://<IP du Pi>:8087, défaut — voir web.port) → Paramètres Techniques →
+#      Web Services, y saisir la connexion MQTT et HA WebSocket DE CETTE machine (probablement
 #      différente de celle de la machine de développement) — la sauvegarde écrit
 #      elle-même data/core/config.yaml, pas besoin de l'éditer à la main.
 #

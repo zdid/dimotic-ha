@@ -326,7 +326,9 @@ class ApplicationBootstrap {
     // et émettre l'événement de démarrage
     this.eventBus?.emit('app:started', {
       timestamp: new Date().toISOString(),
-      version: '1.0.0',
+      // ⭐ 24/08/2026 — APP_VERSION injecté au build Docker (voir Dockerfile/rebuild-and-deploy.sh),
+      // repli explicite 'dev' hors Docker (dev local, npm run dev:local).
+      version: process.env.APP_VERSION || 'dev',
     });
 
     this.logger?.info('Bootstrap', 'Application démarrée avec succès');

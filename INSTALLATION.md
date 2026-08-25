@@ -44,19 +44,12 @@ Le fichier copié fonctionne tel quel dans le cas général. Deux points à vér
   (accès dynamique à `/dev/ttyUSBx`, quel que soit son numéro). Alternative plus restrictive si le
   port ne change jamais : remplacer par `devices: ["/dev/ttyUSB0:/dev/ttyUSB0"]` +
   `group_add: ["dialout"]` (déjà présent dans le fichier).
-- **Port 8080 déjà utilisé sur cette machine** (rencontré sur stfort — l'ancien système dimotic
-  l'occupe déjà) : pas de remapping possible en `network_mode: host` — il faut changer
-  `web.port` dans `data/core/config.yaml` (§A.5) vers un port libre, **et** ajouter une surcharge
-  `healthcheck:` dans le `compose.yaml` pointant vers ce même port (le `HEALTHCHECK` intégré à
-  l'image cible le port 8080 en dur) :
-  ```yaml
-      healthcheck:
-        test: ["CMD", "node", "-e", "fetch('http://localhost:<PORT>/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-        interval: 30s
-        timeout: 5s
-        start_period: 15s
-        retries: 3
-  ```
+- **Port par défaut (8087) déjà utilisé sur cette machine** (rencontré sur stfort — l'ancien
+  système dimotic occupe le port 8080, d'où le choix de 8087 comme défaut) : pas de remapping
+  possible en `network_mode: host` — changer `web.port` dans `data/core/config.yaml` (§A.5) vers
+  un port libre. Depuis le 25/08/2026, le `HEALTHCHECK` intégré à l'image lit lui-même `web.port`
+  dans ce fichier (repli sur 8087 si absent) — plus besoin de surcharge manuelle dans
+  `compose.yaml` pour que le healthcheck suive.
 
 ### A.4 Premier démarrage
 
@@ -81,7 +74,7 @@ Sans ça : `EACCES` au démarrage sur l'écriture des logs.
 
 ### A.5 Configuration (après le premier démarrage)
 
-Ouvrir `http://<IP de la machine>:8080` (ou le port choisi en §A.3) → **Paramètres Techniques →
+Ouvrir `http://<IP de la machine>:8087` (défaut — ou le port choisi en §A.3) → **Paramètres Techniques →
 Web Services** : y saisir la connexion MQTT et le WebSocket Home Assistant DE CETTE machine — la
 sauvegarde écrit elle-même `data/core/config.yaml`, pas besoin de l'éditer à la main.
 

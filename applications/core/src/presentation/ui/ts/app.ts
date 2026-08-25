@@ -70,9 +70,12 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // ⭐ fonctionnelles-supervisor_specs v2.6 — identité de la machine, persistant (rejoué à la
-// reconnexion, voir AppService.registerCoreSocketEvents).
-socket.on('app:machine-id', (data: { machineId: string }) => {
+// reconnexion, voir AppService.registerCoreSocketEvents). `address` ajoutée le 24/08/2026 pour
+// l'affichage version+hôte de Sidebar.ts — dispatché en CustomEvent (même patron que app:started/
+// uptime, TechnicalConfigManager.ts) pour que Sidebar puisse réagir sans ordre de chargement figé.
+socket.on('app:machine-id', (data: { machineId: string; address?: string }) => {
   window.app.machineId = data.machineId;
+  window.dispatchEvent(new CustomEvent('app:machine-id', { detail: data }));
 });
 
 // Écouter les erreurs Socket.io

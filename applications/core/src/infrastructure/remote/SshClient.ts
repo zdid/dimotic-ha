@@ -123,6 +123,115 @@ export function runSsh(
   });
 }
 
+export interface RunSshStreamingOptions {
+  stdin?: string;
+  /** Appelé pour chaque ligne complète reçue (stdout ET stderr confondus — `docker compose pull`
+   *  écrit sa progression sur l'un ou l'autre selon les versions). Une ligne partielle en fin de
+   *  paquet est retenue jusqu'au prochain paquet ou à la clôture du process, jamais transmise
+   *  tronquée. */
+  onData?: (line: string) => void;
+  /** Timeout réarmé à CHAQUE donnée reçue (stdout ou stderr) — plutôt qu'un timeout absolu unique,
+   *  s'adapte naturellement à une cible lente (ex: RPi3 chargé vs RPi5) tant qu'elle progresse
+   *  réellement ; ne tue la commande que si plus rien ne se passe pendant `idleTimeoutMs` (silence
+   *  prolongé = probablement bloqué). Défaut 90s. */
+  idleTimeoutMs?: number;
+  /** Plafond absolu, garde-fou pour le cas pathologique d'un flux qui progresse indéfiniment très
+   *  lentement sans jamais se terminer. Défaut 45 min. */
+  maxTotalMs?: number;
+}
+
+const DEFAULT_IDLE_TIMEOUT_MS = 90000;
+const DEFAULT_MAX_TOTAL_MS = 2700000;
+
+/**
+ * Variante de `runSsh` pour une commande longue dont la progression doit être suivie en direct
+ * (⭐ 24/08/2026, `docker compose pull` — vérifié empiriquement produire un flux de lignes de
+ * progression fréquentes même en SSH non-tty, pas un buffer silencieux jusqu'à la fin). Timeout
+ * adaptatif par inactivité (voir `RunSshStreamingOptions.idleTimeoutMs`) plutôt qu'un timeout
+ * absolu unique — remplace le besoin d'un timeout fixe différent par type de matériel cible.
+ */
+export function runSshStreaming(
+  target: RemoteTarget,
+  remoteCommand: string,
+  opts: RunSshStreamingOptions = {}
+): Promise<{ success: boolean; output: string; error?: string }> {
+  const { stdin, onData, idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS, maxTotalMs = DEFAULT_MAX_TOTAL_MS } = opts;
+
+  return new Promise((resolve) => {
+    const args = ['-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes'];
+    if (target.sshKeyPath) args.push('-i', expandHome(target.sshKeyPath));
+    args.push(`root@${target.host}`, remoteCommand);
+
+    const child = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+
+    let output = '';
+    let pendingLine = '';
+    let settled = false;
+
+    const finish = (result: { success: boolean; output: string; error?: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(idleTimer);
+      clearTimeout(maxTimer);
+      resolve(result);
+    };
+
+    const flushPendingLine = () => {
+      if (pendingLine) {
+        onData?.(pendingLine);
+        pendingLine = '';
+      }
+    };
+
+    const handleChunk = (chunk: Buffer) => {
+      const text = chunk.toString();
+      output += text;
+      resetIdleTimer();
+
+      pendingLine += text;
+      const lines = pendingLine.split('\n');
+      pendingLine = lines.pop() ?? '';
+      for (const line of lines) onData?.(line);
+    };
+
+    let idleTimer: ReturnType<typeof setTimeout>;
+    const resetIdleTimer = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        child.kill();
+        finish({ success: false, output, error: `Aucune activité depuis ${idleTimeoutMs}ms — probablement bloqué` });
+      }, idleTimeoutMs);
+    };
+    resetIdleTimer();
+
+    const maxTimer = setTimeout(() => {
+      child.kill();
+      finish({ success: false, output, error: `Dépassement du plafond de ${maxTotalMs}ms` });
+    }, maxTotalMs);
+
+    child.stdout.on('data', handleChunk);
+    child.stderr.on('data', handleChunk);
+
+    child.on('error', (err) => {
+      finish({ success: false, output, error: err.message });
+    });
+
+    child.on('close', (code) => {
+      flushPendingLine();
+      if (code === 0) {
+        finish({ success: true, output });
+      } else {
+        finish({ success: false, output, error: `ssh a quitté avec le code ${code}` });
+      }
+    });
+
+    if (stdin !== undefined) {
+      child.stdin.write(stdin);
+    }
+    child.stdin.end();
+  });
+}
+
 /** Copie un ou plusieurs fichiers/répertoires vers la machine cible (scp -r). */
 export function runScp(
   target: RemoteTarget,

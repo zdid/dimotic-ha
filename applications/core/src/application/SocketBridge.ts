@@ -290,6 +290,12 @@ export class SocketBridge {
       this.broadcast('core:deployment:remote-op:result', data);
     });
 
+    // Ligne de progression pendant le pull-up (⭐ 24/08/2026) — pas de log par ligne (bruyant),
+    // flux éphémère, jamais rejoué à la reconnexion.
+    this.eventBus.on('core:deployment:remote-op:progress', (data: { targetId: string; chunk: string }) => {
+      this.broadcast('core:deployment:remote-op:progress', data);
+    });
+
     // ======================================================================
     // DÉPLOIEMENT HOME ASSISTANT + MOSQUITTO (⭐ 24/08/2026)
     // ======================================================================
@@ -302,6 +308,28 @@ export class SocketBridge {
     this.eventBus.on('core:deployment:ha-stack:remote-op:result', (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => {
       this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:ha-stack:remote-op:result');
       this.broadcast('core:deployment:ha-stack:remote-op:result', data);
+    });
+
+    this.eventBus.on('core:deployment:ha-stack:remote-op:progress', (data: { targetId: string; chunk: string }) => {
+      this.broadcast('core:deployment:ha-stack:remote-op:progress', data);
+    });
+
+    // ======================================================================
+    // DÉPLOIEMENT ZIGBEE2MQTT (⭐ 24/08/2026)
+    // ======================================================================
+
+    this.eventBus.on('core:deployment:zigbee2mqtt:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:zigbee2mqtt:targets:list');
+      this.broadcast('core:deployment:zigbee2mqtt:targets:list', data);
+    });
+
+    this.eventBus.on('core:deployment:zigbee2mqtt:remote-op:result', (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:zigbee2mqtt:remote-op:result');
+      this.broadcast('core:deployment:zigbee2mqtt:remote-op:result', data);
+    });
+
+    this.eventBus.on('core:deployment:zigbee2mqtt:remote-op:progress', (data: { targetId: string; chunk: string }) => {
+      this.broadcast('core:deployment:zigbee2mqtt:remote-op:progress', data);
     });
 
     // ======================================================================
@@ -492,6 +520,34 @@ export class SocketBridge {
       socket.on('core:deployment:ha-stack:remote-op', (data: { targetId: string; action: string; version?: string }) => {
         this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:ha-stack:remote-op de ${socket.id}, ${data.targetId}/${data.action}`);
         this.eventBus.emit('core:deployment:ha-stack:remote-op', data);
+      });
+
+      // ===========================================================================
+      // DÉPLOIEMENT ZIGBEE2MQTT (⭐ 24/08/2026)
+      // ===========================================================================
+
+      // @ts-ignore
+      socket.on('core:deployment:zigbee2mqtt:targets:get', () => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:zigbee2mqtt:targets:get de ${socket.id}`);
+        this.eventBus.emit('core:deployment:zigbee2mqtt:targets:get', undefined as void);
+      });
+
+      // @ts-ignore
+      socket.on('core:deployment:zigbee2mqtt:target:save', (data: unknown) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:zigbee2mqtt:target:save de ${socket.id}`);
+        this.eventBus.emit('core:deployment:zigbee2mqtt:target:save', data);
+      });
+
+      // @ts-ignore
+      socket.on('core:deployment:zigbee2mqtt:target:delete', (data: { id: string }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:zigbee2mqtt:target:delete de ${socket.id}, id: ${data.id}`);
+        this.eventBus.emit('core:deployment:zigbee2mqtt:target:delete', data);
+      });
+
+      // @ts-ignore
+      socket.on('core:deployment:zigbee2mqtt:remote-op', (data: { targetId: string; action: string; version?: string }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:zigbee2mqtt:remote-op de ${socket.id}, ${data.targetId}/${data.action}`);
+        this.eventBus.emit('core:deployment:zigbee2mqtt:remote-op', data);
       });
 
       // ===========================================================================

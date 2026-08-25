@@ -12,7 +12,7 @@
  * page, avant les deux sections (dimotic-ha et HA+Mosquitto partagent la même clé).
  */
 
-import { renderTargetCards, renderSshPrepSection, showTargetActionResult, type TargetActionResult, type RemoteAction } from './TargetCards.js';
+import { renderTargetCards, renderSshPrepSection, showTargetActionResult, appendTargetProgress, type TargetActionResult, type RemoteAction } from './TargetCards.js';
 
 const createTemplate = (): HTMLTemplateElement => {
   const template = document.createElement('template');
@@ -73,6 +73,12 @@ const createTemplate = (): HTMLTemplateElement => {
         padding: 6px 14px; border-radius: 4px; border: none; cursor: pointer;
         background: #3498db; color: white; font-size: 0.85rem;
       }
+      .target-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .target-progress {
+        margin-top: 10px; padding: 8px 10px; max-height: 180px; overflow-y: auto;
+        background: #1a252f; border: 1px solid #4a6278; border-radius: 4px;
+        color: #bdc3c7; font-size: 0.78rem; white-space: pre-wrap; word-break: break-all;
+      }
       .target-result { padding: 10px; border-radius: 4px; margin-top: 10px; }
       .target-result-success { background: rgba(46, 204, 113, 0.15); border: 1px solid #2ecc71; color: #2ecc71; }
       .target-result-error { background: rgba(231, 76, 60, 0.15); border: 1px solid #e74c3c; color: #e74c3c; }
@@ -126,6 +132,41 @@ const createTemplate = (): HTMLTemplateElement => {
         <input type="text" id="ha-deploy-version" placeholder="2026.8.0" style="width:120px;">
       </div>
       <div id="ha-targets-container"><div class="empty">Chargement...</div></div>
+
+      <h2 style="margin-top:30px;">🐝 Déploiement zigbee2mqtt</h2>
+      <p class="section-description">
+        Installer/mettre à jour zigbee2mqtt (image koenkk/zigbee2mqtt) sur la machine où est branché
+        le dongle USB Zigbee — liste de cibles séparée, le dongle peut être sur une machine
+        différente de celle qui héberge HA+Mosquitto.
+      </p>
+      <div class="add-target-form">
+        <div class="field">
+          <label for="z2m-target-id">Identifiant</label>
+          <input type="text" id="z2m-target-id" placeholder="orangepi">
+        </div>
+        <div class="field">
+          <label for="z2m-target-host">Hôte</label>
+          <input type="text" id="z2m-target-host" placeholder="192.168.1.130">
+        </div>
+        <div class="field">
+          <label for="z2m-target-serial">Port série du dongle</label>
+          <input type="text" id="z2m-target-serial" placeholder="/dev/ttyUSB0" style="width:140px;">
+        </div>
+        <div class="field">
+          <label for="z2m-target-mqtt-host">Hôte MQTT</label>
+          <input type="text" id="z2m-target-mqtt-host" placeholder="192.168.1.51" style="width:140px;">
+        </div>
+        <div class="field">
+          <label for="z2m-target-mqtt-port">Port MQTT</label>
+          <input type="text" id="z2m-target-mqtt-port" placeholder="1883" style="width:80px;">
+        </div>
+        <button type="button" id="add-z2m-target-btn">➕ Ajouter</button>
+      </div>
+      <div class="field" style="margin-bottom:12px;">
+        <label for="z2m-deploy-version">Version zigbee2mqtt à déployer (vide = latest)</label>
+        <input type="text" id="z2m-deploy-version" placeholder="1.40.0" style="width:120px;">
+      </div>
+      <div id="z2m-targets-container"><div class="empty">Chargement...</div></div>
     </div>
   `;
   return template;
@@ -162,6 +203,11 @@ export class DeploymentManager extends HTMLElement {
       if (container) showTargetActionResult(container, result);
     });
 
+    this.socket.on('core:deployment:remote-op:progress', (data: { targetId: string; chunk: string }) => {
+      const container = this.shadowRoot!.getElementById('targets-container');
+      if (container) appendTargetProgress(container, data.targetId, data.chunk);
+    });
+
     this.socket.emit('core:deployment:targets:get');
 
     this.shadowRoot!.getElementById('add-target-btn')?.addEventListener('click', () => this.addTarget());
@@ -175,9 +221,32 @@ export class DeploymentManager extends HTMLElement {
       if (container) showTargetActionResult(container, result);
     });
 
+    this.socket.on('core:deployment:ha-stack:remote-op:progress', (data: { targetId: string; chunk: string }) => {
+      const container = this.shadowRoot!.getElementById('ha-targets-container');
+      if (container) appendTargetProgress(container, data.targetId, data.chunk);
+    });
+
     this.socket.emit('core:deployment:ha-stack:targets:get');
 
     this.shadowRoot!.getElementById('add-ha-target-btn')?.addEventListener('click', () => this.addHaStackTarget());
+
+    this.socket.on('core:deployment:zigbee2mqtt:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
+      this.renderZigbee2mqttTargets(data);
+    });
+
+    this.socket.on('core:deployment:zigbee2mqtt:remote-op:result', (result: TargetActionResult) => {
+      const container = this.shadowRoot!.getElementById('z2m-targets-container');
+      if (container) showTargetActionResult(container, result);
+    });
+
+    this.socket.on('core:deployment:zigbee2mqtt:remote-op:progress', (data: { targetId: string; chunk: string }) => {
+      const container = this.shadowRoot!.getElementById('z2m-targets-container');
+      if (container) appendTargetProgress(container, data.targetId, data.chunk);
+    });
+
+    this.socket.emit('core:deployment:zigbee2mqtt:targets:get');
+
+    this.shadowRoot!.getElementById('add-z2m-target-btn')?.addEventListener('click', () => this.addZigbee2mqttTarget());
   }
 
   private renderSshPrep(isRunningInDocker: boolean, projectRoot: string): void {
@@ -242,6 +311,49 @@ export class DeploymentManager extends HTMLElement {
 
     if (idEl) idEl.value = '';
     if (hostEl) hostEl.value = '';
+  }
+
+  private renderZigbee2mqttTargets(data: { targets: { id: string; host: string }[] }): void {
+    const container = this.shadowRoot!.getElementById('z2m-targets-container');
+    if (!container) return;
+    renderTargetCards(container, {
+      targets: data.targets,
+      onAction: (targetId: string, action: RemoteAction) => {
+        const version = (this.shadowRoot!.getElementById('z2m-deploy-version') as HTMLInputElement | null)?.value.trim();
+        this.socket.emit('core:deployment:zigbee2mqtt:remote-op', { targetId, action, version: version || undefined });
+      },
+      onDelete: (targetId: string) => {
+        this.socket.emit('core:deployment:zigbee2mqtt:target:delete', { id: targetId });
+      }
+    });
+  }
+
+  private addZigbee2mqttTarget(): void {
+    const idEl = this.shadowRoot!.getElementById('z2m-target-id') as HTMLInputElement | null;
+    const hostEl = this.shadowRoot!.getElementById('z2m-target-host') as HTMLInputElement | null;
+    const serialEl = this.shadowRoot!.getElementById('z2m-target-serial') as HTMLInputElement | null;
+    const mqttHostEl = this.shadowRoot!.getElementById('z2m-target-mqtt-host') as HTMLInputElement | null;
+    const mqttPortEl = this.shadowRoot!.getElementById('z2m-target-mqtt-port') as HTMLInputElement | null;
+
+    const id = idEl?.value.trim() ?? '';
+    const host = hostEl?.value.trim() ?? '';
+    if (!id || !host) return;
+
+    const serialPort = serialEl?.value.trim() || '/dev/ttyUSB0';
+    const mqttHost = mqttHostEl?.value.trim() ?? '';
+    const mqttPortRaw = mqttPortEl?.value.trim();
+    const mqttPort = mqttPortRaw ? Number.parseInt(mqttPortRaw, 10) : undefined;
+
+    this.socket.emit('core:deployment:zigbee2mqtt:target:save', {
+      id, host, remoteDir: '/docker/zigbee2mqtt', serialPort, mqttHost,
+      mqttPort: Number.isFinite(mqttPort) ? mqttPort : undefined
+    });
+
+    if (idEl) idEl.value = '';
+    if (hostEl) hostEl.value = '';
+    if (serialEl) serialEl.value = '';
+    if (mqttHostEl) mqttHostEl.value = '';
+    if (mqttPortEl) mqttPortEl.value = '';
   }
 }
 

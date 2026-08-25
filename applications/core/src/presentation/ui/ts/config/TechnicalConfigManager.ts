@@ -193,9 +193,9 @@ export class TechnicalConfigManager {
     // démarrage) plutôt que Date.now() (l'heure de réception côté client) : l'événement étant
     // maintenant persistant, il est rejoué tel quel à un client qui se connecte bien après le
     // démarrage réel, Date.now() donnerait alors un uptime totalement faux à ce moment-là.
-    this.socket.on('app:started', (data: { timestamp?: string }) => {
+    this.socket.on('app:started', (data: { timestamp?: string; version?: string }) => {
       this.uptime = data?.timestamp ? new Date(data.timestamp).getTime() : Date.now();
-      window.dispatchEvent(new CustomEvent('app:started', { detail: { uptime: this.uptime } }));
+      window.dispatchEvent(new CustomEvent('app:started', { detail: { uptime: this.uptime, version: data?.version } }));
     });
     
     // Liste des modules

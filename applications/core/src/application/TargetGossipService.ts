@@ -32,7 +32,7 @@
 import { MqttTransport, type MqttMessage } from '../infrastructure/transport/MqttTransport';
 import type { ConfigService } from '../infrastructure/config/ConfigService';
 import type { IEventBus } from './IEventBus';
-import type { DeploymentTargetConfig, HaStackTargetConfig } from '../infrastructure/config/schema';
+import type { DeploymentTargetConfig, HaStackTargetConfig, Zigbee2mqttTargetConfig } from '../infrastructure/config/schema';
 import type { Logger } from '../infrastructure/logger';
 
 const TOPIC_PREFIX = 'dimotic/core';
@@ -43,6 +43,7 @@ const SCRIPTSHA_GOSSIP_TIMEOUT_MS = 5000;
 interface TargetsGossipPayload {
   core: DeploymentTargetConfig[];
   haStack: HaStackTargetConfig[];
+  zigbee2mqtt: Zigbee2mqttTargetConfig[];
 }
 
 interface GossipableScript {
@@ -122,7 +123,8 @@ export class TargetGossipService {
     if (!this.transport) return;
     const payload: TargetsGossipPayload = {
       core: this.configService.getTargets().filter((t) => t.origin !== 'gossip'),
-      haStack: this.configService.getHaStackTargets().filter((t) => t.origin !== 'gossip')
+      haStack: this.configService.getHaStackTargets().filter((t) => t.origin !== 'gossip'),
+      zigbee2mqtt: this.configService.getZigbee2mqttTargets().filter((t) => t.origin !== 'gossip')
     };
     this.transport.publish(`${TOPIC_PREFIX}/${this.machineId}/known-targets`, JSON.stringify(payload), 1, true);
   }
@@ -175,6 +177,7 @@ export class TargetGossipService {
 
     this.mergeTargets(sourceMachineId, data.core || [], 'core');
     this.mergeTargets(sourceMachineId, data.haStack || [], 'haStack');
+    this.mergeTargets(sourceMachineId, data.zigbee2mqtt || [], 'zigbee2mqtt');
   }
 
   private handleScriptsMessage(sourceMachineId: string, message: MqttMessage): void {
@@ -193,10 +196,12 @@ export class TargetGossipService {
 
   private mergeTargets(
     sourceMachineId: string,
-    incoming: Array<DeploymentTargetConfig | HaStackTargetConfig>,
-    kind: 'core' | 'haStack'
+    incoming: Array<DeploymentTargetConfig | HaStackTargetConfig | Zigbee2mqttTargetConfig>,
+    kind: 'core' | 'haStack' | 'zigbee2mqtt'
   ): void {
-    const current = kind === 'core' ? this.configService.getTargets() : this.configService.getHaStackTargets();
+    const current = kind === 'core' ? this.configService.getTargets()
+      : kind === 'haStack' ? this.configService.getHaStackTargets()
+      : this.configService.getZigbee2mqttTargets();
     const knownHosts = new Set(current.map((t) => t.host).filter(Boolean));
     const newOnes = incoming
       .filter((t) => t.host && !knownHosts.has(t.host))
@@ -206,7 +211,9 @@ export class TargetGossipService {
     const merged = [...current, ...newOnes];
     const result = kind === 'core'
       ? this.configService.setTargets(merged as DeploymentTargetConfig[])
-      : this.configService.setHaStackTargets(merged as HaStackTargetConfig[]);
+      : kind === 'haStack'
+      ? this.configService.setHaStackTargets(merged as HaStackTargetConfig[])
+      : this.configService.setZigbee2mqttTargets(merged as Zigbee2mqttTargetConfig[]);
 
     if (result.success) {
       this.logger.info(

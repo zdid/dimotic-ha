@@ -14,7 +14,7 @@
 
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import { runSsh, runScp, shellQuote, ensureGlobalSshKey, type RemoteOpResult } from '../infrastructure/remote/SshClient';
+import { runSsh, runSshStreaming, runScp, shellQuote, ensureGlobalSshKey, type RemoteOpResult } from '../infrastructure/remote/SshClient';
 import { DockerContainerController, type RemoteUnitController } from '../infrastructure/remote/RemoteUnitController';
 import type { ConfigService } from '../infrastructure/config/ConfigService';
 import type { ApplicationManager } from './ApplicationManager';
@@ -31,11 +31,6 @@ export interface DeployResult {
 const CONTAINER_NAME = 'dimotic-ha';
 const HEALTH_CHECK_ATTEMPTS = 30;
 const HEALTH_CHECK_INTERVAL_MS = 3000;
-/** `docker compose pull` dépasse largement le timeout par défaut de runSsh (30s) sur du matériel
- *  modeste — bug réel constaté sur le premier déploiement HA+Mosquitto (⭐ 24/08/2026, voir
- *  HaStackDeployService.ts). Même valeur ici par cohérence, même si l'image dimotic-ha est plus
- *  petite. */
-const PULL_UP_TIMEOUT_MS = 600000;
 
 /** Attache la clé SSH unique de l'installation (générée si absente) avant toute opération SSH —
  *  voir ensureGlobalSshKey (core/infrastructure/remote/SshClient.ts). */
@@ -85,7 +80,10 @@ export class CoreDeployService {
    * Compose) : la variable est injectée sur `pull` ET `up -d` (compose relit le fichier à chaque
    * invocation, les deux doivent voir la même valeur).
    */
-  async deploy(rawTarget: DeploymentTargetConfig, version?: string): Promise<DeployResult> {
+  /** `onProgress` (⭐ 24/08/2026) : appelé pour chaque ligne de progression pendant l'étape
+   *  pull-up (voir runSshStreaming, SshClient.ts) — timeout adaptatif par inactivité plutôt qu'un
+   *  timeout fixe, s'adapte naturellement au matériel de la cible (RPi3 lent vs RPi5). */
+  async deploy(rawTarget: DeploymentTargetConfig, version?: string, onProgress?: (line: string) => void): Promise<DeployResult> {
     if (!rawTarget.host) {
       return { success: false, step: 'mkdir', error: 'Aucun hôte cible configuré (target.host)' };
     }
@@ -146,7 +144,7 @@ export class CoreDeployService {
     }
 
     const envPrefix = `DIMOTIC_TAG=${shellQuote(tag)}`;
-    const pullUp = await runSsh(target, `cd ${shellQuote(target.remoteDir)} && ${envPrefix} docker compose pull && ${envPrefix} docker compose up -d`, undefined, PULL_UP_TIMEOUT_MS);
+    const pullUp = await runSshStreaming(target, `cd ${shellQuote(target.remoteDir)} && ${envPrefix} docker compose pull && ${envPrefix} docker compose up -d`, { onData: onProgress });
     if (!pullUp.success) {
       this.logger.error('CoreDeployService', `Échec de docker compose pull/up sur ${target.host}: ${pullUp.error}`);
       return { success: false, step: 'pull-up', error: pullUp.error, output: pullUp.output };

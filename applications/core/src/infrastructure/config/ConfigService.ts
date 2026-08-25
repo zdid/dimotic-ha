@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import { AppConfig, HaConfig, MqttConfig, WebConfig, LoggingConfig, DeploymentTargetConfig, HaStackTargetConfig } from './schema';
+import { AppConfig, HaConfig, MqttConfig, WebConfig, LoggingConfig, DeploymentTargetConfig, HaStackTargetConfig, Zigbee2mqttTargetConfig } from './schema';
 import { ConfigLoader } from './loader';
 import { ConfigWriter, SaveResult } from './writer';
 import type { Logger } from '../logger/index';
@@ -237,11 +237,11 @@ export class ConfigService {
 
   /**
    * Sauvegarde la liste des cibles de déploiement, même narrowing que setDisabledApps() (préserve
-   * ha/web/logging/disabledApps/haStackTargets depuis this.config, jamais depuis un payload client
-   * partiel).
+   * ha/web/logging/disabledApps/haStackTargets/zigbee2mqttTargets depuis this.config, jamais
+   * depuis un payload client partiel).
    */
   setTargets(targets: DeploymentTargetConfig[]): SaveResult {
-    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets, haStackTargets: this.config.haStackTargets } as AppConfig;
+    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
       this.config = { ...this.config, targets };
@@ -261,10 +261,30 @@ export class ConfigService {
    * Sauvegarde la liste des cibles HA+Mosquitto, même narrowing défensif que setTargets().
    */
   setHaStackTargets(haStackTargets: HaStackTargetConfig[]): SaveResult {
-    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets } as AppConfig;
+    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
       this.config = { ...this.config, haStackTargets };
+    }
+    return result;
+  }
+
+  /**
+   * Retourne la liste des cibles de déploiement zigbee2mqtt (⭐ nouveau 24/08/2026, voir
+   * Zigbee2mqttDeployService.ts) — liste séparée de `targets`/`haStackTargets`, même patron sinon.
+   */
+  getZigbee2mqttTargets(): Zigbee2mqttTargetConfig[] {
+    return this.config.zigbee2mqttTargets ? [...this.config.zigbee2mqttTargets] : [];
+  }
+
+  /**
+   * Sauvegarde la liste des cibles zigbee2mqtt, même narrowing défensif que setTargets().
+   */
+  setZigbee2mqttTargets(zigbee2mqttTargets: Zigbee2mqttTargetConfig[]): SaveResult {
+    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets } as AppConfig;
+    const result = this.writer.save(socleConfig);
+    if (result.success) {
+      this.config = { ...this.config, zigbee2mqttTargets };
     }
     return result;
   }

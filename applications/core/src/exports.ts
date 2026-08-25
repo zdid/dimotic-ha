@@ -156,13 +156,14 @@ export { detectDockerEnvironment, isRunningInDocker } from './infrastructure/run
 // voir infrastructure/remote/, mutualise ce que rpigpio/teleinfo/espdisplay réimplémentaient chacune
 export {
   runSsh,
+  runSshStreaming,
   runScp,
   shellQuote,
   expandHome,
   globalSshKeyPath,
   ensureGlobalSshKey,
 } from './infrastructure/remote/SshClient';
-export type { RemoteTarget, RemoteOpResult } from './infrastructure/remote/SshClient';
+export type { RemoteTarget, RemoteOpResult, RunSshStreamingOptions } from './infrastructure/remote/SshClient';
 export {
   DockerContainerController,
   SystemdUnitController,

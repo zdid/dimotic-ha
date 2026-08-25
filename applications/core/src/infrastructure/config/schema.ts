@@ -104,6 +104,24 @@ const haStackTargetSchema = z.object({
 });
 
 /**
+ * Cible de déploiement zigbee2mqtt (⭐ nouveau 24/08/2026) — liste SÉPARÉE de `haStackTargets` :
+ * le dongle USB Zigbee peut être branché sur une machine différente de celle qui héberge
+ * HA+Mosquitto (même principe que RFXCOM — matériel physique = sa propre cible, décision explicite
+ * de l'utilisateur). Connexion MQTT explicite (pas de "localhost" implicite comme Mosquitto dans
+ * HaStackDeployService) : cette cible peut être une machine distincte de celle du broker.
+ */
+const zigbee2mqttTargetSchema = z.object({
+  id: z.string().min(1),
+  host: z.string().default(''),
+  remoteDir: z.string().default('/docker/zigbee2mqtt'),
+  origin: z.enum(['local', 'gossip']).default('local'),
+  // Port série du dongle Zigbee sur CETTE machine — même convention que rfxcomConfigSchema.port.
+  serialPort: z.string().min(1).default('/dev/ttyUSB0'),
+  mqttHost: z.string().default(''),
+  mqttPort: z.number().int().min(1).max(65535).default(1883)
+});
+
+/**
  * Schéma principal de la configuration de l'application.
  * STRICT : tous les champs sont requis. Les valeurs par défaut sont appliquées
  * par ConfigLoader/ConfigWriter après validation.
@@ -126,6 +144,8 @@ export const configSchema = z.object({
   targets: z.array(deploymentTargetSchema).default([]),
   // Cibles de déploiement Home Assistant + Mosquitto (⭐ 24/08/2026) — voir haStackTargetSchema.
   haStackTargets: z.array(haStackTargetSchema).default([]),
+  // Cibles de déploiement zigbee2mqtt (⭐ 24/08/2026) — voir zigbee2mqttTargetSchema.
+  zigbee2mqttTargets: z.array(zigbee2mqttTargetSchema).default([]),
   // Les sections spécifiques aux modules seront ajoutées dynamiquement
 }).passthrough()
   .refine(
@@ -135,6 +155,10 @@ export const configSchema = z.object({
   .refine(
     (config) => new Set(config.haStackTargets.map((t) => t.id)).size === config.haStackTargets.length,
     { message: 'Chaque cible doit avoir un id unique', path: ['haStackTargets'] }
+  )
+  .refine(
+    (config) => new Set(config.zigbee2mqttTargets.map((t) => t.id)).size === config.zigbee2mqttTargets.length,
+    { message: 'Chaque cible doit avoir un id unique', path: ['zigbee2mqttTargets'] }
   );
 // ⚠️ .passthrough() est indispensable : sans lui, Zod strippe silencieusement toute clé de
 // premier niveau non déclarée ci-dessus (nommage/rfxcom/arbreouquoi/evoo7/...) à chaque
@@ -155,6 +179,7 @@ export type WebConfig = z.infer<typeof webSchema>;
 export type LoggingConfig = z.infer<typeof loggingSchema>;
 export type DeploymentTargetConfig = z.infer<typeof deploymentTargetSchema>;
 export type HaStackTargetConfig = z.infer<typeof haStackTargetSchema>;
+export type Zigbee2mqttTargetConfig = z.infer<typeof zigbee2mqttTargetSchema>;
 export type AppConfig = z.infer<typeof configSchema>;
 
-export { coreSchema, haWsSchema, haStructureSchema, haConfigSchema, mqttSchema, webSchema, loggingSchema, deploymentTargetSchema, haStackTargetSchema };
+export { coreSchema, haWsSchema, haStructureSchema, haConfigSchema, mqttSchema, webSchema, loggingSchema, deploymentTargetSchema, haStackTargetSchema, zigbee2mqttTargetSchema };
