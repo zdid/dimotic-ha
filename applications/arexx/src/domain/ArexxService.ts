@@ -289,6 +289,19 @@ export class ArexxService implements IArexxService {
     this.eventBus.onGeneric('arexx:status:get', () => this.emitStatus());
     this.eventBus.onGeneric('arexx:sensors:list:get', () => this.emitSensorsList());
 
+    // ⭐ 25/08/2026, bug réel corrigé : this.config n'était chargé qu'une fois, au démarrage du
+    // service (constructeur) — une cible ajoutée/modifiée depuis la page Déploiement était bien
+    // écrite sur disque (ConfigService), mais jamais relue ici : arexx:status continuait de
+    // renvoyer l'ancienne liste de targets en mémoire, donnant l'impression que la sauvegarde
+    // n'avait pas fonctionné. Recharge simple (pas de reconnexion de backend d'acquisition ici,
+    // contrairement à RfxComService::reconnectTransceiverIfConfigChanged — hors périmètre de ce
+    // correctif, targets n'affecte pas l'acquisition en cours).
+    this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (event) => {
+      if (event.moduleId !== MODULE_NAME || !event.success) return;
+      this.config = this.loadConfig();
+      this.emitStatus();
+    });
+
     this.eventBus.onGeneric<{ uniqueId: string; name: string }>('arexx:sensor:set_name', (data) => {
       const sensor = this.sensorRegistry.setSensorName(data.uniqueId, data.name);
       this.persistSensors();
