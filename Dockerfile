@@ -97,6 +97,15 @@ WORKDIR /app
 COPY --from=builder --chown=node:node /app/tsconfig.json ./tsconfig.json
 COPY --from=builder --chown=node:node /app/applications ./applications
 
+# ⭐ 25/08/2026, essai : élimine les sources .ts (et .d.ts, attrapés par le même motif — plus
+# nécessaires une fois la compilation croisée entre apps terminée dans le stage builder) — CMD
+# tourne désormais en `node` pur sur dist/ (voir supervisor.js/ProcessSupervisor.ts, dist/
+# systématiquement prioritaire). Cible précisément *.ts, PAS tout `src/` : PresentationServer sert
+# certains fichiers statiques (ex: presentation/index.html) EXCLUSIVEMENT depuis src/ en repli, tsc
+# ne les copiant jamais dans dist/ (voir presentation/server/index.ts) — supprimer src/ entièrement
+# casserait l'UI de chaque app.
+RUN find ./applications -type f -name '*.ts' -delete
+
 RUN mkdir -p /app/data /app/logs \
     && chown -R node:node /app
 

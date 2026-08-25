@@ -27,6 +27,12 @@ build_app() {
     # voir son package.json) — sans ce flag, `npm run build:ui` échoue avec "missing script" et
     # casse tout le build (set -e) pour un cas parfaitement normal, pas une erreur.
     npm run build:ui --if-present
+    # ⭐ 25/08/2026 : retire les devDependencies (typescript/tsx/@types/*/vitest) une fois la
+    # compilation de CETTE app terminée — plus jamais lues à l'exécution (CMD tourne en `node` pur
+    # sur dist/, voir supervisor.js/ProcessSupervisor.ts). Sans risque pour les autres apps métier
+    # dont le build:ui référence les .d.ts déjà émis par core (fichiers sur disque, indépendants de
+    # node_modules) — voir le commentaire d'ordre de build en tête de fichier.
+    npm prune --omit=dev
   )
 }
 

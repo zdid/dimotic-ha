@@ -27,13 +27,15 @@
 
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const fs = require('node:fs');
 
 const NO_RESTART_EXIT_CODE = 75;
 const RESTART_DELAY_MS = 1000;
 
 const CORE_DIR = path.resolve(__dirname, '..');
+const DIST_ENTRY_POINT = path.join(CORE_DIR, 'dist', 'index.js');
 const TSX_BIN = path.join(CORE_DIR, 'node_modules', '.bin', 'tsx');
-const ENTRY_POINT = path.join(CORE_DIR, 'src', 'index.ts');
+const SRC_ENTRY_POINT = path.join(CORE_DIR, 'src', 'index.ts');
 
 let child = null;
 let stopping = false;
@@ -42,9 +44,23 @@ function log(message) {
   console.log(`[supervisor] ${new Date().toISOString()} ${message}`);
 }
 
+/** ⭐ 25/08/2026 : dist/index.js (compilé, `node` pur) EN PREMIER si présent — même ordre de
+ *  priorité que ProcessSupervisor.ts::resolveEntryPoint() pour les apps métier. Repli sur
+ *  tsx+src/index.ts uniquement si dist/ est absent (dev local hors `dev:local` qui n'appelle
+ *  jamais ce script, ou installation bare-metal sans build préalable) — garde ce superviseur
+ *  utilisable tel quel dans les deux cas, sans dépendre de tsx quand un build existe déjà. */
+function resolveEntryPoint() {
+  if (fs.existsSync(DIST_ENTRY_POINT)) {
+    return { command: process.execPath, args: [DIST_ENTRY_POINT] };
+  }
+  return { command: TSX_BIN, args: [SRC_ENTRY_POINT] };
+}
+
 function start() {
   log("Démarrage de l'application...");
-  child = spawn(TSX_BIN, [ENTRY_POINT], { stdio: 'inherit', cwd: CORE_DIR });
+  const entry = resolveEntryPoint();
+  log(`Point d'entrée : ${entry.command} ${entry.args.join(' ')}`);
+  child = spawn(entry.command, entry.args, { stdio: 'inherit', cwd: CORE_DIR });
 
   child.on('exit', (code, signal) => {
     child = null;
