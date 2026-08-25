@@ -707,6 +707,25 @@
 
 ---
 
+### 🟡 Services post-installation : groupe de notification "tous les téléphones" — Question ouverte, pas encore une action décidée
+- **Constat (2026-08-25)**, en corrigeant le script scriptsha "Rapport entités indisponibles/piles
+  faibles" (`notify.mobile_app_TON_TELEPHONE`, placeholder à personnaliser par machine) : un seul
+  téléphone existe aujourd'hui (`notify.mobile_app_telephone_de_didier`), donc l'appel direct
+  suffit — mais dès qu'un deuxième arrivera, chaque script/automatisation visant "tout le monde"
+  devra soit lister chaque service individuellement, soit passer par un groupe de notification HA
+  (`configuration.yaml`, `notify: - platform: group ...`, voir l'échange qui a donné lieu à cette
+  entrée pour la déclaration exacte).
+- **Question à trancher, pas encore une action** : est-ce que `HaPostInstallService.ts`/Services
+  post-installation devrait pouvoir écrire cette déclaration de groupe dans `configuration.yaml`
+  (ou la maintenir à jour automatiquement à partir des `notify.mobile_app_*` détectés), ou est-ce
+  hors périmètre de dimotic-ha (config HA native, à faire à la main comme aujourd'hui) ? Contrairement aux
+  autres entrées de Services post-installation, ceci touche `configuration.yaml` directement, pas
+  un flux `config_entries` — mécanisme d'écriture différent, jamais utilisé ailleurs dans ce projet.
+- **Statut** : Non traité — un seul téléphone actuellement, pas encore un besoin réel
+- **Priorité** : Basse (pas de second téléphone à ce jour)
+
+---
+
 ## Notes techniques
 
 ### Package npm utilisé
