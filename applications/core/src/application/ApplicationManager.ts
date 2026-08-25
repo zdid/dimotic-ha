@@ -187,6 +187,31 @@ export class ApplicationManager {
   }
 
   /**
+   * ⭐ 25/08/2026, bug réel corrigé : `enable()` utilisait `processSupervisor.isRegistered(appId)`
+   * pour décider entre spawn ciblé et redémarrage complet — mais une app DÉSACTIVÉE n'est jamais
+   * enregistrée auprès de ProcessSupervisor (`AppService.detectApplicationModules()` filtre les
+   * apps désactivées AVANT de les enregistrer), donc `isRegistered` renvoie systématiquement
+   * `false` pour toute app qu'on active depuis l'état désactivé — même une app qui déclare
+   * `runsAsSeparateProcess: true` dans son propre module. Résultat : activer n'importe quelle app
+   * déclenchait toujours un redémarrage complet de core, l'exact problème que la migration en
+   * process séparé (fonctionnelles-supervisor_specs v2.6) était censée éliminer.
+   *
+   * Délégué à AppService (voir `setActivateSeparateProcessHook`) plutôt que réimplémenté ici :
+   * activer une app en process séparé exige non seulement de l'enregistrer/démarrer auprès de
+   * ProcessSupervisor, mais aussi tout le câblage EventBus↔app que `detectApplicationModules()`
+   * fait pour chaque app au démarrage (autoBridgeSocketEvents, ha:bridge:reply,
+   * integration:{id}:*, bridgedEvents propres à l'app) — dupliquer cette logique ici l'aurait
+   * fait diverger silencieusement à la première évolution de l'une des deux copies. ApplicationManager
+   * n'a pas accès à SupervisorEventBridge ; AppService, qui l'a déjà, fournit ce hook après sa
+   * propre construction (voir AppService.ts).
+   */
+  private activateSeparateProcessHook?: (appId: string, appDir: string) => boolean;
+
+  setActivateSeparateProcessHook(hook: (appId: string, appDir: string) => boolean): void {
+    this.activateSeparateProcessHook = hook;
+  }
+
+  /**
    * Active une application (retire son id de `disabledApps`)
    */
   enable(appId: string): { success: boolean; error?: string; restarting?: boolean } {
@@ -213,7 +238,13 @@ export class ApplicationManager {
       // sans redémarrer tout core (objectif même de la migration) — contrairement au comportement
       // par défaut ci-dessous (§8.1, redémarrage complet du process, toujours utilisé pour les
       // apps in-process tant qu'elles n'ont pas été migrées).
-      const separateProcess = !!this.processSupervisor?.isRegistered(appId);
+      //
+      // ⭐ 25/08/2026, bug réel corrigé : on ne peut pas se fier à isRegistered() ici — une app
+      // désactivée n'est jamais enregistrée auprès de ProcessSupervisor. Le hook (voir
+      // setActivateSeparateProcessHook ci-dessus) lit la capacité de l'app depuis son propre
+      // module et fait l'enregistrement + tout le câblage EventBus nécessaires ; il ne reste plus
+      // qu'à démarrer le process une fois ce câblage en place.
+      const separateProcess = !!this.activateSeparateProcessHook?.(appId, path.join(this.appsDir, appId));
       if (separateProcess) {
         this.processSupervisor!.start(appId);
       } else {

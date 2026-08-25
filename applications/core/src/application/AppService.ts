@@ -176,6 +176,11 @@ export class AppService {
 
     // Initialiser le gestionnaire d'applications
     this.applicationManager = new ApplicationManager(restartManager, logger, configService, this.processSupervisor);
+    // ⭐ 25/08/2026 — voir ApplicationManager.setActivateSeparateProcessHook() et
+    // AppService.tryActivateSeparateProcessApp() pour le pourquoi (activer une app en process
+    // séparé depuis l'état désactivé exige le câblage EventBus complet, pas seulement
+    // register()+start(), et ApplicationManager n'a pas accès à SupervisorEventBridge).
+    this.applicationManager.setActivateSeparateProcessHook((appId, appDir) => this.tryActivateSeparateProcessApp(appId, appDir));
     this.coreDeployService = new CoreDeployService(configService, this.applicationManager, logger);
     this.haStackDeployService = new HaStackDeployService(logger);
     this.zigbee2mqttDeployService = new Zigbee2mqttDeployService(logger);
@@ -497,30 +502,7 @@ export class AppService {
             // ApplicationModule.bridgedEvents.
             if (appModule.runsAsSeparateProcess) {
               const appDir = path.join(appsDir, dir.name);
-              this.processSupervisor.register(appModule.id, appDir);
-              this.supervisorBridge.autoBridgeSocketEvents(appModule.id);
-              this.supervisorBridge.bridgeEvent(appModule.id, 'app:module:config:saved');
-              // Découplage HaStructureRegistry/HaWsClient (⭐ 24/08/2026, voir HaQueryBridge.ts) —
-              // ha:bridge:reply pour le canal requête/réponse générique (HaBridgeClient),
-              // ha:entity:state_changed/ha:ready déjà émis par AppService, simplement pontés en
-              // plus vers toute app séparée (harmless si elle n'écoute pas, même principe que
-              // app:module:config:saved ci-dessus).
-              this.supervisorBridge.bridgeEvent(appModule.id, 'ha:bridge:reply');
-              this.supervisorBridge.bridgeEvent(appModule.id, 'ha:entity:state_changed');
-              this.supervisorBridge.bridgeEvent(appModule.id, 'ha:ready');
-              if (appModule.type === 'integration') {
-                // Émis par IntegrationBridge (core, in-process) vers le module enregistré —
-                // toujours ces 4 mêmes noms, paramétrés par moduleId, quel que soit le module
-                // (voir IntegrationBridge.ts) ; harmless si un module donné n'en écoute qu'une
-                // partie (arexx par ex. n'écoute jamais :command, sensor uniquement).
-                this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:command`);
-                this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:bridge:connection`);
-                this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:ha:online`);
-                this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:passthrough:message`);
-              }
-              for (const eventName of appModule.bridgedEvents ?? []) {
-                this.supervisorBridge.bridgeEvent(appModule.id, eventName);
-              }
+              this.wireSeparateProcessApp(appModule, appDir);
             }
 
             // Détecter le schéma Zod du module (convention {moduleId}ConfigSchema, ex:
@@ -553,6 +535,77 @@ export class AppService {
       }
     } catch (error) {
       this.logger.error('AppService', `Erreur de détection des modules: ${error}`);
+    }
+  }
+
+  /**
+   * Enregistre le spawn (ProcessSupervisor) et ponte les événements sens core → app
+   * (SupervisorEventBridge) pour une application en process séparé — factorisé hors de
+   * detectApplicationModules() (⭐ 25/08/2026) pour être réutilisable depuis
+   * tryActivateSeparateProcessApp() (activation d'une app depuis l'état désactivé, sans
+   * redémarrage de core — voir ApplicationManager.enable()) sans dupliquer cette logique.
+   * Voir le commentaire détaillé sur les 3 mécanismes génériques + bridgedEvents, déplacé ici.
+   */
+  private wireSeparateProcessApp(appModule: ApplicationModule, appDir: string): void {
+    this.processSupervisor.register(appModule.id, appDir);
+    this.supervisorBridge.autoBridgeSocketEvents(appModule.id);
+    this.supervisorBridge.bridgeEvent(appModule.id, 'app:module:config:saved');
+    this.supervisorBridge.bridgeEvent(appModule.id, 'ha:bridge:reply');
+    this.supervisorBridge.bridgeEvent(appModule.id, 'ha:entity:state_changed');
+    this.supervisorBridge.bridgeEvent(appModule.id, 'ha:ready');
+    if (appModule.type === 'integration') {
+      this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:command`);
+      this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:bridge:connection`);
+      this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:ha:online`);
+      this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:passthrough:message`);
+    }
+    for (const eventName of appModule.bridgedEvents ?? []) {
+      this.supervisorBridge.bridgeEvent(appModule.id, eventName);
+    }
+  }
+
+  /**
+   * ⭐ 25/08/2026 — hook fourni à ApplicationManager (setActivateSeparateProcessHook, voir son
+   * commentaire) : tente d'activer `appId` en process séparé sans redémarrer core. Charge son
+   * module (dist/domain/index.js en priorité, repli src/domain/index.ts — même logique
+   * dist-prioritaire que detectApplicationModules()) pour lire `runsAsSeparateProcess` ; si
+   * absent/false, renvoie `false` sans effet de bord (ApplicationManager retombe alors sur le
+   * redémarrage complet, seul chemin valide pour une app qui n'a jamais été migrée).
+   *
+   * Une app désactivée n'a jamais eu son wireSeparateProcessApp() initial (filtrée avant, voir
+   * detectApplicationModules()) : appelé ici. Poussée dans `this.modules` si absente (jamais
+   * activée depuis le démarrage de ce process core) pour que menu/UI la reflètent normalement.
+   */
+  private tryActivateSeparateProcessApp(appId: string, appDir: string): boolean {
+    const distDomainIndexJs = path.join(appDir, 'dist', 'domain', 'index.js');
+    const srcDomainIndexTs = path.join(appDir, 'src', 'domain', 'index.ts');
+
+    try {
+      let module: Record<string, unknown> | undefined;
+      if (existsSync(distDomainIndexJs)) {
+        module = require(path.resolve(distDomainIndexJs));
+      } else if (existsSync(srcDomainIndexTs)) {
+        // require() sur un .ts fonctionne sous tsx (loader enregistré pour tout le process, y
+        // compris les require() dynamiques) — seul contexte où ce repli est exercé, dist/domain/
+        // index.js existe toujours en production (voir docker/build-apps.sh).
+        module = require(path.resolve(srcDomainIndexTs));
+      }
+      if (!module) return false;
+
+      const appKey = Object.keys(module).find((k) => k.endsWith('_APP'));
+      const appModule = appKey ? (module[appKey] as ApplicationModule) : undefined;
+      if (!appModule?.runsAsSeparateProcess) return false;
+
+      if (!this.processSupervisor.isRegistered(appModule.id)) {
+        this.wireSeparateProcessApp(appModule, appDir);
+      }
+      if (!this.modules.some((m) => m.id === appModule.id)) {
+        this.modules.push({ ...appModule, status: this.getModuleConfigStatus(appModule) });
+      }
+      return true;
+    } catch (error) {
+      this.logger.warn('AppService', `Impossible d'activer ${appId} en process séparé: ${error}`);
+      return false;
     }
   }
 
