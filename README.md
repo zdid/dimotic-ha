@@ -64,6 +64,10 @@ dimotic-ha reprend et modernise un système domotique personnel développé sur 
 
 C'est un projet personnel, en développement actif, qui pilote une vraie maison au quotidien — pas une démo.
 
+## Licence
+
+MIT — voir [`LICENSE`](LICENSE).
+
 ---
 
 *Développé en grande partie en binôme avec Claude Code — les spécifications techniques versionnées (`specs/`) et l'historique de développement en gardent la trace complète.*

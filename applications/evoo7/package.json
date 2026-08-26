@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Intégration EVOO7 Control (VR Electronique) pour Home Assistant via MQTT Discovery",
   "main": "dist/domain/index.js",
+  "license": "MIT",
   "scripts": {
     "build": "tsc -b",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",

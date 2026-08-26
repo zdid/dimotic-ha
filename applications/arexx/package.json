@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Intégration AREXX (capteurs BS1000/BS500) pour Home Assistant via MQTT Discovery",
   "main": "dist/domain/index.js",
+  "license": "MIT",
   "scripts": {
     "build": "tsc -b",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Paramétrage graphique de la téléinformation EDF (mode historique, 2 compteurs sur bascule GPIO) et déploiement de l'agent Node.js sur le RPi1 cible",
   "main": "dist/domain/index.js",
+  "license": "MIT",
   "scripts": {
     "build": "tsc -b",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",

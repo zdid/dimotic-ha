@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Application de gestion des conventions de nommage et taxonomie pour Home Assistant via MQTT Discovery",
   "main": "dist/domain/index.js",
+  "license": "MIT",
   "scripts": {
     "build": "tsc -b && mkdir -p dist/defaultconfig && cp -r src/defaultconfig/. dist/defaultconfig/",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Plans de maison avec icônes tactiles reliées à Home Assistant (portage de haplanserver)",
   "main": "dist/domain/index.js",
+  "license": "MIT",
   "scripts": {
     "build": "tsc -b",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",

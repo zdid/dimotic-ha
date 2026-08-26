@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Paramétrage graphique des pins GPIO (mqtt-io) — quoi/où, numéro de pin, inversion, direction — et déploiement du config.yaml généré + redémarrage du service distant",
   "main": "dist/domain/index.js",
+  "license": "MIT",
   "scripts": {
     "build": "tsc -b",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",

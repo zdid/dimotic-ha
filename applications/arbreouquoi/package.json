@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Application de visualisation du référentiel HA organisé par Arbre OU/QUOI",
   "main": "dist/domain/index.js",
+  "license": "MIT",
   "scripts": {
     "build": "tsc",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",

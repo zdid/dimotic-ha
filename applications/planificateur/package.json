@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Stockage, ordonnancement et exécution des macros/planifications domotiques en langage naturel (voir specs/current/fonctionnelles-planificateur_specs)",
   "main": "dist/domain/index.js",
+  "license": "MIT",
   "scripts": {
     "build": "tsc -b",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",
