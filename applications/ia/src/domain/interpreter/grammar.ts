@@ -8,7 +8,7 @@
 import type { PatternNode } from './dsl';
 import { compilePattern } from './dsl';
 import type { Candidate, GabaritDef, MatchContext, Token } from './types';
-import { parseSpokenDuration, parseDateTimeAt, parseFrenchDate, parseTimeOfDay, isInteger } from './datetime';
+import { parseSpokenDuration, parseDateTimeAt, parseFrenchDate, parseTimeOfDay, isNumeric } from './datetime';
 
 const CONNECTEURS_LIEU_COMPOSE = ['de la', 'de l', 'du', 'des', 'de'];
 const MAX_REPEAT = 20;
@@ -98,7 +98,9 @@ function matchTerminalCategory(category: string, captureName: string, mots: Toke
       return simple ? ok(simple.next, { [captureName]: [simple.display] }) : FAIL;
     }
     case 'valeur': {
-      const val = isInteger(mots[p] ?? '');
+      // isNumeric (pas isInteger) : une consigne de température ("20.5") est un cas réaliste, pas
+      // seulement des entiers — trouvé en confrontant le moteur au jeu d'essai (tester.mjs).
+      const val = isNumeric(mots[p] ?? '');
       return val !== false ? ok(p + 1, { [captureName]: [val] }) : FAIL;
     }
     case 'duree': {
@@ -152,7 +154,12 @@ function matchEnum(source: 'verbe' | 'enum', table: string, captureName: string,
 export function matchNode(node: PatternNode, mots: Token[], pos: number, ctx: MatchContext, strict: boolean): MatchOutcome {
   switch (node.kind) {
     case 'literal': {
-      const p = skipIgnorable(mots, pos, ctx, strict);
+      // ⭐ Même correctif que matchWordSequence : ne saute un mot ignorable QUE s'il ne
+      // correspond pas déjà au littéral attendu — sinon un gabarit dont le littéral EST lui-même
+      // un mot ignorable (ex. "les" dans "tous les <jour>*") le sauterait à tort en le cherchant
+      // plus loin. Trouvé en testant "tous les lundi et mardi..." (touslesjourssemaine).
+      let p = pos;
+      while (mots[p] !== node.word && !strict && typeof mots[p] === 'string' && ctx.vocabulaire.motsIgnores.includes(mots[p] as string)) p++;
       return mots[p] === node.word ? ok(p + 1) : FAIL;
     }
     case 'category':
