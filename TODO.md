@@ -740,11 +740,24 @@
 
 ### 🟡 Interpréteur déterministe ia : gabarits restants + points non vérifiés en réel
 - **Constat (2026-08-26)** : implémenté et vérifié en conditions réelles (voir
-  `fonctionnelles-ia_specs_v1.10.md` §16, commit `2d9ba54`) — "allume/éteins le salon" via
-  `ia:test:send` cible bien les mêmes entités HA que le chemin Mistral, 0 token consommé, ~26ms
-  au lieu de ~1.5-2s. Le moteur générique (DSL + matching) est complet ; seule une partie des
-  gabarits `modelesv2.js` a été portée en YAML (`ordre_immediat`, `ordre_valeur`, `dans`,
-  `attendre`, `a`, `pendant`, `touslesjours`, `touslesjourssemaine`, `leweekend`, `si_alors`).
+  `fonctionnelles-ia_specs_v1.10.md` §16, commits `2d9ba54`/`fd2835e`/`b2ee1c4`) — "allume/éteins
+  le salon" cible bien les mêmes entités HA que le chemin Mistral, 0 token consommé, ~26ms au lieu
+  de ~1,5-2s. **Jeu d'essai permanent** : `applications/ia/interpreter/tester.mjs` (44 cas, corpus
+  fictif indépendant de l'état HA réel — `node interpreter/tester.mjs` après `npm run build`). Le
+  moteur générique (DSL + matching) est complet ; seule une partie des gabarits `modelesv2.js` a
+  été portée en YAML (`ordre_immediat`, `ordre_valeur`, `dans`, `attendre`, `a`, `pendant`,
+  `touslesjours`, `touslesjourssemaine`, `leweekend`, `si_alors`).
+- **Résolu le 26/08/2026 (session suivante, demande utilisateur)** : "attendre X" seul (usage
+  macro réel : "allume le salon. attendre 3 heures. éteins le salon.", trois phrases séparées) est
+  désormais reconnu comme un pas d'attente autonome, assemblé avec les autres énoncés de l'envoi
+  en UNE commande `execution` (`ExecutionStep[]` plat, le seul type de premier niveau que
+  `handler.ts` exécute immédiatement — vérifié dans le code avant d'implémenter, `sequence` n'existe
+  qu'imbriqué). **Vérifié en réel** : "allume le salon. attendre cinq secondes. eteins le salon."
+  → lumière allumée puis éteinte exactement 5s après, via `ExecutionEngine.executeSteps()` côté
+  `planificateur` (pas juste reconnu : réellement exécuté avec la bonne temporisation). Deux vrais
+  bugs du moteur trouvés en construisant le jeu d'essai et corrigés au passage (commit `fd2835e`) :
+  un mot littéral lui-même ignorable (ex. "les") n'était jamais matché ; `<valeur>` rejetait les
+  décimaux ("20.5").
 - **À faire** :
   - Porter les gabarits restants dans `applications/ia/interpreter/gabarits.yaml` (mécanisme déjà
     prêt, aucun code à changer) : `jusqua`/`de` (bornes temporelles), `entre` (fenêtre entre deux
@@ -754,18 +767,21 @@
     de lieux, trouvé dans le fichier de conflit ownCloud non fusionné du legacy).
   - Factoriser le sous-motif dupliqué "heure ou lever/coucher de soleil" (`jusqua`/`a`/`de`/`entre`)
     en un gabarit privé réutilisable — actuellement laissé dupliqué faute de temps, pas un blocage.
-  - `pendant <duree> (a <duree>)?` : capture la durée mais `interpreter/index.ts::buildPlanificationJson`
-    ne l'assemble pas encore en séquence "allume maintenant → attends → éteins" — actuellement un
-    fragment reconnu mais sans effet exploitable, la phrase entière retombe donc sur Mistral.
+  - `pendant <duree> (a <duree>)?` (durée d'exécution avant réaction inverse, distinct du "attendre"
+    déjà résolu) pourrait maintenant réutiliser le même mécanisme d'assemblage `execution`
+    (action → wait → action inverse) — pas encore fait, capturé mais sans effet exploitable pour
+    l'instant.
   - `si_alors` et les gabarits de planification (`dans`/`touslesjours`+`a`) sont validés par des
-    tests unitaires isolés (14 cas, tous corrects) et par une vérification structurelle du code,
-    mais **pas encore testés en réel contre `planificateur`** (contrairement à `ordre_immediat`,
-    testé en direct) — volontairement, pour ne pas créer de vraie planification/déclencheur dans
-    les données de l'utilisateur pendant son absence. À tester en priorité au retour.
+    tests unitaires isolés (`tester.mjs`, tous corrects) et par une vérification structurelle du
+    code, mais **pas encore testés en réel contre `planificateur`** (contrairement à
+    `ordre_immediat` et à la séquence action/wait/action, testées en direct) — volontairement,
+    pour ne pas créer de vraie planification/déclencheur dans les données de l'utilisateur sans
+    lui. À tester en priorité au retour.
   - `context.lieuOrigine` (§16.6 de la spec) : crochet posé, mais aucune source réelle ne le
     renseigne encore (device_id du satellite Assist non transmis jusqu'à `ia` aujourd'hui) — à
     examiner séparément si le besoin se confirme.
-- **Statut** : Cœur du moteur livré et vérifié en réel — extension des gabarits restante
+- **Statut** : Cœur du moteur livré et vérifié en réel (y compris séquence avec attente) —
+  extension des gabarits restante
 - **Priorité** : Moyenne (le sous-ensemble déjà livré couvre déjà le cas d'usage le plus fréquent)
 
 ---
