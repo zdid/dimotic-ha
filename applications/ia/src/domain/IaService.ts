@@ -376,10 +376,10 @@ export class IaService implements IIaService {
         const reply = await this.structuredRouter.route(outcome.data);
         messages.push(reply ? reply.message : 'Planificateur ne répond pas — commande non transmise.');
         if (reply) planificateurReply = reply.message;
-      } else {
-        // evenement (si_alors) : entity_id résolu À CHAQUE EXÉCUTION, jamais mis en cache tel
-        // quel — seuls trigger_quoi/trigger_lieu (des NOMS, pas un entity_id) sont cachés, cette
-        // résolution reste donc toujours fraîche même en relecture depuis PhraseCache.
+      } else if (outcome.kind === 'evenement') {
+        // entity_id résolu À CHAQUE EXÉCUTION, jamais mis en cache tel quel — seuls
+        // trigger_quoi/trigger_lieu (des NOMS, pas un entity_id) sont cachés, cette résolution
+        // reste donc toujours fraîche même en relecture depuis PhraseCache.
         const entities = await this.haBridgeClient.getEntitiesByQuoiAndLieux(
           outcome.triggerQuoi ? slugifyInterpreter(outcome.triggerQuoi) : undefined,
           outcome.triggerLieu ? [outcome.triggerLieu] : []
@@ -399,6 +399,20 @@ export class IaService implements IIaService {
         const reply = await this.structuredRouter.route(structured);
         messages.push(reply ? reply.message : 'Planificateur ne répond pas — commande non transmise.');
         if (reply) planificateurReply = reply.message;
+      } else {
+        // request (gabarit "donne", §16.9) — même résolution que `obtenir_etat` (ToolExecutor.ts),
+        // jamais un portage du formatage de `donnemoi.js`. Toujours résolu à l'exécution (état
+        // vivant), y compris en relecture depuis PhraseCache — seuls quoi/lieux (des noms) y sont
+        // cachés, jamais un état.
+        const entities = await this.haBridgeClient.getEntitiesByQuoiAndLieux(
+          outcome.quoi ? slugifyInterpreter(outcome.quoi) : undefined,
+          outcome.lieux
+        );
+        if (entities.length === 0) {
+          messages.push(`Aucune entité trouvée pour "${outcome.quoi ?? ''} ${outcome.lieux.join(' ')}".`);
+        } else {
+          messages.push(entities.map((e) => `${e.friendly_name ?? e.entity_id} : ${e.state ?? 'inconnu'}`).join(', '));
+        }
       }
     }
 

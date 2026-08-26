@@ -38,14 +38,17 @@ export type DeterministicOutcome =
       triggerLieu?: string;
       triggerEtat: string;
       action: ExecuterActionParams;
-    };
+    }
+  /** Interrogation ("donne-moi...", gabarit `donne`, §16.9) — routée par l'appelant vers la même
+   *  résolution d'entités qu'`obtenir_etat` côté `ia`, jamais vers un portage de `donnemoi.js`. */
+  | { kind: 'request'; quoi?: string; lieux: string[] };
 
 /** Uniquement interne — jamais exposé hors de ce module (voir assemblage final dans
  *  `interpretDeterministic`) : un pas d'attente autonome ("attendre 3 heures" seul, sans ordre à
  *  la suite dans la même phrase — usage macro, demande utilisateur 26/08/2026). */
 type RawOutcome = DeterministicOutcome | { kind: 'wait'; seconds: number };
 
-const FRAGMENT_GABARITS = ['dans', 'attendre', 'pendant', 'a', 'touslesjours', 'touslesjourssemaine', 'leweekend'];
+const FRAGMENT_GABARITS = ['dans', 'attendre', 'pendant', 'a', 'entre', 'touslesjours', 'touslesjourssemaine', 'leweekend'];
 const TERMINAL_ORDRE = ['ordre_immediat', 'ordre_valeur'];
 
 function normalizeWords(text: string): string[] {
@@ -78,10 +81,24 @@ function buildContext(vocabulaire: Vocabulaire, gabarits: Record<string, Gabarit
   };
 }
 
-function buildActionParams(captures: CaptureMap, def: GabaritDef, lieuOrigine: string | undefined): ExecuterActionParams {
+function buildActionParams(captures: CaptureMap, def: GabaritDef, lieuOrigine: string | undefined, allLieux: string[]): ExecuterActionParams | undefined {
   const flat = flattenCaptures(captures);
   const quoi = (flat.quoi as string | undefined) ?? (def.defaults?.quoi as string | undefined) ?? '';
   let lieux = (flat.lieux as string[] | undefined) ?? [];
+  // "allume tout sauf le garage" — <enum:tous#lieux> a mis lieux=["tous"], à développer en tous
+  // les lieux connus AVANT de retirer l'exclusion (sinon "tous" resterait un sentinel littéral).
+  const lieuxsauf = flat.lieuxsauf as string[] | undefined;
+  if (lieuxsauf && lieuxsauf.length > 0) {
+    if (lieux.length === 1 && lieux[0] === 'tous') lieux = allLieux;
+    const lieuxAvantExclusion = lieux.length;
+    lieux = lieux.filter((l) => !lieuxsauf.includes(l));
+    // Exclusion qui vide une liste de lieux explicitement nommés ("le salon sauf le salon") : un
+    // ordre littéralement contradictoire, pas "aucun filtre" — HaStructureRegistry
+    // .getEntitiesByQuoiAndLieux traite un tableau `lieux` vide comme "toutes les entités"
+    // (vérifié en direct le 26/08/2026 : a bien ciblé TOUTE la maison), ce qui viserait toute la
+    // maison au lieu de rien. Repli Mistral plutôt que ce faux "partout".
+    if (lieuxAvantExclusion > 0 && lieux.length === 0) return undefined;
+  }
   if (lieux.length === 0 && lieuOrigine) lieux = [lieuOrigine];
   return {
     verbe: (flat.verbe as string) ?? '',
@@ -103,6 +120,12 @@ function buildPlanificationJson(planifCaptures: CaptureMap, action: ExecuterActi
   if (typeof flat.duree === 'number') {
     trigger.type = 'delay';
     trigger.seconds = Math.round((flat.duree as number) / 1000);
+  } else if (flat.from && flat.to) {
+    // "entre 14h et 18h ..." — fenêtre, `triggerSchema.from`/`to` (scheduler.ts::triggerToMs,
+    // case 'window') déjà existants côté planificateur, vérifié avant d'écrire ceci.
+    trigger.type = 'window';
+    trigger.from = flat.from;
+    trigger.to = flat.to;
   } else if (flat.jours || flat.heure) {
     trigger.type = 'recurrence';
     if (flat.heure) trigger.at = flat.heure;
@@ -139,7 +162,7 @@ interface Utterance {
   next: number;
 }
 
-function matchUtterance(mots: Token[], startPos: number, ctx: MatchContext, lieuOrigine: string | undefined): Utterance | undefined {
+function matchUtterance(mots: Token[], startPos: number, ctx: MatchContext, lieuOrigine: string | undefined, allLieux: string[]): Utterance | undefined {
   let pos = startPos;
   let planifCaptures: CaptureMap = {};
   let matchedAnyFragment = false;
@@ -186,13 +209,25 @@ function matchUtterance(mots: Token[], startPos: number, ctx: MatchContext, lieu
     const r = matchGabarit(name, mots, pos, ctx);
     if (!r) continue;
     const def = ctx.gabarits[name];
-    const params = buildActionParams(r.captures, def, lieuOrigine);
+    const params = buildActionParams(r.captures, def, lieuOrigine, allLieux);
+    if (!params) return undefined; // exclusion sauf a tout exclu — voir buildActionParams
     if (matchedAnyFragment) {
       const structured = buildPlanificationJson(planifCaptures, params);
       if (!structured) return undefined;
       return { outcome: { kind: 'structured', data: structured }, next: r.next };
     }
     return { outcome: { kind: 'action', params }, next: r.next };
+  }
+
+  // Interrogation ("donne-moi...", §16.9) — jamais composée avec des fragments temporels
+  // (édge case non couvert, comme pour si_alors) ; routée par l'appelant, pas exécutée ici.
+  const request = matchGabarit('donne', mots, pos, ctx);
+  if (request && !matchedAnyFragment) {
+    const flat = flattenCaptures(request.captures);
+    return {
+      outcome: { kind: 'request', quoi: flat.quoi as string | undefined, lieux: (flat.lieux as string[] | undefined) ?? [] },
+      next: request.next
+    };
   }
 
   // ⭐ 26/08/2026, demande utilisateur — "attendre X" utilisé SEUL, sans ordre à la suite dans la
@@ -212,7 +247,7 @@ function matchUtterance(mots: Token[], startPos: number, ctx: MatchContext, lieu
   return undefined;
 }
 
-function interpretPhrase(mots: Token[], ctx: MatchContext, lieuOrigine: string | undefined): RawOutcome[] | undefined {
+function interpretPhrase(mots: Token[], ctx: MatchContext, lieuOrigine: string | undefined, allLieux: string[]): RawOutcome[] | undefined {
   if (mots.length === 0) return undefined;
 
   const macro = matchMacro(mots, 0, ctx);
@@ -223,7 +258,7 @@ function interpretPhrase(mots: Token[], ctx: MatchContext, lieuOrigine: string |
   const outcomes: RawOutcome[] = [];
   let cursor = 0;
   while (cursor < mots.length) {
-    const utterance = matchUtterance(mots, cursor, ctx, lieuOrigine);
+    const utterance = matchUtterance(mots, cursor, ctx, lieuOrigine, allLieux);
     if (!utterance) return undefined;
     outcomes.push(utterance.outcome);
     cursor = utterance.next;
@@ -269,7 +304,7 @@ export function interpretDeterministic(text: string, vocabulaire: Vocabulaire, g
   const outcomes: RawOutcome[] = [];
   for (const phrase of phrases) {
     const mots = tokenize(phrase);
-    const phraseOutcomes = interpretPhrase(mots, ctx, live.lieuOrigine);
+    const phraseOutcomes = interpretPhrase(mots, ctx, live.lieuOrigine, live.lieux);
     if (!phraseOutcomes) return undefined;
     outcomes.push(...phraseOutcomes);
   }

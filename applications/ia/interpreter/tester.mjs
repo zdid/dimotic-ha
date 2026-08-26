@@ -96,6 +96,21 @@ const CORPUS = [
   { phrase: 'tous les lundi et mardi allume la cuisine', attendu: true, note: 'touslesjourssemaine' },
   { phrase: 'le week end allume le salon', attendu: true, note: 'leweekend' },
 
+  // --- Planification : fenêtre "entre X et Y" (26/08/2026) -----------------------------------
+  { section: 'Planification — fenêtre (entre)', phrase: 'entre quatorze heures et dix huit heures allume le salon', attendu: true, note: 'trigger.type=window, from/to' },
+  { phrase: 'tous les jours jusqu à midi allume le salon', attendu: true, note: '"jusqu à" fusionné dans le gabarit "a"' },
+  { phrase: 'tous les jours au coucher du soleil allume le salon', attendu: false, note: 'lever/coucher de soleil hors périmètre (pas de champ trigger correspondant côté planificateur)' },
+
+  // --- Interrogation "donne" (26/08/2026) -----------------------------------------------------
+  { section: 'Interrogation (donne)', phrase: 'donne moi la lumière du salon', attendu: true, note: 'routé vers la résolution d\'entités, pas un portage de donnemoi.js' },
+  { phrase: 'donne moi l état de la cuisine', attendu: true },
+  { phrase: 'montre moi le volet de la chambre', attendu: true, note: 'autre forme de surface du même verbe' },
+
+  // --- Exclusion de lieux "sauf" (26/08/2026, trouvé dans le fichier de conflit legacy) -------
+  { section: 'Exclusion (sauf)', phrase: 'allume tout sauf le garage', attendu: true, note: 'lieux = tous les lieux connus moins le garage' },
+  { phrase: 'allume le salon et la cuisine sauf la cuisine', attendu: true, note: 'exclusion sur une liste explicite (cas limite, pas juste "tous")' },
+  { phrase: 'allume le salon sauf le salon', attendu: false, note: 'exclusion qui vide une liste explicite (contradiction) -> repli Mistral, pas "toute la maison" (bug réel trouvé en test live le 26/08)' },
+
   // --- Nombres en lettres (vérifie numbers.ts en conditions réelles) -------------------------
   { section: 'Nombres en lettres', phrase: 'règle le thermostat du salon à quatre vingt treize', attendu: true },
   { phrase: 'dans soixante seize minutes allume la cuisine', attendu: true },

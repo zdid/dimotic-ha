@@ -3,17 +3,22 @@
 # data/ia/gabarits_interpreteur.yaml au premier démarrage si absent (éditable à chaud ensuite, voir
 # vocabulaire.yaml pour la même convention).
 #
-# STATUT (26/08/2026) : sous-ensemble initial couvrant les cas à plus forte valeur (ordre immédiat,
-# ordre avec valeur, planification relative/quotidienne simple, gabarit événementiel si_alors).
-# Gabarits `modelesv2.js` restants (jusqua/a/de/entre/levercouchersoleil(1)/delayrepeat/donne/
-# sauf_lieux) : le moteur générique les supporte déjà, il ne reste qu'à les décrire ici — voir le
-# plan de mise en œuvre pour le détail de chacun.
+# STATUT (26/08/2026, suite) : `jusqua`/`de` fusionnés dans `a` (mêmes alternatives de surface que
+# le legacy — "à"/"jusqu'à"/"au"/"jusqu'au"), `entre` (fenêtre, trigger.type=window), `donne`
+# (interrogation, type_sortie=request) et l'exclusion `sauf <lieu>*` (intégrée à `ordre_immediat`,
+# pas un gabarit séparé) sont maintenant couverts. **Restent volontairement hors périmètre** —
+# `levercouchersoleil`/`levercouchersoleil1` (offsets lever/coucher de soleil) et `delayrepeat`
+# ("toutes les X") : `planificateur`'s `triggerSchema`/`scheduler.ts` (vérifié avant d'écrire ceci,
+# pas supposé) n'ont NI champ pour une heure relative au lever/coucher du soleil, NI mécanisme
+# d'intervalle répétitif générique (`trigger.every` existe mais n'est lu nulle part dans
+# `triggerToMs` — champ descriptif, pas fonctionnel) — les implémenter demanderait d'étendre ce
+# schéma côté `planificateur` d'abord, pas seulement d'ajouter un gabarit ici.
 
 gabarits:
   # --- Ordres (typePhrase "ordre" legacy) ---------------------------------------------------
 
   ordre_immediat:
-    pattern: "<verbe:on_off> <enum:tous#lieux>? <quoi>? <lieu#lieux>*"
+    pattern: "<verbe:on_off> <enum:tous#lieux>? <quoi>? <lieu#lieux>* (sauf <lieu#lieuxsauf>*)?"
     strict: false
     type_sortie: ordre
     defaults:
@@ -38,10 +43,23 @@ gabarits:
     strict: true
     type_sortie: planif_fragment
 
+  # Fusionne jusqua/a/de du legacy — mêmes alternatives de surface que le "a" original
+  # (`["a","jusqu a", "au", "jusqu au"]`), "de" traité comme une fenêtre via le gabarit `entre`
+  # plutôt que composé séparément (voir note de statut en tête de fichier).
   a:
-    pattern: "(a|à) <heure>"
+    pattern: "(a|à|jusqu a|au|jusqu au) <heure>"
     strict: true
     type_sortie: planif_fragment
+
+  entre:
+    pattern: "entre <heure#from> et <heure#to>"
+    strict: true
+    type_sortie: planif_fragment
+
+  donne:
+    pattern: "<verbe:request> (l etat|les etats)? <quoi>? <lieu#lieux>*"
+    strict: false
+    type_sortie: request
 
   pendant:
     pattern: "pendant <duree> (a <duree#duration2>)?"

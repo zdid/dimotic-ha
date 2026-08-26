@@ -22,6 +22,9 @@ verbeGroupes:
     regler: [regle, regles, regler, mets, met, mettre, chauffe, chauffer, chauffez]
     baisser: [baisse, baisses, baisser, baissez, descend, descends, descendez, descendre, diminue, diminues, diminuer]
     augmenter: [monte, montes, monter, montez, augmente, augmentes, augmentez, augmenter]
+  # Gabarit "donne" (interrogation, §16.9) — un seul verbe canonique, plusieurs formes de surface.
+  request:
+    donner: [donne, "donne moi", donnez, "donnez moi", "dis moi", "dit moi", "montre moi", montre]
 
 # Tables <enum:X> : chaque entrée associe une ou plusieurs formes de surface à une valeur capturée
 # fixe (scalaire ou liste) — jamais le texte littéralement matché.
