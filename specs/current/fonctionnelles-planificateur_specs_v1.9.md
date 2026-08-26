@@ -1,9 +1,20 @@
 # Spécifications Fonctionnelles — Application PLANIFICATEUR
 
-**Version :** 1.8
-**Date :** 15 Août 2026
+**Version :** 1.9
+**Date :** 26 Août 2026
 **Statut :** Document de référence pour l'application `applications/planificateur`
 
+> **v1.9** : **Correctif §5.1 — un trigger récurrent manqué au-delà de la fenêtre de rattrapage
+> n'était jamais reprogrammé.** Bug réel signalé par l'utilisateur : "éteindre toutes les
+> lumières tous les jours à 2h30" exécutée le 17/08, plus jamais depuis (service arrêté à
+> l'heure du déclenchement le 18/08). `resumeOrSchedule()` marquait bien `missed: true`, mais
+> seul le cas non récurrent appelait la suite du cycle (`completed_at`) — un récurrent manqué
+> restait active sans aucun minuteur, silencieusement, jusqu'au redémarrage suivant, qui retombait
+> dans le même cas. Corrigé : un trigger récurrent manqué est maintenant reprogrammé pour sa
+> prochaine occurrence (`next_fire_at` recalculé par rapport à l'heure courante, saute donc
+> naturellement l'occurrence manquée), `missed` reste affiché jusqu'au prochain déclenchement
+> réussi comme avant. Vérifié en conditions réelles sur la planification concernée.
+>
 > **v1.8** : Retrait de l'entrée "Macros" du sous-menu Paramètres Techniques (§11) — redondante
 > avec le bouton "📋 Macros" déjà présent dans le tableau de bord, seul accès conservé. Corrige au
 > passage une description périmée de `config.html` (annonçait encore "macros + planifications
@@ -193,9 +204,14 @@ l'instant présent :
   - Si l'échéance est dépassée mais dans la **fenêtre de rattrapage** configurée
     (`catchUpWindowSeconds`, §10), le déclenchement a lieu **immédiatement**, puis la planification
     reprend son cycle normal (recalculée si récurrente).
-  - Si l'échéance est dépassée au-delà de cette fenêtre, le déclenchement est **abandonné** —
-    logué explicitement et marqué `missed` (§2), visible dans l'UI (§11) jusqu'à la prochaine
-    exécution réussie de cette planification, s'il y en a une.
+  - Si l'échéance est dépassée au-delà de cette fenêtre, le déclenchement lui-même est
+    **abandonné** — logué explicitement et marqué `missed` (§2), visible dans l'UI (§11) jusqu'à
+    la prochaine exécution réussie. **⭐ v1.9** : si le trigger est **récurrent**, la planification
+    est immédiatement **reprogrammée pour sa prochaine occurrence** (`next_fire_at` recalculé par
+    rapport à l'heure courante — saute donc naturellement l'occurrence manquée) ; sinon (`delay`/
+    `date`/`duration`, non récurrent), elle est terminée (`completed_at`) comme avant. Corrige un
+    bug réel où un trigger récurrent manqué au-delà de la fenêtre restait actif sans aucun
+    minuteur, indéfiniment, jusqu'au redémarrage suivant (qui retombait dans le même cas).
 - **Triggers `state_change`** : `pending` (§2) trace les entités pour lesquelles une exécution était
   en cours au moment de la coupure. Au redémarrage, chacune est **redéclenchée à neuf** (nouvelle
   interprétation Mistral, nouvelle attente complète) plutôt que reprise sur le temps restant — voir
@@ -412,6 +428,7 @@ dashboard déjà ouvert jusqu'à un rafraîchissement manuel.
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.9 | 26/08/2026 | Claude | **Correctif §5.1** : un trigger récurrent manqué au-delà de la fenêtre de rattrapage (`catchUpWindowSeconds`) n'était jamais reprogrammé — `resumeOrSchedule()` marquait `missed: true` mais seul le cas non récurrent poursuivait le cycle (`completed_at`), un récurrent manqué restait actif sans minuteur indéfiniment. Corrigé : reprogrammation immédiate pour la prochaine occurrence dans ce cas (`schedulerRuntime.schedule()`, `next_fire_at` recalculé depuis maintenant). Bug réel signalé par l'utilisateur ("éteindre toutes les lumières tous les jours à 2h30", plus jamais déclenchée après un arrêt de service au moment précis du tir), vérifié corrigé en conditions réelles sur la planification concernée (`handler.ts:150-165`, commit `17a9069`). |
 | 1.7 | 11/08/2026 | Claude | **Écran principal en liste numérotée** (§11) : indicateur actif/inactif, nom facultatif, phrase, prochaine exécution ; journaux existants déplacés en onglet séparé ; boîte de dialogue de création (phrase soumise à `ia` pour validation). **Identifiant numérique stable** `id` (§2), résolution par numéro en plus du nom pour les opérations de gestion (§4, `CommandHandler.resolvePlan()`). **Résolution de `lieux` déléguée au graphe de lieux centralisé** de `HaStructureRegistry` (§7, voir `techniques-socle-ha-mqtt_specs` §8.3.2) — généralise le repli `lieu_precis` v1.6 aux phrases composées et aux lieux qualifiés par étage, `entities_snapshot` enrichi de `lieu_pere` (§6/§7) en plus de `lieu_precis`. **Mise à jour live des dashboards** après une planification créée/gérée par conversation (§11), manque constaté en testant la nouvelle boîte de dialogue. Toutes demandes utilisateur, session du 10-11/08/2026. |
 | 1.6 | 10/08/2026 | Claude | **Résolution de `lieux` sur le lieu précis en repli de l'area HA** (§7, corrige "éteins le salon" ciblant toute la salle), `entities_snapshot` enrichi de `lieu_precis` (§6). **Deux journaux sur le tableau de bord** (§8) : actions reçues de `ia`, détail des commandes envoyées à HA (issue réelle, entité déclenchante, prochaine exécution). Toutes demandes utilisateur, session du 10/08/2026. |
 | 1.5 | 03/08/2026 | Claude | **Déclencheur réactif `state_change`** (nouvelle §3.2) : règles sur changement d'état d'entité (précise via `entity_id`, ou par défaut sur tout un domaine via `domain`), priorité entité>domaine, comportement "minuterie" (annulation/relance par couple planification/entité). §6 étendue à quatre situations de déclenchement (ajout du changement d'état), contexte de déploiement enrichi de `triggered_entity_id` pour le ciblage implicite. Nouvelle §5.1 : persistance d'une heure cible absolue (`next_fire_at`) et reprise sur le temps réellement restant après coupure pour les triggers temporels (corrige un comportement antérieur où `delay`/`duration` repartaient intégralement à zéro à chaque redémarrage, jamais documenté comme tel), fenêtre de rattrapage configurable (`catchUpWindowSeconds`, §10) au-delà de laquelle un déclenchement est abandonné et marqué `missed` (badge UI, §11). §2 étendue (`next_fire_at`/`pending`/`missed` sur `PlanificationDefinition`, champs de `Trigger` pour `state_change`). Limitations connues (§12) : reprise imprécise pour `state_change` (durée d'attente jamais persistée), ambiguïté récurrent/one-shot non résolue, `missed` non suivi par entité pour une règle de domaine. |
