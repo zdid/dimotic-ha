@@ -102,18 +102,29 @@ export class ToolExecutor {
           // est terminée avec succès, pas suggérer un échec à corriger.
           return JSON.stringify({ success: true, message: 'Action vérifiée avec succès — mode comparatif, aucune exécution réelle n\'a lieu par conception (ne pas retenter, c\'est terminé).', dryRun: true });
         }
-        try {
-          const reply = await this.toolExecuteRequester.request(params, this.toolExecuteTimeoutMs);
-          return JSON.stringify({ success: reply.success, message: reply.message });
-        } catch (error) {
-          this.logger.error('ToolExecutor', `Timeout executer_action: ${error}`);
-          return JSON.stringify({ success: false, message: 'planificateur ne répond pas' });
-        }
+        const reply = await this.executeDirect(params);
+        return JSON.stringify(reply);
       }
 
       default:
         this.logger.warn('ToolExecutor', `Outil inconnu: ${call.function.name}`);
         return JSON.stringify({ error: `outil inconnu: ${call.function.name}` });
+    }
+  }
+
+  /**
+   * ⭐ 26/08/2026 — extrait de `execute()` (cas `executer_action` non-dryRun) pour être réutilisé
+   * par le nouveau chemin déterministe (`interpreter/`, specs §16) : même corrélation
+   * `ia:tool:execute` vers `planificateur`, que l'appel vienne d'un outil décidé par Mistral ou
+   * d'une phrase reconnue localement sans lui.
+   */
+  async executeDirect(params: ExecuterActionParams): Promise<{ success: boolean; message: string }> {
+    try {
+      const reply = await this.toolExecuteRequester.request(params, this.toolExecuteTimeoutMs);
+      return { success: reply.success, message: reply.message };
+    } catch (error) {
+      this.logger.error('ToolExecutor', `Timeout executer_action: ${error}`);
+      return { success: false, message: 'planificateur ne répond pas' };
     }
   }
 }

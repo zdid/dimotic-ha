@@ -157,7 +157,11 @@ export const IA_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   // résolu par resolution.ts, ex: "sac" — lieu inconnu) systématiquement en échec, ExecutionEngine
   // logue "Timeout (15000ms) en attente de réponse sur planificateur:deploy:reply" — ia ne
   // recevait jamais la demande de réinterprétation, ne pouvait donc jamais répondre.
-  bridgedEvents: ['ia:tool:execute:reply', 'ia:command:reply', 'planificateur:deploy']
+  // ⭐ 26/08/2026 — planificateur:macros:list déjà émis (PlanificateurService.ts, pour son propre
+  // tableau de bord) mais jamais relayé jusqu'ici vers ia : nécessaire pour que l'interpréteur
+  // déterministe (specs §16) puisse reconnaître un nom de macro en tête de phrase sans solliciter
+  // planificateur à chaque tentative (voir interpreter/macros.ts).
+  bridgedEvents: ['ia:tool:execute:reply', 'ia:command:reply', 'planificateur:deploy', 'planificateur:macros:list']
 };
 
 // ============================================================================

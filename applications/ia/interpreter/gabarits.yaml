@@ -1,0 +1,71 @@
+# Gabarits de phrase de l'interpréteur déterministe (voir specs/current/fonctionnelles-ia_specs
+# §16 et le plan de mise en œuvre — "Notation des gabarits"). Modèle versionné, copié vers
+# data/ia/gabarits_interpreteur.yaml au premier démarrage si absent (éditable à chaud ensuite, voir
+# vocabulaire.yaml pour la même convention).
+#
+# STATUT (26/08/2026) : sous-ensemble initial couvrant les cas à plus forte valeur (ordre immédiat,
+# ordre avec valeur, planification relative/quotidienne simple, gabarit événementiel si_alors).
+# Gabarits `modelesv2.js` restants (jusqua/a/de/entre/levercouchersoleil(1)/delayrepeat/donne/
+# sauf_lieux) : le moteur générique les supporte déjà, il ne reste qu'à les décrire ici — voir le
+# plan de mise en œuvre pour le détail de chacun.
+
+gabarits:
+  # --- Ordres (typePhrase "ordre" legacy) ---------------------------------------------------
+
+  ordre_immediat:
+    pattern: "<verbe:on_off> <enum:tous#lieux>? <quoi>? <lieu#lieux>*"
+    strict: false
+    type_sortie: ordre
+    defaults:
+      quoi: lumiere
+
+  ordre_valeur:
+    pattern: "<verbe:valeur> <quoi>? <lieu#lieux>* (a|à)? <valeur>"
+    strict: false
+    type_sortie: ordre
+    defaults:
+      quoi: thermostat
+
+  # --- Fragments de planification (typePhrase "planif" legacy, composables) ----------------
+
+  dans:
+    pattern: "dans <duree>"
+    strict: true
+    type_sortie: planif_fragment
+
+  attendre:
+    pattern: "attendre <duree>"
+    strict: true
+    type_sortie: planif_fragment
+
+  a:
+    pattern: "(a|à) <heure>"
+    strict: true
+    type_sortie: planif_fragment
+
+  pendant:
+    pattern: "pendant <duree> (a <duree#duration2>)?"
+    strict: true
+    type_sortie: planif_fragment
+
+  touslesjours:
+    pattern: "tous les jours <enum:jours_ouvres>? (sauf (<enum:jour#jourssauf>*|<enum:week_end#jourssauf>))?"
+    strict: true
+    type_sortie: planif_fragment
+
+  touslesjourssemaine:
+    pattern: "tous les <enum:jour#jours>*"
+    strict: false
+    type_sortie: planif_fragment
+
+  leweekend:
+    pattern: "<enum:week_end#jours>"
+    strict: true
+    type_sortie: planif_fragment
+
+  # --- Gabarit événementiel (absent du legacy, demande explicite utilisateur, §16.8) --------
+
+  si_alors:
+    pattern: "si <quoi#trigger_quoi>? <lieu#trigger_lieu>* <enum:etat_on_off#trigger_etat> (alors|,) <gabarit:ordre_immediat>"
+    strict: false
+    type_sortie: evenement

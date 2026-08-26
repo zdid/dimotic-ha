@@ -28,6 +28,16 @@ import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, mak
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
 import { IA_CLIENT_EVENTS } from './socket-events';
 import { validateReferences, buildCorrectionRequestMessage } from './referenceValidator';
+import {
+  interpretDeterministic,
+  loadVocabulaire,
+  loadGabarits,
+  type Vocabulaire,
+  type GabaritDef,
+  type LiveCatalogs,
+  type DeterministicOutcome
+} from './interpreter/index';
+import { ensureSeeded, watchFile } from './interpreter/loader';
 
 const MAX_TOOL_ROUNDS = 5; // garde-fou — évite une boucle d'outils infinie en cas de réponse aberrante
 
@@ -105,6 +115,16 @@ export class IaService implements IIaService {
   private readonly recentExchanges: Exchange[] = [];
   private configWatcher?: fs.FSWatcher;
 
+  // ⭐ 26/08/2026 — interpréteur déterministe (specs §16) : vocabulaire/gabarits rechargés à chaud,
+  // même convention que rulesProvider. Cache local des macros connues, alimenté par le relais
+  // `planificateur:macros:list` (bridgedEvents, index.ts) — jamais interrogé à la demande, la donnée
+  // arrive par diffusion.
+  private interpreterVocabulaire: Vocabulaire = { verbeGroupes: {}, enums: {}, motsIgnores: [], separateurs: [] };
+  private interpreterGabarits: Record<string, GabaritDef> = {};
+  private interpreterMacros: string[] = [];
+  private vocabulaireWatcher?: fs.FSWatcher;
+  private gabaritsWatcher?: fs.FSWatcher;
+
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
@@ -128,6 +148,26 @@ export class IaService implements IIaService {
     // data/ vide). N'écrase jamais un fichier déjà présent à l'emplacement cible.
     this.ensureRulesFileSeeded(resolved, path.join(appRoot, 'rules', 'regles_mistral.txt'));
     return resolved;
+  }
+
+  /** Chemins des fichiers YAML de l'interpréteur — même amorçage que `resolveRulesPath()`
+   *  ci-dessus (modèle intégré sous `applications/ia/interpreter/`, copié vers `data/ia/` au
+   *  premier démarrage si absent, jamais écrasé ensuite). */
+  private resolveInterpreterPath(dataFileName: string, templateFileName: string): string {
+    const appRoot = path.join(process.env.PROJECT_ROOT || process.cwd(), 'applications', 'ia');
+    const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia');
+    const resolved = path.join(dataDir, dataFileName);
+    ensureSeeded(resolved, path.join(appRoot, 'interpreter', templateFileName));
+    return resolved;
+  }
+
+  private loadInterpreterFiles(): void {
+    try {
+      this.interpreterVocabulaire = loadVocabulaire(this.resolveInterpreterPath('vocabulaire_interpreteur.yaml', 'vocabulaire.yaml'));
+      this.interpreterGabarits = loadGabarits(this.resolveInterpreterPath('gabarits_interpreteur.yaml', 'gabarits.yaml'));
+    } catch (error) {
+      this.logger.error('IaService', `Échec du chargement du vocabulaire/gabarits de l'interpréteur: ${error}`);
+    }
   }
 
   private ensureRulesFileSeeded(targetPath: string, templatePath: string): void {
@@ -184,6 +224,22 @@ export class IaService implements IIaService {
     this.deployResponder.wire();
     this.setupSocketEventListeners();
 
+    // ⭐ 26/08/2026 — interpréteur déterministe (specs §16).
+    this.loadInterpreterFiles();
+    this.vocabulaireWatcher = watchFile(this.resolveInterpreterPath('vocabulaire_interpreteur.yaml', 'vocabulaire.yaml'), () => {
+      this.logger.info('IaService', 'Vocabulaire interpréteur modifié, rechargement');
+      this.loadInterpreterFiles();
+    });
+    this.gabaritsWatcher = watchFile(this.resolveInterpreterPath('gabarits_interpreteur.yaml', 'gabarits.yaml'), () => {
+      this.logger.info('IaService', 'Gabarits interpréteur modifiés, rechargement');
+      this.loadInterpreterFiles();
+    });
+    // Relais déjà émis par planificateur pour son propre tableau de bord (PlanificateurService.ts)
+    // — jamais interrogé à la demande, juste mis en cache ici (bridgedEvents, voir domain/index.ts).
+    this.eventBus.onGeneric<Array<{ name: string }>>('planificateur:macros:list', (macros) => {
+      this.interpreterMacros = (macros ?? []).map((m) => m.name);
+    });
+
     this.ollamaServer = new OllamaHttpServer(this.config, this.logger, (body, res) => this.handleChat(body, res));
     this.ollamaServer.start();
 
@@ -206,6 +262,8 @@ export class IaService implements IIaService {
     this.logger.info('IaService', 'Arrêt du service ia...');
     this.rulesProvider.stop();
     this.configWatcher?.close();
+    this.vocabulaireWatcher?.close();
+    this.gabaritsWatcher?.close();
     this.ollamaServer?.stop();
     if (this.assistSessionsCleanupTimer) clearInterval(this.assistSessionsCleanupTimer);
     this.logger.info('IaService', 'Service ia arrêté');
@@ -222,7 +280,11 @@ export class IaService implements IIaService {
     const messages = this.rulesProvider.inject(this.buildMessages(body));
     const question = extractQuestion(messages);
 
-    const result = await this.runChatRounds(messages, mistralModel, body.options || {});
+    // ⭐ 26/08/2026 — interpréteur déterministe (specs §16) : tenté AVANT tout appel Mistral. Si la
+    // phrase est reconnue avec confiance, court-circuite entièrement `runChatRounds()` (pas d'appel
+    // Mistral) ; sinon comportement strictement inchangé.
+    const result = (question ? await this.tryDeterministicPath(question) : undefined)
+      ?? await this.runChatRounds(messages, mistralModel, body.options || {});
 
     if (!result.ok) {
       res.write(makeOllamaErrorChunk(ollamaModel, result.errorMessage));
@@ -240,6 +302,104 @@ export class IaService implements IIaService {
     res.end();
 
     this.recordExchange(question, result.finalText, result.intermediateJson, result.planificateurReply, result.promptTokens, result.completionTokens, result.cachedTokens);
+  }
+
+  /**
+   * ⭐ 26/08/2026 — interpréteur déterministe (specs §16). Tente de reconnaître `question` sans
+   * aucun appel Mistral ; `undefined` si non reconnu avec confiance (l'appelant retombe sur
+   * `runChatRounds`, comportement inchangé). Exécute directement chaque énoncé reconnu
+   * (`ToolExecutor.executeDirect`/`StructuredRouter.route`, mêmes canaux que le chemin Mistral
+   * existant — aucun nouveau mécanisme d'exécution) et assemble un résultat conforme au contrat de
+   * `runChatRounds` pour que le reste de `handleChat()` n'ait rien à savoir de ce court-circuit.
+   */
+  private async tryDeterministicPath(question: string): Promise<RunChatRoundsResult | undefined> {
+    if (!this.haBridgeClient.isAvailable() || Object.keys(this.interpreterGabarits).length === 0) return undefined;
+
+    const live: LiveCatalogs = {
+      lieux: this.haBridgeClient.getLieuCatalog(this.config.excludedQuoiIds),
+      lieuxComposes: this.buildLieuxComposes(),
+      quois: this.haBridgeClient.getQuoiCatalog().map((q) => q.label),
+      macros: this.interpreterMacros,
+      lieuOrigine: undefined // aucune source réelle branchée à ce stade — voir specs §16.6
+    };
+
+    let outcomes: DeterministicOutcome[] | undefined;
+    try {
+      outcomes = interpretDeterministic(question, this.interpreterVocabulaire, this.interpreterGabarits, live);
+    } catch (error) {
+      this.logger.error('IaService', `Erreur interpréteur déterministe (repli Mistral): ${error}`);
+      return undefined;
+    }
+    if (!outcomes) return undefined;
+
+    this.logger.info('IaService', `Interpréteur déterministe: "${question}" reconnu sans Mistral (${outcomes.length} énoncé(s))`);
+
+    const messages: string[] = [];
+    let planificateurReply: string | undefined;
+    for (const outcome of outcomes) {
+      if (outcome.kind === 'action') {
+        const reply = await this.toolExecutor.executeDirect(outcome.params);
+        messages.push(reply.message);
+        planificateurReply = reply.message;
+      } else if (outcome.kind === 'structured') {
+        const reply = await this.structuredRouter.route(outcome.data);
+        messages.push(reply ? reply.message : 'Planificateur ne répond pas — commande non transmise.');
+        if (reply) planificateurReply = reply.message;
+      } else {
+        const entities = await this.haBridgeClient.getEntitiesByQuoiAndLieux(
+          outcome.triggerQuoi ? slugifyInterpreter(outcome.triggerQuoi) : undefined,
+          outcome.triggerLieu ? [outcome.triggerLieu] : []
+        );
+        if (entities.length === 0) {
+          messages.push(`Aucune entité trouvée pour déclencher sur "${outcome.triggerQuoi ?? ''} ${outcome.triggerLieu ?? ''}".`);
+          continue;
+        }
+        const structured = {
+          type: 'planification',
+          name: `interpreteur_evenement_${Date.now()}`,
+          active: true,
+          phrase_originale: question,
+          trigger: { type: 'state_change', entity_id: entities[0].entity_id, to_state: outcome.triggerEtat },
+          action: { type: 'action', order: '', verbe: outcome.action.verbe, quoi: outcome.action.quoi, lieux: outcome.action.lieux, valeur: outcome.action.valeur }
+        };
+        const reply = await this.structuredRouter.route(structured);
+        messages.push(reply ? reply.message : 'Planificateur ne répond pas — commande non transmise.');
+        if (reply) planificateurReply = reply.message;
+      }
+    }
+
+    return {
+      ok: true,
+      finalText: messages.join(' '),
+      promptTokens: 0,
+      completionTokens: 0,
+      cachedTokens: 0,
+      bufferedChunks: [],
+      wasStructured: true,
+      intermediateJson: JSON.stringify(outcomes),
+      planificateurReply,
+      verificationRetried: false
+    };
+  }
+
+  /** Dérive les paires (lieu_precis, lieu_principal) réellement observées, pour les candidats
+   *  composés de l'interpréteur (§16.5) — `getLieuCatalog()` seul les a déjà aplaties. */
+  private buildLieuxComposes(): Array<{ lieuPrecis: string; lieu: string }> {
+    const pairs: Array<{ lieuPrecis: string; lieu: string }> = [];
+    const seen = new Set<string>();
+    for (const entity of this.haBridgeClient.getAllEntities()) {
+      const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
+      const lieuPrecis = taxonomy?.lieu_precis;
+      const lieu = taxonomy?.lieu_principal;
+      if (typeof lieuPrecis === 'string' && lieuPrecis && typeof lieu === 'string' && lieu) {
+        const key = `${lieuPrecis}::${lieu}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          pairs.push({ lieuPrecis, lieu });
+        }
+      }
+    }
+    return pairs;
   }
 
   /**
@@ -409,7 +569,11 @@ export class IaService implements IIaService {
       ? [...existing.messages, { role: 'user' as const, content: message }]
       : this.rulesProvider.inject([{ role: 'user', content: message }]);
 
-    const result = await this.runChatRounds(messages, mistralModel, {});
+    // ⭐ 26/08/2026 — même court-circuit déterministe que handleChat() (specs §16), seulement sur
+    // une conversation fraîche (pas de session d'assistance en cours : une clarification déjà
+    // engagée reste un dialogue Mistral, pas une nouvelle phrase à réinterpréter de zéro).
+    const result = (!existing ? await this.tryDeterministicPath(message) : undefined)
+      ?? await this.runChatRounds(messages, mistralModel, {});
 
     if (!result.ok) {
       // Échec technique (Mistral injoignable...) : la session n'est pas perdue, l'utilisateur peut
@@ -590,6 +754,18 @@ export class IaService implements IIaService {
   ): IaService {
     return new IaService(eventBus, logger, configProvider, haBridgeClient);
   }
+}
+
+/** Mirror volontaire de `slugify()` déjà dupliquée dans `ToolExecutor.ts`/`resolution.ts` (pas
+ *  d'import croisé entre modules internes non plus, même principe que pour les applications). */
+function slugifyInterpreter(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_+/g, '_');
 }
 
 function extractQuestion(messages: OllamaMessage[]): string {
