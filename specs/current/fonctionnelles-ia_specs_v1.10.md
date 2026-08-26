@@ -1,8 +1,21 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.9
-**Date :** 12 Août 2026
+**Version :** 1.10
+**Date :** 26 Août 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.10** : **Interpréteur déterministe français** (§16, nouveau, conception validée en session,
+> implémentation en cours) — reprend la logique de l'ancien moteur `zdidnodedomotext`
+> (`interpretetext.js`/`modelesv2.js`, prédécesseur pré-dimotic-ha), réécrite en TypeScript, débarrassée
+> de son défaut connu de découpage de phrases, et convergeant vers les structures déjà produites par
+> Mistral (`ExecuterActionParams`, `PlanificationDefinition`/trigger, `MacroDefinition`/`macro_ref`) —
+> pas un nouveau format. S'exécute en pré-filtre avant tout appel Mistral dans `handleChat()` (§9) :
+> si la phrase est reconnue avec confiance, exécution directe sans aller-retour Mistral (gain de
+> latence/coût sur les tournures courantes — "allume le salon"), sinon repli intégral et inchangé sur
+> le chemin Mistral existant. Vocabulaire et gabarits externalisés dans des fichiers YAML éditables à
+> chaud (même convention que `regles_mistral.txt`, §5), pas de code en dur. Nouveau gabarit
+> événementiel `si_alors` (absent du legacy) ciblant directement `trigger.type: 'state_change'`
+> (`fonctionnelles-planificateur_specs`, `StateWatcher.ts`), déjà en production côté `planificateur`.
 
 > **v1.9** : **Comparatif multi-modèles** (§14, nouveau) — `ia` peut désormais interroger jusqu'à 4
 > modèles (Mistral Small/Medium, Claude Haiku/Sonnet via la couche de compatibilité OpenAI
@@ -382,8 +395,13 @@ vrai accord spontané.
 
 ## 9. Deux façons distinctes de traiter une requête domotique : action immédiate vs JSON structuré
 
-Toute requête (une fois routée vers le domotique, §6) est d'abord classifiée par les règles
-domotiques (prompt système) parmi 7 catégories. **Une seule d'entre elles — l'action immédiate
+**⭐ v1.10** — avant même d'atteindre ce qui suit, un interpréteur déterministe (§16) tente de
+reconnaître la phrase localement, sans aucun appel Mistral ; s'il y parvient avec confiance,
+l'exécution se fait directement et rien de ce qui suit dans cette section ne s'applique à cet
+échange. Sinon (cas non reconnu), le comportement décrit ci-dessous reste inchangé.
+
+Toute requête (une fois routée vers le domotique, §6, et non déjà traitée par le §16) est d'abord
+classifiée par les règles domotiques (prompt système) parmi 7 catégories. **Une seule d'entre elles — l'action immédiate
 ("allume le salon", "éteins tout") — passe par le mécanisme d'outils du §7/§8**, jamais par le
 JSON structuré ci-dessous.
 
@@ -443,6 +461,7 @@ de client tout fait) — `ia` et `planificateur` implémentent chacun un petit h
 | `ia:tool:execute:reply` | planificateur → ia | Résultat corrélé de l'appel d'outil |
 | `planificateur:deploy` | planificateur → ia | Demande de réinterprétation au déclenchement (§10) |
 | `planificateur:deploy:reply` | ia → planificateur | Séquence d'exécution plate corrélée |
+| `planificateur:macros:list` | planificateur → ia | ⭐ v1.10 — relais (déjà émis par `planificateur` pour son UI, désormais aussi vers `ia` via `bridgedEvents`) : cache local des macros pour `interpreter/macros.ts` (§16.5) |
 
 ## 12. Configuration
 
@@ -626,7 +645,159 @@ recomptés comme "erreur" de raisonnement.)*
     "1 semaine"` côté Mistral vs `"1 jour"` + filtre `days` côté Claude) — les deux plausibles côté
     `planificateur`, jamais harmonisés côté prompt, non résolu par cette étude.
 
-## 15. Limitations connues / décisions
+## 16. Interpréteur déterministe (pré-filtre avant Mistral, nouveau v1.10)
+
+### 16.1 Contexte et objectif
+
+L'ancien système pré-dimotic-ha (`zdidnodedomotext`, legacy Node.js) comprenait un interpréteur
+français d'ordres domotiques par grammaire déclarative (`interpretetext.js` + `modelesv2.js` + un
+parseur date/heure/durée dédié, `num_convert_date_duration_time.js`), sans aucun LLM, avec une
+résolution quasi instantanée. Aujourd'hui, toute phrase — même une tournure simple et fréquente
+comme "allume le salon" — passe systématiquement par un aller-retour Mistral (§7-§9) : plus lent,
+plus coûteux, et le travail de fiabilisation de la partie IA (§14) n'est pas encore complètement
+abouti. Objectif : reprendre la logique de cet ancien moteur pour court-circuiter Mistral sur les
+tournures reconnues avec confiance, tout en gardant le chemin Mistral existant comme repli intact et
+inchangé pour tout le reste — jamais de régression sur ce que l'ancien système ne couvre pas.
+
+### 16.2 Insertion dans le flux existant
+
+`interpretDeterministic(text, context)` s'exécute dans `IaService.handleChat()`, immédiatement après
+`extractQuestion(messages)` et avant `runChatRounds()` (§8). Deux issues :
+- **Reconnaissance confiante** : exécution directe, sans jamais solliciter Mistral — soit via
+  `ToolExecutor.executeDirect(params: ExecuterActionParams)` (nouvelle méthode publique, extraite du
+  chemin `executer_action` non-dryRun déjà existant en §8, réutilisée par les deux chemins) pour un
+  ordre immédiat, soit via `StructuredRouter.route(structured)` (§9, inchangé) pour un JSON structuré
+  `planification`/`macro_ref`/`gestion`.
+- **Aucune reconnaissance** (`undefined`) : `runChatRounds()` s'exécute exactement comme aujourd'hui,
+  comportement byte-identique à avant l'ajout de ce mécanisme — même contrat que
+  `resolveAction`/`executeImmediateAction` côté `planificateur` (jamais de résultat approximatif
+  renvoyé comme s'il était sûr).
+
+### 16.3 Vocabulaire et gabarits — fichiers YAML éditables à chaud
+
+Même convention que `regles_mistral.txt` (§5, `RulesProvider`) : un fichier vivant sous `data/ia/`
+(gitignored, éditable sans reconstruire, rechargé à chaud par surveillance de fichier), seedé au
+premier démarrage depuis un modèle versionné dans le dépôt. Deux fichiers distincts :
+- **`vocabulaire_interpreteur.yaml`** (modèle : `applications/ia/interpreter/vocabulaire.yaml`) :
+  synonymes de verbes (mirror volontaire, pas un import croisé, des clés de
+  `fonctionnelles-planificateur_specs::resolution.ts::ON_OFF_TOGGLE_VERBS`/`VALUE_VERBS`), tables
+  `<enum:...>` (valeurs fixes capturées par branche, ex. lever/coucher du soleil), mots ignorés
+  (articles + "et"), séparateurs de phrase.
+- **`gabarits_interpreteur.yaml`** (modèle : `applications/ia/interpreter/gabarits.yaml`) : tous les
+  gabarits de phrase portés de `modelesv2.js` (§16.4).
+
+Les lieux/quois eux-mêmes ne sont **jamais** figés dans ces fichiers — dérivés en direct du
+référentiel HA à chaque appel (§16.5), donnée vivante.
+
+### 16.4 Gabarits — notation, composition, ce qui est porté
+
+**Notation (DSL)**, compilée au chargement vers l'arbre de matching interne :
+`<lieu>`/`<quoi>`/`<valeur>`/`<duree>`/`<heure>`/`<date>`/`<datetime>` (catégories terminales,
+résolues dynamiquement) ; `<categorie#nomcapture>` (renomme une capture dupliquée dans un même
+gabarit) ; `<enum:table>`/`<verbe:table>` (table nommée du vocabulaire, valeur capturée fixe par
+branche, scalaire ou liste) ; `<gabarit:nom>` (référence à un autre gabarit entier, composition —
+mécanisme déjà présent dans le legacy sous le nom `type:"model"`) ; `(a|b|c)` alternative, `?`
+facultatif, `*` répétable, applicables à un jeton seul ou à un groupe. `strict` (mode de comparaison,
+mots ignorés sautés automatiquement seulement hors mode strict) et `defaults` (§16.6) restent des
+attributs YAML séparés du motif, pas encodés dedans.
+
+**Ce qui est porté** — vérifié contre les gabarits réels de `modelesv2.js`, pas supposé : la plupart
+ne sont pas des phrases complètes indépendantes mais des **fragments de clause temporelle
+composables** (`attendre`, `dans`, `jusqua`, `a`, `de`, `le`, `pendant`, `touslesjours`,
+`touslesjourssemaine`, `leweekend`, `levercouchersoleil1`/`levercouchersoleil`, `entre`,
+`delayrepeat`), enchaînés par la boucle de phrase du moteur avant une clause terminale unique :
+`allume` (ordre générique on/off), `regle` (ordre avec valeur), `active`/`desactive`, `donne`
+(interrogation), `sauf_lieux` (exclusion de lieux — trouvé dans un fichier de conflit ownCloud non
+fusionné du legacy, absent du fichier réel mais cohérent pour être repris), et le nouveau gabarit
+`si_alors` (§16.8). Sortie selon la clause terminale : `ExecuterActionParams`, JSON `DomoticNode`
+`planification` (fragments temporels, via le port de `num_convert_date_duration_time.js`), résolution
+d'entités déjà existante côté `ia` (interrogation — voir §16.9 pour ce qui reste hors périmètre), ou
+`trigger.type: 'state_change'`.
+
+### 16.5 Résolution lieux/quois/macros
+
+- **Lieux** : `HaStructureRegistry.getLieuCatalog(excludedQuoiIds?)` (déjà utilisé en §5 pour le
+  catalogue Mistral) réutilisé tel quel comme source des candidats simples — tous niveaux de
+  taxonomie confondus (`lieu_precis`/`lieu_principal`/`lieu_pere`/`lieu_grand_pere`), déjà
+  dédupliqués. **Candidats composés** (ex. "chevet gauche de la chambre") dérivés en plus,
+  directement depuis `attributs_taxonomie` de chaque entité (avant l'aplatissement de
+  `getLieuCatalog()`), sous forme de paires `(lieu_precis, lieu_principal)` — matchées via un motif à
+  connecteur souple (`<lieu_precis> (de|du|de la|de l'|des)? <lieu>`, jamais un article deviné).
+- **Tri par longueur décroissante** (pas un tri alphabétique inversé comme le legacy, qui ne
+  fonctionnait que par coïncidence sur les cas de préfixe strict) appliqué uniformément aux candidats
+  lieux/quois/macros avant matching — essaie le candidat le plus spécifique/long en premier.
+- **Normalisation** (minuscules, accents supprimés lettre par lettre, apostrophe/tiret → espace)
+  appliquée aux deux côtés (phrase ET candidats) — point propre au nouveau moteur : `getLieuCatalog()`
+  renvoie des valeurs "affichage" (accentuées), contrairement au vocabulaire legacy écrit sans accent
+  à la main.
+- **Macros** : `planificateur:macros:list` (déjà émis, §11) désormais relayé vers `ia`
+  (`bridgedEvents`), mis en cache localement, reconnu en tête de phrase selon le même tri par
+  longueur.
+
+### 16.6 Défauts : `quoi` et lieu d'origine
+
+- **`quoi: "lumière"` par défaut** sur les gabarits on/off bruts (`allume`/`eteins`/`active`/
+  `desactive`) sans quoi explicite — nécessaire, pas cosmétique : `getEntitiesByQuoiAndLieux(undefined,
+  lieux)` renvoie toutes les entités du lieu tous domaines confondus, et `executeImmediateAction`
+  exige un `quoi` non vide. Sans ce défaut, "allume le salon" (formulation la plus probable) ne
+  passerait jamais par ce chemin rapide.
+- **`context.lieuOrigine` (optionnel)** : si la phrase ne capture aucun lieu, `lieux` défaute à
+  `[context.lieuOrigine]` — objectif "allume" tout seul, dit près d'un micro situé dans une pièce,
+  cible cette pièce. Crochet prêt à l'emploi mais **pas garanti bout en bout à ce stade** : aucune
+  info d'origine (device_id du satellite déclencheur) ne remonte aujourd'hui jusqu'à `ia`
+  (`OllamaChatRequestBody` n'a rien de tel) ; `HaStructureRegistry` connaît déjà l'association
+  `device_id`→aire, la brique manquante est le pipeline Assist HA lui-même (hors périmètre de cette
+  spec, à examiner séparément). Tant que non branché, `context.lieuOrigine` reste `undefined`, repli
+  Mistral inchangé.
+
+### 16.7 Découpage de phrases
+
+**Bug corrigé** : le découpage legacy (`.replace(/(\D)\.(\D)/g, ...)`) exige un caractère
+non-numérique des deux côtés du point pour couper une phrase — toute phrase se terminant par un
+nombre entier ("Chauffe à 20. Allume...") n'est jamais coupée de la suivante. Corrigé en protégeant
+d'abord les vrais décimaux (chiffre-point-chiffre) via un remplacement temporaire, puis en coupant
+librement sur tout point restant.
+
+**Séparateurs étendus** (`vocabulaire_interpreteur.yaml`, §16.3) : `.` (corrigé), `puis` (corrigé en
+limite de mot — le legacy matchait aussi dans "depuis"), `;`, `ensuite`, `et puis`, `et ensuite`,
+retour à la ligne explicite. `et` seul explicitement exclu (ambigu : "allume le salon et la cuisine"
+est un seul ordre à deux lieux, pas deux ordres).
+
+**Détection sans séparateur** (ex. "allume le salon éteins la cuisine") : les verbes formant un
+vocabulaire fermé disjoint des quoi/lieux, une fois un ordre complet refermé avec succès, un verbe
+reconnu immédiatement après démarre un nouvel ordre implicite — déclenché uniquement après fermeture
+réussie d'un ordre, jamais en cours de matching.
+
+### 16.8 Nouveau gabarit événementiel `si_alors`
+
+Absent du legacy (constaté par l'utilisateur) — "si la lumière de la vitrine s'allume alors allume le
+plan de travail". Ne demande aucune nouvelle mécanique d'exécution : `StateWatcher.ts`
+(`fonctionnelles-planificateur_specs`) gère déjà des déclencheurs `trigger.type === 'state_change'`
+complets. Motif : `si <clause déclencheur> (alors|,) <clause action>` — la clause déclencheur résout
+lieu/quoi comme le reste (§16.5) plus un vocabulaire verbe-d'état → `to_state` limité en v1 à on/off
+(allumé/éteint/ouvert/fermé, états à valeur différés) ; la clause action réutilise tel quel les
+gabarits `ordre` déjà portés (§16.4), aucun nouveau parsing.
+
+### 16.9 Hors périmètre
+
+- **Réponse aux interrogations** ("donne-moi...") : la reconnaissance du gabarit `donne` est portée
+  (§16.4), mais routée vers la résolution d'entités déjà existante côté `ia` (§7) — pas vers un
+  portage du formatage de réponse du legacy (`donnemoi.js`), qui reconstruirait une couche de mise en
+  forme contre une source de données (réplication RethinkDB) qui n'existe plus.
+- **CRUD/stockage de macros legacy** (`macros.js`) : non repris comme infrastructure —
+  `planificateur` a déjà un système plus riche (`MacroDefinition`/`macro_ref`/`GestionNode`). Seule la
+  lecture de cette liste existante est nécessaire côté `ia` (§16.5).
+- **Bus MQTT/bootstrap legacy** (`mqttdimotic.js`/`appli.js`/réplication RethinkDB) : aucune brique à
+  porter, déjà intégralement remplacés par `EventBus`/`HaBridgeClient`/`ApplicationManager`.
+
+### 16.10 Statut à cette version
+
+Conception validée en session (voir plan de mise en œuvre pour le détail complet des vérifications
+effectuées) — implémentation en cours au moment de cette version de la spec. Une future version
+documentera les résultats de vérification réels (§ "Vérification" du plan de mise en œuvre) une fois
+le moteur testé en conditions réelles.
+
+## 17. Limitations connues / décisions
 
 - Le routage multi-IA (§6) a deux points non résolus avant implémentation réelle : la source fiable
   d'une clé de session par device (jamais testée avec du matériel vocal réel), et le format exact du
@@ -644,10 +815,11 @@ recomptés comme "erreur" de raisonnement.)*
   `fonctionnelles-planificateur_specs` §3.2, §12). Un mécanisme de clarification (nouvelle catégorie
   de réponse, ou repli avec confirmation implicite) reste à concevoir séparément.
 
-## 16. Historique
+## 18. Historique
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.10 | 26/08/2026 | Claude | **Interpréteur déterministe français** (§16, nouveau) : reprise de la logique de l'ancien moteur `zdidnodedomotext` (`interpretetext.js`/`modelesv2.js`/`num_convert_date_duration_time.js`), réécrite en TypeScript, corrigée du bug de découpage de phrases (`.replace(/(\D)\.(\D)/g,...)`, coupait mal les phrases se terminant par un nombre entier — vérifié empiriquement), et convergeant vers les structures déjà produites par Mistral (`ExecuterActionParams`/`PlanificationDefinition`/`MacroDefinition`) plutôt qu'un nouveau format. Pré-filtre dans `IaService.handleChat()` avant `runChatRounds()` : reconnaissance confiante → exécution directe (`ToolExecutor.executeDirect()`, nouveau) sans aller-retour Mistral ; sinon repli intégral inchangé. Vocabulaire/gabarits en YAML éditables à chaud (`data/ia/vocabulaire_interpreteur.yaml`/`gabarits_interpreteur.yaml`, même convention que `regles_mistral.txt`). Nouveau gabarit événementiel `si_alors` (absent du legacy, cible `trigger.type: 'state_change'` déjà géré par `planificateur`). Toutes demandes/décisions utilisateur, session du 26/08/2026 — voir le plan de mise en œuvre associé pour le détail complet des vérifications (bug de découpage confirmé en direct via `node`, `getLieuCatalog()`/`getEntitiesByQuoiAndLieux()` relus pour fonder les défauts §16.6, etc.). |
 | 1.9 | 12/08/2026 | Claude | **Comparatif multi-modèles** (§14, nouveau) : jusqu'à 4 modèles (Mistral Small/Medium, Claude Haiku/Sonnet via la couche de compatibilité OpenAI d'Anthropic, §14.2/§3) interrogés en parallèle sur la même phrase, toujours en dry-run strict (§14.3) — jamais de transmission à `planificateur`, quel que soit le fournisseur actif. **Vérification post-décision des références quoi/lieux/entity_id** (§8.2, nouveau `referenceValidator.ts`) : tout JSON structuré (planification/macro/condition/sequence/execution), plus les étapes produites par `DeployResponder` (§10) — "d'où qu'il vienne", demande utilisateur explicite — est désormais vérifié contre `HaStructureRegistry` avant transmission ; référence invalide → relance forcée (une seule fois, drapeau `verificationRetried`, renommé depuis `quoiIntrouvableRetried`) puis refus explicite avec demande de correction si le problème persiste. Gap corrigé en cours de route : la vérification ne couvrait initialement pas `executer_action` en dry-run (`ToolExecutor` répondait toujours "succès" sans vérifier) — trouvé en dépouillant l'étude ci-dessous. Bug annexe corrigé : `tool_choice="any"` (convention Mistral) traduit en `'required'` pour Anthropic, qui rejetait la valeur Mistral avec un 400. **Étude comparative du 12/08/2026 sur 30 cas** (§14.6, commandes et résultats détaillés) : Mistral Small confirmé comme fournisseur actif (§12) — meilleur rapport latence (~4,6s vs ~9-16s)/coût (0,97€ vs 6$ sur ~3 jours)/fiabilité pour l'usage domotique réel ; Claude conservé comme outil de vérification ponctuelle via le comparatif. Toutes demandes utilisateur, session du 11-12/08/2026. |
 | 1.8 | 11/08/2026 | Claude | **Deux correctifs anti-hallucination contre les faux refus "quoi_introuvable"** constatés en direct ("allume la salle" refusé à tort). **Catalogue quoi/lieux statique injecté dans le prompt système** (§5, `RulesProvider` accepte un `HaStructureRegistry` optionnel, `getQuoiCatalog()`/`getLieuCatalog()` ajoutés à la suite de `regles_mistral.txt` à chaque appel — voir `techniques-socle-ha-mqtt_specs` §8.3.3) : effet mesuré, "allume la salle" se résout dès le premier round sans relance forcée. **Relance forcée `tool_choice=any`** (§8.1, nouveau) : filet de sécurité résiduel — `MistralClient.streamChat()` accepte un `toolChoice` optionnel, jamais par défaut sur tous les rounds ; `IaService` détecte `"quoi_introuvable"` sans qu'aucun outil n'ait été appelé dans l'échange et relance une seule fois ce round en forçant un outil (`isUnverifiedQuoiIntrouvable()`, drapeau `quoiIntrouvableRetried`). Testé en direct 3/3, aucune régression sur action directe/planification. Toutes demandes utilisateur, session du 11/08/2026. |
 | 1.7 | 11/08/2026 | Claude | **`lister_entites`/`obtenir_etat` délégués au graphe de lieux centralisé** (§7, `HaStructureRegistry.getEntitiesByQuoiAndLieux()`, voir `techniques-socle-ha-mqtt_specs` §8.3.2) — remplace une résolution propre à `ToolExecutor.ts` limitée aux areas HA, sans repli, jamais documentée comme telle. `regles_mistral.txt` enrichi : `lieu_pere` exposé en plus de `lieu_precis`, résolution numéro→planification pour la gestion (voir `fonctionnelles-planificateur_specs` v1.7 §4/§7). Toutes demandes utilisateur, session du 10-11/08/2026. |
