@@ -40,6 +40,11 @@ export type DeterministicOutcome =
       action: ExecuterActionParams;
     };
 
+/** Uniquement interne — jamais exposé hors de ce module (voir assemblage final dans
+ *  `interpretDeterministic`) : un pas d'attente autonome ("attendre 3 heures" seul, sans ordre à
+ *  la suite dans la même phrase — usage macro, demande utilisateur 26/08/2026). */
+type RawOutcome = DeterministicOutcome | { kind: 'wait'; seconds: number };
+
 const FRAGMENT_GABARITS = ['dans', 'attendre', 'pendant', 'a', 'touslesjours', 'touslesjourssemaine', 'leweekend'];
 const TERMINAL_ORDRE = ['ordre_immediat', 'ordre_valeur'];
 
@@ -130,7 +135,7 @@ function nextTokenIsKnownVerbOrSi(mots: Token[], pos: number, ctx: MatchContext)
 }
 
 interface Utterance {
-  outcome: DeterministicOutcome;
+  outcome: RawOutcome;
   next: number;
 }
 
@@ -138,6 +143,7 @@ function matchUtterance(mots: Token[], startPos: number, ctx: MatchContext, lieu
   let pos = startPos;
   let planifCaptures: CaptureMap = {};
   let matchedAnyFragment = false;
+  const matchedFragmentNames: string[] = [];
   let progressed = true;
   while (progressed) {
     progressed = false;
@@ -148,6 +154,7 @@ function matchUtterance(mots: Token[], startPos: number, ctx: MatchContext, lieu
         for (const [k, v] of Object.entries(r.captures)) planifCaptures[k] = [...(planifCaptures[k] ?? []), ...v];
         pos = r.next;
         matchedAnyFragment = true;
+        matchedFragmentNames.push(name);
         progressed = true;
         break;
       }
@@ -188,10 +195,24 @@ function matchUtterance(mots: Token[], startPos: number, ctx: MatchContext, lieu
     return { outcome: { kind: 'action', params }, next: r.next };
   }
 
+  // ⭐ 26/08/2026, demande utilisateur — "attendre X" utilisé SEUL, sans ordre à la suite dans la
+  // même phrase : usage macro réel ("allume le salon. attendre 3 heures. éteins le salon." — trois
+  // phrases séparées par des points, pas une seule combinée). Un pas d'attente autonome plutôt
+  // qu'un échec — assemblé en séquence avec les autres énoncés de l'envoi, voir
+  // `interpretDeterministic` ci-dessous. `dans`/`touslesjours`/etc. seuls (sans ordre après) restent
+  // un échec : ce sont des déclencheurs, pas des pas de pause, un "dans 5 minutes" seul n'a pas de
+  // sens sans action à retarder.
+  if (matchedFragmentNames.includes('attendre') && pos === mots.length) {
+    const flat = flattenCaptures(planifCaptures);
+    if (typeof flat.duree === 'number') {
+      return { outcome: { kind: 'wait', seconds: Math.round((flat.duree as number) / 1000) }, next: pos };
+    }
+  }
+
   return undefined;
 }
 
-function interpretPhrase(mots: Token[], ctx: MatchContext, lieuOrigine: string | undefined): DeterministicOutcome[] | undefined {
+function interpretPhrase(mots: Token[], ctx: MatchContext, lieuOrigine: string | undefined): RawOutcome[] | undefined {
   if (mots.length === 0) return undefined;
 
   const macro = matchMacro(mots, 0, ctx);
@@ -199,7 +220,7 @@ function interpretPhrase(mots: Token[], ctx: MatchContext, lieuOrigine: string |
     return [{ kind: 'structured', data: { type: 'macro_ref', name: macro.name } }];
   }
 
-  const outcomes: DeterministicOutcome[] = [];
+  const outcomes: RawOutcome[] = [];
   let cursor = 0;
   while (cursor < mots.length) {
     const utterance = matchUtterance(mots, cursor, ctx, lieuOrigine);
@@ -212,6 +233,31 @@ function interpretPhrase(mots: Token[], ctx: MatchContext, lieuOrigine: string |
   return outcomes;
 }
 
+/** Assemble des énoncés indépendants (actions/structured/evenement) en UNE seule commande
+ *  `execution` (`fonctionnelles-planificateur_specs` §8, `handler.ts::handleCommand` — le seul
+ *  type de premier niveau qui exécute une liste de pas immédiatement, `ExecutionStep[]` PLAT avec
+ *  des pas `action`/`wait` distincts, pas un arbre `sequence` imbriqué qui n'est géré qu'À
+ *  L'INTÉRIEUR d'une macro/planification, jamais en commande de premier niveau — vérifié dans
+ *  `handler.ts` avant d'écrire ceci). N'accepte que des pas `action`/`wait` — un `structured`
+ *  (planification/macro_ref) ou `evenement` mêlé à un `wait` n'est pas un cas supporté : repli
+ *  Mistral plutôt qu'un comportement approximatif. */
+function buildExecutionPayload(outcomes: RawOutcome[]): Record<string, unknown> | undefined {
+  const steps: Record<string, unknown>[] = [];
+  for (const [i, o] of outcomes.entries()) {
+    if (o.kind === 'action') {
+      steps.push({ step: i, type: 'action', order: '', verbe: o.params.verbe, quoi: o.params.quoi, lieux: o.params.lieux, valeur: o.params.valeur, delay_before_seconds: 0 });
+    } else if (o.kind === 'wait') {
+      steps.push({ step: i, type: 'wait', seconds: o.seconds, delay_before_seconds: 0 });
+    } else {
+      return undefined;
+    }
+  }
+  return {
+    type: 'execution',
+    execution: { trigger_name: 'interpreteur_sequence', triggered_at: new Date().toISOString(), context_snapshot: {}, steps }
+  };
+}
+
 /** Tente de reconnaître `text` sans passer par Mistral. `undefined` si non reconnu avec confiance
  *  (repli intégral sur `runChatRounds`, comportement inchangé). Ne renvoie JAMAIS un résultat
  *  partiel — soit toute la phrase (une fois découpée en énoncés) est reconnue, soit rien. */
@@ -220,12 +266,18 @@ export function interpretDeterministic(text: string, vocabulaire: Vocabulaire, g
   if (phrases.length === 0) return undefined;
 
   const ctx = buildContext(vocabulaire, gabarits, live);
-  const outcomes: DeterministicOutcome[] = [];
+  const outcomes: RawOutcome[] = [];
   for (const phrase of phrases) {
     const mots = tokenize(phrase);
     const phraseOutcomes = interpretPhrase(mots, ctx, live.lieuOrigine);
     if (!phraseOutcomes) return undefined;
     outcomes.push(...phraseOutcomes);
   }
-  return outcomes.length > 0 ? outcomes : undefined;
+  if (outcomes.length === 0) return undefined;
+
+  const hasWait = outcomes.some((o) => o.kind === 'wait');
+  if (!hasWait) return outcomes as DeterministicOutcome[]; // aucun 'wait' présent — cast sûr
+
+  const execution = buildExecutionPayload(outcomes);
+  return execution ? [{ kind: 'structured', data: execution }] : undefined;
 }

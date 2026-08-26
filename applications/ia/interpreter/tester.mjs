@@ -82,8 +82,13 @@ const CORPUS = [
   // --- Planification : délai relatif ---------------------------------------------------------
   { section: 'Planification — délai relatif', phrase: 'dans cinq minutes éteins le salon', attendu: true },
   { phrase: 'dans dix minutes allume la cuisine', attendu: true },
-  { phrase: 'attendre trois heures ferme le garage', attendu: true, note: 'sans "puis" (voir la limite documentée ci-dessous)' },
-  { phrase: 'attendre trois heures puis ferme le garage', attendu: false, note: 'LIMITE CONNUE : "puis" est un séparateur de PHRASE — il coupe "attendre trois heures" du reste, qui se retrouve alors seul (un fragment sans ordre n\'est jamais reconnu). Dire la même chose sans "puis" fonctionne (cas au-dessus).' },
+  { phrase: 'attendre trois heures ferme le garage', attendu: true, note: 'attendre+ordre dans la même phrase -> une planification à délai (comme avant)' },
+  { phrase: 'attendre trois heures puis ferme le garage', attendu: true, note: '"puis" coupe en 2 phrases ("attendre 3h" seule + "ferme le garage") -> assemblées en UNE séquence execution (wait puis action), pas 2 exécutions indépendantes' },
+
+  // --- "attendre" seul, usage macro (26/08/2026, demande utilisateur) -----------------------
+  { section: '"attendre" seul (usage macro)', phrase: 'allume le salon. attendre trois heures. éteins le salon.', attendu: true, note: '3 phrases (points) -> 1 seule commande execution : action, wait, action, dans l\'ordre' },
+  { phrase: 'attendre cinq minutes', attendu: true, note: 'un wait seul, sans aucune action -> execution à un seul pas' },
+  { phrase: 'dans cinq minutes', attendu: false, note: 'contrairement à "attendre", "dans" seul reste un échec — c\'est un déclencheur, pas un pas de pause' },
 
   // --- Planification : récurrence quotidienne -------------------------------------------------
   { section: 'Planification — récurrence', phrase: 'tous les jours à midi allume le salon', attendu: true },
