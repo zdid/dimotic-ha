@@ -1,8 +1,16 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.10
+**Version :** 1.11
 **Date :** 26 Août 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.11** : **Gabarits restants de l'interpréteur déterministe** (§16.4) — `entre`/`donne`/exclusion
+> `sauf`, fusion `jusqua`/`de` dans `a`, avec correctif d'un cas limite réel (exclusion vidant une
+> liste de lieux explicitement nommés) trouvé en test sur l'instance locale. **Cache des 100
+> dernières phrases + comptabilisation cache/interpréteur/Mistral** (§16.10, nouveau), partagé entre
+> le chat direct et la réinterprétation d'un déclenchement planifié (`DeployResponder`), gelé pendant
+> un échange d'assistance Mistral en cours. Voir §16.10-§16.11 et l'historique ci-dessous pour le
+> détail complet.
 
 > **v1.10** : **Interpréteur déterministe français** (§16, nouveau, conception validée en session,
 > implémentation en cours) — reprend la logique de l'ancien moteur `zdidnodedomotext`
@@ -703,16 +711,34 @@ attributs YAML séparés du motif, pas encodés dedans.
 
 **Ce qui est porté** — vérifié contre les gabarits réels de `modelesv2.js`, pas supposé : la plupart
 ne sont pas des phrases complètes indépendantes mais des **fragments de clause temporelle
-composables** (`attendre`, `dans`, `jusqua`, `a`, `de`, `le`, `pendant`, `touslesjours`,
-`touslesjourssemaine`, `leweekend`, `levercouchersoleil1`/`levercouchersoleil`, `entre`,
-`delayrepeat`), enchaînés par la boucle de phrase du moteur avant une clause terminale unique :
-`allume` (ordre générique on/off), `regle` (ordre avec valeur), `active`/`desactive`, `donne`
-(interrogation), `sauf_lieux` (exclusion de lieux — trouvé dans un fichier de conflit ownCloud non
-fusionné du legacy, absent du fichier réel mais cohérent pour être repris), et le nouveau gabarit
+composables** (`attendre`, `dans`, `a` — fusionne `jusqua`/`de`, mêmes alternatives de surface
+"à"/"jusqu'à"/"au"/"jusqu'au" —, `pendant`, `touslesjours`, `touslesjourssemaine`, `leweekend`,
+`entre`), enchaînés par la boucle de phrase du moteur avant une clause terminale unique :
+`ordre_immediat` (on/off générique, avec exclusion `sauf <lieu>*` intégrée — pas un gabarit séparé,
+voir plus bas), `ordre_valeur` (ordre avec valeur), `donne` (interrogation), et le nouveau gabarit
 `si_alors` (§16.8). Sortie selon la clause terminale : `ExecuterActionParams`, JSON `DomoticNode`
-`planification` (fragments temporels, via le port de `num_convert_date_duration_time.js`), résolution
-d'entités déjà existante côté `ia` (interrogation — voir §16.9 pour ce qui reste hors périmètre), ou
-`trigger.type: 'state_change'`.
+`planification` (fragments temporels, via le port de `num_convert_date_duration_time.js` —
+`entre <heure#from> et <heure#to>` produit un `trigger.type: 'window'`, déjà supporté par
+`scheduler.ts::triggerToMs` côté `planificateur`), résolution d'entités déjà existante côté `ia`
+(interrogation — voir §16.9 pour ce qui reste hors périmètre), ou `trigger.type: 'state_change'`.
+
+**Exclusion de lieux (`sauf <lieu>*`)** — intégrée à `ordre_immediat`
+(`... <lieu#lieux>* (sauf <lieu#lieuxsauf>*)?`), pas un gabarit séparé comme envisagé initialement.
+`<enum:tous#lieux>` ("allume **tout** sauf le garage") est développé en la liste complète des lieux
+connus avant soustraction. **Cas limite corrigé** : si l'exclusion vide entièrement une liste de
+lieux *explicitement nommés* ("allume le salon sauf le salon" — contradiction littérale), le moteur
+ne renvoie PAS `lieux: []` : `HaStructureRegistry.getEntitiesByQuoiAndLieux` traite un tableau vide
+comme "aucun filtre" et cible alors *toute la maison* (comportement voulu quand aucun lieu n'a jamais
+été mentionné, mais faux ici — vérifié en direct le 26/08/2026, a bien ciblé l'ensemble des lumières
+de la maison). Dans ce cas précis (liste non vide réduite à vide par l'exclusion), le gabarit échoue
+et la phrase retombe sur Mistral plutôt que de produire ce faux "partout".
+
+**Hors périmètre, vérifié et non supposé** : `levercouchersoleil`/`levercouchersoleil1` (déclencheurs
+relatifs au lever/coucher du soleil) et `delayrepeat` ("toutes les X", intervalle répétitif) restent
+non portés — `triggerSchema`/`scheduler.ts` côté `planificateur` n'ont ni champ pour une heure
+relative au soleil, ni mécanisme d'intervalle générique fonctionnel (`trigger.every` existe dans le
+schéma mais n'est lu nulle part dans `triggerToMs` — champ descriptif, pas exploité). Les implémenter
+demanderait d'étendre ce schéma côté `planificateur` d'abord, pas seulement d'ajouter un gabarit ici.
 
 ### 16.5 Résolution lieux/quois/macros
 
@@ -790,12 +816,52 @@ gabarits `ordre` déjà portés (§16.4), aucun nouveau parsing.
 - **Bus MQTT/bootstrap legacy** (`mqttdimotic.js`/`appli.js`/réplication RethinkDB) : aucune brique à
   porter, déjà intégralement remplacés par `EventBus`/`HaBridgeClient`/`ApplicationManager`.
 
-### 16.10 Statut à cette version
+### 16.10 Cache des 100 dernières phrases + comptabilisation cache/interpréteur/Mistral (nouveau v1.11)
 
-Conception validée en session (voir plan de mise en œuvre pour le détail complet des vérifications
-effectuées) — implémentation en cours au moment de cette version de la spec. Une future version
-documentera les résultats de vérification réels (§ "Vérification" du plan de mise en œuvre) une fois
-le moteur testé en conditions réelles.
+**Objectif** (demande utilisateur 26/08/2026) : les phrases déjà interprétées une fois — par le
+moteur déterministe OU par Mistral — ne doivent plus jamais repasser par aucun des deux à
+l'identique, et l'usage réel de chaque chemin (cache / interpréteur / Mistral) doit être mesurable
+pour objectiver le travail de fiabilisation en cours (§14).
+
+- **`PhraseCache`** : LRU-ish des 100 dernières phrases (`Map` par ordre d'insertion), clé
+  `normalizeText(phrase)` (§16.5), valeur `DeterministicOutcome[]` — indifféremment produit par le
+  moteur déterministe ou par Mistral (résultat Mistral rejoué tel quel, encapsulé en outcome
+  `structured`/`execution`, jamais réinterprété). Une entrée existante est déplacée en fin d'ordre
+  à chaque hit (réutilisation), l'entrée la plus ancienne est évincée au-delà de 100.
+- **`InterpreterMetrics`** : compteurs `cacheHits`/`interpreterHits`/`mistralCalls`, instance
+  partagée entre `IaService` et `DeployResponder` (un seul jeu de compteurs, quel que soit le point
+  d'entrée de la phrase). Diffusés dans le statut `ia` existant (§13).
+- **Ordre d'essai, dans les deux points d'entrée** (chat direct via `IaService.handleChat()` §16.2,
+  ET réinterprétation d'un déclenchement planifié via `DeployResponder`, §10) : cache → interpréteur
+  déterministe → Mistral. Le résultat Mistral est mis en cache après coup, pour bénéficier au
+  prochain envoi identique — y compris pour une phrase que le moteur déterministe ne reconnaît pas
+  du tout.
+- **`DeployResponder`** (réinterprétation à l'exécution, §10) : câblé avec les mêmes
+  `phraseCache`/`metrics` et des callbacks `getVocabulaire`/`getGabarits`/`getMacros`/
+  `getExcludedQuoiIds` pour reconstruire son propre `LiveCatalogs` (factorisé dans
+  `liveCatalogs.ts::buildLiveCatalogs()`, partagé avec `IaService` — pas de duplication de la
+  dérivation lieux/quois/macros). `outcomesToExecutionSteps()` convertit une décision déjà résolue
+  en `ExecutionStep[]` — **jamais** un `structured` planification/macro (un déclenchement ne doit
+  exécuter que des pas immédiats, jamais créer une nouvelle planification en réagissant à sa propre
+  `phrase_originale` — repli Mistral sinon, comportement inchangé).
+- **Gel du cache/interpréteur pendant un échange d'assistance Mistral en cours** (demande
+  utilisateur 26/08/2026) : `ia` permet déjà à Mistral d'aider à formuler une planification complexe
+  par échanges successifs (clarifications). Le cache/interpréteur ne doivent JAMAIS intercepter un
+  message qui fait partie d'un tel échange en cours — sinon une réponse de clarification de
+  l'utilisateur ("oui tous les jours") pourrait être interprétée seule, hors contexte, par le moteur
+  déterministe. Gardé par `isFreshExchange()` : cache/interpréteur uniquement tentés quand aucun
+  message de rôle assistant n'existe déjà dans la conversation (réutilise la même détection `!existing`
+  déjà en place pour les sessions d'assistance, §6).
+
+### 16.11 Statut à cette version
+
+Moteur déterministe et cache/métriques validés en conditions réelles sur l'instance locale (voir
+plan de mise en œuvre pour le détail complet des vérifications effectuées, corpus de test dans
+`applications/ia/interpreter/tester.mjs`, 53 cas). `si_alors` et le chemin `DeployResponder`
+cache→interpréteur→Mistral restent validés uniquement par test unitaire/relecture de code — jamais
+testés en direct contre un vrai déclenchement planifié qui se déclenche pendant une session (pour ne
+pas créer d'automatisation réelle non surveillée) : à confirmer lors d'un prochain déclenchement
+observé en conditions réelles.
 
 ## 17. Limitations connues / décisions
 
@@ -819,6 +885,7 @@ le moteur testé en conditions réelles.
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.11 | 26/08/2026 | Claude | **Gabarits restants de l'interpréteur déterministe** (§16.4) : fusion `jusqua`/`de` dans `a`, `entre` (fenêtre, `trigger.type: 'window'`), `donne` (interrogation, routée vers la résolution d'entités existante), exclusion `sauf <lieu>*` intégrée à `ordre_immediat` — avec correctif d'un cas limite réel trouvé en test (exclusion qui vide une liste de lieux explicitement nommés visait par erreur toute la maison, `HaStructureRegistry.getEntitiesByQuoiAndLieux([])` traitant un tableau vide comme "aucun filtre"). `levercouchersoleil`/`delayrepeat` confirmés hors périmètre (schéma `planificateur` à étendre d'abord). **Cache des 100 dernières phrases + comptabilisation cache/interpréteur/Mistral** (§16.10, nouveau) : `PhraseCache`/`InterpreterMetrics` partagés entre `IaService` et `DeployResponder`, gel pendant un échange d'assistance Mistral en cours (`isFreshExchange()`). Corpus de test étendu à 53 cas. |
 | 1.10 | 26/08/2026 | Claude | **Interpréteur déterministe français** (§16, nouveau) : reprise de la logique de l'ancien moteur `zdidnodedomotext` (`interpretetext.js`/`modelesv2.js`/`num_convert_date_duration_time.js`), réécrite en TypeScript, corrigée du bug de découpage de phrases (`.replace(/(\D)\.(\D)/g,...)`, coupait mal les phrases se terminant par un nombre entier — vérifié empiriquement), et convergeant vers les structures déjà produites par Mistral (`ExecuterActionParams`/`PlanificationDefinition`/`MacroDefinition`) plutôt qu'un nouveau format. Pré-filtre dans `IaService.handleChat()` avant `runChatRounds()` : reconnaissance confiante → exécution directe (`ToolExecutor.executeDirect()`, nouveau) sans aller-retour Mistral ; sinon repli intégral inchangé. Vocabulaire/gabarits en YAML éditables à chaud (`data/ia/vocabulaire_interpreteur.yaml`/`gabarits_interpreteur.yaml`, même convention que `regles_mistral.txt`). Nouveau gabarit événementiel `si_alors` (absent du legacy, cible `trigger.type: 'state_change'` déjà géré par `planificateur`). Toutes demandes/décisions utilisateur, session du 26/08/2026 — voir le plan de mise en œuvre associé pour le détail complet des vérifications (bug de découpage confirmé en direct via `node`, `getLieuCatalog()`/`getEntitiesByQuoiAndLieux()` relus pour fonder les défauts §16.6, etc.). |
 | 1.9 | 12/08/2026 | Claude | **Comparatif multi-modèles** (§14, nouveau) : jusqu'à 4 modèles (Mistral Small/Medium, Claude Haiku/Sonnet via la couche de compatibilité OpenAI d'Anthropic, §14.2/§3) interrogés en parallèle sur la même phrase, toujours en dry-run strict (§14.3) — jamais de transmission à `planificateur`, quel que soit le fournisseur actif. **Vérification post-décision des références quoi/lieux/entity_id** (§8.2, nouveau `referenceValidator.ts`) : tout JSON structuré (planification/macro/condition/sequence/execution), plus les étapes produites par `DeployResponder` (§10) — "d'où qu'il vienne", demande utilisateur explicite — est désormais vérifié contre `HaStructureRegistry` avant transmission ; référence invalide → relance forcée (une seule fois, drapeau `verificationRetried`, renommé depuis `quoiIntrouvableRetried`) puis refus explicite avec demande de correction si le problème persiste. Gap corrigé en cours de route : la vérification ne couvrait initialement pas `executer_action` en dry-run (`ToolExecutor` répondait toujours "succès" sans vérifier) — trouvé en dépouillant l'étude ci-dessous. Bug annexe corrigé : `tool_choice="any"` (convention Mistral) traduit en `'required'` pour Anthropic, qui rejetait la valeur Mistral avec un 400. **Étude comparative du 12/08/2026 sur 30 cas** (§14.6, commandes et résultats détaillés) : Mistral Small confirmé comme fournisseur actif (§12) — meilleur rapport latence (~4,6s vs ~9-16s)/coût (0,97€ vs 6$ sur ~3 jours)/fiabilité pour l'usage domotique réel ; Claude conservé comme outil de vérification ponctuelle via le comparatif. Toutes demandes utilisateur, session du 11-12/08/2026. |
 | 1.8 | 11/08/2026 | Claude | **Deux correctifs anti-hallucination contre les faux refus "quoi_introuvable"** constatés en direct ("allume la salle" refusé à tort). **Catalogue quoi/lieux statique injecté dans le prompt système** (§5, `RulesProvider` accepte un `HaStructureRegistry` optionnel, `getQuoiCatalog()`/`getLieuCatalog()` ajoutés à la suite de `regles_mistral.txt` à chaque appel — voir `techniques-socle-ha-mqtt_specs` §8.3.3) : effet mesuré, "allume la salle" se résout dès le premier round sans relance forcée. **Relance forcée `tool_choice=any`** (§8.1, nouveau) : filet de sécurité résiduel — `MistralClient.streamChat()` accepte un `toolChoice` optionnel, jamais par défaut sur tous les rounds ; `IaService` détecte `"quoi_introuvable"` sans qu'aucun outil n'ait été appelé dans l'échange et relance une seule fois ce round en forçant un outil (`isUnverifiedQuoiIntrouvable()`, drapeau `quoiIntrouvableRetried`). Testé en direct 3/3, aucune régression sur action directe/planification. Toutes demandes utilisateur, session du 11/08/2026. |

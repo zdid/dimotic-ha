@@ -758,30 +758,48 @@
   bugs du moteur trouvés en construisant le jeu d'essai et corrigés au passage (commit `fd2835e`) :
   un mot littéral lui-même ignorable (ex. "les") n'était jamais matché ; `<valeur>` rejetait les
   décimaux ("20.5").
+- **Résolu le 26/08/2026 (session suivante encore)** : gabarits restants portés
+  (`fonctionnelles-ia_specs_v1.11.md` §16.4, commit `dfb127c`) — `jusqua`/`de` fusionnés dans `a`
+  (mêmes alternatives de surface), `entre <heure> et <heure>` (fenêtre, `trigger.type: 'window'`,
+  déjà supporté par `scheduler.ts`), `donne` (interrogation, routée vers la résolution d'entités
+  existante, pas un portage de `donnemoi.js`), exclusion `sauf <lieu>*` intégrée à `ordre_immediat`
+  (pas un gabarit séparé). Corpus de test étendu à 53 cas. **Vrai bug trouvé en testant en direct** :
+  une exclusion vidant entièrement une liste de lieux explicitement nommés ("allume le salon sauf le
+  salon") produisait `lieux: []`, que `HaStructureRegistry.getEntitiesByQuoiAndLieux` traite comme
+  "aucun filtre" — a réellement ciblé TOUTE la maison au lieu de rien. Corrigé : repli Mistral dans
+  ce cas précis. **Cache des 100 dernières phrases + comptabilisation cache/interpréteur/Mistral**
+  livré dans la même session (`PhraseCache`/`InterpreterMetrics`, partagés entre `IaService` et
+  `DeployResponder`, gelés pendant un échange d'assistance Mistral en cours via `isFreshExchange()`)
+  — voir §16.10 de la spec.
+- **Hors périmètre, confirmé (pas juste différé)** : `levercouchersoleil`/`levercouchersoleil1`
+  (offsets lever/coucher du soleil) et `delayrepeat` ("toutes les X") — `triggerSchema`/
+  `scheduler.ts` de `planificateur` n'ont ni champ pour une heure relative au soleil ni mécanisme
+  d'intervalle répétitif fonctionnel (`trigger.every` existe dans le schéma mais n'est lu nulle part
+  dans `triggerToMs`). Les implémenter demande d'étendre ce schéma côté `planificateur` d'abord, pas
+  seulement d'ajouter un gabarit ici — à traiter comme un chantier `planificateur` séparé si le
+  besoin se confirme.
 - **À faire** :
-  - Porter les gabarits restants dans `applications/ia/interpreter/gabarits.yaml` (mécanisme déjà
-    prêt, aucun code à changer) : `jusqua`/`de` (bornes temporelles), `entre` (fenêtre entre deux
-    heures/lever-coucher), `levercouchersoleil`/`levercouchersoleil1` (offsets lever/coucher du
-    soleil), `delayrepeat` ("toutes les X"), `donne` (interrogation, routée vers la résolution
-    d'entités existante côté `ia`, pas vers un portage de `donnemoi.js`), `sauf_lieux` (exclusion
-    de lieux, trouvé dans le fichier de conflit ownCloud non fusionné du legacy).
-  - Factoriser le sous-motif dupliqué "heure ou lever/coucher de soleil" (`jusqua`/`a`/`de`/`entre`)
-    en un gabarit privé réutilisable — actuellement laissé dupliqué faute de temps, pas un blocage.
+  - Factoriser le sous-motif dupliqué "heure" entre `a`/`entre` en un gabarit privé réutilisable —
+    actuellement laissé dupliqué faute de temps, pas un blocage.
   - `pendant <duree> (a <duree>)?` (durée d'exécution avant réaction inverse, distinct du "attendre"
     déjà résolu) pourrait maintenant réutiliser le même mécanisme d'assemblage `execution`
     (action → wait → action inverse) — pas encore fait, capturé mais sans effet exploitable pour
     l'instant.
-  - `si_alors` et les gabarits de planification (`dans`/`touslesjours`+`a`) sont validés par des
-    tests unitaires isolés (`tester.mjs`, tous corrects) et par une vérification structurelle du
+  - `si_alors` et les gabarits de planification (`dans`/`touslesjours`+`a`/`entre`) sont validés par
+    des tests unitaires isolés (`tester.mjs`, tous corrects) et par une vérification structurelle du
     code, mais **pas encore testés en réel contre `planificateur`** (contrairement à
     `ordre_immediat` et à la séquence action/wait/action, testées en direct) — volontairement,
     pour ne pas créer de vraie planification/déclencheur dans les données de l'utilisateur sans
     lui. À tester en priorité au retour.
+  - Le chemin `DeployResponder` cache→interpréteur→Mistral (réinterprétation d'un déclenchement
+    planifié) est câblé et type-vérifié mais **jamais testé en réel** — nécessiterait un vrai
+    déclenchement planifié qui se déclenche pendant une session observée.
   - `context.lieuOrigine` (§16.6 de la spec) : crochet posé, mais aucune source réelle ne le
     renseigne encore (device_id du satellite Assist non transmis jusqu'à `ia` aujourd'hui) — à
     examiner séparément si le besoin se confirme.
-- **Statut** : Cœur du moteur livré et vérifié en réel (y compris séquence avec attente) —
-  extension des gabarits restante
+- **Statut** : Moteur déterministe + cache/métriques livrés et vérifiés en réel (ordres immédiats,
+  séquence avec attente, entre/donne/sauf, correctif exclusion-vidée) — restent `si_alors`/
+  planification et `DeployResponder` à tester en conditions réelles (pas juste unitairement)
 - **Priorité** : Moyenne (le sous-ensemble déjà livré couvre déjà le cas d'usage le plus fréquent)
 
 ---
