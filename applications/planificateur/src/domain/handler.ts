@@ -150,10 +150,23 @@ export class CommandHandler {
     } else {
       this.logger.warn('CommandHandler', `"${plan.name}" manquée (en retard de ${Math.round(overdueMs / 1000)}s, au-delà de la fenêtre de rattrapage de ${this.catchUpWindowSeconds}s) — abandonnée`);
       plan.missed = true;
-      // Un déclenchement non récurrent manqué ne se représentera jamais — terminée au même titre
-      // qu'un déclenchement réussi (voir cleanupCompletedPlanifications), sinon elle resterait
-      // active indéfiniment, reconsidérée (et re-logguée "manquée") à chaque redémarrage.
-      if (!isRecurring(plan.trigger)) plan.completed_at = new Date().toISOString();
+      if (isRecurring(plan.trigger)) {
+        // ⭐ Bug réel constaté (demande utilisateur, 26/08/2026) : une planification récurrente
+        // ("tous les jours à 2h30") manquée au-delà de la fenêtre de rattrapage se voyait bien
+        // marquée `missed`, mais plus JAMAIS reprogrammée — sans schedule() ici, aucun minuteur
+        // n'était réarmé, la planification restait active mais silencieuse indéfiniment (jusqu'au
+        // redémarrage suivant, qui retombait dans le même cas puisque next_fire_at était encore
+        // plus dans le passé). schedule() recalcule next_fire_at par rapport à MAINTENANT
+        // (triggerToMs, scheduler.ts), donc saute naturellement l'occurrence manquée et vise la
+        // suivante — `missed` reste affiché tel quel jusqu'au prochain déclenchement réussi
+        // (handleTriggerFired() l'efface déjà, voir plus bas).
+        this.schedulerRuntime.schedule(plan);
+      } else {
+        // Un déclenchement non récurrent manqué ne se représentera jamais — terminée au même titre
+        // qu'un déclenchement réussi (voir cleanupCompletedPlanifications), sinon elle resterait
+        // active indéfiniment, reconsidérée (et re-logguée "manquée") à chaque redémarrage.
+        plan.completed_at = new Date().toISOString();
+      }
       this.persistPlanifications();
     }
   }
