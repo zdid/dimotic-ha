@@ -93,13 +93,20 @@ const CORPUS = [
   // --- Planification : récurrence quotidienne -------------------------------------------------
   { section: 'Planification — récurrence', phrase: 'tous les jours à midi allume le salon', attendu: true },
   { phrase: 'tous les jours à quatorze heures moins le quart éteins le bureau', attendu: true },
-  { phrase: 'tous les lundi et mardi allume la cuisine', attendu: true, note: 'touslesjourssemaine' },
-  { phrase: 'le week end allume le salon', attendu: true, note: 'leweekend' },
+  { phrase: 'tous les lundi et mardi allume la cuisine', attendu: true, note: 'touslesjourssemaine — vérifier RÉSULTAT: days doit être ["mon","tue"] (anglais, pas "lundi"/"mardi" — correctif 26/08/2026, scheduler.ts compare des clés anglaises)' },
+  { phrase: 'le week end allume le salon', attendu: true, note: 'leweekend — vérifier RÉSULTAT: days doit être ["sat","sun"]' },
+  { phrase: 'tous les jours en semaine à huit heures allume le bureau', attendu: true, note: 'touslesjours+jours_ouvres — vérifier RÉSULTAT: days doit être ["mon","tue","wed","thu","fri"] (correctif capture #jours manquant, 26/08/2026 : ne posait AUCUN filtre avant)' },
 
   // --- Planification : fenêtre "entre X et Y" (26/08/2026) -----------------------------------
   { section: 'Planification — fenêtre (entre)', phrase: 'entre quatorze heures et dix huit heures allume le salon', attendu: true, note: 'trigger.type=window, from/to' },
   { phrase: 'tous les jours jusqu à midi allume le salon', attendu: true, note: '"jusqu à" fusionné dans le gabarit "a"' },
-  { phrase: 'tous les jours au coucher du soleil allume le salon', attendu: false, note: 'lever/coucher de soleil hors périmètre (pas de champ trigger correspondant côté planificateur)' },
+
+  // --- Planification : lever/coucher de soleil (26/08/2026, suite — plus hors périmètre) -----
+  { section: 'Planification — lever/coucher de soleil', phrase: 'au lever du soleil allume la cuisine', attendu: true, note: 'sunevent bare, sans décalage — vérifier RÉSULTAT: offset_seconds:0' },
+  { phrase: 'tous les jours au coucher du soleil allume le salon', attendu: true, note: 'combiné avec touslesjours — plus hors périmètre depuis le trigger.type=sun (suncalc côté planificateur)' },
+  { phrase: 'une heure après le coucher du soleil ferme le volet', attendu: true, note: 'offset positif — vérifier RÉSULTAT: offset_seconds:3600' },
+  { phrase: 'trente minutes avant le lever du soleil ouvre le volet', attendu: true, note: 'offset négatif — vérifier RÉSULTAT: offset_seconds:-1800' },
+  { phrase: 'le week end une heure après le coucher du soleil ferme le volet', attendu: true, note: 'cas exact de la demande utilisateur (26/08/2026) — combine filtre de jours ET décalage solaire ; vérifier RÉSULTAT: days:["sat","sun"], sun_event:"coucher", offset_seconds:3600' },
 
   // --- Interrogation "donne" (26/08/2026) -----------------------------------------------------
   { section: 'Interrogation (donne)', phrase: 'donne moi la lumière du salon', attendu: true, note: 'routé vers la résolution d\'entités, pas un portage de donnemoi.js' },

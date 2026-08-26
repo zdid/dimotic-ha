@@ -2,8 +2,10 @@ import {
   createLongLivedTokenAuth,
   createConnection,
   getStates,
+  getConfig,
   callService,
   type Connection,
+  type HassConfig,
 } from 'home-assistant-js-websocket';
 import type { HaRawEntity, HaStateChangedMessage, HaAreaRegistryUpdatedMessage, HaDeviceRegistryUpdatedMessage, HaEntityRegistryUpdatedMessage, HaWsMessage } from '../types/ha-entity';
 import { HaWsConfig } from '../../infrastructure/config/schema';
@@ -262,6 +264,21 @@ export class HaWsClient {
     }
 
     return this.connection.sendMessagePromise({ type: 'conversation/process', text, language });
+  }
+
+  /**
+   * Configuration de l'installation HA elle-même (`get_config`) — latitude/longitude notamment,
+   * utilisées par `planificateur` pour calculer les heures de lever/coucher du soleil (`suncalc`,
+   * §16 fonctionnelles-ia_specs) plutôt que de faire ressaisir une position GPS. `getConfig` est un
+   * helper haut niveau de `home-assistant-js-websocket`, au même titre que `getStates`/
+   * `callService` — pas un échappatoire bas niveau comme processConversation()/createArea().
+   */
+  getHaConfig(): Promise<HassConfig> {
+    if (!this.isAuthenticated || !this.connection) {
+      throw new Error('Cannot get config: not authenticated');
+    }
+
+    return getConfig(this.connection);
   }
 
   /**

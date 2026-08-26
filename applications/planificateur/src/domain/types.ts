@@ -55,7 +55,7 @@ export interface MacroDefinition {
 }
 
 export interface Trigger {
-  type: string; // 'delay' | 'time' | 'date' | 'recurrence' | 'recurrence_complex' | 'window' | 'duration' | 'state_change'
+  type: string; // 'delay' | 'time' | 'date' | 'recurrence' | 'recurrence_complex' | 'window' | 'duration' | 'state_change' | 'sun'
   seconds?: number;
   seconds_min?: number;
   seconds_max?: number;
@@ -79,6 +79,9 @@ export interface Trigger {
   entity_id?: string;
   domain?: string;
   to_state?: string;
+  // Déclencheur 'sun' — voir nodes-schema.ts::triggerSchema pour le détail du raisonnement.
+  sun_event?: 'lever' | 'coucher';
+  offset_seconds?: number;
 }
 
 export interface PlanificationDefinition {

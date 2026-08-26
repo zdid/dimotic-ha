@@ -48,7 +48,7 @@ export type DeterministicOutcome =
  *  la suite dans la même phrase — usage macro, demande utilisateur 26/08/2026). */
 type RawOutcome = DeterministicOutcome | { kind: 'wait'; seconds: number };
 
-const FRAGMENT_GABARITS = ['dans', 'attendre', 'pendant', 'a', 'entre', 'touslesjours', 'touslesjourssemaine', 'leweekend'];
+const FRAGMENT_GABARITS = ['dans', 'attendre', 'pendant', 'a', 'entre', 'soleil', 'touslesjours', 'touslesjourssemaine', 'leweekend'];
 const TERMINAL_ORDRE = ['ordre_immediat', 'ordre_valeur'];
 
 function normalizeWords(text: string): string[] {
@@ -126,6 +126,16 @@ function buildPlanificationJson(planifCaptures: CaptureMap, action: ExecuterActi
     trigger.type = 'window';
     trigger.from = flat.from;
     trigger.to = flat.to;
+  } else if (flat.sunevent) {
+    // "au lever/coucher du soleil", décalage optionnel — trigger.type='sun', calcul réel côté
+    // planificateur (suncalc), pas juste sun.sun de HA (voir en-tête de gabarits.yaml).
+    trigger.type = 'sun';
+    trigger.sun_event = flat.sunevent;
+    const offsetMs = typeof flat.offset === 'number' ? (flat.offset as number) : 0;
+    const sign = flat.direction === 'avant' ? -1 : 1;
+    trigger.offset_seconds = Math.round(offsetMs / 1000) * sign;
+    if (flat.jours) trigger.days = flat.jours;
+    if (flat.jourssauf) trigger.except_days = flat.jourssauf;
   } else if (flat.jours || flat.heure) {
     trigger.type = 'recurrence';
     if (flat.heure) trigger.at = flat.heure;

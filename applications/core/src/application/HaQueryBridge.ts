@@ -35,7 +35,8 @@ export type HaBridgeMethod =
   | 'getQuoiCatalog'
   | 'getLieuCatalog'
   | 'sendCommand'
-  | 'processConversation';
+  | 'processConversation'
+  | 'getHaConfig';
 
 interface HaBridgeRequest {
   correlation_id: string;
@@ -123,6 +124,10 @@ export class HaQueryBridge {
         const client = this.requireWsClient();
         const [text, language] = args as [string, string | undefined];
         return client.processConversation(text, language);
+      }
+      case 'getHaConfig': {
+        const client = this.requireWsClient();
+        return client.getHaConfig();
       }
       default: {
         const exhaustive: never = method;

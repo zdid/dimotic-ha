@@ -177,6 +177,15 @@ export class HaBridgeClient {
     return this.request('processConversation', [text, language]);
   }
 
+  /** Latitude/longitude de l'installation HA (`HaWsClient.getHaConfig()`) — lookup ponctuel, pas
+   *  de cache local synchrone à patcher (ne change jamais en pratique). Utilisé par `planificateur`
+   *  pour le calcul lever/coucher du soleil (`sun-times.ts`, §16 fonctionnelles-ia_specs). */
+  async getHaConfig(): Promise<{ latitude: number; longitude: number }> {
+    const reply = await this.request('getHaConfig', []);
+    const config = reply as { latitude: number; longitude: number };
+    return { latitude: config.latitude, longitude: config.longitude };
+  }
+
   // ==========================================================================
   // Abonnement live — état brut, poussé par core à chaque state_changed HA
   // ==========================================================================

@@ -104,7 +104,13 @@ export const triggerSchema = z.object({
   description: z.string().optional(),
   entity_id: z.string().optional(),
   domain: z.string().optional(),
-  to_state: z.string().optional()
+  to_state: z.string().optional(),
+  // Déclencheur 'sun' (§16 fonctionnelles-ia_specs, gabarit "soleil") — offset_seconds signé
+  // (négatif = avant, positif = après), calcul réel via suncalc côté scheduler.ts (pas juste
+  // sun.sun de HA, qui ne donne que le PROCHAIN lever/coucher — insuffisant combiné à days/
+  // except_days, ex. "tous les week-ends 1h après le coucher du soleil").
+  sun_event: z.enum(['lever', 'coucher']).optional(),
+  offset_seconds: z.number().optional()
 });
 
 export const planificationDefinitionSchema: z.ZodType<PlanificationDefinition> = z.lazy(() =>

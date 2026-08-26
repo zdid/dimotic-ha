@@ -20,6 +20,7 @@ import { planificateurConfigSchema, type PlanificateurConfig } from './config-sc
 import { macrosConfigSchema, planificationsConfigSchema, DEFAULT_MACROS_CONFIG, DEFAULT_PLANIFICATIONS_CONFIG, type MacrosConfigFile, type PlanificationsConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { SchedulerRuntime } from './scheduler-runtime';
+import { createSunTimesProvider } from './sun-times';
 import { StateWatcher } from './state-watcher';
 import { ExecutionEngine } from './execution';
 import { CommandHandler } from './handler';
@@ -83,7 +84,8 @@ export class PlanificateurService implements IPlanificateurService {
       (plan) => {
         this.handler.handleTriggerFired(plan).catch((e) => this.logger.error('PlanificateurService', `Erreur de déploiement pour "${plan.name}": ${e}`));
       },
-      () => this.handler.persistPlanifications()
+      () => this.handler.persistPlanifications(),
+      createSunTimesProvider(this.haBridgeClient, this.logger)
     );
 
     // Construit inconditionnellement (⭐ 24/08/2026) : HaBridgeClient existe toujours, même quand

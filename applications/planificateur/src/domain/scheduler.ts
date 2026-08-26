@@ -8,14 +8,17 @@
 
 import type { Trigger } from './types';
 import type { Logger } from '../../../core/dist/exports';
+import type { SunTimesProvider } from './sun-times';
 
 /** true si `trigger` reprogramme automatiquement une nouvelle occurrence après déclenchement. */
 export function isRecurring(trigger: Trigger): boolean {
-  return ['recurrence', 'recurrence_complex', 'window', 'time'].includes(trigger.type);
+  return ['recurrence', 'recurrence_complex', 'window', 'time', 'sun'].includes(trigger.type);
 }
 
-/** Calcule le délai en ms avant la prochaine occurrence de `trigger`, ou null si non calculable. */
-export function triggerToMs(trigger: Trigger, logger?: Logger, now: Date = new Date()): number | null {
+/** Calcule le délai en ms avant la prochaine occurrence de `trigger`, ou null si non calculable.
+ *  `getSunTimes` : uniquement pour le cas 'sun' (voir sun-times.ts) — fonction déjà résolue,
+ *  synchrone, injectée par l'appelant pour garder CE fichier pur/sans effet de bord (voir en-tête). */
+export function triggerToMs(trigger: Trigger, logger?: Logger, now: Date = new Date(), getSunTimes?: SunTimesProvider): number | null {
   switch (trigger.type) {
     case 'delay': {
       if (trigger.seconds !== undefined) return trigger.seconds * 1000;
@@ -61,6 +64,30 @@ export function triggerToMs(trigger: Trigger, logger?: Logger, now: Date = new D
         target.setDate(target.getDate() + 1);
       }
       return target.getTime() - now.getTime();
+    }
+
+    // Même forme de boucle jour-par-jour que 'recurrence' (7 jours max, dayKey anglais), mais
+    // l'heure cible est recalculée CHAQUE jour candidat via suncalc (lever/coucher change par
+    // date) plutôt qu'une heure fixe — voir sun-times.ts pour pourquoi sun.sun de HA ne suffit pas
+    // ici (ne donne que le PROCHAIN lever/coucher, pas celui d'une date arbitraire).
+    case 'sun': {
+      if (!trigger.sun_event || !getSunTimes) return null;
+      const target = new Date(now);
+      for (let i = 0; i < 7; i++) {
+        const times = getSunTimes(target);
+        if (times) {
+          const base = trigger.sun_event === 'lever' ? times.sunrise : times.sunset;
+          const withOffset = new Date(base.getTime() + (trigger.offset_seconds ?? 0) * 1000);
+          if (withOffset > now) {
+            const dayKey = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][target.getDay()];
+            const allowed = !trigger.days || trigger.days.includes(dayKey);
+            const excluded = trigger.except_days?.includes(dayKey) ?? false;
+            if (allowed && !excluded) return withOffset.getTime() - now.getTime();
+          }
+        }
+        target.setDate(target.getDate() + 1);
+      }
+      return null;
     }
 
     case 'recurrence_complex': {

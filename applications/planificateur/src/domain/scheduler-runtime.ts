@@ -9,6 +9,7 @@
 import type { Logger } from '../../../core/dist/exports';
 import type { PlanificationDefinition } from './types';
 import { triggerToMs, isRecurring } from './scheduler';
+import type { SunTimesProvider } from './sun-times';
 
 export type FireCallback = (plan: PlanificationDefinition) => void;
 /** Appelé chaque fois qu'un nouveau next_fire_at est calculé (programmation initiale ET réarmement
@@ -21,12 +22,13 @@ export class SchedulerRuntime {
   constructor(
     private readonly logger: Logger,
     private readonly onFire: FireCallback,
-    private readonly onScheduled?: ScheduledCallback
+    private readonly onScheduled?: ScheduledCallback,
+    private readonly getSunTimes?: SunTimesProvider
   ) {}
 
   /** Programmation normale — délai recalculé depuis maintenant (`triggerToMs`). */
   schedule(plan: PlanificationDefinition): void {
-    const ms = triggerToMs(plan.trigger, this.logger);
+    const ms = triggerToMs(plan.trigger, this.logger, undefined, this.getSunTimes);
     if (ms === null) {
       this.logger.warn('SchedulerRuntime', `Déclencheur non supporté pour "${plan.name}": ${plan.trigger.type}`);
       return;
@@ -54,7 +56,7 @@ export class SchedulerRuntime {
       this.onFire(plan);
 
       if (recurring) {
-        const next = triggerToMs(plan.trigger, this.logger);
+        const next = triggerToMs(plan.trigger, this.logger, undefined, this.getSunTimes);
         if (next !== null) {
           const t = setTimeout(fire, next);
           this.timers.set(plan.name, t);

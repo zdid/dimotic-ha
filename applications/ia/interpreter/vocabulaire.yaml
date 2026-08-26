@@ -34,30 +34,39 @@ enums:
       valeur: lever
     - formes: ["coucher du soleil", "le coucher du soleil"]
       valeur: coucher
+  avant_apres:
+    - formes: [avant]
+      valeur: avant
+    - formes: [apres, "après"]
+      valeur: apres
   tous:
     - formes: [tous, tout, toute, toutes]
       valeur: [tous]
+  # Valeurs anglaises 3 lettres (mon/tue/.../sun) — PAS les noms français des `formes:` — parce que
+  # scheduler.ts::triggerToMs compare trigger.days à ces mêmes clés (dérivées de Date.getDay()),
+  # comme regles_mistral.txt§0 instruit déjà Mistral de le faire (§16 de la spec ia, correctif
+  # 26/08/2026 : un filtre de jour produit par l'interpréteur ne matchait jamais rien avant ça).
   jours_ouvres:
     - formes: ["en semaine", "ouvres", "ouvre", "travailles"]
-      valeur: [lundi, mardi, mercredi, jeudi, vendredi]
+      valeur: [mon, tue, wed, thu, fri]
   week_end:
     - formes: ["le week end", "week end", "le week-end", "week-end"]
-      valeur: [samedi, dimanche]
+      valeur: [sat, sun]
   jour:
     - formes: [lundi, lundis]
-      valeur: lundi
+      valeur: mon
     - formes: [mardi, mardis]
-      valeur: mardi
+      valeur: tue
     - formes: [mercredi, mercredis]
-      valeur: mercredi
+      valeur: wed
     - formes: [jeudi, jeudis]
-      valeur: jeudi
+      valeur: thu
     - formes: [vendredi, vendredis]
-      valeur: vendredi
+      valeur: fri
     - formes: [samedi, samedis]
-      valeur: samedi
+      valeur: sat
     - formes: [dimanche, dimanches]
-      valeur: dimanche
+      valeur: sun
   # Vocabulaire verbe-d'état du gabarit si_alors (§16.8) — limité à on/off en v1, valeurs alignées
   # sur `resolution.ts::ON_OFF_TOGGLE_VERBS` côté service (turn_on/turn_off).
   etat_on_off:

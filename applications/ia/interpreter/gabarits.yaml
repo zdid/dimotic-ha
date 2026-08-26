@@ -5,14 +5,15 @@
 #
 # STATUT (26/08/2026, suite) : `jusqua`/`de` fusionnés dans `a` (mêmes alternatives de surface que
 # le legacy — "à"/"jusqu'à"/"au"/"jusqu'au"), `entre` (fenêtre, trigger.type=window), `donne`
-# (interrogation, type_sortie=request) et l'exclusion `sauf <lieu>*` (intégrée à `ordre_immediat`,
-# pas un gabarit séparé) sont maintenant couverts. **Restent volontairement hors périmètre** —
-# `levercouchersoleil`/`levercouchersoleil1` (offsets lever/coucher de soleil) et `delayrepeat`
-# ("toutes les X") : `planificateur`'s `triggerSchema`/`scheduler.ts` (vérifié avant d'écrire ceci,
-# pas supposé) n'ont NI champ pour une heure relative au lever/coucher du soleil, NI mécanisme
-# d'intervalle répétitif générique (`trigger.every` existe mais n'est lu nulle part dans
-# `triggerToMs` — champ descriptif, pas fonctionnel) — les implémenter demanderait d'étendre ce
-# schéma côté `planificateur` d'abord, pas seulement d'ajouter un gabarit ici.
+# (interrogation, type_sortie=request), l'exclusion `sauf <lieu>*` (intégrée à `ordre_immediat`,
+# pas un gabarit séparé) et `soleil` (lever/coucher, trigger.type=sun, calcul réel via `suncalc`
+# côté `planificateur` — pas une simple lecture de `sun.sun` de HA, qui ne donne que le PROCHAIN
+# lever/coucher, insuffisant dès qu'un filtre de jours type "tous les week-ends" est combiné) sont
+# maintenant couverts. **Reste volontairement hors périmètre** — `delayrepeat` ("toutes les X") :
+# `trigger.every` existe dans `triggerSchema` mais n'est lu nulle part dans
+# `scheduler.ts::triggerToMs` (champ descriptif, pas fonctionnel) — l'implémenter demanderait
+# d'abord de câbler un vrai mécanisme d'intervalle répétitif côté `planificateur`, pas seulement
+# d'ajouter un gabarit ici.
 
 gabarits:
   # --- Ordres (typePhrase "ordre" legacy) ---------------------------------------------------
@@ -56,6 +57,15 @@ gabarits:
     strict: true
     type_sortie: planif_fragment
 
+  # Lever/coucher de soleil, avec décalage optionnel avant/après (26/08/2026, demande utilisateur —
+  # calcul réel via suncalc côté planificateur, voir fonctionnelles-planificateur_specs pour le
+  # trigger.type=sun correspondant ; ne se contente PAS de lire sun.sun de HA, qui ne donne que le
+  # prochain lever/coucher, insuffisant pour un filtre de jours type "tous les week-ends").
+  soleil:
+    pattern: "(<duree#offset> <enum:avant_apres#direction>)? (au|a|à)? <enum:lever_coucher#sunevent>"
+    strict: true
+    type_sortie: planif_fragment
+
   donne:
     pattern: "<verbe:request> (l etat|les etats)? <quoi>? <lieu#lieux>*"
     strict: false
@@ -67,7 +77,7 @@ gabarits:
     type_sortie: planif_fragment
 
   touslesjours:
-    pattern: "tous les jours <enum:jours_ouvres>? (sauf (<enum:jour#jourssauf>*|<enum:week_end#jourssauf>))?"
+    pattern: "tous les jours <enum:jours_ouvres#jours>? (sauf (<enum:jour#jourssauf>*|<enum:week_end#jourssauf>))?"
     strict: true
     type_sortie: planif_fragment
 
