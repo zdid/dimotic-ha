@@ -738,6 +738,38 @@
 
 ---
 
+### 🟡 Interpréteur déterministe ia : gabarits restants + points non vérifiés en réel
+- **Constat (2026-08-26)** : implémenté et vérifié en conditions réelles (voir
+  `fonctionnelles-ia_specs_v1.10.md` §16, commit `2d9ba54`) — "allume/éteins le salon" via
+  `ia:test:send` cible bien les mêmes entités HA que le chemin Mistral, 0 token consommé, ~26ms
+  au lieu de ~1.5-2s. Le moteur générique (DSL + matching) est complet ; seule une partie des
+  gabarits `modelesv2.js` a été portée en YAML (`ordre_immediat`, `ordre_valeur`, `dans`,
+  `attendre`, `a`, `pendant`, `touslesjours`, `touslesjourssemaine`, `leweekend`, `si_alors`).
+- **À faire** :
+  - Porter les gabarits restants dans `applications/ia/interpreter/gabarits.yaml` (mécanisme déjà
+    prêt, aucun code à changer) : `jusqua`/`de` (bornes temporelles), `entre` (fenêtre entre deux
+    heures/lever-coucher), `levercouchersoleil`/`levercouchersoleil1` (offsets lever/coucher du
+    soleil), `delayrepeat` ("toutes les X"), `donne` (interrogation, routée vers la résolution
+    d'entités existante côté `ia`, pas vers un portage de `donnemoi.js`), `sauf_lieux` (exclusion
+    de lieux, trouvé dans le fichier de conflit ownCloud non fusionné du legacy).
+  - Factoriser le sous-motif dupliqué "heure ou lever/coucher de soleil" (`jusqua`/`a`/`de`/`entre`)
+    en un gabarit privé réutilisable — actuellement laissé dupliqué faute de temps, pas un blocage.
+  - `pendant <duree> (a <duree>)?` : capture la durée mais `interpreter/index.ts::buildPlanificationJson`
+    ne l'assemble pas encore en séquence "allume maintenant → attends → éteins" — actuellement un
+    fragment reconnu mais sans effet exploitable, la phrase entière retombe donc sur Mistral.
+  - `si_alors` et les gabarits de planification (`dans`/`touslesjours`+`a`) sont validés par des
+    tests unitaires isolés (14 cas, tous corrects) et par une vérification structurelle du code,
+    mais **pas encore testés en réel contre `planificateur`** (contrairement à `ordre_immediat`,
+    testé en direct) — volontairement, pour ne pas créer de vraie planification/déclencheur dans
+    les données de l'utilisateur pendant son absence. À tester en priorité au retour.
+  - `context.lieuOrigine` (§16.6 de la spec) : crochet posé, mais aucune source réelle ne le
+    renseigne encore (device_id du satellite Assist non transmis jusqu'à `ia` aujourd'hui) — à
+    examiner séparément si le besoin se confirme.
+- **Statut** : Cœur du moteur livré et vérifié en réel — extension des gabarits restante
+- **Priorité** : Moyenne (le sous-ensemble déjà livré couvre déjà le cas d'usage le plus fréquent)
+
+---
+
 ## Notes techniques
 
 ### Package npm utilisé
