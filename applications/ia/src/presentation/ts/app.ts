@@ -20,6 +20,12 @@ interface IaStatus {
   provider: 'mistral' | 'anthropic';
   activeModel: string;
   providerConfigured: boolean;
+  // ⭐ 26/08/2026, demande utilisateur — combien de phrases traitées par le cache, l'interpréteur
+  // déterministe, ou Mistral/Claude depuis le démarrage (IaService.emitStatus()).
+  cacheHits: number;
+  interpreterHits: number;
+  mistralCalls: number;
+  cacheSize: number;
 }
 
 interface ComparisonSide {
@@ -262,6 +268,9 @@ function updateStatusDisplay(status: IaStatus): void {
   if (portEl) portEl.textContent = String(status.ollamaHttpPort);
   if (rulesEl) rulesEl.textContent = status.rulesLoaded ? 'Chargées' : 'Absentes';
   if (providerEl) providerEl.textContent = `${providerLabel} (${status.activeModel})`;
+
+  const countersEl = $('counters-status');
+  if (countersEl) countersEl.textContent = `${status.cacheHits} / ${status.interpreterHits} / ${status.mistralCalls} (cache: ${status.cacheSize}/100)`;
 }
 
 function updateExchanges(exchanges: Exchange[]): void {

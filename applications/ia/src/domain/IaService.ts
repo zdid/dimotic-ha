@@ -34,10 +34,12 @@ import {
   loadGabarits,
   type Vocabulaire,
   type GabaritDef,
-  type LiveCatalogs,
   type DeterministicOutcome
 } from './interpreter/index';
 import { ensureSeeded, watchFile } from './interpreter/loader';
+import { buildLiveCatalogs } from './liveCatalogs';
+import { PhraseCache } from './PhraseCache';
+import { InterpreterMetrics } from './InterpreterMetrics';
 
 const MAX_TOOL_ROUNDS = 5; // garde-fou — évite une boucle d'outils infinie en cas de réponse aberrante
 
@@ -124,6 +126,10 @@ export class IaService implements IIaService {
   private interpreterMacros: string[] = [];
   private vocabulaireWatcher?: fs.FSWatcher;
   private gabaritsWatcher?: fs.FSWatcher;
+  // ⭐ 26/08/2026, demande utilisateur — cache des 100 dernières phrases résolues + compteurs
+  // cache/interpréteur/Mistral, partagés avec DeployResponder (une seule instance de chaque).
+  private readonly phraseCache = new PhraseCache();
+  private readonly metrics = new InterpreterMetrics();
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -136,7 +142,12 @@ export class IaService implements IIaService {
     this.rulesProvider = new RulesProvider(this.resolveRulesPath(), this.logger, this.haBridgeClient, () => this.config.excludedQuoiIds);
     this.toolExecutor = new ToolExecutor(this.eventBus, this.logger, this.haBridgeClient, this.config.toolExecuteTimeoutMs);
     this.structuredRouter = new StructuredRouter(this.eventBus, this.logger, this.config.commandTimeoutMs);
-    this.deployResponder = new DeployResponder(this.eventBus, this.logger, this.mistralClient, this.rulesProvider, this.config.defaultMistralModel, this.haBridgeClient);
+    this.deployResponder = new DeployResponder(
+      this.eventBus, this.logger, this.mistralClient, this.rulesProvider, this.config.defaultMistralModel, this.haBridgeClient,
+      this.phraseCache, this.metrics,
+      () => this.interpreterVocabulaire, () => this.interpreterGabarits, () => this.interpreterMacros,
+      () => this.config.excludedQuoiIds
+    );
   }
 
   private resolveRulesPath(): string {
@@ -279,12 +290,20 @@ export class IaService implements IIaService {
 
     const messages = this.rulesProvider.inject(this.buildMessages(body));
     const question = extractQuestion(messages);
+    const fresh = isFreshExchange(messages);
 
-    // ⭐ 26/08/2026 — interpréteur déterministe (specs §16) : tenté AVANT tout appel Mistral. Si la
-    // phrase est reconnue avec confiance, court-circuite entièrement `runChatRounds()` (pas d'appel
-    // Mistral) ; sinon comportement strictement inchangé.
-    const result = (question ? await this.tryDeterministicPath(question) : undefined)
-      ?? await this.runChatRounds(messages, mistralModel, body.options || {});
+    // ⭐ 26/08/2026, demande utilisateur — cache (100 dernières phrases) puis interpréteur
+    // déterministe (specs §16), tentés AVANT tout appel Mistral, seulement sur un échange FRAIS
+    // (aucun tour d'assistant déjà présent dans la conversation) : une conversation déjà engagée
+    // avec Mistral — ex. formulation assistée d'une planification complexe — ne doit jamais être
+    // interceptée ici, seule Mistral a le contexte des tours précédents.
+    let result = fresh && question ? await this.tryCache(question) : undefined;
+    if (!result && fresh && question) result = await this.tryDeterministicPath(question);
+    if (!result) {
+      this.metrics.recordMistralCall();
+      result = await this.runChatRounds(messages, mistralModel, body.options || {});
+      if (fresh && question) this.cacheMistralResult(question, result);
+    }
 
     if (!result.ok) {
       res.write(makeOllamaErrorChunk(ollamaModel, result.errorMessage));
@@ -304,24 +323,26 @@ export class IaService implements IIaService {
     this.recordExchange(question, result.finalText, result.intermediateJson, result.planificateurReply, result.promptTokens, result.completionTokens, result.cachedTokens);
   }
 
+  /** ⭐ 26/08/2026 — `PhraseCache` : `question` déjà résolue récemment → exécution directe, sans
+   *  repasser ni par l'interpréteur ni par Mistral. */
+  private async tryCache(question: string): Promise<RunChatRoundsResult | undefined> {
+    const outcomes = this.phraseCache.get(question);
+    if (!outcomes) return undefined;
+    this.metrics.recordCacheHit();
+    this.logger.info('IaService', `Cache: "${question}" déjà résolue — exécution directe (${outcomes.length} énoncé(s))`);
+    return this.executeOutcomes(outcomes, question);
+  }
+
   /**
    * ⭐ 26/08/2026 — interpréteur déterministe (specs §16). Tente de reconnaître `question` sans
    * aucun appel Mistral ; `undefined` si non reconnu avec confiance (l'appelant retombe sur
-   * `runChatRounds`, comportement inchangé). Exécute directement chaque énoncé reconnu
-   * (`ToolExecutor.executeDirect`/`StructuredRouter.route`, mêmes canaux que le chemin Mistral
-   * existant — aucun nouveau mécanisme d'exécution) et assemble un résultat conforme au contrat de
-   * `runChatRounds` pour que le reste de `handleChat()` n'ait rien à savoir de ce court-circuit.
+   * `runChatRounds`, comportement inchangé). Sur succès, met en cache la décision (même forme que
+   * ce que `PhraseCache` rejoue) avant de l'exécuter.
    */
   private async tryDeterministicPath(question: string): Promise<RunChatRoundsResult | undefined> {
     if (!this.haBridgeClient.isAvailable() || Object.keys(this.interpreterGabarits).length === 0) return undefined;
 
-    const live: LiveCatalogs = {
-      lieux: this.haBridgeClient.getLieuCatalog(this.config.excludedQuoiIds),
-      lieuxComposes: this.buildLieuxComposes(),
-      quois: this.haBridgeClient.getQuoiCatalog().map((q) => q.label),
-      macros: this.interpreterMacros,
-      lieuOrigine: undefined // aucune source réelle branchée à ce stade — voir specs §16.6
-    };
+    const live = buildLiveCatalogs(this.haBridgeClient, this.interpreterMacros, this.config.excludedQuoiIds);
 
     let outcomes: DeterministicOutcome[] | undefined;
     try {
@@ -332,8 +353,18 @@ export class IaService implements IIaService {
     }
     if (!outcomes) return undefined;
 
+    this.metrics.recordInterpreterHit();
     this.logger.info('IaService', `Interpréteur déterministe: "${question}" reconnu sans Mistral (${outcomes.length} énoncé(s))`);
+    this.phraseCache.set(question, outcomes);
+    return this.executeOutcomes(outcomes, question);
+  }
 
+  /** Exécute une décision déjà résolue (`ToolExecutor.executeDirect`/`StructuredRouter.route`,
+   *  mêmes canaux que le chemin Mistral existant — aucun nouveau mécanisme d'exécution), qu'elle
+   *  vienne d'un match frais de l'interpréteur ou d'une relecture du cache — assemble un résultat
+   *  conforme au contrat de `runChatRounds` pour que le reste de `handleChat()`/
+   *  `handleTestCommand()` n'ait rien à savoir de ce court-circuit. */
+  private async executeOutcomes(outcomes: DeterministicOutcome[], phraseOriginale: string): Promise<RunChatRoundsResult> {
     const messages: string[] = [];
     let planificateurReply: string | undefined;
     for (const outcome of outcomes) {
@@ -346,6 +377,9 @@ export class IaService implements IIaService {
         messages.push(reply ? reply.message : 'Planificateur ne répond pas — commande non transmise.');
         if (reply) planificateurReply = reply.message;
       } else {
+        // evenement (si_alors) : entity_id résolu À CHAQUE EXÉCUTION, jamais mis en cache tel
+        // quel — seuls trigger_quoi/trigger_lieu (des NOMS, pas un entity_id) sont cachés, cette
+        // résolution reste donc toujours fraîche même en relecture depuis PhraseCache.
         const entities = await this.haBridgeClient.getEntitiesByQuoiAndLieux(
           outcome.triggerQuoi ? slugifyInterpreter(outcome.triggerQuoi) : undefined,
           outcome.triggerLieu ? [outcome.triggerLieu] : []
@@ -358,7 +392,7 @@ export class IaService implements IIaService {
           type: 'planification',
           name: `interpreteur_evenement_${Date.now()}`,
           active: true,
-          phrase_originale: question,
+          phrase_originale: phraseOriginale,
           trigger: { type: 'state_change', entity_id: entities[0].entity_id, to_state: outcome.triggerEtat },
           action: { type: 'action', order: '', verbe: outcome.action.verbe, quoi: outcome.action.quoi, lieux: outcome.action.lieux, valeur: outcome.action.valeur }
         };
@@ -382,24 +416,12 @@ export class IaService implements IIaService {
     };
   }
 
-  /** Dérive les paires (lieu_precis, lieu_principal) réellement observées, pour les candidats
-   *  composés de l'interpréteur (§16.5) — `getLieuCatalog()` seul les a déjà aplaties. */
-  private buildLieuxComposes(): Array<{ lieuPrecis: string; lieu: string }> {
-    const pairs: Array<{ lieuPrecis: string; lieu: string }> = [];
-    const seen = new Set<string>();
-    for (const entity of this.haBridgeClient.getAllEntities()) {
-      const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
-      const lieuPrecis = taxonomy?.lieu_precis;
-      const lieu = taxonomy?.lieu_principal;
-      if (typeof lieuPrecis === 'string' && lieuPrecis && typeof lieu === 'string' && lieu) {
-        const key = `${lieuPrecis}::${lieu}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          pairs.push({ lieuPrecis, lieu });
-        }
-      }
-    }
-    return pairs;
+  /** Met en cache une décision Mistral conclue (voir `extractOutcomesFromMistralResult`) — no-op
+   *  silencieux pour tout ce qui n'est pas une conclusion nette (texte, clarification, échec). */
+  private cacheMistralResult(question: string, result: RunChatRoundsResult): void {
+    if (!result.ok) return;
+    const outcomes = extractOutcomesFromMistralResult(result);
+    if (outcomes) this.phraseCache.set(question, outcomes);
   }
 
   /**
@@ -569,11 +591,17 @@ export class IaService implements IIaService {
       ? [...existing.messages, { role: 'user' as const, content: message }]
       : this.rulesProvider.inject([{ role: 'user', content: message }]);
 
-    // ⭐ 26/08/2026 — même court-circuit déterministe que handleChat() (specs §16), seulement sur
-    // une conversation fraîche (pas de session d'assistance en cours : une clarification déjà
-    // engagée reste un dialogue Mistral, pas une nouvelle phrase à réinterpréter de zéro).
-    const result = (!existing ? await this.tryDeterministicPath(message) : undefined)
-      ?? await this.runChatRounds(messages, mistralModel, {});
+    // ⭐ 26/08/2026, demande utilisateur — même court-circuit cache/déterministe que handleChat()
+    // (specs §16), seulement sur une conversation fraîche (pas de session d'assistance en cours :
+    // une clarification déjà engagée reste un dialogue Mistral, jamais interceptée ici — c'est
+    // exactement l'assistance Q&R prévue pour formuler une planification complexe).
+    let result = !existing ? await this.tryCache(message) : undefined;
+    if (!result && !existing) result = await this.tryDeterministicPath(message);
+    if (!result) {
+      this.metrics.recordMistralCall();
+      result = await this.runChatRounds(messages, mistralModel, {});
+      if (!existing) this.cacheMistralResult(message, result);
+    }
 
     if (!result.ok) {
       // Échec technique (Mistral injoignable...) : la session n'est pas perdue, l'utilisateur peut
@@ -713,6 +741,7 @@ export class IaService implements IIaService {
     this.recentExchanges.unshift({ at: new Date().toISOString(), question, response, intermediateJson, planificateurReply, promptTokens, completionTokens, cachedTokens });
     if (this.recentExchanges.length > 20) this.recentExchanges.length = 20;
     this.eventBus.emitGeneric('ia:exchanges:list', this.recentExchanges);
+    this.emitStatus(); // ⭐ 26/08/2026 — rafraîchit les compteurs cache/interpréteur/Mistral affichés
   }
 
   // ==========================================================================
@@ -742,7 +771,14 @@ export class IaService implements IIaService {
       // badge toujours étiqueté "Mistral".
       provider: this.config.provider,
       activeModel: this.config.provider === 'anthropic' ? this.config.defaultAnthropicModel : this.config.defaultMistralModel,
-      providerConfigured: this.config.provider === 'anthropic' ? !!this.config.anthropicApiKey : !!this.config.mistralApiKey
+      providerConfigured: this.config.provider === 'anthropic' ? !!this.config.anthropicApiKey : !!this.config.mistralApiKey,
+      // ⭐ 26/08/2026, demande utilisateur — combien de phrases traitées par le cache, l'interpréteur
+      // déterministe, ou Mistral/Claude, depuis le démarrage (en mémoire, remis à zéro à chaque
+      // redémarrage). cacheSize : nombre d'entrées actuellement en cache (sur 100 max).
+      cacheHits: this.metrics.cacheHits,
+      interpreterHits: this.metrics.interpreterHits,
+      mistralCalls: this.metrics.mistralCalls,
+      cacheSize: this.phraseCache.size()
     });
   }
 
@@ -766,6 +802,50 @@ function slugifyInterpreter(text: string): string {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .replace(/_+/g, '_');
+}
+
+/** ⭐ 26/08/2026, demande utilisateur — une conversation est "fraîche" si aucun tour d'assistant
+ *  n'y figure déjà. Une conversation déjà engagée avec Mistral (ex. formulation assistée d'une
+ *  planification complexe) ne doit JAMAIS être interceptée par le cache ni l'interpréteur
+ *  déterministe — seule Mistral connaît le contexte des tours précédents. */
+function isFreshExchange(messages: OllamaMessage[]): boolean {
+  return !messages.some((m) => m.role === 'assistant');
+}
+
+/** ⭐ 26/08/2026 — extrait la décision d'un résultat Mistral réussi et CONCLU (action réellement
+ *  exécutée, ou JSON structuré transmis avec succès à planificateur) sous la même forme que
+ *  l'interpréteur déterministe, pour alimenter `PhraseCache` uniformément quelle que soit
+ *  l'origine de la décision. `undefined` pour tout ce qui n'est pas une conclusion nette (texte
+ *  conversationnel, demande de clarification, refus, échec) — même niveau de rigueur que
+ *  `handleTestCommand`'s `concluded`/`usedExecuterAction`, jamais un résultat approximatif mis en
+ *  cache. */
+function extractOutcomesFromMistralResult(result: RunChatRoundsResult): DeterministicOutcome[] | undefined {
+  if (!result.ok || !result.intermediateJson) return undefined;
+
+  if (result.wasStructured) {
+    if (result.planificateurReply) {
+      try {
+        if (JSON.parse(result.planificateurReply).success === false) return undefined;
+      } catch { /* pas de statut exploitable — on ne bloque pas la mise en cache pour ça */ }
+    }
+    try {
+      return [{ kind: 'structured', data: JSON.parse(result.intermediateJson) }];
+    } catch {
+      return undefined;
+    }
+  }
+
+  try {
+    const calls = JSON.parse(result.intermediateJson) as MistralToolCall[];
+    if (!Array.isArray(calls)) return undefined;
+    const actionCall = [...calls].reverse().find((c) => c?.function?.name === 'executer_action');
+    if (!actionCall) return undefined;
+    const args = typeof actionCall.function.arguments === 'string' ? JSON.parse(actionCall.function.arguments) : actionCall.function.arguments;
+    if (!args?.verbe || !args?.quoi) return undefined;
+    return [{ kind: 'action', params: { verbe: args.verbe, quoi: args.quoi, lieux: Array.isArray(args.lieux) ? args.lieux : [], valeur: args.valeur } }];
+  } catch {
+    return undefined;
+  }
 }
 
 function extractQuestion(messages: OllamaMessage[]): string {

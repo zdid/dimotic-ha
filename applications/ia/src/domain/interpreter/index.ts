@@ -281,3 +281,29 @@ export function interpretDeterministic(text: string, vocabulaire: Vocabulaire, g
   const execution = buildExecutionPayload(outcomes);
   return execution ? [{ kind: 'structured', data: execution }] : undefined;
 }
+
+/**
+ * Convertit une décision déjà résolue (fraîche ou rejouée depuis `PhraseCache`) en
+ * `ExecutionStep[]` — le format attendu par `DeployResponder`/`planificateur:deploy:reply`
+ * (`fonctionnelles-planificateur_specs` §8), pour la réinterprétation d'un déclenchement
+ * planifié. Un déclenchement ne doit exécuter QUE des pas immédiats — jamais créer une nouvelle
+ * planification/macro en réagissant à son propre `phrase_originale` : `undefined` pour toute
+ * décision qui n'est pas exclusivement composée d'actions/attentes (repli Mistral, comportement
+ * inchangé), plutôt qu'un comportement inattendu.
+ */
+export function outcomesToExecutionSteps(outcomes: DeterministicOutcome[]): Record<string, unknown>[] | undefined {
+  if (outcomes.length === 1 && outcomes[0].kind === 'structured') {
+    const data = outcomes[0].data;
+    if (data.type === 'execution' && data.execution && typeof data.execution === 'object') {
+      const steps = (data.execution as { steps?: unknown }).steps;
+      if (Array.isArray(steps)) return steps as Record<string, unknown>[];
+    }
+    return undefined; // planification/macro_ref/gestion : jamais un pas exécutable directement ici
+  }
+  const steps: Record<string, unknown>[] = [];
+  for (const [i, o] of outcomes.entries()) {
+    if (o.kind !== 'action') return undefined;
+    steps.push({ step: i, type: 'action', order: '', verbe: o.params.verbe, quoi: o.params.quoi, lieux: o.params.lieux, valeur: o.params.valeur, delay_before_seconds: 0 });
+  }
+  return steps;
+}
