@@ -771,13 +771,34 @@
   livré dans la même session (`PhraseCache`/`InterpreterMetrics`, partagés entre `IaService` et
   `DeployResponder`, gelés pendant un échange d'assistance Mistral en cours via `isFreshExchange()`)
   — voir §16.10 de la spec.
-- **Hors périmètre, confirmé (pas juste différé)** : `levercouchersoleil`/`levercouchersoleil1`
-  (offsets lever/coucher du soleil) et `delayrepeat` ("toutes les X") — `triggerSchema`/
-  `scheduler.ts` de `planificateur` n'ont ni champ pour une heure relative au soleil ni mécanisme
-  d'intervalle répétitif fonctionnel (`trigger.every` existe dans le schéma mais n'est lu nulle part
-  dans `triggerToMs`). Les implémenter demande d'étendre ce schéma côté `planificateur` d'abord, pas
-  seulement d'ajouter un gabarit ici — à traiter comme un chantier `planificateur` séparé si le
-  besoin se confirme.
+- **Résolu le 26/08/2026 (session suivante encore) — nouveau gabarit `soleil`** (demande
+  utilisateur explicite : "le lever et le coucher de soleil sont utilisés dans toutes les
+  implémentations de ma domotique, sauf chez moi") : `fonctionnelles-ia_specs_v1.12.md` §16.4 +
+  `fonctionnelles-planificateur_specs_v1.10.md` §3.1bis. Plus "hors périmètre" — nouveau
+  `trigger.type: 'sun'` côté `planificateur`, calcul réel via `suncalc` (nouvelle dépendance,
+  position GPS lue une fois depuis HA elle-même via nouveau `HaBridgeClient.getHaConfig()`), pas
+  juste `sun.sun` de HA (insuffisant combiné à un filtre de jours restrictif — voir la spec pour le
+  raisonnement complet). Gabarit `soleil` composable avec les fragments de jours existants (ex. "le
+  week end une heure après le coucher du soleil ferme le volet" — l'exemple exact donné par
+  l'utilisateur). **Deux vrais bugs trouvés et corrigés en préparant ce gabarit** :
+  jour/`<enum:jour>`/`<enum:week_end>`/`<enum:jours_ouvres>` capturaient des noms de jours
+  FRANÇAIS alors que `scheduler.ts::triggerToMs` (et `regles_mistral.txt`) attendent des clés
+  ANGLAISES 3 lettres (`mon`/`sat`/...) — tout filtre de jour produit par l'interpréteur était
+  silencieusement inopérant depuis son introduction ; `touslesjours`+`jours_ouvres` ne posait même
+  aucun filtre du tout (capture sous la mauvaise clé, `#jours` manquant). Corpus de test étendu à 58
+  cas. **Validé par test unitaire déterministe** (marche jour-par-jour/offset/filtre de jours de
+  `triggerToMs`, 9 cas ; sanity-check `suncalc` réel contre Paris) — **le round-trip complet
+  `getHaConfig()` → position GPS réelle de l'installation HA n'est pas encore confirmé en conditions
+  réelles** : un redémarrage local a rencontré la course démarrage/authentification WS déjà connue
+  ("Cannot get config: not authenticated"), mécanisme de nouvel essai automatique ajouté en
+  conséquence mais pas encore re-déclenché avec succès faute d'un trigger `sun` existant. Volontairement
+  pas de planification réelle créée pour tester bout-en-bout (même prudence que `si_alors`) — à
+  faire avec l'utilisateur au retour.
+- **Reste hors périmètre, confirmé (pas juste différé)** : `delayrepeat` ("toutes les X") —
+  `trigger.every` existe dans le schéma `triggerSchema` mais n'est lu nulle part dans `triggerToMs`.
+  L'implémenter demande de câbler un vrai mécanisme d'intervalle répétitif côté `planificateur`
+  d'abord, pas seulement d'ajouter un gabarit ici — à traiter comme un chantier séparé si le besoin
+  se confirme.
 - **À faire** :
   - Factoriser le sous-motif dupliqué "heure" entre `a`/`entre` en un gabarit privé réutilisable —
     actuellement laissé dupliqué faute de temps, pas un blocage.
@@ -797,9 +818,14 @@
   - `context.lieuOrigine` (§16.6 de la spec) : crochet posé, mais aucune source réelle ne le
     renseigne encore (device_id du satellite Assist non transmis jusqu'à `ia` aujourd'hui) — à
     examiner séparément si le besoin se confirme.
-- **Statut** : Moteur déterministe + cache/métriques livrés et vérifiés en réel (ordres immédiats,
-  séquence avec attente, entre/donne/sauf, correctif exclusion-vidée) — restent `si_alors`/
-  planification et `DeployResponder` à tester en conditions réelles (pas juste unitairement)
+  - Trigger `sun` : confirmer en réel que `getHaConfig()` résout bien la position GPS réelle de
+    l'installation HA de l'utilisateur (pas juste le mécanisme de nouvel essai, jamais encore
+    observé réussir), puis créer UNE planification `sun` réelle avec l'utilisateur pour valider le
+    bout-en-bout (reconnaissance + `next_fire_at` calculé correctement) avant de considérer le
+    gabarit pleinement livré.
+- **Statut** : Moteur déterministe + cache/métriques + trigger `sun` livrés et vérifiés
+  (unitairement pour `sun` — `getHaConfig()` en conditions réelles et `si_alors`/planification via
+  `DeployResponder` restent à confirmer en conditions réelles avec l'utilisateur)
 - **Priorité** : Moyenne (le sous-ensemble déjà livré couvre déjà le cas d'usage le plus fréquent)
 
 ---

@@ -1,8 +1,17 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.11
+**Version :** 1.12
 **Date :** 26 Août 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.12** : **Gabarit `soleil`** (§16.4, lever/coucher du soleil, demande utilisateur — "utilisé
+> dans toutes les implémentations domotiques sauf chez moi") : composable avec les filtres de jours
+> existants (ex. "le week end une heure après le coucher du soleil ferme le volet"), calcul réel
+> côté `planificateur` via `suncalc` — pas juste `sun.sun` de HA, insuffisant pour une date future
+> arbitraire. Précédemment "hors périmètre" (v1.10-v1.11), plus maintenant. **Correctif jours
+> FR→EN** : les enums `jour`/`week_end`/`jours_ouvres` capturaient des valeurs françaises alors que
+> `scheduler.ts` (et Mistral) attendent des clés anglaises — un filtre de jour produit par
+> l'interpréteur ne matchait jamais rien avant ce correctif. Voir §16.4/§16.11 pour le détail.
 
 > **v1.11** : **Gabarits restants de l'interpréteur déterministe** (§16.4) — `entre`/`donne`/exclusion
 > `sauf`, fusion `jusqua`/`de` dans `a`, avec correctif d'un cas limite réel (exclusion vidant une
@@ -713,14 +722,38 @@ attributs YAML séparés du motif, pas encodés dedans.
 ne sont pas des phrases complètes indépendantes mais des **fragments de clause temporelle
 composables** (`attendre`, `dans`, `a` — fusionne `jusqua`/`de`, mêmes alternatives de surface
 "à"/"jusqu'à"/"au"/"jusqu'au" —, `pendant`, `touslesjours`, `touslesjourssemaine`, `leweekend`,
-`entre`), enchaînés par la boucle de phrase du moteur avant une clause terminale unique :
-`ordre_immediat` (on/off générique, avec exclusion `sauf <lieu>*` intégrée — pas un gabarit séparé,
-voir plus bas), `ordre_valeur` (ordre avec valeur), `donne` (interrogation), et le nouveau gabarit
-`si_alors` (§16.8). Sortie selon la clause terminale : `ExecuterActionParams`, JSON `DomoticNode`
-`planification` (fragments temporels, via le port de `num_convert_date_duration_time.js` —
-`entre <heure#from> et <heure#to>` produit un `trigger.type: 'window'`, déjà supporté par
+`entre`, `soleil` — lever/coucher du soleil, nouveau v1.12, voir plus bas), enchaînés par la boucle
+de phrase du moteur avant une clause terminale unique : `ordre_immediat` (on/off générique, avec
+exclusion `sauf <lieu>*` intégrée — pas un gabarit séparé, voir plus bas), `ordre_valeur` (ordre
+avec valeur), `donne` (interrogation), et le nouveau gabarit `si_alors` (§16.8). Sortie selon la
+clause terminale : `ExecuterActionParams`, JSON `DomoticNode` `planification` (fragments temporels,
+via le port de `num_convert_date_duration_time.js` — `entre <heure#from> et <heure#to>` produit un
+`trigger.type: 'window'`, `soleil` produit un `trigger.type: 'sun'`, tous deux déjà supportés par
 `scheduler.ts::triggerToMs` côté `planificateur`), résolution d'entités déjà existante côté `ia`
 (interrogation — voir §16.9 pour ce qui reste hors périmètre), ou `trigger.type: 'state_change'`.
+
+**Lever/coucher du soleil (`soleil`, nouveau v1.12)** — pattern
+`"(<duree#offset> <enum:avant_apres#direction>)? (au|a|à)? <enum:lever_coucher#sunevent>"`,
+composable comme les autres fragments temporels (ex. "le week end une heure après le coucher du
+soleil ferme le volet" combine `leweekend` + `soleil`). Le calcul réel de l'heure (pas juste sa
+reconnaissance) est fait côté `planificateur` via `suncalc` — voir sa spec, §"trigger.type='sun'" :
+**pas** une simple lecture de `sun.sun` de HA, qui ne donne que le PROCHAIN lever/coucher, insuffisant
+dès qu'un filtre de jours est combiné (calculer le coucher de samedi prochain quand on est dimanche
+demande une date arbitraire, pas "le prochain"). `offset_seconds` signé (négatif = avant, positif =
+après, 0 par défaut si aucun décalage n'est dit).
+
+**Correctif jours FR→EN (26/08/2026, trouvé en préparant `soleil`)** : les tables `<enum:jour>`/
+`<enum:week_end>`/`<enum:jours_ouvres>` de `vocabulaire.yaml` capturaient des valeurs **françaises**
+(`lundi`, `samedi`...), mais `scheduler.ts::triggerToMs` compare `trigger.days` à des clés
+**anglaises 3 lettres** (`mon`, `sat`...) dérivées de `Date.getDay()` — même convention que
+`regles_mistral.txt` instruit déjà Mistral d'utiliser. Résultat avant correctif : un filtre de jour
+produit par l'interpréteur (`touslesjourssemaine`/`leweekend`) ne matchait *jamais* aucun jour côté
+`planificateur` — filtre silencieusement inopérant. Un second bug lié (`touslesjours`,
+`<enum:jours_ouvres>` sans `#jours`) faisait que "tous les jours ouvrés à 8h" ne posait *aucun*
+filtre de jour du tout (capture sous la mauvaise clé). Les deux corrigés ensemble (seules les
+valeurs `valeur:` des enums changent, pas les `formes:` françaises reconnues en entrée) — vérifié
+qu'aucun code UI ne lisait `trigger.days`/`except_days` avant ce correctif (donc sans risque de
+régression d'affichage).
 
 **Exclusion de lieux (`sauf <lieu>*`)** — intégrée à `ordre_immediat`
 (`... <lieu#lieux>* (sauf <lieu#lieuxsauf>*)?`), pas un gabarit séparé comme envisagé initialement.
@@ -733,12 +766,12 @@ comme "aucun filtre" et cible alors *toute la maison* (comportement voulu quand 
 de la maison). Dans ce cas précis (liste non vide réduite à vide par l'exclusion), le gabarit échoue
 et la phrase retombe sur Mistral plutôt que de produire ce faux "partout".
 
-**Hors périmètre, vérifié et non supposé** : `levercouchersoleil`/`levercouchersoleil1` (déclencheurs
-relatifs au lever/coucher du soleil) et `delayrepeat` ("toutes les X", intervalle répétitif) restent
-non portés — `triggerSchema`/`scheduler.ts` côté `planificateur` n'ont ni champ pour une heure
-relative au soleil, ni mécanisme d'intervalle générique fonctionnel (`trigger.every` existe dans le
-schéma mais n'est lu nulle part dans `triggerToMs` — champ descriptif, pas exploité). Les implémenter
-demanderait d'étendre ce schéma côté `planificateur` d'abord, pas seulement d'ajouter un gabarit ici.
+**Reste hors périmètre, vérifié et non supposé** : `delayrepeat` ("toutes les X", intervalle
+répétitif) — `trigger.every` existe dans `triggerSchema` mais n'est lu nulle part dans
+`scheduler.ts::triggerToMs` (champ descriptif, pas exploité). L'implémenter demanderait de câbler un
+vrai mécanisme d'intervalle répétitif côté `planificateur` d'abord, pas seulement d'ajouter un
+gabarit ici (`levercouchersoleil`/`levercouchersoleil1` : voir ci-dessus, plus hors périmètre depuis
+v1.12).
 
 ### 16.5 Résolution lieux/quois/macros
 
@@ -857,11 +890,21 @@ pour objectiver le travail de fiabilisation en cours (§14).
 
 Moteur déterministe et cache/métriques validés en conditions réelles sur l'instance locale (voir
 plan de mise en œuvre pour le détail complet des vérifications effectuées, corpus de test dans
-`applications/ia/interpreter/tester.mjs`, 53 cas). `si_alors` et le chemin `DeployResponder`
-cache→interpréteur→Mistral restent validés uniquement par test unitaire/relecture de code — jamais
-testés en direct contre un vrai déclenchement planifié qui se déclenche pendant une session (pour ne
-pas créer d'automatisation réelle non surveillée) : à confirmer lors d'un prochain déclenchement
-observé en conditions réelles.
+`applications/ia/interpreter/tester.mjs`, 58 cas — 53 + 5 nouveaux cas `soleil`/correctif jours
+FR→EN en v1.12). `si_alors` et le chemin `DeployResponder` cache→interpréteur→Mistral restent
+validés uniquement par test unitaire/relecture de code — jamais testés en direct contre un vrai
+déclenchement planifié qui se déclenche pendant une session (pour ne pas créer d'automatisation
+réelle non surveillée) : à confirmer lors d'un prochain déclenchement observé en conditions réelles.
+
+Le gabarit `soleil` (v1.12) est validé end-to-end côté reconnaissance de phrase (corpus, y compris
+composé avec `leweekend`) ; côté calcul réel de l'heure (`trigger.type='sun'`, `suncalc`), voir
+`fonctionnelles-planificateur_specs` — validé par test unitaire déterministe (marche jour-par-jour,
+offset, filtre de jours) et sanity-check contre `suncalc` réel (position Paris connue), mais le
+round-trip complet `HaBridgeClient.getHaConfig()` → position GPS réelle de l'installation HA de
+l'utilisateur n'a pas encore été confirmé en conditions réelles (redémarrage local effectué,
+`getHaConfig()` a échoué une fois sur la course démarrage/authentification WS déjà connue —
+mécanisme de nouvel essai ajouté, pas encore re-déclenché en réel faute d'un trigger `sun` existant
+à ce jour).
 
 ## 17. Limitations connues / décisions
 
@@ -885,6 +928,7 @@ observé en conditions réelles.
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.12 | 26/08/2026 | Claude | **Gabarit `soleil`** (§16.4, lever/coucher du soleil, demande utilisateur — "utilisé dans toutes les implémentations domotiques sauf chez moi") : pattern `"(<duree#offset> <enum:avant_apres#direction>)? (au|a|à)? <enum:lever_coucher#sunevent>"`, composable avec les fragments de jours existants (`leweekend`, `touslesjours`...). Produit `trigger.type: 'sun'`, calculé réellement côté `planificateur` via `suncalc` (voir sa spec) — pas une lecture de `sun.sun` de HA, qui ne donne que le PROCHAIN lever/coucher, insuffisant combiné à un filtre de jours (ex. "tous les week-ends" — calculer le coucher de samedi prochain depuis un dimanche demande une date arbitraire). Précédemment listé "hors périmètre" (v1.10/v1.11), l'utilisateur avait déjà résolu ce même problème dans son ancien système via la même bibliothèque (`suncalc`, retrouvé dans `zdidnodedomoutil/heurelevercouchersoleil.js`). **Correctif jours FR→EN trouvé en préparant ce gabarit** : les enums `jour`/`week_end`/`jours_ouvres` de `vocabulaire.yaml` capturaient des valeurs françaises (`lundi`, `samedi`...) alors que `scheduler.ts::triggerToMs` (et `regles_mistral.txt`, déjà) attendent des clés anglaises 3 lettres (`mon`, `sat`...) — un filtre de jour produit par l'interpréteur ne matchait *jamais* aucun jour côté `planificateur` avant ce correctif (silencieusement inopérant, pas d'erreur visible). Second bug lié corrigé au passage : `touslesjours`+`jours_ouvres` ne posait aucun filtre du tout (capture sous la mauvaise clé, `#jours` manquant). Corpus de test étendu à 58 cas. Toutes demandes utilisateur, session du 26/08/2026. Ancienne version v1.11 archivée. |
 | 1.11 | 26/08/2026 | Claude | **Gabarits restants de l'interpréteur déterministe** (§16.4) : fusion `jusqua`/`de` dans `a`, `entre` (fenêtre, `trigger.type: 'window'`), `donne` (interrogation, routée vers la résolution d'entités existante), exclusion `sauf <lieu>*` intégrée à `ordre_immediat` — avec correctif d'un cas limite réel trouvé en test (exclusion qui vide une liste de lieux explicitement nommés visait par erreur toute la maison, `HaStructureRegistry.getEntitiesByQuoiAndLieux([])` traitant un tableau vide comme "aucun filtre"). `levercouchersoleil`/`delayrepeat` confirmés hors périmètre (schéma `planificateur` à étendre d'abord). **Cache des 100 dernières phrases + comptabilisation cache/interpréteur/Mistral** (§16.10, nouveau) : `PhraseCache`/`InterpreterMetrics` partagés entre `IaService` et `DeployResponder`, gel pendant un échange d'assistance Mistral en cours (`isFreshExchange()`). Corpus de test étendu à 53 cas. |
 | 1.10 | 26/08/2026 | Claude | **Interpréteur déterministe français** (§16, nouveau) : reprise de la logique de l'ancien moteur `zdidnodedomotext` (`interpretetext.js`/`modelesv2.js`/`num_convert_date_duration_time.js`), réécrite en TypeScript, corrigée du bug de découpage de phrases (`.replace(/(\D)\.(\D)/g,...)`, coupait mal les phrases se terminant par un nombre entier — vérifié empiriquement), et convergeant vers les structures déjà produites par Mistral (`ExecuterActionParams`/`PlanificationDefinition`/`MacroDefinition`) plutôt qu'un nouveau format. Pré-filtre dans `IaService.handleChat()` avant `runChatRounds()` : reconnaissance confiante → exécution directe (`ToolExecutor.executeDirect()`, nouveau) sans aller-retour Mistral ; sinon repli intégral inchangé. Vocabulaire/gabarits en YAML éditables à chaud (`data/ia/vocabulaire_interpreteur.yaml`/`gabarits_interpreteur.yaml`, même convention que `regles_mistral.txt`). Nouveau gabarit événementiel `si_alors` (absent du legacy, cible `trigger.type: 'state_change'` déjà géré par `planificateur`). Toutes demandes/décisions utilisateur, session du 26/08/2026 — voir le plan de mise en œuvre associé pour le détail complet des vérifications (bug de découpage confirmé en direct via `node`, `getLieuCatalog()`/`getEntitiesByQuoiAndLieux()` relus pour fonder les défauts §16.6, etc.). |
 | 1.9 | 12/08/2026 | Claude | **Comparatif multi-modèles** (§14, nouveau) : jusqu'à 4 modèles (Mistral Small/Medium, Claude Haiku/Sonnet via la couche de compatibilité OpenAI d'Anthropic, §14.2/§3) interrogés en parallèle sur la même phrase, toujours en dry-run strict (§14.3) — jamais de transmission à `planificateur`, quel que soit le fournisseur actif. **Vérification post-décision des références quoi/lieux/entity_id** (§8.2, nouveau `referenceValidator.ts`) : tout JSON structuré (planification/macro/condition/sequence/execution), plus les étapes produites par `DeployResponder` (§10) — "d'où qu'il vienne", demande utilisateur explicite — est désormais vérifié contre `HaStructureRegistry` avant transmission ; référence invalide → relance forcée (une seule fois, drapeau `verificationRetried`, renommé depuis `quoiIntrouvableRetried`) puis refus explicite avec demande de correction si le problème persiste. Gap corrigé en cours de route : la vérification ne couvrait initialement pas `executer_action` en dry-run (`ToolExecutor` répondait toujours "succès" sans vérifier) — trouvé en dépouillant l'étude ci-dessous. Bug annexe corrigé : `tool_choice="any"` (convention Mistral) traduit en `'required'` pour Anthropic, qui rejetait la valeur Mistral avec un 400. **Étude comparative du 12/08/2026 sur 30 cas** (§14.6, commandes et résultats détaillés) : Mistral Small confirmé comme fournisseur actif (§12) — meilleur rapport latence (~4,6s vs ~9-16s)/coût (0,97€ vs 6$ sur ~3 jours)/fiabilité pour l'usage domotique réel ; Claude conservé comme outil de vérification ponctuelle via le comparatif. Toutes demandes utilisateur, session du 11-12/08/2026. |

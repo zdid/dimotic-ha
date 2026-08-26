@@ -1,8 +1,16 @@
 # Spécifications Fonctionnelles — Application PLANIFICATEUR
 
-**Version :** 1.9
+**Version :** 1.10
 **Date :** 26 Août 2026
 **Statut :** Document de référence pour l'application `applications/planificateur`
+
+> **v1.10** : **Nouveau déclencheur `sun`** (§3.1bis, lever/coucher du soleil, demande utilisateur)
+> — calcul réel via `suncalc` (position GPS de HA elle-même, `HaBridgeClient.getHaConfig()`
+> nouveau), pas juste `sun.sun` de HA (insuffisant combiné à un filtre de jours). Offset signé,
+> réutilise `days`/`except_days` du trigger `recurrence`. `scheduler.ts` reste pur : position
+> injectée via un paramètre synchrone (`sun-times.ts`), résolue une fois en amont. Voir §3.1bis pour
+> le détail complet (course démarrage/authentification WS rencontrée et corrigée par nouvel essai
+> automatique).
 
 > **v1.9** : **Correctif §5.1 — un trigger récurrent manqué au-delà de la fenêtre de rattrapage
 > n'était jamais reprogrammé.** Bug réel signalé par l'utilisateur : "éteindre toutes les
@@ -109,6 +117,7 @@ d'identifiant pour les opérations de gestion (§4).
 | `recurrence_complex` | "le dernier jour du mois", "premier lundi" | Récurrent, motif calculé |
 | `window` | "de 18h à 22h" | Plage active |
 | `duration` | "pendant 10 minutes" | Génère automatiquement une action de fin |
+| `sun` | "au coucher du soleil", "1h après le lever" | Récurrent, heure recalculée chaque jour (§3.1bis) |
 
 `{type:"delay", seconds:0}` sert aussi à représenter une **exécution immédiate et non répétitive** —
 notamment celle d'un appel d'outil `executer_action` résolu en direct (§6) : aucun nouveau type de
@@ -126,6 +135,51 @@ structuré au moment de la création (§4) — recalculer une date/heure est une
 du périmètre du langage naturel, pour laquelle un calcul de code est strictement plus fiable, plus
 rapide, et sans risque d'erreur arithmétique qu'une nouvelle interrogation de l'IA à chaque
 occurrence.
+
+### 3.1bis Déclencheur solaire — `sun` (nouveau v1.10)
+
+Lever/coucher du soleil, avec décalage optionnel ("1h après le coucher", "30 minutes avant le
+lever") et filtre de jours réutilisant `days`/`except_days` (§3.1) tel quel — ex. "tous les
+week-ends, 1h après le coucher du soleil, ferme tous les volets".
+
+| Champ | Rôle |
+|-------|------|
+| `sun_event` | `'lever'` ou `'coucher'`. |
+| `offset_seconds` | Décalage signé (négatif = avant, positif = après), 0 par défaut. |
+| `days` / `except_days` | Identiques au trigger `recurrence` (§3.1) — mêmes clés anglaises 3 lettres. |
+
+**Pourquoi un vrai calcul astronomique, pas juste `sun.sun` de HA** : l'entité native `sun.sun`
+(`next_rising`/`next_setting`) ne donne que le **prochain** lever/coucher, jamais celui d'une date
+future arbitraire — insuffisant dès qu'un filtre de jours restrictif est en jeu (calculer le coucher
+de samedi prochain quand on est dimanche demande le coucher d'UNE date précise dans 6 jours, pas
+"le prochain"). `scheduler.ts::triggerToMs` (case `'sun'`) calcule donc via `suncalc`
+(`suncalc.getTimes(date, lat, lng)`), pour chaque jour candidat de la marche jour-par-jour (même
+mécanique que le case `'recurrence'`, §3.1), jusqu'à trouver le premier jour autorisé par
+`days`/`except_days` dont l'heure obtenue (+`offset_seconds`) tombe dans le futur.
+
+**Position GPS** : celle de l'installation HA elle-même (`hass.config.latitude`/`longitude`), lue
+une fois via `HaBridgeClient.getHaConfig()` (nouveau — `HaWsClient.getHaConfig()` → `getConfig()` de
+`home-assistant-js-websocket`, un helper haut niveau de la bibliothèque, pas un échappatoire bas
+niveau) et mise en cache indéfiniment (`sun-times.ts::createSunTimesProvider`) — ne change jamais en
+pratique, pas besoin de la ressaisir en configuration. Nouvelle tentative automatique tant que non
+résolue (course possible entre le démarrage de `planificateur` et l'authentification WS de `core`,
+vérifiée en conditions réelles le 26/08/2026 — `Cannot get config: not authenticated`, transitoire,
+identique à celle déjà rencontrée pour l'exécution directe de commandes).
+
+**`scheduler.ts` reste pur/synchrone** (invariant du fichier, voir son en-tête) : `triggerToMs()`
+reçoit la position déjà résolue via un paramètre `getSunTimes` (fonction synchrone injectée par
+`SchedulerRuntime`/`PlanificateurService`), jamais d'appel réseau à l'intérieur du calcul lui-même.
+
+**Ancrage midi local pour `suncalc`** : `suncalc` calcule en UTC ; ancrer la date d'entrée sur midi
+local (`setHours(12,0,0,0)`) avant l'appel évite qu'un jour civil local proche de minuit ne se
+décale vers la veille/le lendemain une fois converti en UTC — robuste pour n'importe quel fuseau
+réel (±12h reste dans le même jour calendaire UTC). Reprend le même besoin déjà identifié dans
+l'ancien système de l'utilisateur (`suncalc` déjà utilisé là, avec une ancre à 3h — spécifique à un
+fuseau proche de la France, pas généralisable).
+
+`isRecurring()` inclut `'sun'` — mêmes garanties de reprise après coupure que `recurrence`/`window`
+(§5.1) : un trigger `sun` manqué au-delà de la fenêtre de rattrapage est reprogrammé, pas
+abandonné silencieusement.
 
 ### 3.2 Déclencheur réactif — `state_change`
 
@@ -428,6 +482,7 @@ dashboard déjà ouvert jusqu'à un rafraîchissement manuel.
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.10 | 26/08/2026 | Claude | **Nouveau déclencheur `sun`** (§3.1bis) : lever/coucher du soleil, offset signé optionnel, réutilise `days`/`except_days` du trigger `recurrence`. Calcul réel via `suncalc` (nouvelle dépendance) plutôt qu'une lecture de `sun.sun` de HA — celui-ci ne donne que le PROCHAIN lever/coucher, insuffisant combiné à un filtre de jours restrictif (ex. "tous les week-ends" : calculer le coucher de samedi prochain depuis un dimanche demande une date arbitraire). Position GPS lue une fois via nouveau `HaBridgeClient.getHaConfig()` (`HaWsClient.getHaConfig()` → `getConfig()` de `home-assistant-js-websocket`, déjà un helper haut niveau de la bibliothèque) et mise en cache indéfiniment ; `scheduler.ts` reste pur/synchrone (position déjà résolue injectée en paramètre, jamais d'appel réseau dans `triggerToMs()`). `isRecurring()` inclut `'sun'` — mêmes garanties de reprise après coupure que les autres déclencheurs récurrents (§5.1). Demande utilisateur explicite ("le lever et le coucher de soleil sont utilisés dans toutes les implémentations de ma domotique, sauf chez moi") — reprend le calcul déjà résolu par l'utilisateur dans son ancien système (même bibliothèque `suncalc`, retrouvée dans `zdidnodedomoutil/heurelevercouchersoleil.js`). Voir aussi `fonctionnelles-ia_specs_v1.12.md` §16.4 pour le gabarit d'interprétation correspondant. Validé par test unitaire déterministe (marche jour-par-jour, offset, filtre de jours, 9 cas) et sanity-check `suncalc` réel (Paris) ; le round-trip `getHaConfig()` → position GPS réelle pas encore confirmé en conditions réelles (redémarrage local effectué, a rencontré une fois la course démarrage/authentification WS déjà connue côté `ExecutionEngine` — mécanisme de nouvel essai automatique ajouté en conséquence). Session du 26/08/2026. Ancienne version v1.9 archivée. |
 | 1.9 | 26/08/2026 | Claude | **Correctif §5.1** : un trigger récurrent manqué au-delà de la fenêtre de rattrapage (`catchUpWindowSeconds`) n'était jamais reprogrammé — `resumeOrSchedule()` marquait `missed: true` mais seul le cas non récurrent poursuivait le cycle (`completed_at`), un récurrent manqué restait actif sans minuteur indéfiniment. Corrigé : reprogrammation immédiate pour la prochaine occurrence dans ce cas (`schedulerRuntime.schedule()`, `next_fire_at` recalculé depuis maintenant). Bug réel signalé par l'utilisateur ("éteindre toutes les lumières tous les jours à 2h30", plus jamais déclenchée après un arrêt de service au moment précis du tir), vérifié corrigé en conditions réelles sur la planification concernée (`handler.ts:150-165`, commit `17a9069`). |
 | 1.7 | 11/08/2026 | Claude | **Écran principal en liste numérotée** (§11) : indicateur actif/inactif, nom facultatif, phrase, prochaine exécution ; journaux existants déplacés en onglet séparé ; boîte de dialogue de création (phrase soumise à `ia` pour validation). **Identifiant numérique stable** `id` (§2), résolution par numéro en plus du nom pour les opérations de gestion (§4, `CommandHandler.resolvePlan()`). **Résolution de `lieux` déléguée au graphe de lieux centralisé** de `HaStructureRegistry` (§7, voir `techniques-socle-ha-mqtt_specs` §8.3.2) — généralise le repli `lieu_precis` v1.6 aux phrases composées et aux lieux qualifiés par étage, `entities_snapshot` enrichi de `lieu_pere` (§6/§7) en plus de `lieu_precis`. **Mise à jour live des dashboards** après une planification créée/gérée par conversation (§11), manque constaté en testant la nouvelle boîte de dialogue. Toutes demandes utilisateur, session du 10-11/08/2026. |
 | 1.6 | 10/08/2026 | Claude | **Résolution de `lieux` sur le lieu précis en repli de l'area HA** (§7, corrige "éteins le salon" ciblant toute la salle), `entities_snapshot` enrichi de `lieu_precis` (§6). **Deux journaux sur le tableau de bord** (§8) : actions reçues de `ia`, détail des commandes envoyées à HA (issue réelle, entité déclenchante, prochaine exécution). Toutes demandes utilisateur, session du 10/08/2026. |
