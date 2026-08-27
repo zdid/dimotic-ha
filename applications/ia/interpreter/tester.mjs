@@ -37,7 +37,7 @@ const gabarits = loadGabarits(path.join(HERE, 'gabarits.yaml'));
 const live = {
   lieux: [
     'Salon', 'Cuisine', 'Chambre', "Chambre d'ami", 'Salle de bain', 'Salle', 'Bureau',
-    'Vitrine', 'Plan de travail', 'Garage', 'Jardin', 'Couloir',
+    'Vitrine', 'Plan de travail', 'Garage', 'Jardin', 'Couloir', 'Buanderie',
     // ⭐ En réel, getLieuCatalog() aplatit AUSSI les lieu_precis en entrées autonomes (pas
     // seulement via les paires composées ci-dessous) — un lieu_precis reste utilisable seul
     // ("le chevet droit", ambigu s'il y en a plusieurs, mais reconnu) : reproduit ici pour que le
@@ -49,9 +49,12 @@ const live = {
     { lieuPrecis: 'Chevet droit', lieu: 'Chambre' },
     { lieuPrecis: 'Plafonnier', lieu: 'Salon' }
   ],
-  quois: ['lumiere', 'volet', 'radiateur', 'thermostat', 'ventilateur', 'prise', 'chauffage'],
+  quois: ['lumiere', 'volet', 'radiateur', 'thermostat', 'ventilateur', 'prise', 'chauffage', 'poele'],
   macros: ['scene cinema', 'bonne nuit', 'je pars'],
-  lieuOrigine: undefined
+  lieuOrigine: undefined,
+  // §16.6bis (27/08/2026) : "poele" n'existe qu'à un seul endroit (Buanderie) dans ce catalogue
+  // fictif -> doit être ajouté automatiquement si la phrase ne dit aucun lieu.
+  quoiUniqueLieu: { poele: 'Buanderie' }
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -72,6 +75,7 @@ const CORPUS = [
   { phrase: 'allume tout', attendu: true, note: '"tout" -> lieux=["tous"]' },
   { phrase: 'allume le chevet gauche de la chambre', attendu: true, note: 'lieu composé' },
   { phrase: 'allume le chevet droit', attendu: true, note: 'lieu composé, forme courte (sans "de la chambre")' },
+  { phrase: 'allume le poele', attendu: true, note: '§16.6bis (27/08/2026) : quoi sans lieu, "poele" n\'existe qu\'en Buanderie -> vérifier RÉSULTAT: lieux:["Buanderie"]' },
 
   // --- Ordres avec valeur -------------------------------------------------------------------
   { section: 'Ordres avec valeur', phrase: 'règle le thermostat du salon à vingt', attendu: true },

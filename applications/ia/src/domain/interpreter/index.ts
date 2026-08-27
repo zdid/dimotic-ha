@@ -27,6 +27,12 @@ export interface LiveCatalogs {
   /** Défaut de lieu si la phrase n'en capture aucun (§16.6) — `undefined` tant que la source réelle
    *  (device_id du satellite déclencheur) n'est pas branchée. */
   lieuOrigine?: string;
+  /** quoi (label affichage) -> lieu unique où il existe dans toute la maison (§16.6bis, demande
+   *  utilisateur 27/08/2026) — présent seulement quand ce quoi n'a qu'un seul lieu_principal
+   *  distinct (deux entités dans le MÊME lieu, à des lieu_precis différents, comptent pour un seul).
+   *  Prioritaire sur `lieuOrigine` : signal plus spécifique ("il n'existe qu'un seul poêle dans
+   *  toute la maison") qu'un défaut générique basé sur l'origine du micro. */
+  quoiUniqueLieu: Record<string, string>;
 }
 
 export type DeterministicOutcome =
@@ -81,7 +87,19 @@ function buildContext(vocabulaire: Vocabulaire, gabarits: Record<string, Gabarit
   };
 }
 
-function buildActionParams(captures: CaptureMap, def: GabaritDef, lieuOrigine: string | undefined, allLieux: string[]): ExecuterActionParams | undefined {
+/** §16.6bis (27/08/2026) : le lieu unique d'un quoi ("il n'existe qu'un seul poêle dans toute la
+ *  maison") l'emporte sur le défaut générique lieuOrigine — signal plus spécifique. */
+function resolveDefaultLieu(quoi: string, lieuOrigine: string | undefined, quoiUniqueLieu: Record<string, string>): string | undefined {
+  return quoiUniqueLieu[quoi] ?? lieuOrigine;
+}
+
+function buildActionParams(
+  captures: CaptureMap,
+  def: GabaritDef,
+  lieuOrigine: string | undefined,
+  allLieux: string[],
+  quoiUniqueLieu: Record<string, string>
+): ExecuterActionParams | undefined {
   const flat = flattenCaptures(captures);
   const quoi = (flat.quoi as string | undefined) ?? (def.defaults?.quoi as string | undefined) ?? '';
   let lieux = (flat.lieux as string[] | undefined) ?? [];
@@ -99,7 +117,10 @@ function buildActionParams(captures: CaptureMap, def: GabaritDef, lieuOrigine: s
     // maison au lieu de rien. Repli Mistral plutôt que ce faux "partout".
     if (lieuxAvantExclusion > 0 && lieux.length === 0) return undefined;
   }
-  if (lieux.length === 0 && lieuOrigine) lieux = [lieuOrigine];
+  if (lieux.length === 0) {
+    const defaut = resolveDefaultLieu(quoi, lieuOrigine, quoiUniqueLieu);
+    if (defaut) lieux = [defaut];
+  }
   return {
     verbe: (flat.verbe as string) ?? '',
     quoi,
@@ -172,7 +193,14 @@ interface Utterance {
   next: number;
 }
 
-function matchUtterance(mots: Token[], startPos: number, ctx: MatchContext, lieuOrigine: string | undefined, allLieux: string[]): Utterance | undefined {
+function matchUtterance(
+  mots: Token[],
+  startPos: number,
+  ctx: MatchContext,
+  lieuOrigine: string | undefined,
+  allLieux: string[],
+  quoiUniqueLieu: Record<string, string>
+): Utterance | undefined {
   let pos = startPos;
   let planifCaptures: CaptureMap = {};
   let matchedAnyFragment = false;
@@ -197,10 +225,16 @@ function matchUtterance(mots: Token[], startPos: number, ctx: MatchContext, lieu
   const evenement = matchGabarit('si_alors', mots, pos, ctx);
   if (evenement) {
     const flat = flattenCaptures(evenement.captures);
+    const actionQuoi = (flat.quoi as string | undefined) ?? 'lumiere';
+    let actionLieux = (flat.lieux as string[] | undefined) ?? [];
+    if (actionLieux.length === 0) {
+      const defaut = resolveDefaultLieu(actionQuoi, lieuOrigine, quoiUniqueLieu);
+      if (defaut) actionLieux = [defaut];
+    }
     const action: ExecuterActionParams = {
       verbe: (flat.verbe as string) ?? '',
-      quoi: (flat.quoi as string | undefined) ?? 'lumiere',
-      lieux: (flat.lieux as string[] | undefined) ?? [],
+      quoi: actionQuoi,
+      lieux: actionLieux,
       valeur: flat.valeur as string | number | undefined
     };
     return {
@@ -219,7 +253,7 @@ function matchUtterance(mots: Token[], startPos: number, ctx: MatchContext, lieu
     const r = matchGabarit(name, mots, pos, ctx);
     if (!r) continue;
     const def = ctx.gabarits[name];
-    const params = buildActionParams(r.captures, def, lieuOrigine, allLieux);
+    const params = buildActionParams(r.captures, def, lieuOrigine, allLieux, quoiUniqueLieu);
     if (!params) return undefined; // exclusion sauf a tout exclu — voir buildActionParams
     if (matchedAnyFragment) {
       const structured = buildPlanificationJson(planifCaptures, params);
@@ -257,7 +291,13 @@ function matchUtterance(mots: Token[], startPos: number, ctx: MatchContext, lieu
   return undefined;
 }
 
-function interpretPhrase(mots: Token[], ctx: MatchContext, lieuOrigine: string | undefined, allLieux: string[]): RawOutcome[] | undefined {
+function interpretPhrase(
+  mots: Token[],
+  ctx: MatchContext,
+  lieuOrigine: string | undefined,
+  allLieux: string[],
+  quoiUniqueLieu: Record<string, string>
+): RawOutcome[] | undefined {
   if (mots.length === 0) return undefined;
 
   const macro = matchMacro(mots, 0, ctx);
@@ -268,7 +308,7 @@ function interpretPhrase(mots: Token[], ctx: MatchContext, lieuOrigine: string |
   const outcomes: RawOutcome[] = [];
   let cursor = 0;
   while (cursor < mots.length) {
-    const utterance = matchUtterance(mots, cursor, ctx, lieuOrigine, allLieux);
+    const utterance = matchUtterance(mots, cursor, ctx, lieuOrigine, allLieux, quoiUniqueLieu);
     if (!utterance) return undefined;
     outcomes.push(utterance.outcome);
     cursor = utterance.next;
@@ -314,7 +354,7 @@ export function interpretDeterministic(text: string, vocabulaire: Vocabulaire, g
   const outcomes: RawOutcome[] = [];
   for (const phrase of phrases) {
     const mots = tokenize(phrase);
-    const phraseOutcomes = interpretPhrase(mots, ctx, live.lieuOrigine, live.lieux);
+    const phraseOutcomes = interpretPhrase(mots, ctx, live.lieuOrigine, live.lieux, live.quoiUniqueLieu);
     if (!phraseOutcomes) return undefined;
     outcomes.push(...phraseOutcomes);
   }
