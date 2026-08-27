@@ -44,17 +44,15 @@ export class ModuleManager {
       window.dispatchEvent(new CustomEvent('modules:loaded', {
         detail: { modules: this.modules }
       }));
-      
-      // Définir le premier module comme actif par défaut (sauf core, qui est géré par ConfigForm)
-      if (this.modules.length > 0 && !this.activeModule) {
-        const firstNonCoreModule = this.modules.find(m => m.id !== 'core');
-        if (firstNonCoreModule) {
-          this.setActiveModule(firstNonCoreModule.id);
-        } else if (this.modules[0].id !== 'core') {
-          this.setActiveModule(this.modules[0].id);
-        }
-        // Si seul core existe, ne pas l'activer (pas de présentation à charger)
-      }
+
+      // ⭐ 27/08/2026 : la sélection du module actif par défaut vit maintenant exclusivement dans
+      // Sidebar.ts/ModuleContainer.ts (page d'accueil par défaut, voir HomeView.ts) — ce bloc
+      // dupliquait la même décision ("premier module non-core") et dispatchait `module:activated`
+      // juste après `modules:loaded`, écrasant systématiquement le choix "accueil" des deux autres
+      // écouteurs (bug réel constaté en test : atterrissait sur arbreouquoi malgré "accueil" fixé
+      // ailleurs). `setActiveModule` ci-dessous exige de toute façon un module CONNU dans
+      // `this.modules` pour dispatcher quoi que ce soit — 'accueil' n'en fait pas partie — donc ce
+      // bloc n'a plus de rôle à jouer ici, supprimé plutôt que rendu incohérent.
     });
     
     // Configuration d'un module — app:modules:config:get est redemandé à la fois par

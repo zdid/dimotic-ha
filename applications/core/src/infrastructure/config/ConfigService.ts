@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import { AppConfig, HaConfig, MqttConfig, WebConfig, LoggingConfig, DeploymentTargetConfig, HaStackTargetConfig, Zigbee2mqttTargetConfig } from './schema';
+import { AppConfig, HaConfig, MqttConfig, WebConfig, LoggingConfig, DeploymentTargetConfig, HaStackTargetConfig, Zigbee2mqttTargetConfig, ExternalSiteConfig } from './schema';
 import { ConfigLoader } from './loader';
 import { ConfigWriter, SaveResult } from './writer';
 import type { Logger } from '../logger/index';
@@ -104,6 +104,11 @@ export class ConfigService {
       disabledApps: this.config.disabledApps,
       targets: this.config.targets,
       haStackTargets: this.config.haStackTargets,
+      // ⭐ 27/08/2026 : zigbee2mqttTargets/externalSites manquaient ici (même classe de bug que
+      // l'incident disabledApps du 07/08/2026 — un champ ajouté après coup à une liste de
+      // narrowing existante, oublié) — corrigé en même temps que l'ajout d'externalSites.
+      zigbee2mqttTargets: this.config.zigbee2mqttTargets,
+      externalSites: this.config.externalSites,
     } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
@@ -171,6 +176,10 @@ export class ConfigService {
       disabledApps: this.config.disabledApps,
       targets: this.config.targets,
       haStackTargets: this.config.haStackTargets,
+      // ⭐ 27/08/2026 : voir clearHaWsToken() — même correctif (zigbee2mqttTargets/externalSites
+      // manquaient ici aussi).
+      zigbee2mqttTargets: this.config.zigbee2mqttTargets,
+      externalSites: this.config.externalSites,
     } as AppConfig;
     const result = this.writer.save(socleConfig);
     console.log('[ConfigService SERVEUR] Résultat sauvegarde:', result);
@@ -219,7 +228,7 @@ export class ConfigService {
    * transitent jamais par ce chemin, chacune a son propre fichier (saveModuleConfig).
    */
   setDisabledApps(disabledApps: string[]): SaveResult {
-    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps, targets: this.config.targets, haStackTargets: this.config.haStackTargets } as AppConfig;
+    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps, targets: this.config.targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets, externalSites: this.config.externalSites } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
       this.config = { ...this.config, disabledApps };
@@ -241,7 +250,7 @@ export class ConfigService {
    * depuis un payload client partiel).
    */
   setTargets(targets: DeploymentTargetConfig[]): SaveResult {
-    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets } as AppConfig;
+    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets, externalSites: this.config.externalSites } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
       this.config = { ...this.config, targets };
@@ -261,7 +270,7 @@ export class ConfigService {
    * Sauvegarde la liste des cibles HA+Mosquitto, même narrowing défensif que setTargets().
    */
   setHaStackTargets(haStackTargets: HaStackTargetConfig[]): SaveResult {
-    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets } as AppConfig;
+    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets, externalSites: this.config.externalSites } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
       this.config = { ...this.config, haStackTargets };
@@ -281,10 +290,30 @@ export class ConfigService {
    * Sauvegarde la liste des cibles zigbee2mqtt, même narrowing défensif que setTargets().
    */
   setZigbee2mqttTargets(zigbee2mqttTargets: Zigbee2mqttTargetConfig[]): SaveResult {
-    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets } as AppConfig;
+    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets, externalSites: this.config.externalSites } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
       this.config = { ...this.config, zigbee2mqttTargets };
+    }
+    return result;
+  }
+
+  /**
+   * Retourne la liste personnelle de sites externes (⭐ 27/08/2026) — jamais gossipée, voir
+   * externalSiteSchema.
+   */
+  getExternalSites(): ExternalSiteConfig[] {
+    return this.config.externalSites ? [...this.config.externalSites] : [];
+  }
+
+  /**
+   * Sauvegarde la liste des sites externes, même narrowing défensif que setZigbee2mqttTargets().
+   */
+  setExternalSites(externalSites: ExternalSiteConfig[]): SaveResult {
+    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets, externalSites } as AppConfig;
+    const result = this.writer.save(socleConfig);
+    if (result.success) {
+      this.config = { ...this.config, externalSites };
     }
     return result;
   }

@@ -285,6 +285,15 @@ export class SocketBridge {
     });
 
     // ======================================================================
+    // SITES EXTERNES (⭐ 27/08/2026)
+    // ======================================================================
+
+    this.eventBus.on('core:external-sites:list', (data: { sites: { id: string; label: string; dimoticUrl: string }[] }) => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: core:external-sites:list');
+      this.broadcast('core:external-sites:list', data);
+    });
+
+    // ======================================================================
     // DÉPLOIEMENT DE DIMOTIC-HA LUI-MÊME (⭐ 23/08/2026)
     // ======================================================================
 
@@ -472,6 +481,28 @@ export class SocketBridge {
       socket.on('app:restart', () => {
         this.logger.info('SocketBridge', `Socket.io → EventBus: app:restart de ${socket.id}`);
         this.eventBus.emit('app:restart:requested', undefined as void);
+      });
+
+      // ===========================================================================
+      // SITES EXTERNES (⭐ 27/08/2026)
+      // ===========================================================================
+
+      // @ts-ignore
+      socket.on('core:external-sites:get', () => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:external-sites:get de ${socket.id}`);
+        this.eventBus.emit('core:external-sites:get', undefined as void);
+      });
+
+      // @ts-ignore
+      socket.on('core:external-site:save', (data: unknown) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:external-site:save de ${socket.id}`);
+        this.eventBus.emit('core:external-site:save', data);
+      });
+
+      // @ts-ignore
+      socket.on('core:external-site:delete', (data: { id: string }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:external-site:delete de ${socket.id}, id: ${data.id}`);
+        this.eventBus.emit('core:external-site:delete', data);
       });
 
       // ===========================================================================

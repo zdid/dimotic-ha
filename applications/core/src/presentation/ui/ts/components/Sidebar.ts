@@ -414,15 +414,18 @@ export class Sidebar extends HTMLElement {
     // Écouter les modules chargés
     window.addEventListener('modules:loaded', (e: any) => {
       this.modules = e.detail.modules;
+      // ⭐ 27/08/2026 — page d'accueil par défaut (remplace l'ancien auto-sélection du premier
+      // module métier), même règle que ModuleContainer.ts : rien à activer si aucune application
+      // ne tourne (core seul).
       if (this.modules.length > 0 && !this.activeModule) {
-        // Ne pas activer core automatiquement (géré par ConfigForm)
-        const firstNonCoreModule = this.modules.find(m => m.id !== 'core');
-        if (firstNonCoreModule) {
-          this.setActiveModule(firstNonCoreModule.id);
-        } else if (this.modules[0].id !== 'core') {
-          this.setActiveModule(this.modules[0].id);
+        const hasNonCoreModule = this.modules.some(m => m.id !== 'core');
+        if (hasNonCoreModule) {
+          // setActiveModuleAndShow (pas juste setActiveModule) : révèle aussi #modules-container
+          // (masqué par défaut, style.display:none dans index.html) — sans ça, le contenu de la
+          // page d'accueil est bien construit dans le Shadow DOM de ModuleContainer mais reste
+          // invisible, aucun autre code ne le révèle sur ce chemin de sélection automatique.
+          this.setActiveModuleAndShow('accueil');
         }
-        // Si seul core existe, ne pas l'activer automatiquement
       }
       this.render();
     });
@@ -601,6 +604,13 @@ export class Sidebar extends HTMLElement {
       'post-install': 'section-post-install'
     };
     
+    // Page d'accueil (⭐ 27/08/2026, voir HomeView.ts) — même reveal que les modules dynamiques
+    // ci-dessous, 'accueil' n'étant pas dans this.modules.
+    if (sectionId === 'accueil') {
+      this.setActiveModuleAndShow('accueil');
+      return;
+    }
+
     // Pour les applications dynamiques (app-nom)
     if (sectionId.startsWith('app-')) {
       // Pour les applications, on pourrait afficher une section dédiée
@@ -655,8 +665,20 @@ export class Sidebar extends HTMLElement {
     const displayModules = this.modules.filter(m => m.id !== 'core');
     
     console.log('[Sidebar] renderModules - Modules à afficher:', displayModules.map(m => `${m.id}(${m.name})`));
-    
-    container.innerHTML = displayModules.map(module => `
+
+    // ⭐ 27/08/2026 — entrée "Accueil" épinglée en tête (page d'accueil, voir HomeView.ts) : pas un
+    // vrai module (aucune entrée dans this.modules), toujours affichée dès qu'au moins une
+    // application non-core tourne, même condition que le choix de module actif par défaut.
+    const accueilItem = displayModules.length > 0 ? `
+      <li class="nav-item ${this.activeModule === 'accueil' ? 'nav-item-active' : ''}">
+        <a href="#accueil" class="nav-link" data-module-id="accueil">
+          <span class="nav-icon">🏠</span>
+          <span class="nav-label">Accueil</span>
+        </a>
+      </li>
+    ` : '';
+
+    container.innerHTML = accueilItem + displayModules.map(module => `
       <li class="nav-item ${this.activeModule === module.id ? 'nav-item-active' : ''}">
         <a href="#${module.id}" class="nav-link" data-module-id="${module.id}">
           <span class="nav-icon">${module.icon}</span>
@@ -668,7 +690,12 @@ export class Sidebar extends HTMLElement {
         </a>
       </li>
     `).join('');
-    
+
+    this.shadowRoot!.querySelector('a[data-module-id="accueil"]')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      this.setActiveModuleAndShow('accueil');
+    });
+
     // Ajouter les écouteurs de clic
     displayModules.forEach(module => {
       const link = this.shadowRoot!.querySelector(`a[data-module-id="${module.id}"]`);

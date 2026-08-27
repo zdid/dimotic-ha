@@ -122,6 +122,21 @@ const zigbee2mqttTargetSchema = z.object({
 });
 
 /**
+ * Site externe (⭐ 27/08/2026, demande utilisateur : accès rapide à une installation dimotic-ha
+ * indépendante, ex. "chez ma fille") — volontairement SÉPARÉ de `targets`/`haStackTargets` :
+ * ceux-ci sont des cibles de déploiement (SSH, `remoteDir`) gossipées entre machines d'un MÊME
+ * site ; ceci est une liste personnelle de raccourcis vers d'autres sites, JAMAIS gossipée (pas de
+ * champ `origin` — toujours ajoutée à la main sur cette machine). Une seule adresse par entrée :
+ * celle du `core` distant, atteint via WireGuard (hors périmètre du dépôt) — ce site affiche déjà
+ * son propre lien vers sa propre HA une fois qu'on y accède, pas besoin de la dupliquer ici.
+ */
+const externalSiteSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  dimoticUrl: z.string().min(1)
+});
+
+/**
  * Schéma principal de la configuration de l'application.
  * STRICT : tous les champs sont requis. Les valeurs par défaut sont appliquées
  * par ConfigLoader/ConfigWriter après validation.
@@ -146,6 +161,8 @@ export const configSchema = z.object({
   haStackTargets: z.array(haStackTargetSchema).default([]),
   // Cibles de déploiement zigbee2mqtt (⭐ 24/08/2026) — voir zigbee2mqttTargetSchema.
   zigbee2mqttTargets: z.array(zigbee2mqttTargetSchema).default([]),
+  // Sites externes (⭐ 27/08/2026) — voir externalSiteSchema. Liste personnelle, jamais gossipée.
+  externalSites: z.array(externalSiteSchema).default([]),
   // Les sections spécifiques aux modules seront ajoutées dynamiquement
 }).passthrough()
   .refine(
@@ -159,6 +176,10 @@ export const configSchema = z.object({
   .refine(
     (config) => new Set(config.zigbee2mqttTargets.map((t) => t.id)).size === config.zigbee2mqttTargets.length,
     { message: 'Chaque cible doit avoir un id unique', path: ['zigbee2mqttTargets'] }
+  )
+  .refine(
+    (config) => new Set(config.externalSites.map((s) => s.id)).size === config.externalSites.length,
+    { message: 'Chaque site doit avoir un id unique', path: ['externalSites'] }
   );
 // ⚠️ .passthrough() est indispensable : sans lui, Zod strippe silencieusement toute clé de
 // premier niveau non déclarée ci-dessus (nommage/rfxcom/arbreouquoi/evoo7/...) à chaque
@@ -180,6 +201,7 @@ export type LoggingConfig = z.infer<typeof loggingSchema>;
 export type DeploymentTargetConfig = z.infer<typeof deploymentTargetSchema>;
 export type HaStackTargetConfig = z.infer<typeof haStackTargetSchema>;
 export type Zigbee2mqttTargetConfig = z.infer<typeof zigbee2mqttTargetSchema>;
+export type ExternalSiteConfig = z.infer<typeof externalSiteSchema>;
 export type AppConfig = z.infer<typeof configSchema>;
 
-export { coreSchema, haWsSchema, haStructureSchema, haConfigSchema, mqttSchema, webSchema, loggingSchema, deploymentTargetSchema, haStackTargetSchema, zigbee2mqttTargetSchema };
+export { coreSchema, haWsSchema, haStructureSchema, haConfigSchema, mqttSchema, webSchema, loggingSchema, deploymentTargetSchema, haStackTargetSchema, zigbee2mqttTargetSchema, externalSiteSchema };

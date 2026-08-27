@@ -100,6 +100,10 @@ export interface ServerToClientEvents {
 
   // Services post-installation HA (⭐ 24/08/2026, voir HaPostInstallService.ts)
   'core:post-install:result': (data: { results: Array<{ kind: string; success: boolean; title?: string; error?: string }> }) => void;
+
+  // Sites externes (⭐ 27/08/2026, voir AppGossipService.ts / schema.ts::externalSiteSchema) —
+  // liste personnelle, jamais gossipée.
+  'core:external-sites:list': (data: { sites: { id: string; label: string; dimoticUrl: string }[] }) => void;
 }
 
 // ------ Événements Client → Server ------
@@ -163,6 +167,11 @@ export interface ClientToServerEvents {
   // Services post-installation HA (⭐ 24/08/2026, voir HaPostInstallService.ts) — agit toujours sur
   // la HA déjà connectée via ha.ws, jamais sur une cible distante par token dédié.
   'core:post-install:apply': (data: { requests: Array<{ kind: string; host?: string; port?: number; username?: string; password?: string; url?: string; model?: string }> }) => void;
+
+  // Sites externes (⭐ 27/08/2026) — voir ServerToClientEvents ci-dessus.
+  'core:external-sites:get': () => void;
+  'core:external-site:save': (data: unknown) => void;
+  'core:external-site:delete': (data: { id: string }) => void;
 }
 
 // ============================================================================
@@ -250,6 +259,12 @@ export interface AppEvents {
   'core:post-install:apply': { requests: Array<{ kind: string; host?: string; port?: number; username?: string; password?: string; url?: string; model?: string }> };
   'core:post-install:result': { results: Array<{ kind: string; success: boolean; title?: string; error?: string }> };
 
+  // Sites externes (⭐ 27/08/2026, voir schema.ts::externalSiteSchema)
+  'core:external-sites:get': void;
+  'core:external-sites:list': { sites: { id: string; label: string; dimoticUrl: string }[] };
+  'core:external-site:save': unknown;
+  'core:external-site:delete': { id: string };
+
   // ------ Extension libre par les applications ------
   // Les applications dérivées peuvent ajouter leurs propres événements
   [key: string]: unknown;
@@ -310,6 +325,13 @@ export const SOCLE_SOCKET_EVENTS = {
   // ⭐ fonctionnelles-supervisor_specs v2.6 — identité de cette machine (core.machineId), exposée
   // côté client pour un futur affichage par écran d'application (Phase 1, minimal : juste exposé).
   MACHINE_ID: 'app:machine-id',
+  // ⭐ 27/08/2026, demande utilisateur (visibilité multi-machines) — adresse de la HA configurée
+  // sur CETTE machine (ha.ws.host/port), pour un lien direct côté UI (page d'accueil).
+  HA_ADDRESS: 'app:ha-address',
+  // ⭐ 27/08/2026 — registre agrégé des applications des AUTRES machines du même site, voir
+  // AppGossipService.ts. Jamais fusionné avec app:modules:list (celle-ci reste strictement
+  // locale) — entrées distantes affichées à côté, en lecture seule.
+  REMOTE_APPS: 'app:remote-apps',
 } as const;
 
 /**

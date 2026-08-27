@@ -12,9 +12,10 @@ import { CoreDeployService } from './CoreDeployService';
 import { HaStackDeployService } from './HaStackDeployService';
 import { Zigbee2mqttDeployService } from './Zigbee2mqttDeployService';
 import { TargetGossipService } from './TargetGossipService';
+import { AppGossipService } from './AppGossipService';
 import { HaPostInstallService, type PostInstallRequest } from './HaPostInstallService';
 import { HaQueryBridge } from './HaQueryBridge';
-import type { DeploymentTargetConfig, HaStackTargetConfig, Zigbee2mqttTargetConfig } from '../infrastructure/config/schema';
+import type { DeploymentTargetConfig, HaStackTargetConfig, Zigbee2mqttTargetConfig, ExternalSiteConfig } from '../infrastructure/config/schema';
 import type { RemoteAction } from '../infrastructure/remote/RemoteUnitController';
 import { ensureGlobalSshKey } from '../infrastructure/remote/SshClient';
 import { isRunningInDocker } from '../infrastructure/runtime/docker';
@@ -80,6 +81,7 @@ export class AppService {
   // Synchronisation "sans maître" des cibles connues (dimotic-ha + HA/Mosquitto) entre toutes les
   // instances du foyer via MQTT retenu (⭐ 24/08/2026, voir TargetGossipService.ts)
   private targetGossipService: TargetGossipService;
+  private appGossipService: AppGossipService;
   // Services post-installation HA (MQTT/Whisper/Piper/openWakeWord/Ollama), ⭐ 24/08/2026
   private haPostInstallService: HaPostInstallService;
   // Découplage HaStructureRegistry/HaWsClient pour les apps en process séparé (⭐ 24/08/2026, voir
@@ -185,6 +187,7 @@ export class AppService {
     this.haStackDeployService = new HaStackDeployService(logger);
     this.zigbee2mqttDeployService = new Zigbee2mqttDeployService(logger);
     this.targetGossipService = new TargetGossipService(configService, eventBus, logger);
+    this.appGossipService = new AppGossipService(configService, eventBus, logger);
     this.haPostInstallService = new HaPostInstallService(configService, logger);
     this.haQueryBridge = new HaQueryBridge(eventBus, logger, () => this.haStructureRegistry, () => this.haWsClient);
 
@@ -236,6 +239,12 @@ export class AppService {
     this.eventBus.on('app:applications:enable', (data: { appId: string }) => this.handleApplicationEnable(data));
     this.eventBus.on('app:applications:disable', (data: { appId: string }) => this.handleApplicationDisable(data));
     this.eventBus.on('app:applications:restart-now', () => this.applicationManager.restartNowIfPending());
+
+    // Sites externes (⭐ 27/08/2026, voir schema.ts::externalSiteSchema) — liste personnelle,
+    // jamais gossipée, même patron CRUD que les cibles de déploiement ci-dessous.
+    this.eventBus.on('core:external-sites:get', () => this.handleExternalSitesGet());
+    this.eventBus.on('core:external-site:save', (data: unknown) => this.handleExternalSiteSave(data as ExternalSiteConfig));
+    this.eventBus.on('core:external-site:delete', (data: unknown) => this.handleExternalSiteDelete(data as { id: string }));
 
     // Déploiement de dimotic-ha lui-même (⭐ 23/08/2026, voir CoreDeployService.ts) — même
     // protocole { targetId, action } que rpigpio/teleinfo/arexx (core/infrastructure/remote/).
@@ -343,6 +352,11 @@ export class AppService {
     // 2.2. Démarre la synchronisation des cibles connues entre instances (⭐ 24/08/2026, voir
     // TargetGossipService.ts) — indépendant de HA WS/des services applicatifs, peut démarrer tôt.
     this.targetGossipService.start();
+
+    // 2.2bis. Démarre le registre d'applications inter-machines (⭐ 27/08/2026, voir
+    // AppGossipService.ts) — AVANT l'émission de app:modules:registered ci-dessous (3.), pour que
+    // le premier abonnement ne rate pas la toute première annonce locale.
+    this.appGossipService.start();
 
     // 2.3. Démarre le pont générique de requêtes HA pour les apps en process séparé (⭐ 24/08/2026,
     // voir HaQueryBridge.ts) — indépendant de l'état HA WS, la vérification se fait par requête.
@@ -722,6 +736,8 @@ export class AppService {
       SOCLE_SOCKET_EVENTS.MODULES_LIST,
       SOCLE_SOCKET_EVENTS.HA_STATUS,
       SOCLE_SOCKET_EVENTS.MACHINE_ID,
+      SOCLE_SOCKET_EVENTS.HA_ADDRESS,
+      SOCLE_SOCKET_EVENTS.REMOTE_APPS,
     ];
 
     this.eventBus.emit('app:socket-events:registered', {
@@ -735,6 +751,21 @@ export class AppService {
     this.eventBus.emitGeneric(SOCLE_SOCKET_EVENTS.MACHINE_ID, {
       machineId: this.configService.getConfig().core.machineId,
       address: getPrimaryIPv4Address(),
+    });
+
+    // ⭐ 27/08/2026 — lien direct vers la HA configurée sur cette machine (page d'accueil). Rien
+    // émis si ha.ws n'est pas configuré du tout (pas de lien à construire).
+    const haWs = this.configService.getConfig().ha?.ws;
+    if (haWs?.host) {
+      this.eventBus.emitGeneric(SOCLE_SOCKET_EVENTS.HA_ADDRESS, { host: haWs.host, port: haWs.port });
+    }
+
+    // ⭐ 27/08/2026 — relaie le registre d'applications inter-machines (AppGossipService) vers le
+    // frontend, sous le nom d'événement Socket.io déclaré ci-dessus (REMOTE_APPS) — snapshot
+    // initial (vide tant qu'aucune annonce distante n'est arrivée) puis à chaque mise à jour.
+    this.eventBus.emitGeneric(SOCLE_SOCKET_EVENTS.REMOTE_APPS, this.appGossipService.getRegistry());
+    this.eventBus.onGeneric('app:remote-registry:changed', (registry) => {
+      this.eventBus.emitGeneric(SOCLE_SOCKET_EVENTS.REMOTE_APPS, registry);
     });
 
     this.logger.info('AppService', `Événements Socket.io du socle enregistrés: ${Object.keys(SOCLE_SOCKET_EVENTS).length} événements, ${persistentCoreEvents.length} persistants`);
@@ -790,6 +821,37 @@ export class AppService {
       error: result.error,
       restarting: result.restarting,
     });
+  }
+
+  // ===========================================================================
+  // SITES EXTERNES (⭐ 27/08/2026, voir schema.ts::externalSiteSchema) — liste personnelle de
+  // raccourcis vers d'autres installations dimotic-ha indépendantes, jamais gossipée.
+  // ===========================================================================
+
+  private handleExternalSitesGet(): void {
+    this.eventBus.emit('core:external-sites:list', { sites: this.configService.getExternalSites() });
+  }
+
+  private handleExternalSiteSave(site: ExternalSiteConfig): void {
+    const sites = this.configService.getExternalSites();
+    const index = sites.findIndex((s) => s.id === site.id);
+    if (index === -1) sites.push(site);
+    else sites[index] = site;
+
+    const result = this.configService.setExternalSites(sites);
+    if (!result.success) {
+      this.logger.error('AppService', `Échec de sauvegarde du site externe ${site.id}: ${result.error}`);
+    }
+    this.handleExternalSitesGet();
+  }
+
+  private handleExternalSiteDelete(data: { id: string }): void {
+    const sites = this.configService.getExternalSites().filter((s) => s.id !== data.id);
+    const result = this.configService.setExternalSites(sites);
+    if (!result.success) {
+      this.logger.error('AppService', `Échec de suppression du site externe ${data.id}: ${result.error}`);
+    }
+    this.handleExternalSitesGet();
   }
 
   // ===========================================================================

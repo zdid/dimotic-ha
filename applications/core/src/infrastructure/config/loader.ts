@@ -16,6 +16,7 @@ const DEFAULT_CONFIG: AppConfig = {
   targets: [],
   haStackTargets: [],
   zigbee2mqttTargets: [],
+  externalSites: [],
   ha: {
     ws_enable: false,
     mqtt_enable: false,

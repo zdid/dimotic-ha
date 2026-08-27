@@ -3,6 +3,8 @@
  * Charge et affiche le contenu des modules
  */
 
+import { buildAccueilHtml } from './HomeView';
+
 // Template HTML pour le Shadow DOM
 const createTemplate = (): HTMLTemplateElement => {
   const template = document.createElement('template');
@@ -93,13 +95,13 @@ export class ModuleContainer extends HTMLElement {
     window.addEventListener('modules:loaded', (e: any) => {
       console.log('[ModuleContainer] Événement modules:loaded reçu:', e.detail);
       const modules = e.detail.modules;
+      // ⭐ 27/08/2026 — page d'accueil par défaut (remplace l'ancien auto-sélection du premier
+      // module métier) dès qu'au moins une application tourne (sinon rien d'utile à afficher,
+      // même règle qu'avant pour ce cas limite).
       if (modules.length > 0 && !this.activeModule) {
-        this.activeModule = modules[0].id;
-        console.log('[ModuleContainer] Premier module défini à:', this.activeModule);
-        if (this.activeModule) {
-          console.log('[ModuleContainer] Chargement du contenu pour premier module:', this.activeModule);
-          this.loadModuleContent(this.activeModule);
-        }
+        this.activeModule = 'accueil';
+        console.log('[ModuleContainer] Module par défaut: accueil');
+        this.loadModuleContent(this.activeModule);
       }
     });
   }
@@ -114,7 +116,16 @@ export class ModuleContainer extends HTMLElement {
       console.log('[ModuleContainer] loadModuleContent - moduleId est vide, abandon');
       return;
     }
-    
+
+    // ⭐ 27/08/2026 — page d'accueil (HomeView.ts) : rendue directement ici, jamais fetchée depuis
+    // un fichier de présentation ('accueil' n'a pas de dossier applications/accueil/). Une fois le
+    // contenu placé en cache, la branche "déjà chargé" juste en dessous prend le relais comme pour
+    // n'importe quel autre module (Alpine.initTree, rappel de window.accueilApp.init()).
+    if (moduleId === 'accueil' && !this.moduleContents['accueil']) {
+      this.moduleContents['accueil'] = buildAccueilHtml();
+      this.moduleInited['accueil'] = true;
+    }
+
     // Ne pas charger de contenu pour le module core (géré par ConfigForm)
     // et ne pas recharger si déjà chargé et initialisé
     if (moduleId === 'core' || (this.moduleContents[moduleId] && this.moduleInited[moduleId])) {

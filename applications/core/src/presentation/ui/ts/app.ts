@@ -17,6 +17,7 @@ import './components/ApplicationsManager';
 import './components/DeploymentManager';
 import './components/PostInstallManager';
 import './components/LogsModal';
+import './components/HomeView';
 
 // Étendre l'interface Window
 declare global {
@@ -32,6 +33,16 @@ declare global {
        *  undefined jusqu'à réception — chaque écran d'application qui veut l'afficher doit tolérer
        *  cette absence initiale. */
       machineId?: string;
+      /** ⭐ 27/08/2026 — voir HomeView.ts (page d'accueil). */
+      haAddress?: { host: string; port: number };
+      externalSites?: { id: string; label: string; dimoticUrl: string }[];
+      remoteApps?: {
+        machineId: string;
+        address?: string;
+        webPort: number;
+        runningInDocker: boolean;
+        apps: { id: string; name: string; icon: string }[];
+      }[];
     };
   }
 }
@@ -76,6 +87,23 @@ window.addEventListener('DOMContentLoaded', () => {
 socket.on('app:machine-id', (data: { machineId: string; address?: string }) => {
   window.app.machineId = data.machineId;
   window.dispatchEvent(new CustomEvent('app:machine-id', { detail: data }));
+});
+
+// ⭐ 27/08/2026 — page d'accueil (HomeView.ts) : lien HA local, sites externes, registre
+// d'applications inter-machines. Même patron que app:machine-id ci-dessus.
+socket.on('app:ha-address', (data: { host: string; port: number }) => {
+  window.app.haAddress = data;
+  window.dispatchEvent(new CustomEvent('app:ha-address', { detail: data }));
+});
+
+socket.on('core:external-sites:list', (data: { sites: { id: string; label: string; dimoticUrl: string }[] }) => {
+  window.app.externalSites = data.sites;
+  window.dispatchEvent(new CustomEvent('core:external-sites:list', { detail: data }));
+});
+
+socket.on('app:remote-apps', (data: Window['app']['remoteApps']) => {
+  window.app.remoteApps = data;
+  window.dispatchEvent(new CustomEvent('app:remote-apps', { detail: data }));
 });
 
 // Écouter les erreurs Socket.io
