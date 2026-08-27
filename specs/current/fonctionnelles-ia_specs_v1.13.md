@@ -1,8 +1,13 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.12
-**Date :** 26 Août 2026
+**Version :** 1.13
+**Date :** 27 Août 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.13** : **Lieu unique déduit du `quoi`** (§16.6bis, demande utilisateur) — quand une phrase ne
+> capture aucun lieu et que le `quoi` reconnu n'existe qu'à un seul endroit dans toute la maison
+> ("allume le poêle"), ce lieu est utilisé automatiquement, prioritaire sur `context.lieuOrigine`.
+> Niveau `lieu_principal`, pas `lieu_precis`. Vérifié en conditions réelles.
 
 > **v1.12** : **Gabarit `soleil`** (§16.4, lever/coucher du soleil, demande utilisateur — "utilisé
 > dans toutes les implémentations domotiques sauf chez moi") : composable avec les filtres de jours
@@ -809,6 +814,38 @@ v1.12).
   spec, à examiner séparément). Tant que non branché, `context.lieuOrigine` reste `undefined`, repli
   Mistral inchangé.
 
+### 16.6bis Lieu unique déduit du `quoi` (nouveau v1.13)
+
+Quand une phrase ne capture aucun lieu ET que le `quoi` reconnu n'existe qu'à un seul endroit dans
+toute la maison ("allume le poêle", un seul poêle réel dans la maison de l'utilisateur), ce lieu est
+utilisé automatiquement — **prioritaire sur `context.lieuOrigine`** : signal plus spécifique
+("il n'existe qu'un seul poêle") qu'un défaut générique basé sur l'origine du micro (qui, de toute
+façon, n'est pas branché en pratique à ce stade, §16.6). Sans ce défaut, `lieux` restait vide, et
+`HaStructureRegistry.getEntitiesByQuoiAndLieux(quoi, [])` traite un tableau vide comme "aucun
+filtre" — cible alors CE quoi dans TOUS les lieux qui en ont un, au lieu du seul qui existe
+réellement (sans conséquence concrète quand il n'y en a qu'un, mais un comportement moins précis que
+nécessaire, et potentiellement large si le quoi existe malgré tout ailleurs pour d'autres raisons).
+
+**Calcul** : `liveCatalogs.ts::buildQuoiUniqueLieu()` dérive, à chaque reconstruction du catalogue
+vivant (même mécanisme que `buildLieuxComposes()` déjà existant, §16.5 — jamais une table figée),
+une correspondance quoi (label affichage) → lieu, uniquement quand ce quoi n'a qu'**un seul**
+`lieu_principal` distinct parmi ses entités réelles. Niveau `lieu_principal`, **pas** `lieu_precis` :
+deux entités du même quoi dans la MÊME pièce mais à des `lieu_precis` différents (ex. deux appliques
+murales dans le même salon) comptent pour un seul lieu — les cibler ensemble via ce lieu est le
+comportement attendu, pas une ambiguïté à signaler.
+
+**Où c'est appliqué** : `resolveDefaultLieu()` (nouvelle fonction, `interpreter/index.ts`)
+centralise la priorité (lieu unique du quoi > `lieuOrigine`), utilisée à la fois par
+`buildActionParams` (`ordre_immediat`/`ordre_valeur`) et par la clause action du gabarit `si_alors`
+(§16.8) — les deux seuls endroits où un `ExecuterActionParams` est construit sans lieu garanti.
+**Pas appliqué** au gabarit `donne` (interrogation, §16.9) : une interrogation sans lieu explicite
+("donne-moi la température") a plus de sens en listant TOUTES les instances du quoi plutôt qu'en se
+limitant à une seule, contrairement à un ordre d'action qui doit cibler quelque chose de précis.
+
+Vérifié en conditions réelles (27/08/2026) : "allume le poele" (aucun lieu dit) →
+`lieux:["salle à manger"]` (seul poêle de la maison réelle de l'utilisateur), chemin déterministe
+(0 token). Demande utilisateur explicite.
+
 ### 16.7 Découpage de phrases
 
 **Bug corrigé** : le découpage legacy (`.replace(/(\D)\.(\D)/g, ...)`) exige un caractère
@@ -928,6 +965,7 @@ mécanisme de nouvel essai ajouté, pas encore re-déclenché en réel faute d'u
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.13 | 27/08/2026 | Claude | **Lieu unique déduit du `quoi`** (§16.6bis) : quand une phrase ne capture aucun lieu et que le `quoi` reconnu n'existe qu'à un seul `lieu_principal` distinct dans toute la maison ("allume le poêle"), ce lieu est utilisé automatiquement — prioritaire sur `context.lieuOrigine` (signal plus spécifique, et de toute façon non branché en pratique, §16.6). Niveau `lieu_principal`, pas `lieu_precis` (deux entités du même quoi dans la même pièce à des `lieu_precis` différents comptent pour un seul lieu). Nouveau `liveCatalogs.ts::buildQuoiUniqueLieu()` (même mécanisme que `buildLieuxComposes()`, dérivé à chaque reconstruction du catalogue, jamais figé) ; nouvelle fonction `resolveDefaultLieu()` centralisant la priorité, appliquée dans `buildActionParams` et la clause action de `si_alors` — volontairement PAS appliquée au gabarit `donne` (une interrogation sans lieu a plus de sens en listant toutes les instances). Vérifié en conditions réelles : "allume le poele" → `lieux:["salle à manger"]` (seul poêle de la maison réelle), 0 token. Corpus de test étendu à 59 cas. Demande utilisateur explicite, session du 27/08/2026. Ancienne version v1.12 archivée. |
 | 1.12 | 26/08/2026 | Claude | **Gabarit `soleil`** (§16.4, lever/coucher du soleil, demande utilisateur — "utilisé dans toutes les implémentations domotiques sauf chez moi") : pattern `"(<duree#offset> <enum:avant_apres#direction>)? (au|a|à)? <enum:lever_coucher#sunevent>"`, composable avec les fragments de jours existants (`leweekend`, `touslesjours`...). Produit `trigger.type: 'sun'`, calculé réellement côté `planificateur` via `suncalc` (voir sa spec) — pas une lecture de `sun.sun` de HA, qui ne donne que le PROCHAIN lever/coucher, insuffisant combiné à un filtre de jours (ex. "tous les week-ends" — calculer le coucher de samedi prochain depuis un dimanche demande une date arbitraire). Précédemment listé "hors périmètre" (v1.10/v1.11), l'utilisateur avait déjà résolu ce même problème dans son ancien système via la même bibliothèque (`suncalc`, retrouvé dans `zdidnodedomoutil/heurelevercouchersoleil.js`). **Correctif jours FR→EN trouvé en préparant ce gabarit** : les enums `jour`/`week_end`/`jours_ouvres` de `vocabulaire.yaml` capturaient des valeurs françaises (`lundi`, `samedi`...) alors que `scheduler.ts::triggerToMs` (et `regles_mistral.txt`, déjà) attendent des clés anglaises 3 lettres (`mon`, `sat`...) — un filtre de jour produit par l'interpréteur ne matchait *jamais* aucun jour côté `planificateur` avant ce correctif (silencieusement inopérant, pas d'erreur visible). Second bug lié corrigé au passage : `touslesjours`+`jours_ouvres` ne posait aucun filtre du tout (capture sous la mauvaise clé, `#jours` manquant). Corpus de test étendu à 58 cas. Toutes demandes utilisateur, session du 26/08/2026. Ancienne version v1.11 archivée. |
 | 1.11 | 26/08/2026 | Claude | **Gabarits restants de l'interpréteur déterministe** (§16.4) : fusion `jusqua`/`de` dans `a`, `entre` (fenêtre, `trigger.type: 'window'`), `donne` (interrogation, routée vers la résolution d'entités existante), exclusion `sauf <lieu>*` intégrée à `ordre_immediat` — avec correctif d'un cas limite réel trouvé en test (exclusion qui vide une liste de lieux explicitement nommés visait par erreur toute la maison, `HaStructureRegistry.getEntitiesByQuoiAndLieux([])` traitant un tableau vide comme "aucun filtre"). `levercouchersoleil`/`delayrepeat` confirmés hors périmètre (schéma `planificateur` à étendre d'abord). **Cache des 100 dernières phrases + comptabilisation cache/interpréteur/Mistral** (§16.10, nouveau) : `PhraseCache`/`InterpreterMetrics` partagés entre `IaService` et `DeployResponder`, gel pendant un échange d'assistance Mistral en cours (`isFreshExchange()`). Corpus de test étendu à 53 cas. |
 | 1.10 | 26/08/2026 | Claude | **Interpréteur déterministe français** (§16, nouveau) : reprise de la logique de l'ancien moteur `zdidnodedomotext` (`interpretetext.js`/`modelesv2.js`/`num_convert_date_duration_time.js`), réécrite en TypeScript, corrigée du bug de découpage de phrases (`.replace(/(\D)\.(\D)/g,...)`, coupait mal les phrases se terminant par un nombre entier — vérifié empiriquement), et convergeant vers les structures déjà produites par Mistral (`ExecuterActionParams`/`PlanificationDefinition`/`MacroDefinition`) plutôt qu'un nouveau format. Pré-filtre dans `IaService.handleChat()` avant `runChatRounds()` : reconnaissance confiante → exécution directe (`ToolExecutor.executeDirect()`, nouveau) sans aller-retour Mistral ; sinon repli intégral inchangé. Vocabulaire/gabarits en YAML éditables à chaud (`data/ia/vocabulaire_interpreteur.yaml`/`gabarits_interpreteur.yaml`, même convention que `regles_mistral.txt`). Nouveau gabarit événementiel `si_alors` (absent du legacy, cible `trigger.type: 'state_change'` déjà géré par `planificateur`). Toutes demandes/décisions utilisateur, session du 26/08/2026 — voir le plan de mise en œuvre associé pour le détail complet des vérifications (bug de découpage confirmé en direct via `node`, `getLieuCatalog()`/`getEntitiesByQuoiAndLieux()` relus pour fonder les défauts §16.6, etc.). |

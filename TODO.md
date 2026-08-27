@@ -823,9 +823,15 @@
     observé réussir), puis créer UNE planification `sun` réelle avec l'utilisateur pour valider le
     bout-en-bout (reconnaissance + `next_fire_at` calculé correctement) avant de considérer le
     gabarit pleinement livré.
-- **Statut** : Moteur déterministe + cache/métriques + trigger `sun` livrés et vérifiés
-  (unitairement pour `sun` — `getHaConfig()` en conditions réelles et `si_alors`/planification via
-  `DeployResponder` restent à confirmer en conditions réelles avec l'utilisateur)
+- **Résolu le 27/08/2026 (session suivante) — lieu unique déduit du `quoi`**
+  (`fonctionnelles-ia_specs_v1.13.md` §16.6bis, commit `a305f34`) : "allume le poêle" (sans lieu)
+  cible désormais automatiquement le lieu du poêle si l'installation n'en a qu'un seul (niveau
+  `lieu_principal`, pas `lieu_precis`), prioritaire sur `context.lieuOrigine`. Vérifié en conditions
+  réelles : `lieux:["salle à manger"]`, 0 token. Corpus étendu à 59 cas.
+- **Statut** : Moteur déterministe + cache/métriques + trigger `sun` + lieu unique du `quoi` livrés
+  et vérifiés (unitairement pour `sun` — `getHaConfig()` en conditions réelles et
+  `si_alors`/planification via `DeployResponder` restent à confirmer en conditions réelles avec
+  l'utilisateur)
 - **Priorité** : Moyenne (le sous-ensemble déjà livré couvre déjà le cas d'usage le plus fréquent)
 
 ---
