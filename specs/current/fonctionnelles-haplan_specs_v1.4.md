@@ -1,5 +1,13 @@
 # Spécifications Fonctionnelles - Module HAPLAN
 
+*Version 1.4 - 28 Août 2026*
+*Nouvelle §17 "Génération de cartes Plan Home Assistant (Lovelace)" — conception soumise par
+l'utilisateur pour une troisième sortie de HAPlan (après l'interaction HA directe et la génération
+ESPHome) : générer et envoyer vers HA une configuration de carte Plan Lovelace, depuis la même
+modélisation de plans/positions déjà existante (§4). Aucun code écrit à ce stade — plusieurs points
+restent à trancher avant implémentation (§17.7), notamment la police d'icônes réellement utilisée et
+les capacités exactes de la carte Plan Lovelace côté HA.*
+
 *Version 1.3 - 15 Août 2026*
 *Met à jour la v1.2 : nouvelle §8.10 "Écran mural physique (ESP32-S3)" — veille du rétroéclairage
 après 30s d'inactivité tactile (rallumé au premier tap) et retrait du texte des coordonnées x/y
@@ -37,7 +45,8 @@ l'EventBus générique (`emitGeneric`/`onGeneric`, même pattern que
 14. [Configuration](#14-configuration)
 15. [Limites, Bugs Connus et Code Mort](#15-limites-bugs-connus-et-code-mort)
 16. [Arborescence des Programmes](#16-arborescence-des-programmes)
-17. [Annexes](#17-annexes)
+17. [Génération de cartes Plan Home Assistant (Lovelace) — conception, v1.4](#17-génération-de-cartes-plan-home-assistant-lovelace--conception-nouveau-v14)
+18. [Annexes](#18-annexes)
 
 ---
 
@@ -738,14 +747,101 @@ Données runtime : `data/haplan/config-haplan-floorplans-v1.0.yaml`, `data/hapla
 
 ---
 
-## 17. Annexes
+## 17. Génération de cartes Plan Home Assistant (Lovelace) — conception, nouveau v1.4
 
-### 17.1 Références
+**Statut** : conception soumise par l'utilisateur (28/08/2026), reprise ici telle quelle — aucun
+code écrit à ce stade. Plusieurs points restent à trancher avant implémentation (§17.7).
+
+### 17.1 Contexte
+
+HAPlan fait déjà deux choses à partir de la même modélisation de plans (images + positions
+d'objets, §4) : interagir en direct avec Home Assistant (§3/§8), et générer des configurations
+ESPHome pour des tablettes qui reproduisent le plan (§3.6/§8.9-8.10). **Objectif de cette
+conception** : une troisième sortie — générer et envoyer une configuration de **carte Plan
+(Lovelace)** vers Home Assistant, depuis les mêmes données de modélisation.
+
+Rappel d'architecture (déjà vraie aujourd'hui, §2/§13) : le cœur (`core`) gère les web services
+(WebSocket HA, port 8123) et MQTT (réservé aux drivers) ; HAPlan est une application satellite en
+process séparé, communique avec le cœur en IPC ; le cœur gère déjà l'authentification (token longue
+durée HA) dans ses paramètres, HAPlan n'a rien à gérer côté authentification.
+
+### 17.2 Source de données (déjà existante)
+
+Un répertoire d'images de plans au format JPEG (fond souvent transparent, ou noir avec tracés
+blancs selon le thème) + un fichier de configuration associé listant, pour chaque plan, la liste
+des objets avec : l'identifiant d'entité HA (ex. `light.salon`), des coordonnées x/y en pourcentage
+(pas de pixels absolus — le pourcentage représente le **centre** de l'icône/texte affiché),
+éventuellement une icône (et parfois une valeur affichée à côté, ou l'icône seule), la taille de
+l'icône/texte (déjà réglable dans HAPlan aujourd'hui, §12.2).
+
+Police d'icônes utilisée par HAPlan aujourd'hui : non identifiée précisément à ce stade (à vérifier
+dans le code, §17.7). Contrainte : la police doit permettre plusieurs couleurs par icône selon
+l'état (ex. gris = éteint, jaune = allumé). HA utilise nativement les icônes **mdi** (Material
+Design Icons), qui répondent à ce besoin — un mapping HAPlan → mdi sera probablement nécessaire si
+la police d'origine diffère.
+
+### 17.3 Types d'objets et comportements
+
+Le système doit rester générique : n'importe quel capteur ou actionneur HA doit pouvoir être placé
+sur un plan, sans liste figée de types supportés — même esprit que le modèle d'objets déjà en place
+côté HAPlan lui-même (§9, `UnifiedObjectFactory`). Cas déjà identifiés :
+
+| Type d'objet | Icône | Comportement au clic |
+|---|---|---|
+| Actionneur simple (lumière) | grisée si éteint, jaune si allumé | bascule l'état (on/off) |
+| Capteur pur (température, humidité...) | déterminée automatiquement selon le type de mesure ; unité récupérée automatiquement | aucune action, affichage seul |
+| Objet complexe (thermostat...) | — | ouvre une fenêtre dédiée avec les différents réglages (fenêtre déjà existante dans HAPlan — `ThermostatWindow.ts`, §16 — à reproduire si possible côté HA) |
+
+**Repli pour les thermostats** si la fenêtre dédiée n'est pas réalisable côté HA : afficher la
+température au centre, bouton **+** (rouge) à droite et **−** (bleu) à gauche pour ajuster la
+consigne directement depuis le plan.
+
+### 17.4 Rendu / affichage
+
+- Le plan doit s'adapter (responsive) à la surface d'affichage disponible côté HA, avec
+  repositionnement proportionnel des icônes/textes — les coordonnées en % s'y prêtent nativement.
+- Le style visuel (fond noir/tracés blancs, ou fond transparent selon le plan) doit être
+  conservé/respecté côté rendu HA.
+
+### 17.5 Génération et envoi vers Home Assistant
+
+- **Format de sortie** : HAPlan construit **directement** la configuration au format attendu par la
+  carte Plan Lovelace de HA (pas de format intermédiaire à transformer côté HA par un script).
+- **Canal d'envoi** : web service (WebSocket HA, port 8123) — pas MQTT, réservé aux drivers.
+- **Authentification** : token longue durée déjà configuré côté cœur (paramètres core, §14) ; HAPlan
+  s'appuie dessus sans gestion supplémentaire.
+- **Déclenchement** : action manuelle initiée depuis HAPlan (pas de génération/envoi automatique à
+  chaque modification d'un plan) — même principe que le bouton de déploiement écran ESP existant
+  (§8.9), un bouton dédié de plus dans le même esprit.
+
+### 17.6 Différence avec la génération ESPHome existante (§3.6/§8.9-8.10)
+
+Les deux sorties partent de la même modélisation (§4/§17.2) mais produisent des artefacts de nature
+différente : ESPHome génère une configuration firmware compilée et déployée sur un écran physique
+dédié (pipeline Python séparé, §8.9) ; la carte Plan Lovelace génère une configuration HA native,
+consommée directement par l'interface HA existante de l'utilisateur (navigateur, appli mobile HA),
+sans matériel dédié ni compilation.
+
+### 17.7 Points restants à trancher / vérifier (avant implémentation)
+
+- Identifier précisément la police d'icônes utilisée actuellement par HAPlan, et déterminer si un
+  mapping vers mdi est nécessaire (et sa méthode : table de correspondance manuelle, ou automatique
+  par nom).
+- Vérifier les capacités réelles de la carte Plan Lovelace de HA (formats de coordonnées acceptés,
+  gestion des couleurs d'icônes dynamiques, possibilité d'ouvrir une fenêtre de dialogue
+  personnalisée pour les thermostats) pour confirmer que le format ciblé est bien réalisable tel
+  quel — **non vérifié à ce stade, condition préalable à l'implémentation**.
+
+---
+
+## 18. Annexes
+
+### 18.1 Références
 - [Spécification de Nommage **OBLIGATOIRE**](spec-nommage-v1.0.md) ⭐
 - [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.19.md) ⭐ (§5.7 exceptions REST, §6.2 routage `Sidebar`)
 - Projet d'origine : [haplanserver](https://github.com/zdid/haplanserver)
 
-### 17.2 Glossaire
+### 18.2 Glossaire
 | Terme | Définition |
 |-------|------------|
 | Plan (floorplan) | Image uploadée servant de fond, avec ses positions d'entités associées |
@@ -754,9 +850,10 @@ Données runtime : `data/haplan/config-haplan-floorplans-v1.0.yaml`, `data/hapla
 | Entité suivie (`trackedEntityIds`) | `entity_id` référencé par au moins une position sur au moins un plan — seules ces entités peuvent recevoir une commande |
 | `attributs_taxonomie` | Attribut HA publié par les intégrations MQTT du projet, source à la fois de l'arbre de sélection (§6) et du nom d'entité affiché (§11) |
 
-### 17.3 Historique
+### 18.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.4 | 2026-08-28 | Claude | **Génération de cartes Plan Home Assistant (Lovelace)** (§17, nouvelle, conception) : troisième sortie de HAPlan depuis la même modélisation plans/positions (§4), après l'interaction HA directe et la génération ESPHome (§3.6/§8.9-8.10) — carte Plan Lovelace construite directement au format HA cible, envoyée en WebSocket (port 8123, pas MQTT) via le token longue durée déjà géré côté cœur, déclenchement manuel depuis HAPlan. Types d'objets génériques (actionneur simple, capteur pur, objet complexe avec fenêtre dédiée ou repli +/− pour les thermostats). Conception soumise par l'utilisateur, reprise telle quelle — aucun code écrit, plusieurs points laissés ouverts avant implémentation (§17.7) : police d'icônes réelle de HAPlan à identifier, capacités exactes de la carte Plan Lovelace côté HA non vérifiées. Ancienne version v1.3 archivée. |
 | 1.3 | 2026-08-15 | Claude | **Écran mural physique (ESP32-S3)** (§8.10, nouvelle) : veille du rétroéclairage après 30s d'inactivité tactile (rallumé au premier tap), retrait du texte des coordonnées x/y (le marqueur "X" rouge reste, décision utilisateur permanente). |
 | 1.2 | 2026-08-13 | Claude | Bouton "Déployer sur l'écran" (§3.6, §8.9) : premier exemple de communication inter-applications initiée par HAPLAN, vers la nouvelle application `applications/espdisplay` (`espdisplay:deploy-floorplan`/`espdisplay:deploy-result` sur l'EventBus générique, même pattern que `integration:bridge:register`). 3 nouveaux événements Socket.io (§13), 2 nouveaux codes d'erreur (§3.5). |
 | 1.1 | 2026-08-06 | Claude | Échelle icônes/textes réglable par l'utilisateur (§12.2, `--plan-scale`, curseur 60-120 %, mémorisé par écran via `localStorage`) et navigation circulaire par flèches entre plans (§12.1), tous deux ajoutés au dashboard depuis la v1.0. Affichage d'état simplifié pour VMC/chauffe-eau/radiateur (§9.3) : libellé ON/OFF retiré (au lieu d'être corrigé, voir bug #3 révisé en §15.3), état désormais lu uniquement à la couleur de l'icône. |
