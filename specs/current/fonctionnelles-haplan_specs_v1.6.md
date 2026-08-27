@@ -1,5 +1,16 @@
 # Spécifications Fonctionnelles - Module HAPLAN
 
+*Version 1.6 - 28 Août 2026*
+*Mécanisme de dépôt révisé (§17.5/§17.8, nouveau) : dépôt de fichier par SSH plutôt que le
+WebSocket envisagé en v1.4/v1.5 — la commande HA correspondante (`lovelace/config/save`) n'est pas
+documentée officiellement, jugée trop fragile. Nouveau tableau de bord dédié en mode YAML (ne
+touche jamais le tableau existant de l'utilisateur, `"mode": "storage"` confirmé en direct sur
+`ha2`), écrit via le même mécanisme SSH déjà éprouvé pour la config HA/Mosquitto
+(`SshClient.ts`/`HaStackDeployService.ts`, `runSsh`+`tee` pour le YAML, `runScp` pour l'image de
+fond déposée dans `config/www/`, servie en `/local/...`). Prérequis ponctuel côté HA (déclaration du
+tableau YAML dans `configuration.yaml`, un redémarrage HA une seule fois) — pas de code. Conception
+toujours non implémentée.*
+
 *Version 1.5 - 28 Août 2026*
 *Réponse aux deux points ouverts par la v1.4 (§17.7) : police d'icônes HAPlan identifiée dans le
 code (Font Awesome 6 Free Solid, CDN, ~8 glyphes utilisés — §17.2) ; capacités de la carte Plan
@@ -843,9 +854,13 @@ consigne directement depuis le plan.
 
 - **Format de sortie** : HAPlan construit **directement** la configuration au format attendu par la
   carte Plan Lovelace de HA (pas de format intermédiaire à transformer côté HA par un script).
-- **Canal d'envoi** : web service (WebSocket HA, port 8123) — pas MQTT, réservé aux drivers.
-- **Authentification** : token longue durée déjà configuré côté cœur (paramètres core, §14) ; HAPlan
-  s'appuie dessus sans gestion supplémentaire.
+- **Canal d'envoi** : **révisé en 28/08/2026 (v1.6, voir §17.8)** — dépôt de fichier par SSH, pas
+  WebSocket. La commande WebSocket qui aurait permis de pousser un tableau de bord en direct
+  (`lovelace/config/save`) n'est pas documentée officiellement par HA (usage interne réservé au
+  frontend, pas de garantie de stabilité) — écartée au profit d'une approche par fichier, plus
+  robuste dans le temps. Toujours pas MQTT, réservé aux drivers.
+- **Authentification** : sans objet pour ce canal (dépôt de fichier par SSH, pas d'appel à l'API HA)
+  — voir §17.8 pour la cible SSH utilisée.
 - **Déclenchement** : action manuelle initiée depuis HAPlan (pas de génération/envoi automatique à
   chaque modification d'un plan) — même principe que le bouton de déploiement écran ESP existant
   (§8.9), un bouton dédié de plus dans le même esprit.
@@ -888,10 +903,54 @@ par coordonnées).
   pour l'affichage de valeur de capteur, §17.3), `icon` (icône statique sans entité), `image`
   (variantes d'image selon l'état), `action-button`, `conditional` (affichage sous condition).
 
-**Reste à faire (implémentation, pas conception)** : ces capacités sont documentées côté HA mais
-**pas encore testées en conditions réelles** contre une vraie carte générée par HAPlan sur
-l'instance HA de l'utilisateur — à valider dès le début de l'implémentation, avant d'aller plus
-loin. Construire la table de correspondance FA→mdi (§17.2, ~8 entrées) reste aussi à faire.
+### 17.8 Mécanisme de dépôt retenu — fichier par SSH (nouveau, 28/08/2026)
+
+**Pourquoi pas le WebSocket envisagé en v1.4/v1.5** : la commande qui permettrait de pousser un
+tableau de bord Lovelace en direct (`lovelace/config/save` et proches) existe côté HA mais n'est
+**pas documentée officiellement** — usage interne réservé au frontend de HA lui-même, sans garantie
+de stabilité d'une version à l'autre. Risque jugé trop élevé pour une fonctionnalité censée durer.
+
+**Complication supplémentaire, propre à l'instance réelle de l'utilisateur** : vérifiée en direct
+(28/08/2026, lecture seule sur `ha2`, `.storage/lovelace_dashboards` présent, tableau "Carte"
+existant en `"mode": "storage"`) — cette instance utilise des tableaux de bord en **mode storage**
+(JSON interne, `.storage/lovelace.<id>`), que HA considère comme sa propre source de vérité en
+mémoire. Écrire directement dans ces fichiers pendant que HA tourne serait fragile (HA peut écraser
+la modification externe à la prochaine écriture depuis son propre état).
+
+**Solution retenue** : un **nouveau tableau de bord dédié en mode YAML** (HA permet de faire
+coexister des tableaux storage et YAML, chacun avec son propre `mode` — un tableau YAML est
+relu depuis son fichier à chaque fois, jamais en conflit avec l'état mémoire de HA). Ne touche
+jamais le tableau "Carte" existant de l'utilisateur. **Prérequis ponctuel, pas du code** : déclarer
+une fois ce nouveau tableau dans `configuration.yaml` côté HA (bloc `lovelace: dashboards:`,
+`mode: yaml`, `filename: ...`) — nécessite un redémarrage de HA une seule fois, à la mise en place ;
+les mises à jour ultérieures du fichier YAML lui-même n'en ont pas besoin.
+
+**Mécanisme technique — rien à inventer, patron déjà éprouvé dans ce projet** : trouvé en examinant
+comment `scriptsha` dépose du contenu chez HA (`HaWsClient.setDomainConfig()`, API REST HA propre à
+`script`/`automation`/`scene`) — **non applicable ici**, HA n'a pas d'équivalent REST pour un
+tableau de bord Lovelace. Le vrai précédent applicable est `HaStackDeployService.ts`
+(`applications/core/src/infrastructure/remote/SshClient.ts`), déjà utilisé pour déployer
+`compose.yaml`/la config Mosquitto sur `ha2` par SSH :
+- `runSsh(target, 'tee <chemin> > /dev/null', contenuDuFichier)` pour écrire le YAML du tableau de
+  bord (texte).
+- `runScp(target, [cheminLocalImage], destination)` pour copier l'image de fond du plan (binaire).
+- Cible SSH : même convention que `HaStackDeployService` — `haStackTargets` (déjà la liste qui
+  identifie où vit l'installation HA de l'utilisateur, avec accès SSH), pas une nouvelle liste à
+  inventer.
+
+**Image de fond du plan** : copiée dans `config/www/` sur la machine HA (via `runScp`, en même
+temps que le YAML), servie nativement par HA au chemin `/local/<fichier>` — convention HA standard,
+confirmée dans sa documentation. Choix cohérent avec l'approche par fichier : le rendu ne dépend
+jamais du serveur web de HAPlan lui-même, utile si HA est consulté hors du réseau local (appli
+mobile) sans que HAPlan y soit forcément joignable.
+
+**Reste à faire (implémentation, pas conception)** : toutes les capacités et le mécanisme sont
+confirmés par la documentation officielle et par un mécanisme déjà éprouvé dans ce projet, mais
+**rien n'a encore été testé en conditions réelles** — à valider dès le début de l'implémentation,
+avant d'aller plus loin : écriture réelle du fichier YAML + image sur `ha2`, redémarrage HA pour la
+déclaration initiale du tableau YAML, rendu réel de la carte, test des couleurs dynamiques et du
+`more-info` sur une vraie entité `climate`. Construire la table de correspondance FA→mdi (§17.2,
+~8 entrées) reste aussi à faire.
 
 ---
 
@@ -914,6 +973,7 @@ loin. Construire la table de correspondance FA→mdi (§17.2, ~8 entrées) reste
 ### 18.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.6 | 2026-08-28 | Claude | **Mécanisme de dépôt révisé** (§17.5/§17.8, nouvelle) : dépôt de fichier par SSH plutôt que le WebSocket envisagé en v1.4/v1.5 — `lovelace/config/save` non documentée officiellement par HA, jugée trop fragile pour une fonctionnalité durable. Instance réelle de l'utilisateur vérifiée en direct (`ha2`, lecture seule) : tableaux de bord en mode storage (`.storage/lovelace_dashboards`), écriture directe risquée (HA peut écraser). Solution : nouveau tableau de bord dédié en mode YAML (coexiste avec l'existant, jamais de conflit), déclaré une fois dans `configuration.yaml` côté HA (redémarrage HA ponctuel, pas de code). Écriture par le même mécanisme SSH déjà éprouvé pour la config HA/Mosquitto (`SshClient.ts`/`HaStackDeployService.ts`, `runSsh`+`tee` pour le YAML, `runScp` pour l'image de fond vers `config/www/`, servie en `/local/...`) — précédent trouvé en examinant d'abord `scriptsha` (non applicable, HA n'a pas d'équivalent REST pour un tableau de bord). Conception toujours non implémentée — mécanisme confirmé par la documentation et un précédent du projet, pas encore testé en conditions réelles. |
 | 1.5 | 2026-08-28 | Claude | **Réponse aux deux points ouverts de la v1.4** (§17.2/§17.7) : police d'icônes HAPlan identifiée en lisant le code (Font Awesome 6 Free Solid, CDN, ~8 glyphes utilisés au total, déjà partagés avec la génération ESPHome §8.10 — table de correspondance FA→mdi manuelle à construire, petite et finie) ; capacités de la carte Plan Lovelace HA confirmées via sa documentation officielle (`picture-elements`/`state-icon`) — coordonnées en % déjà compatibles avec la convention HAPlan (`translate(-50%,-50%)` des deux côtés), couleur dynamique par état native (`state_color`, va au-delà du besoin exprimé — couverture par `device_class` sur de nombreux domaines), fenêtre thermostat déjà couverte nativement par le dialogue `more-info` standard sur une entité `climate` (rend probablement inutile le repli +/- envisagé en v1.4). Conception toujours non implémentée — capacités confirmées par la documentation, pas encore vérifiées en conditions réelles contre l'instance HA de l'utilisateur (à faire au démarrage de l'implémentation). |
 | 1.4 | 2026-08-28 | Claude | **Génération de cartes Plan Home Assistant (Lovelace)** (§17, nouvelle, conception) : troisième sortie de HAPlan depuis la même modélisation plans/positions (§4), après l'interaction HA directe et la génération ESPHome (§3.6/§8.9-8.10) — carte Plan Lovelace construite directement au format HA cible, envoyée en WebSocket (port 8123, pas MQTT) via le token longue durée déjà géré côté cœur, déclenchement manuel depuis HAPlan. Types d'objets génériques (actionneur simple, capteur pur, objet complexe avec fenêtre dédiée ou repli +/− pour les thermostats). Conception soumise par l'utilisateur, reprise telle quelle — aucun code écrit, plusieurs points laissés ouverts avant implémentation (§17.7) : police d'icônes réelle de HAPlan à identifier, capacités exactes de la carte Plan Lovelace côté HA non vérifiées. Ancienne version v1.3 archivée. |
 | 1.3 | 2026-08-15 | Claude | **Écran mural physique (ESP32-S3)** (§8.10, nouvelle) : veille du rétroéclairage après 30s d'inactivité tactile (rallumé au premier tap), retrait du texte des coordonnées x/y (le marqueur "X" rouge reste, décision utilisateur permanente). |
