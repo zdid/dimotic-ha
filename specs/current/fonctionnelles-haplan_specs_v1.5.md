@@ -1,5 +1,14 @@
 # Spécifications Fonctionnelles - Module HAPLAN
 
+*Version 1.5 - 28 Août 2026*
+*Réponse aux deux points ouverts par la v1.4 (§17.7) : police d'icônes HAPlan identifiée dans le
+code (Font Awesome 6 Free Solid, CDN, ~8 glyphes utilisés — §17.2) ; capacités de la carte Plan
+Lovelace HA confirmées via sa documentation officielle (§17.7) — coordonnées en % déjà compatibles
+avec la convention HAPlan, couleur dynamique par état déjà native (`state_color`), fenêtre
+thermostat déjà couverte nativement par le dialogue `more-info` standard sur une entité `climate`
+(rend probablement inutile le repli +/- envisagé en v1.4, §17.3). Conception toujours non
+implémentée — reste à vérifier ces capacités en conditions réelles au démarrage de l'implémentation.*
+
 *Version 1.4 - 28 Août 2026*
 *Nouvelle §17 "Génération de cartes Plan Home Assistant (Lovelace)" — conception soumise par
 l'utilisateur pour une troisième sortie de HAPlan (après l'interaction HA directe et la génération
@@ -750,7 +759,9 @@ Données runtime : `data/haplan/config-haplan-floorplans-v1.0.yaml`, `data/hapla
 ## 17. Génération de cartes Plan Home Assistant (Lovelace) — conception, nouveau v1.4
 
 **Statut** : conception soumise par l'utilisateur (28/08/2026), reprise ici telle quelle — aucun
-code écrit à ce stade. Plusieurs points restent à trancher avant implémentation (§17.7).
+code écrit à ce stade. Les deux points laissés ouverts en v1.4 sont désormais tranchés (§17.2 pour
+la police d'icônes, §17.7 pour les capacités HA) — reste seulement à vérifier en conditions réelles
+au moment de l'implémentation (§17.7, "Reste à faire").
 
 ### 17.1 Contexte
 
@@ -774,11 +785,28 @@ des objets avec : l'identifiant d'entité HA (ex. `light.salon`), des coordonné
 éventuellement une icône (et parfois une valeur affichée à côté, ou l'icône seule), la taille de
 l'icône/texte (déjà réglable dans HAPlan aujourd'hui, §12.2).
 
-Police d'icônes utilisée par HAPlan aujourd'hui : non identifiée précisément à ce stade (à vérifier
-dans le code, §17.7). Contrainte : la police doit permettre plusieurs couleurs par icône selon
-l'état (ex. gris = éteint, jaune = allumé). HA utilise nativement les icônes **mdi** (Material
-Design Icons), qui répondent à ce besoin — un mapping HAPlan → mdi sera probablement nécessaire si
-la police d'origine diffère.
+**Police d'icônes identifiée (28/08/2026, résout le point ouvert en §17.7 de la v1.4)** :
+**Font Awesome 6 Free Solid** — chargée en CDN côté navigateur (`dashboard.html`,
+`cdnjs.cloudflare.com/.../font-awesome/6.0.0/...`), sélection par classe CSS (`<i class="fas
+fa-lightbulb">`). Choix d'icône par domaine codé en dur, dispersé dans chaque
+`Enhanced*Object.ts` (§16) — pas de table centralisée : `fa-lightbulb` (lumière), `fa-fire`/
+`fa-snowflake` (radiateur, glyphe qui change selon l'état), `fa-wind` (VMC), `fa-thermometer-*`
+(thermostat, 3 variantes selon la température), `fa-window-maximize`/`-minimize` (volet),
+`fa-toggle-on`/`-off` (interrupteur), `fa-water` (chauffe-eau). Couleur selon l'état : gris
+(`#bbbbbb`) si éteint, jaune/or (`#FFD700`) si allumé — géré en style inline JS
+(`EnhancedLightObject.updateDisplay()`), pas par classe CSS.
+
+**Même police déjà réutilisée pour l'écran ESP** (§8.10) — `generate_esphome_floorplan.py` embarque
+le `.ttf` Font Awesome 5.15.4 Solid (glyphes identiques à FA6 pour ces icônes) et sélectionne par
+point de code Unicode explicite, avec les mêmes couleurs (`0xFFC107`/`0x9E9E9E`) — convention déjà
+partagée entre les deux sorties existantes, pas propre à l'une ou l'autre.
+
+**Mapping vers mdi nécessaire, confirmé** : la carte Plan Lovelace de HA attend des identifiants
+`mdi:...` (§17.7), jamais rencontrés dans le code HAPlan actuel. Mais l'ensemble des glyphes
+réellement utilisés est **petit et fini** (la liste ci-dessus, ~8 icônes) — une table de
+correspondance manuelle FA→mdi suffit largement (ex. `fa-lightbulb`→`mdi:lightbulb`,
+`fa-fire`/`fa-snowflake`→`mdi:fire`/`mdi:snowflake-alert`, `fa-wind`→`mdi:fan`, pas besoin d'une
+conversion automatique par nom).
 
 ### 17.3 Types d'objets et comportements
 
@@ -792,7 +820,15 @@ côté HAPlan lui-même (§9, `UnifiedObjectFactory`). Cas déjà identifiés :
 | Capteur pur (température, humidité...) | déterminée automatiquement selon le type de mesure ; unité récupérée automatiquement | aucune action, affichage seul |
 | Objet complexe (thermostat...) | — | ouvre une fenêtre dédiée avec les différents réglages (fenêtre déjà existante dans HAPlan — `ThermostatWindow.ts`, §16 — à reproduire si possible côté HA) |
 
-**Repli pour les thermostats** si la fenêtre dédiée n'est pas réalisable côté HA : afficher la
+**Réponse confirmée (28/08/2026, résout le point ouvert en §17.7 de la v1.4)** : réalisable
+nativement, sans rien construire de spécifique. `tap_action: more-info` (une action standard de
+l'élément `state-icon`, §17.7) ouvre le dialogue "plus d'infos" natif de HA — qui, pour une entité
+`climate.*`, affiche déjà par défaut une interface complète de thermostat (réglage de température,
+sélection du mode). **Le repli +/- décrit ci-dessous n'est donc probablement pas nécessaire** —
+gardé ici pour mémoire seulement, au cas où le rendu par défaut de `more-info` ne conviendrait pas
+visuellement une fois vu en réel.
+
+**Repli pour les thermostats** si la fenêtre dédiée par défaut ne convenait pas : afficher la
 température au centre, bouton **+** (rouge) à droite et **−** (bleu) à gauche pour ajuster la
 consigne directement depuis le plan.
 
@@ -822,15 +858,40 @@ dédié (pipeline Python séparé, §8.9) ; la carte Plan Lovelace génère une 
 consommée directement par l'interface HA existante de l'utilisateur (navigateur, appli mobile HA),
 sans matériel dédié ni compilation.
 
-### 17.7 Points restants à trancher / vérifier (avant implémentation)
+### 17.7 Capacités confirmées de la carte Plan Lovelace HA (28/08/2026)
 
-- Identifier précisément la police d'icônes utilisée actuellement par HAPlan, et déterminer si un
-  mapping vers mdi est nécessaire (et sa méthode : table de correspondance manuelle, ou automatique
-  par nom).
-- Vérifier les capacités réelles de la carte Plan Lovelace de HA (formats de coordonnées acceptés,
-  gestion des couleurs d'icônes dynamiques, possibilité d'ouvrir une fenêtre de dialogue
-  personnalisée pour les thermostats) pour confirmer que le format ciblé est bien réalisable tel
-  quel — **non vérifié à ce stade, condition préalable à l'implémentation**.
+Les deux points laissés ouverts en v1.4 sont tranchés — police d'icônes HAPlan en §17.2, capacités
+HA ci-dessous (source : documentation officielle `home-assistant.io/dashboards/picture-elements/`,
+pas encore vérifié en conditions réelles contre l'instance HA de l'utilisateur — voir "Reste à
+faire" en fin de section).
+
+**Le type HA visé est le `picture-elements` avec des éléments `state-icon`** — c'est très
+exactement l'équivalent HA natif de ce que fait déjà HAPlan (image de fond + éléments positionnés
+par coordonnées).
+
+- **Coordonnées** : `style: {left: X%, top: Y%}` (CSS, pourcentages relatifs à l'image), avec un
+  style par défaut incluant `transform: translate(-50%, -50%)` — **correspond exactement** à la
+  convention déjà utilisée par HAPlan (§17.2 : le pourcentage représente déjà le centre de
+  l'icône). Aucune conversion de format nécessaire, juste `left`/`top` au lieu de `x`/`y`.
+- **Couleur dynamique selon l'état** : `state_color` (booléen, `true` par défaut) sur l'élément
+  `state-icon` — **entièrement natif à HA, rien à construire**. Va même au-delà du besoin exprimé en
+  §17.3 : couleur automatique par `device_class` pour de nombreux domaines (`light`, `climate`,
+  `cover`, `sensor`, `binary_sensor`, `lock`, `media_player`, `humidifier`, `vacuum`, `sun`...),
+  gris pour l'état inactif — pas seulement gris/jaune pour les lumières.
+- **Fenêtre thermostat** : voir §17.3 ci-dessus — `more-info` natif suffit, repli +/- probablement
+  inutile.
+- **Autres options de l'élément `state-icon`** (pour référence) : `entity` (requis), `icon`
+  (surcharge l'icône par défaut de l'entité), `title` (infobulle), `tap_action`/`hold_action`/
+  `double_tap_action` (actions standard HA — `more-info`, `toggle`, `perform-action`, `navigate`).
+- **Autres types d'éléments disponibles** dans une carte `picture-elements` (pour mémoire, pas
+  utilisés dans cette conception) : `state-badge`, `state-label` (texte d'état/attribut — pertinent
+  pour l'affichage de valeur de capteur, §17.3), `icon` (icône statique sans entité), `image`
+  (variantes d'image selon l'état), `action-button`, `conditional` (affichage sous condition).
+
+**Reste à faire (implémentation, pas conception)** : ces capacités sont documentées côté HA mais
+**pas encore testées en conditions réelles** contre une vraie carte générée par HAPlan sur
+l'instance HA de l'utilisateur — à valider dès le début de l'implémentation, avant d'aller plus
+loin. Construire la table de correspondance FA→mdi (§17.2, ~8 entrées) reste aussi à faire.
 
 ---
 
@@ -853,6 +914,7 @@ sans matériel dédié ni compilation.
 ### 18.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.5 | 2026-08-28 | Claude | **Réponse aux deux points ouverts de la v1.4** (§17.2/§17.7) : police d'icônes HAPlan identifiée en lisant le code (Font Awesome 6 Free Solid, CDN, ~8 glyphes utilisés au total, déjà partagés avec la génération ESPHome §8.10 — table de correspondance FA→mdi manuelle à construire, petite et finie) ; capacités de la carte Plan Lovelace HA confirmées via sa documentation officielle (`picture-elements`/`state-icon`) — coordonnées en % déjà compatibles avec la convention HAPlan (`translate(-50%,-50%)` des deux côtés), couleur dynamique par état native (`state_color`, va au-delà du besoin exprimé — couverture par `device_class` sur de nombreux domaines), fenêtre thermostat déjà couverte nativement par le dialogue `more-info` standard sur une entité `climate` (rend probablement inutile le repli +/- envisagé en v1.4). Conception toujours non implémentée — capacités confirmées par la documentation, pas encore vérifiées en conditions réelles contre l'instance HA de l'utilisateur (à faire au démarrage de l'implémentation). |
 | 1.4 | 2026-08-28 | Claude | **Génération de cartes Plan Home Assistant (Lovelace)** (§17, nouvelle, conception) : troisième sortie de HAPlan depuis la même modélisation plans/positions (§4), après l'interaction HA directe et la génération ESPHome (§3.6/§8.9-8.10) — carte Plan Lovelace construite directement au format HA cible, envoyée en WebSocket (port 8123, pas MQTT) via le token longue durée déjà géré côté cœur, déclenchement manuel depuis HAPlan. Types d'objets génériques (actionneur simple, capteur pur, objet complexe avec fenêtre dédiée ou repli +/− pour les thermostats). Conception soumise par l'utilisateur, reprise telle quelle — aucun code écrit, plusieurs points laissés ouverts avant implémentation (§17.7) : police d'icônes réelle de HAPlan à identifier, capacités exactes de la carte Plan Lovelace côté HA non vérifiées. Ancienne version v1.3 archivée. |
 | 1.3 | 2026-08-15 | Claude | **Écran mural physique (ESP32-S3)** (§8.10, nouvelle) : veille du rétroéclairage après 30s d'inactivité tactile (rallumé au premier tap), retrait du texte des coordonnées x/y (le marqueur "X" rouge reste, décision utilisateur permanente). |
 | 1.2 | 2026-08-13 | Claude | Bouton "Déployer sur l'écran" (§3.6, §8.9) : premier exemple de communication inter-applications initiée par HAPLAN, vers la nouvelle application `applications/espdisplay` (`espdisplay:deploy-floorplan`/`espdisplay:deploy-result` sur l'EventBus générique, même pattern que `integration:bridge:register`). 3 nouveaux événements Socket.io (§13), 2 nouveaux codes d'erreur (§3.5). |
