@@ -1,5 +1,16 @@
 # Spécifications Fonctionnelles - Supervision Multi-Machines (SUPERVISOR)
 
+*Version 2.8 - 27 Août 2026*
+*⭐ Visibilité multi-machines intra-site (§14bis, nouveau) : registre d'applications par gossip MQTT
+(`AppGossipService`, même patron que `TargetGossipService`), nouvelle page d'accueil (lien HA local,
+sites externes personnels jamais gossipés, applications des autres machines en lecture seule).
+Étape 1 d'un besoin en deux temps (diffusion Docker qui empêche les tests/corrections ponctuelles) —
+le besoin d'origine (application hors Docker) reste différé. Vocabulaire "site" clarifié en session :
+une propriété/un foyer indépendant, aucune fusion de visibilité entre sites. Deux bugs réels trouvés
+et corrigés en testant (sélection du module par défaut dupliquée dans `ModuleManager.ts`,
+`zigbee2mqttTargets` perdu silencieusement par 3 méthodes de `ConfigService`). Vérifié en conditions
+réelles (broker MQTT, navigateur).*
+
 *Version 2.7 - 24 Août 2026*
 *⭐ Migration en process séparé terminée pour `ia`/`planificateur`/`haplan`/`arbreouquoi` —
 dernières applications restées in-process, différée en v2.6 (16/08/2026) faute de mécanisme pour
@@ -1121,6 +1132,88 @@ texte hérité de l'époque où désactiver *toute* app redémarrait `core` ; re
 uniquement en apparence, jamais de désagrément réel constaté (l'app se désactive bien, sans jamais
 couper la connexion), mais trompeur. Signalé, correction non demandée cette session.
 
+## 14bis. Visibilité multi-machines intra-site + page d'accueil (nouveau v2.8, 27/08/2026)
+
+### 14bis.1 Contexte
+
+Point de départ : diffusion par Docker qui empêche les tests/corrections ponctuelles sans
+reconstruire toute l'image, et création d'une nouvelle application sur une plateforme de dev non
+dockerisée. Discutée en session en mode plan avec l'utilisateur (voir plan de mise en œuvre associé
+pour le détail des options écartées) — traité en deux temps : **cette version couvre uniquement la
+brique de visibilité**, le besoin d'origine (application modifiée hors Docker remplaçant celle
+dockerisée) reste différé.
+
+**Vocabulaire clarifié en session** : un "site" = une propriété/un foyer indépendant (son propre HA,
+son propre Mosquitto, ses propres applications) — `ha2`/`orangepi`/`stfort` sont des dépendances du
+MÊME site, pas des sites différents. **Aucune fusion de visibilité entre sites** — seul un accès
+point-à-point (WireGuard, hors périmètre du dépôt) relie deux sites ; naviguer vers l'adresse d'un
+`core` distant affiche sa propre vue, jamais mélangée. Le mécanisme ci-dessous reste donc strictement
+intra-site par construction (un site = un broker MQTT partagé).
+
+### 14bis.2 Registre d'applications par gossip — `AppGossipService`
+
+Même patron que `TargetGossipService` (§6, déjà en place) : chaque `core` publie sur un topic MQTT
+**retenu** `dimotic/core/{machineId}/known-apps`, la liste de ses applications actives localement
+(`{id, name, icon, audience}`, dérivée de la même source que `app:modules:list`), enrichie de
+`address`/`webPort`/`runningInDocker` (ce dernier via `isRunningInDocker()`, §11.4bis déjà présent
+dans le socle). Toute instance abonnée au wildcard `dimotic/core/+/known-apps` fusionne dans un
+registre agrégé en mémoire (jamais persisté — redécouvert à chaque démarrage via les messages
+retenus). **Contrairement à `TargetGossipService::mergeTargets()`, pas de renommage
+`{machineId}::{id}`** : qu'une même application tourne sur plusieurs machines et apparaisse donc
+plusieurs fois est le comportement voulu (demande explicite), pas une collision à éviter.
+
+Vérifié en conditions réelles : publication retenue confirmée sur le broker (`mosquitto_sub`),
+fusion d'une annonce simulée d'une seconde machine confirmée en log, relais jusqu'au frontend
+(`app:remote-apps`) confirmé.
+
+### 14bis.3 Affichage — entrées distantes en lecture seule, additives
+
+Décision de conception : ne PAS fusionner les entrées distantes dans le modèle `ModuleManager`
+existant (celui-ci traite `module.id` comme clé unique partout — config, module actif...) ; les
+entrées apprises par gossip sont affichées à côté, en lecture seule, étiquetées "{machineId}
+(Docker)"/"{machineId} (hôte)". Clic sur une entrée distante → **redirection simple** du navigateur
+vers `http://{address}:{webPort}/` — pas de proxy HTTP/WebSocket inter-machines (l'ancienne
+proposition v2.1 §7.2, jamais implémentée) : la vitrine unique reste assurée indirectement, puisque
+chaque `core` diffuse déjà le même registre complet à ses propres visiteurs.
+
+### 14bis.4 Lien HA local + sites externes personnels + page d'accueil
+
+- **Lien HA local** (`app:ha-address`, nouveau) : construit directement depuis `ha.ws.host`/
+  `ha.ws.port` déjà connus de `core`, aucune nouvelle donnée à stocker.
+- **Sites externes** (`core.externalSites`, `schema.ts::externalSiteSchema`) : liste personnelle,
+  **jamais gossipée** (pas de champ `origin` comme `targets`/`haStackTargets`) — une seule adresse
+  par entrée (celle du `core` distant). Décision de conception : pas besoin de stocker l'adresse HA
+  de ce site, il affiche déjà son propre lien HA (point précédent, appliqué chez lui) une fois qu'on
+  y accède via WireGuard — jamais dupliquée, toujours à jour. CRUD complet côté Socket.io
+  (`core:external-site(s):*`), même patron que `targets`.
+- **Nouvelle page d'accueil** (`HomeView.ts`) : lien HA local + sites externes + registre
+  d'applications distantes, devient la vue par défaut au lieu du premier module métier
+  (`ModuleContainer.ts`/`Sidebar.ts`). Rendue directement en mémoire (pas un fichier de présentation
+  fetché, 'accueil' n'a pas de dossier `applications/accueil/`).
+
+**Bug réel trouvé et corrigé en testant** : `ModuleManager.ts` avait sa PROPRE logique dupliquée de
+sélection du module actif par défaut ("premier module non-core"), déclenchée juste après
+`modules:loaded` — elle écrasait systématiquement le choix "accueil" fait par `Sidebar.ts`/
+`ModuleContainer.ts` (constaté au navigateur : atterrissait sur `arbreouquoi` malgré "accueil" fixé
+ailleurs). Supprimée — la sélection du module par défaut vit désormais exclusivement dans
+`Sidebar.ts`/`ModuleContainer.ts`. Un second bug (sans lien direct, trouvé en touchant les mêmes
+lignes) : `ConfigService.setDisabledApps()`/`saveConfig()`/`clearHaWsToken()` perdaient déjà
+silencieusement `zigbee2mqttTargets` (même classe de bug que l'incident `disabledApps` du
+07/08/2026, jamais propagé à ces 3 méthodes lors de l'ajout de `zigbee2mqttTargets`) — corrigé au
+passage.
+
+Vérifié en conditions réelles au navigateur (capture d'écran) : page d'accueil par défaut, lien HA
+correct, ajout/suppression d'un site externe, navigation retour depuis un module vers Accueil.
+
+### 14bis.5 Hors périmètre (explicitement différé)
+
+- Le besoin d'origine (application modifiée hors Docker remplaçant celle dockerisée).
+- `MqttEventBus` (§6.3, déjà écrite et testée mais jamais instanciée en production) et le proxy
+  HTTP/WebSocket inter-machines (v2.1 §7.2) — pas nécessaires pour de la visibilité en lecture seule.
+- Authentification MQTT (déjà documentée comme risque connu, §10) — pas aggravée par ce chantier
+  (aucun trafic cross-site prévu, le gossip reste intra-site par construction).
+- Installation/configuration de WireGuard — infrastructure réseau, hors du dépôt de code.
+
 ## 15. Annexes
 
 ### 15.1 Références
@@ -1158,6 +1251,7 @@ couper la connexion), mais trompeur. Signalé, correction non demandée cette se
 ### 15.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 2.8 | 2026-08-27 | Claude | **Visibilité multi-machines intra-site + page d'accueil** (§14bis, nouveau) — voir aussi `fonctionnelles-core` : registre d'applications par gossip MQTT (`AppGossipService.ts`, même patron que `TargetGossipService`, `dimotic/core/{machineId}/known-apps` retenu, pas de renommage `{machineId}::{id}` — une même app sur plusieurs machines apparaît plusieurs fois, voulu). Entrées distantes affichées en lecture seule à côté du menu existant (pas de fusion dans `ModuleManager`), clic → redirection simple `http://{address}:{webPort}/` (pas de proxy HTTP/WebSocket, vitrine unique déjà assurée par la diffusion du même registre à chaque `core`). Nouveau lien HA local (`app:ha-address`), nouvelle liste personnelle de sites externes jamais gossipée (`core.externalSites`), nouvelle page d'accueil par défaut (`HomeView.ts`). Vocabulaire "site" clarifié en session (propriété/foyer indépendant, aucune fusion cross-site — WireGuard hors périmètre du dépôt). Deux bugs réels trouvés et corrigés en testant : sélection du module par défaut dupliquée dans `ModuleManager.ts` (écrasait "accueil"), `zigbee2mqttTargets` perdu silencieusement par `setDisabledApps()`/`saveConfig()`/`clearHaWsToken()` de `ConfigService` (même classe que l'incident `disabledApps` du 07/08/2026). Vérifié en conditions réelles (broker MQTT réel, navigateur). Besoin d'origine (app hors Docker) différé à une session ultérieure. Toutes demandes utilisateur, session du 27/08/2026. Ancienne version v2.7 archivée. |
 | 2.6 | 2026-08-16 | Claude | **⭐ Phase 2 — migration terminée pour les 6 applications restantes prévues** (`rpigpio`, `teleinfo`, `arexx`, `evoo7`, `nommage`, `rfxcom`) et révision d'architecture en cours de route, §14.5-§14.11 (nouvelles) : pivot du pont EventBus↔app de MQTT (`MqttEventBus`) vers IPC (`IpcEventBus`) — les apps migrées restent sur la même machine que `core`, qui les spawn lui-même, un tuyau `child_process` suffit (§14.5) ; pont générique éliminant `bridgedEvents` manuel via 3 mécanismes automatiques (§14.6) ; rollout des 6 apps avec les écueils rencontrés par app (§14.7) ; présence/heartbeat rpigpio/teleinfo, du point 1 de l'Agent Minimal §11 passé de la conception à une implémentation réelle, teleinfo vérifiée en conditions réelles (§11.5/§14.8) ; correctif du bug préexistant `app:menu:register` trouvé en Phase 1 (§14.9) ; migration différée d'`ia`/`planificateur`/`haplan`/`arbreouquoi`, décision explicite documentée (§14.10). `MqttEventBus`/le pont MQTT générique non supprimés, juste plus utilisés par aucune app (§6.3/§7.1 annotées d'une note v2.6). Ancienne version v2.5 archivée. |
 | 2.5 | 2026-08-16 | Claude | **⭐ Phase 1 implémentée et vérifiée en conditions réelles** (§14, nouvelle) : `espdisplay` migrée en process séparé (`MqttEventBus`, `ProcessSupervisor`, `SupervisorEventBridge`, `standalone.ts`). Deux problèmes réels trouvés en testant : process orphelins au redémarrage de `core` (corrigé, `stopAllSeparateProcesses()` + filet `process.on('exit')`), `app:menu:register` jamais relayé côté socle pour aucune app (préexistant, non corrigé ici, signalé dans `TODO.md`). Deux décisions prises en cours de route : commandes MQTT start/stop/restart généralisées à toute app séparée (pas réservées à l'agent minimal §11), aucune signature sur ce canal pour cette phase (authentification prévue au niveau du broker mosquitto, sujet séparé). Ancienne version v2.4 archivée. |
 | 2.4 | 2026-08-16 | Claude | Correction de référence croisée uniquement (`techniques-socle-ha-mqtt_specs` v4.29→v4.30, §8.5.4ter rejet des commandes MQTT retenues). Aucun changement de contenu propre à cette spec. Ancienne version v2.3 archivée. |

@@ -834,6 +834,32 @@
   l'utilisateur)
 - **Priorité** : Moyenne (le sous-ensemble déjà livré couvre déjà le cas d'usage le plus fréquent)
 
+### 🟢 Socle : visibilité multi-machines intra-site + page d'accueil — Implémenté et vérifié
+- **Constat (2026-08-27)** : demande utilisateur — la diffusion par Docker empêche les tests/
+  corrections ponctuelles sans reconstruire toute l'image, et créer une nouvelle application se
+  fait sur une plateforme de dev non dockerisée. Discuté en session en mode plan (plusieurs allers-
+  retours pour clarifier la portée — voir `fonctionnelles-supervisor_specs_v2.8.md` §14bis.1 pour le
+  détail) : traité en deux temps, **cette partie couvre uniquement la visibilité**.
+- **Livré** (`fonctionnelles-supervisor_specs_v2.8.md` §14bis, commits `7aa1a86`) : `AppGossipService`
+  (registre d'applications par gossip MQTT, même patron que `TargetGossipService`), entrées
+  distantes affichées en lecture seule à côté du menu existant (redirection simple au clic, pas de
+  proxy), nouveau lien HA local, nouvelle liste personnelle de sites externes jamais gossipée
+  (`core.externalSites` — une seule adresse par entrée, le site distant affiche déjà son propre lien
+  HA une fois qu'on y accède), nouvelle page d'accueil par défaut (`HomeView.ts`).
+- **Deux vrais bugs trouvés et corrigés en testant** : `ModuleManager.ts` avait sa propre logique
+  dupliquée de sélection du module par défaut, qui écrasait systématiquement "accueil" juste après
+  (constaté au navigateur : atterrissait sur `arbreouquoi`) — supprimée. `ConfigService
+  .setDisabledApps()`/`saveConfig()`/`clearHaWsToken()` perdaient déjà silencieusement
+  `zigbee2mqttTargets` (même classe de bug que l'incident `disabledApps` du 07/08/2026) — corrigé au
+  passage.
+- **Vérifié en conditions réelles** : publication/fusion du registre confirmée sur le broker MQTT
+  réel (`mosquitto_sub`, simulation d'une seconde machine), et au navigateur (page d'accueil par
+  défaut, lien HA correct, ajout/suppression d'un site externe, navigation retour vers Accueil).
+- **Hors périmètre, différé explicitement** : le besoin d'origine (une application modifiée hors
+  Docker remplace celle qui est dockerisée) — à reprendre en session dédiée, une fois cette base en
+  place. WireGuard lui-même (infrastructure réseau) reste hors du dépôt de code.
+- **Priorité** : Moyenne (base posée, le besoin d'origine qui a motivé la discussion reste à traiter)
+
 ---
 
 ## Notes techniques
