@@ -95,11 +95,18 @@ const deploymentTargetSchema = z.object({
  * SÉPARÉE de `targets` (décidé avec l'utilisateur : pas forcément les mêmes machines que celles
  * qui hébergent dimotic-ha). Même forme que `deploymentTargetSchema`, seul le `remoteDir` par
  * défaut change — même clé SSH globale que toute autre cible (SshClient.ts#globalSshKeyPath).
+ *
+ * `remoteDir` désigne ici le dossier PARENT `/docker` (pas le dossier d'un projet précis) :
+ * `HaStackDeployService` gère DEUX projets Compose isolés sous ce parent
+ * (`<remoteDir>/homeassistant/`, `<remoteDir>/mosquitto/`), qui doivent rester des frères directs
+ * sous `/docker` comme toute autre application (`/docker/<app>/`) — ⭐ 28/08/2026, corrige un
+ * défaut erroné (`/docker/homeassistant`) qui produisait un niveau d'imbrication en trop
+ * (`/docker/homeassistant/homeassistant/`), repéré et signalé par l'utilisateur.
  */
 const haStackTargetSchema = z.object({
   id: z.string().min(1),
   host: z.string().default(''),
-  remoteDir: z.string().default('/docker/homeassistant'),
+  remoteDir: z.string().default('/docker'),
   origin: z.enum(['local', 'gossip']).default('local')
 });
 
