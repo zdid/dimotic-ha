@@ -254,6 +254,20 @@ export class RpigpioService implements IRpigpioService {
       return;
     }
 
+    // ⭐ 28/08/2026 : évite de rediffuser un config.yml avec un broker MQTT vide — bug réel
+    // constaté sur ha2 (mqtt-io-rpigpio en boucle de redémarrage, "empty values not allowed"),
+    // cause racine : aucune validation avant ce point ne bloquait un déploiement avec
+    // `mqtt.host` resté à son défaut de schéma (chaîne vide).
+    if (action === 'deploy' && !this.config.mqtt.host.trim()) {
+      this.eventBus.emit(RPIGPIO_SOCKET_EVENTS.REMOTE_OP_RESULT, {
+        targetId,
+        action,
+        success: false,
+        error: 'Broker MQTT non configuré (mqtt.host vide) — renseigne-le avant de déployer.'
+      });
+      return;
+    }
+
     try {
       const result = await (action === 'deploy'
         ? this.deployService.deploy(target, generateMqttIoConfig(this.config, this.pins), generateComposeFile(target))
