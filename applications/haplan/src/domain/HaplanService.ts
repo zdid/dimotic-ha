@@ -282,10 +282,7 @@ export class HaplanService implements IHaplanService {
       (data) => this.handleFloorplanDeploy(data)
     );
 
-    this.eventBus.onGeneric<{ floorplanId: string }>(
-      HAPLAN_CLIENT_EVENTS.LOVELACE_DEPLOY,
-      (data) => this.handleLovelaceDeploy(data)
-    );
+    this.eventBus.onGeneric(HAPLAN_CLIENT_EVENTS.LOVELACE_DEPLOY, () => this.handleLovelaceDeploy());
   }
 
   private emitFloorplansList(): void {
@@ -442,48 +439,56 @@ export class HaplanService implements IHaplanService {
     this.eventBus.emitGeneric('espdisplay:deploy-floorplan', { floorplanId: data.floorplanId });
   }
 
-  /**
-   * Dépôt de la carte Plan Lovelace sur HA — contrairement à handleFloorplanDeploy ci-dessus, pas
-   * de relais vers une autre application : la génération du YAML (§17 de la spec, voir
-   * lovelace-generator.ts) reste ici (connaissance HAPLAN — icônes, positions), seul le dépôt SSH
-   * lui-même est délégué à core (HaplanLovelaceDeployService, seul à connaître haStackTargets et
-   * les primitives SSH — voir specs pour le détail complet des deux responsabilités).
+/**
+   * Dépôt de la carte Plan Lovelace sur HA — TOUS les plans connus, une vue HA par plan (voir
+   * lovelace-generator.ts) dans un seul tableau de bord, navigables par les onglets natifs de HA
+   * (balayage déjà géré nativement sur mobile). Contrairement à handleFloorplanDeploy ci-dessus,
+   * pas de relais vers une autre application : la génération du YAML (§17 de la spec) reste ici
+   * (connaissance HAPLAN — icônes, positions), seul le dépôt SSH lui-même est délégué à core
+   * (HaplanLovelaceDeployService, seul à connaître haStackTargets et les primitives SSH).
    */
-  private handleLovelaceDeploy(data: { floorplanId: string }): void {
+  private handleLovelaceDeploy(): void {
     if (this.lovelaceDeployInProgress) {
       this.eventBus.emitGeneric('haplan:error',
-        createHaplanError('HAPLAN_LOVELACE_DEPLOY_BUSY', 'Un dépôt est déjà en cours, réessaie dans un instant', 'haplan:lovelace:deploy', { floorplanId: data.floorplanId }));
+        createHaplanError('HAPLAN_LOVELACE_DEPLOY_BUSY', 'Un dépôt est déjà en cours, réessaie dans un instant', 'haplan:lovelace:deploy'));
       return;
     }
-    const floorplan = this.floorplansConfig.floorplans[data.floorplanId];
-    if (!floorplan) {
+    const floorplanIds = Object.keys(this.floorplansConfig.floorplans);
+    if (floorplanIds.length === 0) {
       this.eventBus.emitGeneric('haplan:error',
-        createHaplanError('HAPLAN_UNKNOWN_ENTITY', `Plan inconnu: ${data.floorplanId}`, 'haplan:lovelace:deploy'));
+        createHaplanError('HAPLAN_UNKNOWN_ENTITY', 'Aucun plan à déployer', 'haplan:lovelace:deploy'));
       return;
     }
 
     this.lovelaceDeployInProgress = true;
-    this.logger.info('HaplanService', `Dépôt de la carte Plan Lovelace demandé pour le plan ${data.floorplanId}`);
-    this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.LOVELACE_DEPLOY_STARTED, { floorplanId: data.floorplanId });
+    this.logger.info('HaplanService', `Dépôt de la carte Plan Lovelace demandé pour ${floorplanIds.length} plan(s)`);
+    this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.LOVELACE_DEPLOY_STARTED, {});
 
-    const yamlContent = buildLovelaceDashboardYaml(floorplan, floorplan.filename, Date.now());
+    const cacheBust = Date.now();
+    const yamlContent = buildLovelaceDashboardYaml(this.floorplansConfig.floorplans, cacheBust);
     // Fusionné sur le fond sombre HAPLAN avant envoi (voir image-flatten.ts) — l'original reste
     // inchangé (toujours utilisé par HAPLAN lui-même, sur son propre fond déjà sombre). Seul le
     // PNG peut avoir un fond transparent problématique ici (JPEG n'a pas de canal alpha — pas de
     // fond blanc-sur-blanc possible) ; WEBP transparent non couvert (pngjs ne le décode pas),
     // limitation connue plutôt qu'un décodeur supplémentaire pour un cas non rencontré à ce jour.
-    const sourceImagePath = path.join(this.resolveImagesDir(), floorplan.filename);
-    let imageLocalPath = sourceImagePath;
-    if (floorplan.filename.toLowerCase().endsWith('.png')) {
-      const flattenedImagePath = path.join(this.resolveImagesDir(), `.lovelace-${floorplan.filename}`);
-      flattenPngOntoDarkBackground(sourceImagePath, flattenedImagePath);
-      imageLocalPath = flattenedImagePath;
-    }
-    this.eventBus.emitGeneric('core:haplan-lovelace:deploy', {
-      yaml: yamlContent,
-      imageLocalPath,
-      imageFilename: floorplan.filename
+    // Sous-dossier dédié (pas de préfixe sur le nom de fichier lui-même) : le dépôt SSH copie
+    // toutes les images en une seule fois vers un répertoire distant (scp source multiple ->
+    // répertoire, voir HaplanLovelaceDeployService.ts), qui préserve le nom de fichier LOCAL tel
+    // quel — il doit donc déjà être le nom final attendu par le YAML (/local/<filename>).
+    const flattenedDir = path.join(this.resolveImagesDir(), '.lovelace-tmp');
+    fs.mkdirSync(flattenedDir, { recursive: true });
+    const images = Object.values(this.floorplansConfig.floorplans).map((floorplan) => {
+      const sourceImagePath = path.join(this.resolveImagesDir(), floorplan.filename);
+      let localPath = sourceImagePath;
+      if (floorplan.filename.toLowerCase().endsWith('.png')) {
+        const flattenedImagePath = path.join(flattenedDir, floorplan.filename);
+        flattenPngOntoDarkBackground(sourceImagePath, flattenedImagePath);
+        localPath = flattenedImagePath;
+      }
+      return { localPath, filename: floorplan.filename };
     });
+
+    this.eventBus.emitGeneric('core:haplan-lovelace:deploy', { yaml: yamlContent, images });
   }
 
   private registerSocketEvents(): void {

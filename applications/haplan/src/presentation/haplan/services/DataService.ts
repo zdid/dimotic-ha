@@ -43,7 +43,7 @@ export class DataService {
   private taxonomyTreeListeners: Set<(areas: any[]) => void> = new Set();
   private deployStartedListeners: Set<(data: { floorplanId: string }) => void> = new Set();
   private deployResultListeners: Set<(data: { floorplanId?: string; ok: boolean; message: string; durationMs: number }) => void> = new Set();
-  private lovelaceDeployStartedListeners: Set<(data: { floorplanId: string }) => void> = new Set();
+  private lovelaceDeployStartedListeners: Set<() => void> = new Set();
   private lovelaceDeployResultListeners: Set<(data: { success: boolean; error?: string }) => void> = new Set();
   private errorListeners: Set<(error: { code?: string; message: string }) => void> = new Set();
 
@@ -96,8 +96,8 @@ export class DataService {
       this.deployResultListeners.forEach((cb) => cb(data));
     });
 
-    this.socket.on('haplan:lovelace:deploy:started', (data: { floorplanId: string }) => {
-      this.lovelaceDeployStartedListeners.forEach((cb) => cb(data));
+    this.socket.on('haplan:lovelace:deploy:started', () => {
+      this.lovelaceDeployStartedListeners.forEach((cb) => cb());
     });
 
     this.socket.on('haplan:lovelace:deploy:result', (data: { success: boolean; error?: string }) => {
@@ -299,13 +299,14 @@ export class DataService {
     this.deployResultListeners.add(callback);
   }
 
-  /** Dépôt de la carte Plan Lovelace sur HA (voir HaplanLovelaceDeployService côté core) —
-   *  asynchrone, résultat livré via onLovelaceDeployResult() (écriture SSH + copie d'image). */
-  deployLovelace(floorplanId: string): void {
-    this.socket.emit('haplan:lovelace:deploy', { floorplanId });
+  /** Dépôt de la carte Plan Lovelace sur HA — TOUS les plans connus, une vue par plan (voir
+   *  HaplanLovelaceDeployService côté core) — asynchrone, résultat livré via
+   *  onLovelaceDeployResult() (écriture SSH + copie des images). */
+  deployLovelace(): void {
+    this.socket.emit('haplan:lovelace:deploy', {});
   }
 
-  onLovelaceDeployStarted(callback: (data: { floorplanId: string }) => void): void {
+  onLovelaceDeployStarted(callback: () => void): void {
     this.lovelaceDeployStartedListeners.add(callback);
   }
 

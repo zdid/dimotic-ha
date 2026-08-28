@@ -1,6 +1,7 @@
 /**
  * Génère le YAML d'un tableau de bord Lovelace HA (carte "Plan", type `picture-elements`) à partir
- * d'un plan HAPLAN — voir fonctionnelles-haplan_specs_v1.6.md §17 pour la conception complète.
+ * de TOUS les plans HAPLAN connus — une vue HA par plan (voir buildLovelaceDashboardYaml plus bas)
+ * — voir fonctionnelles-haplan_specs_v1.6.md §17 pour la conception complète.
  *
  * Pas d'icône explicite par entité pour cette première version : le choix d'icône côté HAPLAN
  * (Font Awesome, UnifiedObjectFactory.ts) n'existe qu'à l'exécution côté navigateur, jamais
@@ -114,32 +115,44 @@ const CARD_MOD_STYLE: Record<string, string> = {
   'hui-image$': ['img {', '  max-height: 100vh;', '  max-width: 100%;', '  width: auto;', '  height: auto;', '  object-fit: contain;', '  position: static !important;', '}'].join('\n')
 };
 
-export function buildLovelaceDashboardYaml(floorplan: HaplanFloorplanEntry, imageFilename: string, cacheBust?: string | number): string {
+function buildView(floorplanId: string, floorplan: HaplanFloorplanEntry, cacheBust?: string | number) {
   const elements: PictureElement[] = floorplan.positions
     .filter((p) => p.x !== null && p.y !== null)
     .flatMap((p) => buildElementsForPosition(p.entity_id, p.x! * 100, p.y! * 100));
 
-  const doc = {
-    title: 'HAPLAN',
-    views: [
+  return {
+    title: floorplanId,
+    path: floorplanId,
+    // panel: true = la carte remplit tout l'écran (pas de grille masonry/sidebar HA autour) — sans
+    // ça, picture-elements reste une petite carte au milieu de l'écran (constaté en réel le
+    // 28/08/2026).
+    panel: true,
+    cards: [
       {
-        title: 'Plan',
-        path: 'haplan',
-        // panel: true = la carte remplit tout l'écran (pas de grille masonry/sidebar HA autour)
-        // — sans ça, picture-elements reste une petite carte au milieu de l'écran (constaté en
-        // réel le 28/08/2026).
-        panel: true,
-        cards: [
-          {
-            type: 'picture-elements',
-            image: cacheBust ? `/local/${imageFilename}?v=${cacheBust}` : `/local/${imageFilename}`,
-            card_mod: { style: CARD_MOD_STYLE },
-            elements
-          }
-        ]
+        type: 'picture-elements',
+        image: cacheBust ? `/local/${floorplan.filename}?v=${cacheBust}` : `/local/${floorplan.filename}`,
+        card_mod: { style: CARD_MOD_STYLE },
+        elements
       }
     ]
   };
+}
 
-  return yaml.dump(doc, { lineWidth: -1 });
+/**
+ * ⭐ 28/08/2026 : un plan HAPLAN = une vue HA (`views:`), pas une carte unique — plusieurs plans
+ * partagent alors le même tableau de bord, avec les onglets natifs de HA en haut de l'écran
+ * (balayage déjà géré nativement par HA sur mobile, aucune dépendance de plus). Alternative
+ * envisagée (carte "swipeable" tierce, sans barre d'onglets visible) écartée pour cette première
+ * version — décidé avec l'utilisateur, onglets natifs par défaut.
+ */
+export function buildLovelaceDashboardYaml(floorplans: Record<string, HaplanFloorplanEntry>, cacheBust?: string | number): string {
+  const doc = {
+    title: 'HAPLAN',
+    views: Object.entries(floorplans).map(([floorplanId, floorplan]) => buildView(floorplanId, floorplan, cacheBust))
+  };
+
+  // noRefs : sans ça, js-yaml factorise CARD_MOD_STYLE (partagé entre toutes les vues) en un
+  // ancrage/alias YAML (&ref_0/*ref_0) — valide, mais évité par prudence plutôt que de compter sur
+  // le parseur YAML interne de HA (PyYAML) pour bien le résoudre dans ce contexte imbriqué.
+  return yaml.dump(doc, { lineWidth: -1, noRefs: true });
 }

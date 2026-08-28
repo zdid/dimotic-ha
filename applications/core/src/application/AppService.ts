@@ -277,7 +277,7 @@ export class AppService {
     // HaplanLovelaceDeployService.ts) — événement ad hoc (pas dans core:deployment:*, HAPLAN reste
     // seul à connaître son propre contenu) émis par HaplanService via IPC (process séparé),
     // réponse repartant vers lui par bridgedEvents (voir applications/haplan/src/domain/index.ts).
-    this.eventBus.onGeneric<{ yaml: string; imageLocalPath: string; imageFilename: string }>(
+    this.eventBus.onGeneric<{ yaml: string; images: Array<{ localPath: string; filename: string }> }>(
       'core:haplan-lovelace:deploy',
       (data) => this.handleHaplanLovelaceDeploy(data)
     );
@@ -1011,7 +1011,7 @@ export class AppService {
    * (voir specs §17.9/hors périmètre) : avec exactement une cible `haStackTargets` configurée (cas
    * réel), on la choisit implicitement ; sinon erreur claire plutôt qu'un choix risqué.
    */
-  private async handleHaplanLovelaceDeploy(data: { yaml: string; imageLocalPath: string; imageFilename: string }): Promise<void> {
+  private async handleHaplanLovelaceDeploy(data: { yaml: string; images: Array<{ localPath: string; filename: string }> }): Promise<void> {
     const targets = this.configService.getHaStackTargets();
     if (targets.length !== 1) {
       const error = targets.length === 0
@@ -1022,7 +1022,7 @@ export class AppService {
       return;
     }
 
-    const result = await this.haplanLovelaceDeployService.deploy(targets[0]!, data.yaml, data.imageLocalPath, data.imageFilename);
+    const result = await this.haplanLovelaceDeployService.deploy(targets[0]!, data.yaml, data.images);
     this.eventBus.emitGeneric('core:haplan-lovelace:deploy:result', { success: result.success, error: result.error });
   }
 

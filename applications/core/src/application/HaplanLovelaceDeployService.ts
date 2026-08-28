@@ -29,12 +29,15 @@ export class HaplanLovelaceDeployService {
 
   /**
    * Écrit `<remoteDir>/homeassistant/config/haplan_lovelace.yaml` (tee, écrase l'existant) puis
-   * copie l'image dans `<remoteDir>/homeassistant/config/www/` (scp) — servie par HA en
-   * `/local/<imageFilename>`, référencée telle quelle dans le YAML (voir lovelace-generator.ts).
-   * `remoteDir` = dossier PARENT `/docker` (voir schema.ts::haStackTargetSchema) — le `/config` de
-   * HA lui-même est un niveau plus bas, dans le projet compose `homeassistant/`.
+   * copie les images (une par plan, voir lovelace-generator.ts) dans
+   * `<remoteDir>/homeassistant/config/www/` (un seul `scp`, plusieurs sources vers un répertoire de
+   * destination — préserve le nom de fichier local de chacune, d'où l'importance que
+   * `images[].localPath` porte déjà le nom de fichier FINAL attendu, voir HaplanService.ts) —
+   * servies par HA en `/local/<filename>`, référencées telles quelles dans le YAML. `remoteDir` =
+   * dossier PARENT `/docker` (voir schema.ts::haStackTargetSchema) — le `/config` de HA lui-même
+   * est un niveau plus bas, dans le projet compose `homeassistant/`.
    */
-  async deploy(rawTarget: HaStackTargetConfig, yaml: string, imageLocalPath: string, imageFilename: string): Promise<RemoteOpResult> {
+  async deploy(rawTarget: HaStackTargetConfig, yaml: string, images: Array<{ localPath: string; filename: string }>): Promise<RemoteOpResult> {
     if (!rawTarget.host) {
       return { success: false, step: 'write-yaml', error: 'Aucun hôte cible configuré (target.host)' };
     }
@@ -54,13 +57,13 @@ export class HaplanLovelaceDeployService {
       return { success: false, step: 'write-yaml', error: writeYaml.error };
     }
 
-    const copyImage = await runScp(target, [imageLocalPath], `${wwwDir}/${imageFilename}`);
-    if (!copyImage.success) {
-      this.logger.error('HaplanLovelaceDeployService', `Échec de copie de l'image sur ${target.host}: ${copyImage.error}`);
-      return { success: false, step: 'copy-image', error: copyImage.error };
+    const copyImages = await runScp(target, images.map((i) => i.localPath), wwwDir);
+    if (!copyImages.success) {
+      this.logger.error('HaplanLovelaceDeployService', `Échec de copie des images sur ${target.host}: ${copyImages.error}`);
+      return { success: false, step: 'copy-image', error: copyImages.error };
     }
 
-    this.logger.info('HaplanLovelaceDeployService', `Carte Plan Lovelace déposée sur ${target.host} (${target.id})`);
+    this.logger.info('HaplanLovelaceDeployService', `Carte Plan Lovelace déposée sur ${target.host} (${target.id}, ${images.length} plan(s))`);
     return { success: true, step: 'copy-image' };
   }
 }

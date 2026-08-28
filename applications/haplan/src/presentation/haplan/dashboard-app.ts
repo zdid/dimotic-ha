@@ -287,11 +287,10 @@ function setupDeployLovelaceButton(): void {
   const originalLabel = btn.textContent ?? '🏠 Déployer sur HA';
 
   btn.addEventListener('click', () => {
-    const floorplanId = dataService.getCurrentFloorplanId();
-    if (!floorplanId) return;
+    if (Object.keys(dataService.getAllFloorplans()).length === 0) return;
     btn.disabled = true;
     btn.textContent = '⏳ Dépôt en cours…';
-    dataService.deployLovelace(floorplanId);
+    dataService.deployLovelace();
   });
 
   dataService.onLovelaceDeployStarted(() => {
