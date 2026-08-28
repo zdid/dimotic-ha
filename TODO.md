@@ -860,6 +860,46 @@
   place. WireGuard lui-même (infrastructure réseau) reste hors du dépôt de code.
 - **Priorité** : Moyenne (base posée, le besoin d'origine qui a motivé la discussion reste à traiter)
 
+### 🟡 Page d'accueil : couleur des liens (bleu) peu lisible sur le thème sombre — À revoir
+- **Signalé (28/08/2026)** par l'utilisateur : sur la page "Accueil" (`HomeView.ts`), la couleur bleue
+  par défaut des liens (HA, sites externes, applications sur les autres machines) rend le texte
+  difficile à lire sur le fond sombre de l'interface.
+- **À faire** : choisir une couleur de lien cohérente avec la palette sombre existante (voir les
+  variables CSS déjà utilisées ailleurs dans `core/src/presentation/ui`), à appliquer à la prochaine
+  modification de cette page plutôt qu'en correctif isolé.
+- **Statut** : Non traité — noté pour la prochaine modification
+- **Priorité** : Basse (cosmétique, pas de perte de fonctionnalité)
+
+### 🟡 Nommage : collision `nommage-main` sur MQTT — cause exacte non identifiée
+- **Découvert (28/08/2026)** en diagnostiquant l'épuisement des descripteurs de fichiers de
+  mosquitto sur `ha2` (voir incident du même jour) : le journal mosquitto (non purgé, 3 jours
+  d'historique) contenait **14 346 "session taken over"** entre le 25/08 12:01 et le 28/08 09:50,
+  quasi exclusivement `arexx-arexx_bridge_199931` et `nommage-main` — un rythme moyen d'environ une
+  collision toutes les 17s, en continu, jamais reproduit depuis (stable sans interruption depuis
+  09:50, y compris à travers deux redémarrages mosquitto ultérieurs le même jour).
+- **Cause technique confirmée pour `nommage`** : `NommageService.ts:45`,
+  `const BRIDGE_INSTANCE = 'main'` — codé en dur, jamais randomisé ni persisté par machine
+  (contrairement à rfxcom/arexx/teleinfo/rpigpio, qui génèrent et persistent un identifiant aléatoire
+  au premier démarrage). Deux instances de `nommage` actives en même temps produiraient donc
+  *garanti* le même client MQTT et se battraient en boucle pour la session.
+- **Vérifié** : `nommage` n'est actuellement activée que sur `ha2` (désactivée sur orangepi, stfort,
+  et la machine locale) — pas de collision inter-machines *en ce moment*. La cause exacte de
+  l'épisode des 3 jours reste donc non expliquée (pas de trace exploitable : `data/*/config.yaml`
+  gitignored, aucun historique pour vérifier si `nommage` a été activée ailleurs pendant cette
+  fenêtre).
+- **Décision (28/08/2026, discuté avec l'utilisateur)** : ne pas juste randomiser `BRIDGE_INSTANCE`
+  comme les autres apps — `nommage` est conceptuellement un service **unique pour tout le site** (pas
+  lié à du matériel spécifique comme rfxcom/arexx), donc une collision signifierait une vraie erreur
+  de configuration (activée à deux endroits), pas un besoin légitime de plusieurs instances.
+  Randomiser masquerait le symptôme sans traiter la cause.
+- **Piste retenue à la place** : `nommage` détecte elle-même qu'une session existe déjà sous
+  `nommage-main` avant de se connecter, et refuse de démarrer avec une erreur claire — rend l'erreur
+  de configuration immédiatement visible au lieu de dégrader silencieusement le broker pendant des
+  jours. Pas encore implémenté.
+- **Statut** : Non traité — cause de fond non identifiée, piste de correctif discutée mais pas codée
+- **Priorité** : Moyenne (pas actif actuellement, mais a contribué à un vrai incident — épuisement
+  des descripteurs mosquitto sur `ha2` le 28/08)
+
 ---
 
 ## Notes techniques
