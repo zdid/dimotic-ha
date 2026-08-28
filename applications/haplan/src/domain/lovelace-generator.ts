@@ -13,6 +13,7 @@
 
 import * as yaml from 'js-yaml';
 import type { HaplanFloorplanEntry } from './floorplans-config-schema';
+import type { ImageDimensions } from './image-dimensions';
 
 interface PictureElement {
   type: 'state-icon' | 'state-label';
@@ -119,25 +120,60 @@ function buildElementsForPosition(entityId: string, leftPercent: number, topPerc
  * que 903px de haut). 56px est la hauteur standard du bandeau HA (mesurée en direct : `ha-card`
  * commence toujours à `top: 56px`). `!important` nécessaire aussi ici (vérifié en direct : sans
  * lui, HA regagne avec sa propre règle interne sur `ha-card`, résultat identique au bug d'origine).
+ *
+ * ⭐ 28/08/2026, deuxième retour réel après ce correctif : `#root` en 100%/100% laisse `object-fit:
+ * contain` faire son travail sur l'`<img>` DEDANS `#root`, mais les icônes superposées sont
+ * positionnées en % de `#root` lui-même (verrouillé par `picture-elements`, hors de notre contrôle
+ * — même quand `#root` a un ratio différent de l'image, donc que l'image est "letterboxée"
+ * (bandes vides) dedans). Résultat : icônes décalées par rapport au plan, parfois visuellement en
+ * dehors de l'image visible. Corrigé en donnant à `#root` lui-même le ratio EXACT de l'image
+ * (`aspect-ratio`, calculé au dépôt à partir du PNG/JPEG réel — voir image-dimensions.ts) plutôt
+ * que 100%/100% — combiné à `max-width/max-height: 100%` dans une `ha-card` flex centrée, c'est le
+ * même calcul que `Math.min(widthRatio, heightRatio)` de `FloorPlan.ts` (l'éditeur HAPLAN
+ * lui-même), mais en CSS pur puisqu'une carte HA est du YAML statique, sans JS à nous. `#root`
+ * n'a alors plus jamais de bande vide : son bord EST le bord de l'image, donc les % des icônes
+ * (calculés à partir de l'image dans HAPLAN) retombent exactement au bon endroit.
  */
-const CARD_MOD_STYLE: Record<string, string> = {
-  '.': [
-    'ha-card {',
-    '  height: calc(100vh - 56px) !important;',
-    '}',
-    '#root {',
-    '  width: 100% !important;',
-    '  height: 100% !important;',
-    '}'
-  ].join('\n'),
-  'hui-image$': [
-    'img {',
-    '  object-fit: contain !important;',
-    '}'
-  ].join('\n')
-};
+function buildCardModStyle(imageWidth: number, imageHeight: number): Record<string, string> {
+  const ratio = imageWidth / imageHeight;
+  return {
+    '.': [
+      'ha-card {',
+      '  height: calc(100vh - 56px) !important;',
+      '  display: flex;',
+      '  align-items: center;',
+      '  justify-content: center;',
+      '}',
+      '#root {',
+      // ⭐ 28/08/2026, deux essais ratés avant celui-ci (vérifiés en direct) :
+      // - `aspect-ratio` + `max-width/max-height:100%` (sans largeur/hauteur de départ) : `#root`
+      //   n'a alors AUCUNE taille définie pour dériver l'autre axe — retombe sur une taille
+      //   minuscule (~520×340, plus petit que l'image elle-même), pas sur la taille max disponible.
+      // - `align-items: stretch` (hauteur = 100% de `ha-card`, largeur dérivée par aspect-ratio) :
+      //   fonctionne pour un plan qui BUTE sur la hauteur, mais un plan très large sur un écran
+      //   étroit (mobile portrait) déborderait en largeur (jamais bridé par la largeur dispo).
+      // Formule symétrique ci-dessous — même calcul que `Math.min(widthRatio, heightRatio)` dans
+      // `FloorPlan.ts` (l'éditeur HAPLAN lui-même), mais en CSS pur : `min(100%, ...)` compare la
+      // largeur MAX disponible (100% de `ha-card`) à la largeur qu'aurait le plan s'il était
+      // bridé par la HAUTEUR dispo (`(100vh - 56px) * ratio`) — le plus petit des deux gagne, quel
+      // que soit l'axe qui bute réellement. `aspect-ratio` dérive ensuite la hauteur à partir de
+      // cette largeur déjà correcte. Vérifié en direct sur un plan paysage (620×412, large) ET un
+      // plan portrait (620×818, haut) : les deux remplissent l'espace dispo sans déborder.
+      `  width: min(100%, calc((100vh - 56px) * ${ratio.toFixed(6)})) !important;`,
+      `  aspect-ratio: ${imageWidth} / ${imageHeight} !important;`,
+      '}'
+    ].join('\n'),
+    'hui-image$': [
+      'img {',
+      '  width: 100%;',
+      '  height: 100%;',
+      '  object-fit: contain !important;',
+      '}'
+    ].join('\n')
+  };
+}
 
-function buildView(floorplanId: string, floorplan: HaplanFloorplanEntry, cacheBust?: string | number) {
+function buildView(floorplanId: string, floorplan: HaplanFloorplanEntry, dimensions: ImageDimensions, cacheBust?: string | number) {
   const elements: PictureElement[] = floorplan.positions
     .filter((p) => p.x !== null && p.y !== null)
     .flatMap((p) => buildElementsForPosition(p.entity_id, p.x! * 100, p.y! * 100));
@@ -153,7 +189,7 @@ function buildView(floorplanId: string, floorplan: HaplanFloorplanEntry, cacheBu
       {
         type: 'picture-elements',
         image: cacheBust ? `/local/${floorplan.filename}?v=${cacheBust}` : `/local/${floorplan.filename}`,
-        card_mod: { style: CARD_MOD_STYLE },
+        card_mod: { style: buildCardModStyle(dimensions.width, dimensions.height) },
         elements
       }
     ]
@@ -166,15 +202,28 @@ function buildView(floorplanId: string, floorplan: HaplanFloorplanEntry, cacheBu
  * (balayage déjà géré nativement par HA sur mobile, aucune dépendance de plus). Alternative
  * envisagée (carte "swipeable" tierce, sans barre d'onglets visible) écartée pour cette première
  * version — décidé avec l'utilisateur, onglets natifs par défaut.
+ *
+ * `dimensions` : largeur/hauteur naturelle de CHAQUE image de plan (une entrée par floorplanId,
+ * voir image-dimensions.ts) — nécessaire pour calculer le ratio exact injecté dans le CSS de
+ * chaque vue (voir buildCardModStyle plus haut). Un plan absent de `dimensions` n'a pas son ratio
+ * gravé (aspect-ratio omis, comportement d'avant ce correctif) plutôt que de faire échouer tout le
+ * dépôt pour un seul plan illisible.
  */
-export function buildLovelaceDashboardYaml(floorplans: Record<string, HaplanFloorplanEntry>, cacheBust?: string | number): string {
+export function buildLovelaceDashboardYaml(
+  floorplans: Record<string, HaplanFloorplanEntry>,
+  dimensions: Record<string, ImageDimensions>,
+  cacheBust?: string | number
+): string {
   const doc = {
     title: 'HAPLAN',
-    views: Object.entries(floorplans).map(([floorplanId, floorplan]) => buildView(floorplanId, floorplan, cacheBust))
+    views: Object.entries(floorplans).map(([floorplanId, floorplan]) =>
+      buildView(floorplanId, floorplan, dimensions[floorplanId] ?? { width: 1, height: 1 }, cacheBust)
+    )
   };
 
-  // noRefs : sans ça, js-yaml factorise CARD_MOD_STYLE (partagé entre toutes les vues) en un
-  // ancrage/alias YAML (&ref_0/*ref_0) — valide, mais évité par prudence plutôt que de compter sur
-  // le parseur YAML interne de HA (PyYAML) pour bien le résoudre dans ce contexte imbriqué.
+  // noRefs : le CSS est maintenant calculé par plan (ratio propre à chaque image), mais gardé par
+  // prudence — sans lui, js-yaml pourrait factoriser toute structure identique par coïncidence
+  // (ex: deux plans de mêmes dimensions) en ancrage/alias YAML (&ref_0/*ref_0), qu'on préfère
+  // éviter plutôt que de compter sur le parseur YAML interne de HA (PyYAML) pour bien le résoudre.
   return yaml.dump(doc, { lineWidth: -1, noRefs: true });
 }

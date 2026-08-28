@@ -28,6 +28,7 @@ import { buildEntityPickerTree } from './taxonomy-tree';
 import type { HaplanPositionEntry } from './floorplans-config-schema';
 import { buildLovelaceDashboardYaml } from './lovelace-generator';
 import { flattenPngOntoDarkBackground } from './image-flatten';
+import { readImageDimensions, type ImageDimensions } from './image-dimensions';
 
 const MODULE_NAME = 'haplan';
 
@@ -465,7 +466,20 @@ export class HaplanService implements IHaplanService {
     this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.LOVELACE_DEPLOY_STARTED, {});
 
     const cacheBust = Date.now();
-    const yamlContent = buildLovelaceDashboardYaml(this.floorplansConfig.floorplans, cacheBust);
+    // Dimensions réelles de chaque image — nécessaires pour graver le bon ratio (aspect-ratio) dans
+    // le CSS de chaque vue (voir lovelace-generator.ts) : sans ça, les icônes superposées se
+    // décalent du plan dès que son ratio diffère de celui de l'écran (retour réel, 28/08/2026). Un
+    // plan dont l'image est illisible est juste omis de `dimensions` plutôt que de bloquer tout le
+    // dépôt — buildLovelaceDashboardYaml gère l'absence d'entrée.
+    const dimensions: Record<string, ImageDimensions> = {};
+    for (const [floorplanId, floorplan] of Object.entries(this.floorplansConfig.floorplans)) {
+      try {
+        dimensions[floorplanId] = readImageDimensions(path.join(this.resolveImagesDir(), floorplan.filename));
+      } catch (error) {
+        this.logger.warn('HaplanService', `Dimensions illisibles pour le plan "${floorplanId}" (${floorplan.filename}) : ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    const yamlContent = buildLovelaceDashboardYaml(this.floorplansConfig.floorplans, dimensions, cacheBust);
     // Fusionné sur le fond sombre HAPLAN avant envoi (voir image-flatten.ts) — l'original reste
     // inchangé (toujours utilisé par HAPLAN lui-même, sur son propre fond déjà sombre). Seul le
     // PNG peut avoir un fond transparent problématique ici (JPEG n'a pas de canal alpha — pas de
