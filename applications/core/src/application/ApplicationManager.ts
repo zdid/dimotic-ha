@@ -212,6 +212,20 @@ export class ApplicationManager {
   }
 
   /**
+   * ⭐ 28/08/2026, bug réel corrigé : `disable()` arrêtait bien le process (processSupervisor.stop)
+   * mais ne retirait jamais l'app de `AppService.modules` ni ne réémettait `app:modules:registered`
+   * — le menu (Sidebar/ModuleManager, alimenté par `app:modules:list`) continuait donc d'afficher
+   * l'entrée jusqu'au prochain redémarrage complet de core, aucune confirmation visible que l'arrêt
+   * avait bien eu lieu. Même raisonnement que setActivateSeparateProcessHook ci-dessus : AppService
+   * est seul à connaître `this.modules`, ApplicationManager lui délègue donc la mise à jour.
+   */
+  private deactivateSeparateProcessHook?: (appId: string) => void;
+
+  setDeactivateSeparateProcessHook(hook: (appId: string) => void): void {
+    this.deactivateSeparateProcessHook = hook;
+  }
+
+  /**
    * Active une application (retire son id de `disabledApps`)
    */
   enable(appId: string): { success: boolean; error?: string; restarting?: boolean } {
@@ -291,6 +305,7 @@ export class ApplicationManager {
       const separateProcess = !!this.processSupervisor?.isRegistered(appId);
       if (separateProcess) {
         this.processSupervisor!.stop(appId);
+        this.deactivateSeparateProcessHook?.(appId);
       } else {
         this.restartManager.scheduleRestart(APPLICATION_TOGGLE_RESTART_DELAY_MS, `Application ${appId} désactivée`);
       }

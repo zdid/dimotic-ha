@@ -183,6 +183,9 @@ export class AppService {
     // séparé depuis l'état désactivé exige le câblage EventBus complet, pas seulement
     // register()+start(), et ApplicationManager n'a pas accès à SupervisorEventBridge).
     this.applicationManager.setActivateSeparateProcessHook((appId, appDir) => this.tryActivateSeparateProcessApp(appId, appDir));
+    // ⭐ 28/08/2026 — voir ApplicationManager.setDeactivateSeparateProcessHook() : symétrique du
+    // hook d'activation ci-dessus, pour que le menu (app:modules:list) reflète bien l'arrêt.
+    this.applicationManager.setDeactivateSeparateProcessHook((appId) => this.deactivateSeparateProcessApp(appId));
     this.coreDeployService = new CoreDeployService(configService, this.applicationManager, logger);
     this.haStackDeployService = new HaStackDeployService(logger);
     this.zigbee2mqttDeployService = new Zigbee2mqttDeployService(logger);
@@ -615,11 +618,30 @@ export class AppService {
       }
       if (!this.modules.some((m) => m.id === appModule.id)) {
         this.modules.push({ ...appModule, status: this.getModuleConfigStatus(appModule) });
+        // ⭐ 28/08/2026 : sans ça, `this.modules` est à jour côté serveur mais aucun onglet ouvert
+        // (ni SocketBridge.modulesList, mis à jour uniquement sur cet événement) ne le sait tant
+        // que core n'a pas redémarré — voir deactivateSeparateProcessApp() ci-dessous, même bug,
+        // sens inverse.
+        this.eventBus.emit('app:modules:registered', { modules: this.modules });
       }
       return true;
     } catch (error) {
       this.logger.warn('AppService', `Impossible d'activer ${appId} en process séparé: ${error}`);
       return false;
+    }
+  }
+
+  /**
+   * ⭐ 28/08/2026, bug réel corrigé — voir ApplicationManager.setDeactivateSeparateProcessHook() :
+   * retire `appId` de `this.modules` et réémet `app:modules:registered` pour que le menu
+   * (Sidebar/ModuleManager, alimenté par `app:modules:list`) reflète immédiatement l'arrêt, sans
+   * attendre un redémarrage complet de core qui n'a plus jamais lieu pour une app en process séparé.
+   */
+  private deactivateSeparateProcessApp(appId: string): void {
+    const before = this.modules.length;
+    this.modules = this.modules.filter((m) => m.id !== appId);
+    if (this.modules.length !== before) {
+      this.eventBus.emit('app:modules:registered', { modules: this.modules });
     }
   }
 
