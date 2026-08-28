@@ -17,9 +17,9 @@
 import * as fs from 'node:fs';
 import { PNG } from 'pngjs';
 
-/** Même couleur que --color-bg (core/src/presentation/ui/styles/main.css) — cohérence visuelle
- *  avec le rendu HAPLAN natif. */
-const BACKGROUND_COLOR: [number, number, number] = [0x1a, 0x1a, 0x2e];
+/** ⭐ 28/08/2026 : quasi noir pur, demande explicite (le fond HAPLAN natif #1a1a2e jugé pas assez
+ *  sombre une fois vu déployé sur HA). */
+const BACKGROUND_COLOR: [number, number, number] = [0x0d, 0x0d, 0x0d];
 
 /**
  * Lit `sourcePath`, compose alpha-over sur BACKGROUND_COLOR, écrit le résultat (toujours opaque)
