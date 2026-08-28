@@ -97,22 +97,44 @@ function buildElementsForPosition(entityId: string, leftPercent: number, topPerc
 /**
  * ⭐ 28/08/2026 : `picture-elements` remplit sa carte en largeur par défaut — sans borne de hauteur,
  * une image portrait dépasse l'écran (constaté en réel avec `panel: true` seul, capture montrant
- * l'image tronquée). Testé en direct via injection JS avant d'écrire ce style (résultat confirmé
- * correct) : `object-fit: contain` sur l'image, centrée dans une `ha-card` haute de 100vh — le plan
- * s'adapte au ratio le plus contraignant (hauteur OU largeur dispo), sans dépendre d'un thème HA
- * particulier. Nécessite `card_mod` (HACS) — carte HA standard n'accepte aucun style personnalisé
- * nativement (vérifié aussi en direct : un `style:` natif sur la carte est silencieusement ignoré).
+ * l'image tronquée). Nécessite `card_mod` (HACS) — carte HA standard n'accepte aucun style
+ * personnalisé nativement (vérifié en direct : un `style:` natif sur la carte est silencieusement
+ * ignoré).
  *
- * `.`/`hui-image$` : la carte `ha-card` est un enfant direct du shadow root de la carte
- * (`hui-picture-elements-card`), atteint directement par `.` (élément courant) — mais l'`<img>`
- * réel vit DANS le shadow root d'un élément enfant `hui-image`, lui-même à l'intérieur. Un simple
- * sélecteur `img { }` au niveau `.` ne l'atteint pas (vérifié en direct : sans le `$`, le style ne
- * s'appliquait pas) — `hui-image$` traverse ce shadow root imbriqué, syntaxe documentée de card_mod
- * (github.com/thomasloven/lovelace-card-mod, "$" = pierce shadow root).
+ * Vrai coupable (trouvé en inspectant le DOM en direct, après plusieurs fausses pistes sur
+ * `hui-image`/son `<img>`/sa `.container` interne — aucune des trois n'était en cause) : le
+ * conteneur qui fixe réellement la taille du plan à sa taille naturelle (ex: 620×412) est
+ * `#root`, une `<div>` du propre shadow root de `hui-picture-elements-card` elle-même (donc
+ * atteignable par `.`, sans piercing) — c'est le parent DIRECT de `hui-image`. Une fois `#root`
+ * forcé à 100%/100%, `hui-image` (et l'`<img>` dedans) suivent naturellement sans avoir besoin
+ * d'aucune règle propre — vérifié en direct : aucune règle sur `hui-image`/`.container` n'était
+ * nécessaire, seule `#root` comptait. `object-fit: contain` doit être en `!important` : HA fixe
+ * `object-fit: cover` sur l'image en interne (rognage) et le regagne sans `!important` (vérifié en
+ * direct : sans `!important`, la carte affichait `cover`, jamais `contain`).
+ *
+ * `calc(100vh - 56px)` plutôt que `100vh` tout court : `100vh` ignore la barre d'outils HA (bandeau
+ * "original / Rez de chaussée / Premier..." en haut, 56px de haut) qui occupe le HAUT du viewport
+ * sans être en position fixe/overlay — `ha-card` grandissait donc de 56px de trop sous le bas
+ * visible de l'écran (vérifié en direct : bas de la carte à 1117px alors que le viewport ne fait
+ * que 903px de haut). 56px est la hauteur standard du bandeau HA (mesurée en direct : `ha-card`
+ * commence toujours à `top: 56px`). `!important` nécessaire aussi ici (vérifié en direct : sans
+ * lui, HA regagne avec sa propre règle interne sur `ha-card`, résultat identique au bug d'origine).
  */
 const CARD_MOD_STYLE: Record<string, string> = {
-  '.': ['ha-card {', '  height: 100vh;', '  display: flex;', '  align-items: center;', '  justify-content: center;', '}'].join('\n'),
-  'hui-image$': ['img {', '  max-height: 100vh;', '  max-width: 100%;', '  width: auto;', '  height: auto;', '  object-fit: contain;', '  position: static !important;', '}'].join('\n')
+  '.': [
+    'ha-card {',
+    '  height: calc(100vh - 56px) !important;',
+    '}',
+    '#root {',
+    '  width: 100% !important;',
+    '  height: 100% !important;',
+    '}'
+  ].join('\n'),
+  'hui-image$': [
+    'img {',
+    '  object-fit: contain !important;',
+    '}'
+  ].join('\n')
 };
 
 function buildView(floorplanId: string, floorplan: HaplanFloorplanEntry, cacheBust?: string | number) {
