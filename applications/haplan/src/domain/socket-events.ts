@@ -34,6 +34,11 @@ export const HAPLAN_SOCKET_EVENTS = {
   FLOORPLAN_DEPLOY_STARTED: 'haplan:floorplan:deploy:started',
   FLOORPLAN_DEPLOY_RESULT: 'haplan:floorplan:deploy:result',
 
+  // --- Déploiement carte Plan Lovelace (voir specs §17, HaplanLovelaceDeployService côté core) ---
+  // Même raison que ci-dessus : ponctuels, pas dans HAPLAN_PERSISTENT_EVENTS.
+  LOVELACE_DEPLOY_STARTED: 'haplan:lovelace:deploy:started',
+  LOVELACE_DEPLOY_RESULT: 'haplan:lovelace:deploy:result',
+
   // --- Erreurs ---
   ERROR: 'haplan:error'
 } as const;
@@ -60,7 +65,11 @@ export const HAPLAN_CLIENT_EVENTS = {
 
   // --- Déploiement du plan affiché sur l'écran ESP physique (relayé à ESPDISPLAY via l'EventBus,
   // voir HaplanService.handleFloorplanDeploy) ---
-  FLOORPLAN_DEPLOY: 'haplan:floorplan:deploy'
+  FLOORPLAN_DEPLOY: 'haplan:floorplan:deploy',
+
+  // --- Déploiement de la carte Plan Lovelace sur HA (relayé à core via l'EventBus, voir
+  // HaplanService.handleLovelaceDeploy) ---
+  LOVELACE_DEPLOY: 'haplan:lovelace:deploy'
 } as const;
 
 // ============================================================================

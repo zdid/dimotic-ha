@@ -69,7 +69,11 @@ export type HaplanErrorCode =
   | 'HAPLAN_COMMAND_FAILED'
   | 'HAPLAN_SAVE_FAILED'
   | 'HAPLAN_DEPLOY_BUSY'
-  | 'HAPLAN_DEPLOY_FAILED';
+  | 'HAPLAN_DEPLOY_FAILED'
+  // ⭐ 28/08/2026 : code distinct de HAPLAN_DEPLOY_BUSY (déploiement écran ESP) — sinon un bouton
+  // "Déployer sur HA" en cours se réactiverait à tort sur une erreur "occupé" du bouton "Déployer
+  // sur l'écran" (les deux filtrent sur haplan:error, canal partagé par toutes les commandes).
+  | 'HAPLAN_LOVELACE_DEPLOY_BUSY';
 
 /**
  * Codes d'erreur génériques (specs-erreurs-v1.0.md §6)

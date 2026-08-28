@@ -100,7 +100,15 @@ export const HAPLAN_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = 
   runsAsSeparateProcess: true,
   configSection: 'haplan',
   configUi: HAPLAN_UI_METADATA,
-  socketEvents: HAPLAN_SOCKET_EVENTS
+  socketEvents: HAPLAN_SOCKET_EVENTS,
+  // ⭐ 28/08/2026 : sans ce tableau, aucun événement core→haplan hors la liste générique fixe de
+  // AppService.wireSeparateProcessApp() ne peut atteindre ce process — bug réel trouvé en
+  // préparant le dépôt de la carte Plan Lovelace : 'espdisplay:deploy-result' (déjà utilisé par
+  // handleFloorplanDeploy depuis la migration en process séparé du 24/08) n'était pas ponté non
+  // plus, listener mort depuis cette date sans jamais avoir été détecté (autoBridgeSocketEvents ne
+  // ponte que les valeurs de HAPLAN_SOCKET_EVENTS, pas les événements internes reçus d'une autre
+  // application). Corrigé au passage.
+  bridgedEvents: ['espdisplay:deploy-result', 'core:haplan-lovelace:deploy:result']
 };
 
 // ============================================================================

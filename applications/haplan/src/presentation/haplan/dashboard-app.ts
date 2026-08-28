@@ -277,6 +277,47 @@ function setupDeployFloorplanButton(): void {
   });
 }
 
+/** Bouton "Déployer sur HA" — dépose la carte Plan Lovelace correspondant au plan actuellement
+ *  affiché (voir HaplanLovelaceDeployService côté core). Même patron que
+ *  setupDeployFloorplanButton() ci-dessus (désactivation le temps de l'opération, résultat par
+ *  alert()) — cohérence avec l'existant plutôt qu'un nouveau style d'affichage. */
+function setupDeployLovelaceButton(): void {
+  const btn = document.getElementById('btn-deploy-lovelace') as HTMLButtonElement | null;
+  if (!btn) return;
+  const originalLabel = btn.textContent ?? '🏠 Déployer sur HA';
+
+  btn.addEventListener('click', () => {
+    const floorplanId = dataService.getCurrentFloorplanId();
+    if (!floorplanId) return;
+    btn.disabled = true;
+    btn.textContent = '⏳ Dépôt en cours…';
+    dataService.deployLovelace(floorplanId);
+  });
+
+  dataService.onLovelaceDeployStarted(() => {
+    btn.disabled = true;
+    btn.textContent = '⏳ Dépôt en cours…';
+  });
+
+  dataService.onLovelaceDeployResult((result) => {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+    if (result.success) {
+      alert('Carte Plan déposée sur HA.');
+    } else {
+      alert(`Échec du dépôt : ${result.error}`);
+    }
+  });
+
+  const LOVELACE_DEPLOY_ERROR_CODES = new Set(['HAPLAN_LOVELACE_DEPLOY_BUSY']);
+  dataService.onError((error) => {
+    if (!error.code || !LOVELACE_DEPLOY_ERROR_CODES.has(error.code)) return;
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+    alert(`Dépôt refusé : ${error.message}`);
+  });
+}
+
 function updateConnectionStatus(): void {
   const status = document.getElementById('haplan-connection-status');
   if (status) {
@@ -305,6 +346,7 @@ setupEntityPickerToggle();
 setupNewFloorplanPanel();
 setupDeleteFloorplanButton();
 setupDeployFloorplanButton();
+setupDeployLovelaceButton();
 setupMenuToggle();
 setupFloorplanArrows();
 setupPlanScaleControl();

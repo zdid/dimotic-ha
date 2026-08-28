@@ -10,6 +10,7 @@ import { EventBus } from './EventBus';
 import { ApplicationManager } from './ApplicationManager';
 import { CoreDeployService } from './CoreDeployService';
 import { HaStackDeployService } from './HaStackDeployService';
+import { HaplanLovelaceDeployService } from './HaplanLovelaceDeployService';
 import { Zigbee2mqttDeployService } from './Zigbee2mqttDeployService';
 import { TargetGossipService } from './TargetGossipService';
 import { AppGossipService } from './AppGossipService';
@@ -77,6 +78,8 @@ export class AppService {
   private coreDeployService: CoreDeployService;
   // Déploiement Home Assistant + Mosquitto sur une machine distante (⭐ 24/08/2026)
   private haStackDeployService: HaStackDeployService;
+  // Dépôt de la carte Plan Lovelace HAPLAN sur HA (⭐ 28/08/2026, voir HaplanLovelaceDeployService.ts)
+  private haplanLovelaceDeployService: HaplanLovelaceDeployService;
   private zigbee2mqttDeployService: Zigbee2mqttDeployService;
   // Synchronisation "sans maître" des cibles connues (dimotic-ha + HA/Mosquitto) entre toutes les
   // instances du foyer via MQTT retenu (⭐ 24/08/2026, voir TargetGossipService.ts)
@@ -188,6 +191,7 @@ export class AppService {
     this.applicationManager.setDeactivateSeparateProcessHook((appId) => this.deactivateSeparateProcessApp(appId));
     this.coreDeployService = new CoreDeployService(configService, this.applicationManager, logger);
     this.haStackDeployService = new HaStackDeployService(logger);
+    this.haplanLovelaceDeployService = new HaplanLovelaceDeployService(logger);
     this.zigbee2mqttDeployService = new Zigbee2mqttDeployService(logger);
     this.targetGossipService = new TargetGossipService(configService, eventBus, logger);
     this.appGossipService = new AppGossipService(configService, eventBus, logger);
@@ -268,6 +272,15 @@ export class AppService {
       const { targetId, action, version } = data as { targetId: string; action: RemoteAction; version?: string };
       this.handleHaStackRemoteOp(targetId, action, version);
     });
+
+    // Dépôt de la carte Plan Lovelace HAPLAN (⭐ nouveau 28/08/2026, voir
+    // HaplanLovelaceDeployService.ts) — événement ad hoc (pas dans core:deployment:*, HAPLAN reste
+    // seul à connaître son propre contenu) émis par HaplanService via IPC (process séparé),
+    // réponse repartant vers lui par bridgedEvents (voir applications/haplan/src/domain/index.ts).
+    this.eventBus.onGeneric<{ yaml: string; imageLocalPath: string; imageFilename: string }>(
+      'core:haplan-lovelace:deploy',
+      (data) => this.handleHaplanLovelaceDeploy(data)
+    );
 
     // Déploiement zigbee2mqtt (⭐ nouveau 24/08/2026, voir Zigbee2mqttDeployService.ts) — liste de
     // cibles séparée de haStackTargets, même protocole sinon.
@@ -991,6 +1004,26 @@ export class AppService {
       this.targetGossipService.republish();
     }
     this.handleHaStackTargetsGet();
+  }
+
+  /**
+   * Dépôt de la carte Plan Lovelace HAPLAN — pas de sélecteur de cible pour cette première version
+   * (voir specs §17.9/hors périmètre) : avec exactement une cible `haStackTargets` configurée (cas
+   * réel), on la choisit implicitement ; sinon erreur claire plutôt qu'un choix risqué.
+   */
+  private async handleHaplanLovelaceDeploy(data: { yaml: string; imageLocalPath: string; imageFilename: string }): Promise<void> {
+    const targets = this.configService.getHaStackTargets();
+    if (targets.length !== 1) {
+      const error = targets.length === 0
+        ? 'Aucune cible HA+Mosquitto configurée (Paramètres Techniques > Déploiement HA)'
+        : 'Plusieurs cibles HA+Mosquitto configurées, sélection non prise en charge pour ce dépôt';
+      this.logger.error('AppService', `Dépôt carte Plan Lovelace: ${error}`);
+      this.eventBus.emitGeneric('core:haplan-lovelace:deploy:result', { success: false, error });
+      return;
+    }
+
+    const result = await this.haplanLovelaceDeployService.deploy(targets[0]!, data.yaml, data.imageLocalPath, data.imageFilename);
+    this.eventBus.emitGeneric('core:haplan-lovelace:deploy:result', { success: result.success, error: result.error });
   }
 
   /**

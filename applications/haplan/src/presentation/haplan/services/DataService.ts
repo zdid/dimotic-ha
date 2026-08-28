@@ -43,6 +43,8 @@ export class DataService {
   private taxonomyTreeListeners: Set<(areas: any[]) => void> = new Set();
   private deployStartedListeners: Set<(data: { floorplanId: string }) => void> = new Set();
   private deployResultListeners: Set<(data: { floorplanId?: string; ok: boolean; message: string; durationMs: number }) => void> = new Set();
+  private lovelaceDeployStartedListeners: Set<(data: { floorplanId: string }) => void> = new Set();
+  private lovelaceDeployResultListeners: Set<(data: { success: boolean; error?: string }) => void> = new Set();
   private errorListeners: Set<(error: { code?: string; message: string }) => void> = new Set();
 
   constructor() {
@@ -92,6 +94,14 @@ export class DataService {
 
     this.socket.on('haplan:floorplan:deploy:result', (data: { floorplanId?: string; ok: boolean; message: string; durationMs: number }) => {
       this.deployResultListeners.forEach((cb) => cb(data));
+    });
+
+    this.socket.on('haplan:lovelace:deploy:started', (data: { floorplanId: string }) => {
+      this.lovelaceDeployStartedListeners.forEach((cb) => cb(data));
+    });
+
+    this.socket.on('haplan:lovelace:deploy:result', (data: { success: boolean; error?: string }) => {
+      this.lovelaceDeployResultListeners.forEach((cb) => cb(data));
     });
 
     this.socket.emit('haplan:floorplans:list:get');
@@ -287,6 +297,20 @@ export class DataService {
 
   onDeployResult(callback: (data: { floorplanId?: string; ok: boolean; message: string; durationMs: number }) => void): void {
     this.deployResultListeners.add(callback);
+  }
+
+  /** Dépôt de la carte Plan Lovelace sur HA (voir HaplanLovelaceDeployService côté core) —
+   *  asynchrone, résultat livré via onLovelaceDeployResult() (écriture SSH + copie d'image). */
+  deployLovelace(floorplanId: string): void {
+    this.socket.emit('haplan:lovelace:deploy', { floorplanId });
+  }
+
+  onLovelaceDeployStarted(callback: (data: { floorplanId: string }) => void): void {
+    this.lovelaceDeployStartedListeners.add(callback);
+  }
+
+  onLovelaceDeployResult(callback: (data: { success: boolean; error?: string }) => void): void {
+    this.lovelaceDeployResultListeners.add(callback);
   }
 
   onError(callback: (error: { code?: string; message: string }) => void): void {
