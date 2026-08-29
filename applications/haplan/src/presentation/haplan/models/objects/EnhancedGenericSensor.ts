@@ -73,8 +73,29 @@ export class EnhancedGenericSensor extends BaseEntity {
     this.updateDisplay();
   }
 
+  /** Icône devant la valeur — voir EnhancedTemperatureSensor.ts (même retour utilisateur, même
+   *  patron, 29/08/2026) ; une par `sensorType` pour rester cohérent avec getColorSchemeForType
+   *  ci-dessus (même découpage temperature/humidity/pressure/power-energy/default). */
+  private getIconForType(type: string): string {
+    switch (type) {
+      case 'temperature':
+        return 'fa-thermometer-half';
+      case 'humidity':
+        return 'fa-droplet';
+      case 'pressure':
+        return 'fa-gauge';
+      case 'power':
+      case 'energy':
+        return 'fa-bolt';
+      default:
+        return 'fa-chart-line';
+    }
+  }
+
   renderEntity(): HTMLElement {
     const container = this.createStyledElement('div', 'enhanced-generic-sensor');
+
+    const icon = this.createIcon(this.getIconForType(this.sensorType), 'medium');
 
     // Créer uniquement l'affichage de la valeur (affichage simplifié)
     const valueDisplay = this.createStyledElement('div', 'sensor-value-display');
@@ -85,7 +106,8 @@ export class EnhancedGenericSensor extends BaseEntity {
     valueDisplay.style.fontWeight = 'normal';
     valueDisplay.style.color = '#FFFFFF'; // Texte blanc pour le contraste
 
-    // Assembler les éléments (uniquement la valeur)
+    // Assembler les éléments (icône puis valeur)
+    container.appendChild(icon);
     container.appendChild(valueDisplay);
 
     // Ajouter un gestionnaire de clic pour ouvrir la fenêtre modale

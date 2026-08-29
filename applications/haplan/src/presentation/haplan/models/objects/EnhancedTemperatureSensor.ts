@@ -32,6 +32,12 @@ export class EnhancedTemperatureSensor extends BaseEntity {
   renderEntity(): HTMLElement {
     const container = this.createStyledElement('div', 'enhanced-temperature-sensor');
 
+    // Icône devant la valeur — ⭐ 29/08/2026, retour utilisateur : l'affichage "valeur seule"
+    // (choix d'origine, cf. commentaire ci-dessous) ne permet pas de distinguer un capteur d'un
+    // autre au premier coup d'œil sur le plan. Même patron que la carte Plan Lovelace (icône +
+    // état côte à côte, voir lovelace-generator.ts).
+    const icon = this.createIcon('fa-thermometer-half', 'medium');
+
     // Créer uniquement l'affichage de la valeur (affichage simplifié)
     const valueDisplay = this.createStyledElement('div', 'sensor-value-display');
     valueDisplay.textContent = this.temperature === 'N/A'
@@ -40,7 +46,8 @@ export class EnhancedTemperatureSensor extends BaseEntity {
     valueDisplay.style.fontWeight = 'normal';
     valueDisplay.style.color = '#FFFFFF'; // Texte blanc pour le contraste
 
-    // Assembler les éléments (uniquement la valeur)
+    // Assembler les éléments (icône puis valeur)
+    container.appendChild(icon);
     container.appendChild(valueDisplay);
 
     // Ajouter un gestionnaire de clic pour ouvrir la fenêtre modale

@@ -624,6 +624,21 @@ body {
     position: relative;
 }
 
+/* ⭐ 29/08/2026 : icône + valeur côte à côte (voir EnhancedTemperatureSensor.ts/
+   EnhancedHumiditySensor.ts/EnhancedGenericSensor.ts) — `.base-entity` (appliqué à toutes les
+   entités, ligne ~400) impose déjà `display:flex; flex-direction:column`, pensé pour empiler les
+   éléments d'une carte plus riche (titre/icône/valeurs) ; sans le réafficher ici, `flex-direction`
+   hérite de `.base-entity` (colonne) même si `display`/`align-items` sont bien repris par cette
+   règle — vérifié en direct : icône au-dessus de la valeur au lieu de juste devant. */
+.enhanced-temperature-sensor,
+.enhanced-humidity-sensor,
+.enhanced-generic-sensor {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+}
+
 .temperature-display {
     display: flex;
     align-items: baseline;
