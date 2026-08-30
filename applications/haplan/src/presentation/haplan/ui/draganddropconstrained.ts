@@ -11,17 +11,31 @@ export class DragAndDropConstrained {
   private onDragEnd?:  (finalPosition: {x: number, y: number}) => void;
   private constraintMode: 'full' | 'center';
   private dragBounds: { minX: number; maxX: number; minY: number; maxY: number } | null = null;
+  private gridPercent?: number;
 
   /**
    * @param elementSelector - Sélecteur CSS de l'élément à rendre "draggable".
    *                         Le conteneur parent sera utilisé automatiquement comme zone de mouvement.
    * @param onDragEnd - Callback appelé à la fin du drag avec la position finale
    * @param constraintMode - Mode de contrainte: 'full' (objet entier dans la zone) ou 'center' (centre dans la zone)
+   * @param gridPercent - ⭐ 30/08/2026, demande explicite : collage sur une grille au relâchement,
+   *                     pour un meilleur alignement des icônes (voir aussi la grille visuelle en
+   *                     mode édition, styles.css `.floorplan-container.edit-mode
+   *                     .floorplan-drag-container`, MÊME valeur à garder synchronisée) — EN
+   *                     POURCENTAGE du conteneur, pas en pixels (deuxième retour utilisateur après
+   *                     un premier essai en px : les positions sont stockées en fraction 0-1 du
+   *                     plan, indépendantes de sa taille rendue à l'écran ; une grille en px
+   *                     correspond à un pourcentage DIFFÉRENT selon la taille du conteneur au
+   *                     moment du drag — un redimensionnement de fenêtre ou un changement de
+   *                     `--plan-scale` décale alors l'alignement obtenu). Non fourni = comportement
+   *                     inchangé (pas de collage), pour ne pas affecter un éventuel autre usage de
+   *                     cette classe générique.
    */
   constructor(
     elementSelector: string,
     onDragEnd?: (finalPosition: {x: number, y: number}) => void,
-    constraintMode: 'full' | 'center' = 'center'
+    constraintMode: 'full' | 'center' = 'center',
+    gridPercent?: number
   ) {
     this.element = document.querySelector<HTMLElement>(elementSelector)!;
     if (!this.element) {
@@ -38,6 +52,7 @@ export class DragAndDropConstrained {
     // Stocker le callback de fin de drag
     this.onDragEnd = onDragEnd;
     this.constraintMode = constraintMode;
+    this.gridPercent = gridPercent;
 
     console.log(`[TRACE] DragAndDropConstrained initialisé avec mode de contrainte: ${constraintMode}`);
 
@@ -197,7 +212,30 @@ export class DragAndDropConstrained {
     document.removeEventListener("mousemove", this.drag);
     document.removeEventListener("mouseup", this.endDrag);
     console.log(`[TRACE] Écouteurs globaux retirés`);
-    
+
+    // ⭐ 30/08/2026, demande explicite : collage sur la grille au relâchement, EN POURCENTAGE du
+    // conteneur (pas en pixels — voir le commentaire du constructeur) — snap AVANT le calcul de la
+    // position finale ci-dessous, pour que le callback ET le rendu visuel reflètent tous les deux
+    // le collage. `style.left`/`style.top` sont convertis en % du conteneur, arrondis au multiple
+    // de `gridPercent` le plus proche, puis reconvertis en px pour l'affichage (le conteneur
+    // pouvant être redimensionné entre-temps, on relit sa taille ACTUELLE ici, pas celle du début
+    // du drag).
+    if (this.gridPercent) {
+      const containerRect = this.container.getBoundingClientRect();
+      const gridPercent = this.gridPercent;
+      const snapAxis = (valuePx: number, containerSizePx: number): number => {
+        if (containerSizePx <= 0) return valuePx;
+        const percent = (valuePx / containerSizePx) * 100;
+        const snappedPercent = Math.round(percent / gridPercent) * gridPercent;
+        return (snappedPercent / 100) * containerSizePx;
+      };
+      const snappedLeft = snapAxis(parseFloat(this.element.style.left) || 0, containerRect.width);
+      const snappedTop = snapAxis(parseFloat(this.element.style.top) || 0, containerRect.height);
+      this.element.style.left = `${snappedLeft}px`;
+      this.element.style.top = `${snappedTop}px`;
+      console.log(`[TRACE] Position collée sur la grille (${gridPercent}%):`, {left: this.element.style.left, top: this.element.style.top});
+    }
+
     // Appeler le callback de fin de drag si défini avec les coordonnées finales
     if (this.onDragEnd) {
       const elementRect = this.element.getBoundingClientRect();
