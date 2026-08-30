@@ -361,17 +361,18 @@ body {
 .floorplan-container.edit-mode .floorplan-drag-container {
     border: 2px dashed #ffeb3b;
     /* ⭐ 30/08/2026, demande explicite : grille visible en mode édition pour aligner les icônes —
-       4% doit rester synchronisé avec le gridPercent passé à DragAndDropConstrained dans
+       2% doit rester synchronisé avec le gridPercent passé à DragAndDropConstrained dans
        HAObject.ts (même valeur utilisée pour le collage au relâchement, sinon la grille affichée
-       ne correspondrait pas à celle utilisée pour l'alignement réel). EN POURCENTAGE (pas en px) :
-       retour utilisateur — un pas en px ne représente pas le même pourcentage du plan selon la
-       taille de rendu, ce qui décale l'alignement obtenu après un redimensionnement/changement de
-       `--plan-scale`. `background-size` accepte les pourcentages nativement (relatifs à la boîte
-       de l'élément), donc la grille reste à 4%/4% quelle que soit la taille réelle du conteneur. */
+       ne correspondrait pas à celle utilisée pour l'alignement réel — 4% au premier essai, réduit
+       à 2% ensuite). EN POURCENTAGE (pas en px) : retour utilisateur — un pas en px ne représente
+       pas le même pourcentage du plan selon la taille de rendu, ce qui décale l'alignement obtenu
+       après un redimensionnement/changement de `--plan-scale`. `background-size` accepte les
+       pourcentages nativement (relatifs à la boîte de l'élément), donc la grille reste à 2%/2%
+       quelle que soit la taille réelle du conteneur. */
     background-image:
         linear-gradient(to right, rgba(255, 255, 255, 0.18) 1px, transparent 1px),
         linear-gradient(to bottom, rgba(255, 255, 255, 0.18) 1px, transparent 1px);
-    background-size: 4% 4%;
+    background-size: 2% 2%;
 }
 
 /* Style pour les objets draggables */
