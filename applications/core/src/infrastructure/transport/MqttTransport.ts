@@ -169,6 +169,21 @@ export class MqttTransport {
     if (this.client) {
       // Publier le LWT offline avant de se déconnecter
       this.publishLwt(LWT_PAYLOAD_OFFLINE, true);
+      // ⭐ 30/08/2026, bug réel constaté en conditions réelles (ha2, EVOO7, désactivation puis
+      // réactivation rapprochées de l'app depuis l'UI) : SANS ce retrait des listeners, le client
+      // mqtt.js qu'on vient de quitter reste en vie en arrière-plan (`.end()` est asynchrone — la
+      // fermeture réseau effective du socket survient plus tard, hors de cette méthode). Quand elle
+      // survient, ce VIEUX client (toujours écouté par CETTE instance MqttTransport, elle-même déjà
+      // « déconnectée » selon disconnect() mais jamais détruite) émet quand même 'close' →
+      // handleClose() → scheduleReconnect() se redéclenche sur une instance qu'on croyait morte,
+      // avec le MÊME clientId qu'un nouveau bridge légitimement recréé entretemps (register() juste
+      // après un unregister()). Les deux se disputent alors la même session MQTT indéfiniment
+      // ("session taken over" toutes les ~60s dans les logs mosquitto, backoff plafonné compris,
+      // jamais résolu tout seul). Même cause profonde que le correctif du 07/08/2026 dans
+      // createMqttClient() (deux mécanismes de reconnexion actifs sur le même clientId) mais un
+      // point d'entrée différent : ici c'est disconnect() qui laissait un client zombie, pas une
+      // reconnexion mqtt.js interne concurrente.
+      this.client.removeAllListeners();
       this.client.end();
       this.client = null;
     }
