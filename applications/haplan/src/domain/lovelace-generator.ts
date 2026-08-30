@@ -55,11 +55,22 @@ interface PictureElement {
  * seulement si indisponible) — `{{ states(...)|float(0)|round(N) }}` ; `round(0)` d'un float reste
  * un float en Jinja ("68.0"), d'où `|int` en plus pour ce cas précis. Espace avant l'unité repris
  * de la convention HA (pas d'espace pour %/° , espace sinon — ex: "68%", "23.9°C", "1015 hPa").
+ *
+ * `:host { transform: translateY(-50%) !important; }` — ⭐ 30/08/2026, deuxième retour utilisateur
+ * après le premier écart fixe (SENSOR_LABEL_OFFSET_PX) : valeur toujours partiellement superposée
+ * à l'icône. Cause trouvée en direct : `hui-state-label-element` est nativement centré (HA lui
+ * applique `transform: translate(-50%, -50%)`, vérifié via le style calculé) — un texte plus large
+ * (ex: "1015 hPa", ~75px) déborde alors vers la GAUCHE de son point d'ancrage bien plus qu'un texte
+ * court ("68%", ~40px), quel que soit l'écart ajouté avant. En ne gardant que le centrage VERTICAL
+ * (translateY seul), le bord GAUCHE du texte se retrouve toujours exactement au point d'ancrage
+ * (`left: calc(icône% + Npx)`), quelle que soit la largeur du texte — l'écart devient prévisible.
  */
 function buildSensorLabelCardMod(entityId: string): string {
   const roundDigits = getSensorRoundDigits(entityId);
+  const hostTransform = ':host { transform: translateY(-50%) !important; }';
   if (roundDigits === null) {
     return [
+      hostTransform,
       'div {',
       '  color: white;',
       '  text-shadow: 0 0 3px black, 0 0 3px black;',
@@ -83,6 +94,7 @@ function buildSensorLabelCardMod(entityId: string): string {
     : `{{ states(config.entity) | float(0) | round(${roundDigits}) }}`;
 
   return [
+    hostTransform,
     'div {',
     '  color: white;',
     '  text-shadow: 0 0 3px black, 0 0 3px black;',
@@ -102,11 +114,26 @@ function buildSensorLabelCardMod(entityId: string): string {
   ].join('\n');
 }
 
-/** Décalage horizontal (% de la largeur de l'image) entre l'icône d'un capteur et sa valeur —
- *  ⭐ 28/08/2026, demande explicite : icône ET valeur, pas l'une ou l'autre (`state-icon` seul ne
- *  montre jamais l'état, `state-label` seul n'a pas d'icône — même patron que HAPLAN lui-même,
- *  qui affiche déjà les deux côte à côte). */
-const SENSOR_LABEL_OFFSET_PERCENT = 3;
+/** Décalage horizontal entre l'icône d'un capteur et sa valeur — ⭐ 28/08/2026, demande explicite :
+ *  icône ET valeur, pas l'une ou l'autre (`state-icon` seul ne montre jamais l'état, `state-label`
+ *  seul n'a pas d'icône — même patron que HAPLAN lui-même, qui affiche déjà les deux côte à côte).
+ *
+ * ⭐ 30/08/2026, retour utilisateur : valeur superposée à l'icône sur certains plans — un décalage
+ * en % de la largeur de l'IMAGE (comme avant) donne un écart en pixels très variable : 3% d'un
+ * plan portrait étroit (620px de large, ex: "original") ≈ 12px une fois rendu à l'écran, plus
+ * petit que l'icône elle-même (~24px) ; 3% d'un plan large ≈ 48px, largement suffisant — l'écart
+ * dépendait donc de la FORME du plan, pas de la taille réelle de l'icône (fixe, indépendante de
+ * l'image). Remplacé par un décalage en pixels ABSOLUS via `calc()` (mélange %/px valide en CSS,
+ * appliqué tel quel par `picture-elements` comme n'importe quelle valeur `left`) — même écart
+ * visuel quel que soit le plan ou l'appareil.
+ *
+ * Valeur mesurée en direct : icône `state-icon` toujours rendue à 40px de large (centrée sur son
+ * point d'ancrage, donc ± 20px). Avec le bord GAUCHE du texte maintenant ancré exactement à ce
+ * décalage (voir `:host { transform: translateY(-50%) }` dans buildSensorLabelCardMod — le texte
+ * ne se centre plus horizontalement), 28px laisse ~8px de marge visible après le bord droit de
+ * l'icône (28 - 20), quelle que soit la largeur du texte affiché.
+ */
+const SENSOR_LABEL_OFFSET_PX = 28;
 
 /**
  * Force la couleur de l'icône d'un `state-icon` (au lieu du `state_color` automatique de HA) — ⭐
@@ -164,7 +191,7 @@ function buildElementsForPosition(entityId: string, leftPercent: number, topPerc
   const label: PictureElement = {
     type: 'state-label',
     entity: entityId,
-    style: { left: `${(leftPercent + SENSOR_LABEL_OFFSET_PERCENT).toFixed(2)}%`, top: `${topPercent.toFixed(2)}%` },
+    style: { left: `calc(${leftPercent.toFixed(2)}% + ${SENSOR_LABEL_OFFSET_PX}px)`, top: `${topPercent.toFixed(2)}%` },
     card_mod: { style: buildSensorLabelCardMod(entityId) }
   };
   return [icon, label];
