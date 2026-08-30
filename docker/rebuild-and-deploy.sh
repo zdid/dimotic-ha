@@ -49,7 +49,8 @@ DOCKER_IMAGE="${DOCKER_IMAGE:-zdid2/dimotic-ha}"
 HA2_HOST="${HA2_HOST:-192.168.1.51}"
 HA2_SSH_KEY="${HA2_SSH_KEY:-$HOME/.ssh/ha2-claude/id_ed25519}"
 
-ORANGEPI_HOST="${ORANGEPI_HOST:-192.168.1.32}"
+# 192.168.1.130 depuis le 30/08/2026 (était 192.168.1.32) — adresse changée côté DHCP/routeur.
+ORANGEPI_HOST="${ORANGEPI_HOST:-192.168.1.130}"
 ORANGEPI_SSH_KEY="${ORANGEPI_SSH_KEY:-$HOME/.ssh/orangepi-claude/id_ed25519}"
 
 SSH_USER="claude"
