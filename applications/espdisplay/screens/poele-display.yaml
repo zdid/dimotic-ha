@@ -101,13 +101,16 @@ display:
     # `lvgl:` est utilisé — LVGL reçoit alors directement le bon canevas 240x320 (confirmé : plus de
     # bandeau, plus d'ascenseur, tout le contenu tient). `swap_xy` + `mirror_x` (la combinaison
     # documentée pour 90°) donnait un canevas de la bonne taille mais un rendu à l'envers (180°,
-    # confirmé par photo) — `mirror_y` à la place corrige le sens (avec swap_xy, l'axe miroir
-    # pertinent n'est pas celui attendu naïvement).
+    # confirmé par photo) — `mirror_y` seul corrige l'ordre vertical des sections (POÊLE bien en
+    # haut, Humidité en bas) mais met le texte en miroir horizontal (lettres inversées, confirmé
+    # par une nouvelle photo). Les deux retours se corrigent mutuellement sur l'axe que l'autre
+    # cassait : `mirror_x` ET `mirror_y` ensemble (avec swap_xy) pour corriger les deux à la fois.
     dimensions:
       width: 240
       height: 320
     transform:
       swap_xy: true
+      mirror_x: true
       mirror_y: true
     # LVGL pilote les rafraîchissements — pas de polling périodique ni d'auto-clear interne au
     # composant display (même contrainte que haplan-display.yaml, ESPHome refuse
