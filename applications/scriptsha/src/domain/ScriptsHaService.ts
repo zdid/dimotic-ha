@@ -273,6 +273,68 @@ mode: single
 `;
 }
 
+const EVOO7_DECALAGE_SCRIPT_ID = 'evoo7_recalage_decalage_ambiant';
+const EVOO7_DECALAGE_SCRIPT_TITLE = 'EVOO7 — recalage automatique du décalage ambiant';
+const EVOO7_DECALAGE_SCRIPT_DESCRIPTION =
+  "Recalcule périodiquement le décalage de température ambiante d'EVOO7 pour que sa température " +
+  'ambiante affichée colle à la référence de la pièce (sensor.salle_temperature). Ne modifie le ' +
+  'décalage que si la valeur recalculée diffère de celle déjà en place.';
+// ⭐ 30/08/2026 : demande explicite de l'utilisateur — "il faut régulièrement positionner le
+// décalage de température d'evoo7 pour que le décalage soit = différence entre la température de
+// salle et température de evoo7". Formule et sens détaillés dans le commentaire `sens:` ci-dessous
+// (boîtier EVOO7 injoignable au moment d'écrire ce script — voir mémoire de session — le sens du
+// décalage n'a PAS pu être testé en conditions réelles, contrairement à l'exigence explicite de
+// l'utilisateur ; hypothèse la plus courante retenue en attendant, clairement signalée comme telle
+// à l'endroit exact où elle compte).
+function buildEvoo7DecalageAutomationYaml(): string {
+  return `alias: "EVOO7 — recalage automatique du décalage ambiant"
+description: >-
+  Recalcule périodiquement le décalage de température ambiante d'EVOO7
+  (number.evoo7_control_decalage_de_la_tdegc_ambiante) pour que sa température ambiante affichée
+  (sensor.evoo7_control_temperature_ambiante) colle à la référence de la pièce
+  (sensor.salle_temperature). Ne modifie le décalage que s'il diffère de la valeur déjà en place
+  (arrondi à l'entier le plus proche, comme demandé).
+trigger:
+  - platform: time_pattern
+    minutes: "/30"
+condition:
+  - condition: numeric_state
+    entity_id: sensor.salle_temperature
+  - condition: numeric_state
+    entity_id: sensor.evoo7_control_temperature_ambiante
+  - condition: numeric_state
+    entity_id: number.evoo7_control_decalage_de_la_tdegc_ambiante
+action:
+  - variables:
+      # ⚠️ SENS DU DÉCALAGE NON VALIDÉ EN CONDITIONS RÉELLES (boîtier EVOO7 injoignable le
+      # 30/08/2026 au moment d'écrire ce script — toute commande, même sur un champ déjà validé
+      # fiable ailleurs, timeout côté boîtier). Hypothèse retenue : le décalage s'AJOUTE à la
+      # lecture brute du capteur ambiant (convention la plus courante pour un réglage de
+      # calibration de capteur, ex: "local_temperature_calibration" d'un TRV Zigbee classique).
+      # sens: 1 si cette hypothèse est correcte, -1 si le décalage agit en sens inverse (température
+      # affichée = brute − décalage). Symptôme si le sens retenu est faux : le décalage s'éloigne de
+      # sa valeur correcte à chaque cycle au lieu de s'en rapprocher (température ambiante EVOO7 qui
+      # diverge de la référence salle au fil des exécutions, plutôt que de converger). À valider dès
+      # que le boîtier redevient réactif : imposer un écart volontaire au décalage, vérifier que la
+      # température ambiante affichée se rapproche bien de sensor.salle_temperature après le cycle
+      # suivant — inverser cette valeur sinon.
+      sens: 1
+      salle: "{{ states('sensor.salle_temperature') | float }}"
+      temp_amb: "{{ states('sensor.evoo7_control_temperature_ambiante') | float }}"
+      decalage_actuel: "{{ states('number.evoo7_control_decalage_de_la_tdegc_ambiante') | float }}"
+      decalage_cible: >-
+        {{ [10, [-10, (decalage_actuel + sens * (salle - temp_amb)) | round(0) | int] | max] | min }}
+  - condition: template
+    value_template: "{{ decalage_cible != decalage_actuel | round(0) | int }}"
+  - service: number.set_value
+    target:
+      entity_id: number.evoo7_control_decalage_de_la_tdegc_ambiante
+    data:
+      value: "{{ decalage_cible }}"
+mode: single
+`;
+}
+
 /**
  * Registre des scripts embarqués dans l'application (⭐ 24/08/2026, demande explicite : les
  * scripts mis au point avec l'utilisateur doivent voyager avec le code, pas rester une donnée
@@ -314,6 +376,13 @@ const BUILTIN_SCRIPTS: BuiltinScriptDef[] = [
     description: REPORT_SCRIPT_DESCRIPTION,
     haDomain: 'automation',
     buildYaml: buildReportAutomationYaml
+  },
+  {
+    id: EVOO7_DECALAGE_SCRIPT_ID,
+    title: EVOO7_DECALAGE_SCRIPT_TITLE,
+    description: EVOO7_DECALAGE_SCRIPT_DESCRIPTION,
+    haDomain: 'automation',
+    buildYaml: buildEvoo7DecalageAutomationYaml
   }
 ];
 
