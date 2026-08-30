@@ -3,21 +3,28 @@
  * de TOUS les plans HAPLAN connus — une vue HA par plan (voir buildLovelaceDashboardYaml plus bas)
  * — voir fonctionnelles-haplan_specs_v1.6.md §17 pour la conception complète.
  *
- * Pas d'icône explicite par entité pour cette première version : le choix d'icône côté HAPLAN
- * (Font Awesome, UnifiedObjectFactory.ts) n'existe qu'à l'exécution côté navigateur, jamais
- * persisté (voir floorplans-config-schema.ts — seuls entity_id/x/y sont stockés). Porter cette
- * logique côté serveur demanderait de dupliquer UnifiedObjectFactory.ts pour un gain cosmétique ;
- * `state_color: true` (défaut de `state-icon`) suffit pour la couleur dynamique par état, et HA
- * choisit déjà une icône par défaut sensée par domaine sans qu'on la précise.
+ * Pas d'icône explicite par entité en général : le choix d'icône complet côté HAPLAN (Font
+ * Awesome, UnifiedObjectFactory.ts) n'existe qu'à l'exécution côté navigateur, jamais persisté
+ * (voir floorplans-config-schema.ts — seuls entity_id/x/y sont stockés) — le dupliquer entièrement
+ * ici referait un gain cosmétique pour des domaines où HA choisit déjà une icône par défaut
+ * pertinente (light/climate/cover, capteurs avec `device_class`). `state_color: true` (défaut de
+ * `state-icon`) suffit pour la couleur dynamique par état dans tous les cas.
+ *
+ * Seule exception portée (⭐ 29/08/2026, retour utilisateur) : les sous-types de `switch.*` que HA
+ * ne peut PAS deviner tout seul (VMC/ballon d'eau chaude/radiateur, aucun domaine ni device_class
+ * dédié côté HA) — voir switch-icon.ts, détection par mots-clés dans l'entity_id (portée de
+ * `SwitchTypeDetector` de HAPLAN, méthode par entity_id uniquement, pure).
  */
 
 import * as yaml from 'js-yaml';
 import type { HaplanFloorplanEntry } from './floorplans-config-schema';
 import type { ImageDimensions } from './image-dimensions';
+import { detectSwitchMdiIcon } from './switch-icon';
 
 interface PictureElement {
   type: 'state-icon' | 'state-label';
   entity: string;
+  icon?: string;
   style: Record<string, string>;
   card_mod?: { style: string };
 }
@@ -72,6 +79,10 @@ function buildElementsForPosition(entityId: string, leftPercent: number, topPerc
     entity: entityId,
     style: { left: `${leftPercent.toFixed(2)}%`, top: `${topPercent.toFixed(2)}%` }
   };
+  if (entityId.startsWith('switch.')) {
+    const switchIcon = detectSwitchMdiIcon(entityId);
+    if (switchIcon) icon.icon = switchIcon;
+  }
   if (!entityId.startsWith('sensor.')) return [icon];
 
   const label: PictureElement = {
