@@ -1,0 +1,517 @@
+# =============================================================================
+# poele-display.yaml — écran de contrôle 2.8" portrait (Sunton/CYD ESP32-2432S028, USB-C en bas)
+# dédié au pilotage du chauffage : thermostat du poêle (helper HA "Thermostat générique"),
+# thermostat EVOO7 (pompe à chaleur), humidité ambiante (capteur "Salle").
+#
+# Config FAITE MAIN — PAS le générateur applications/haplan/tools/generate_esphome_floorplan.py
+# (layout différent : panneau de contrôle, pas un plan de maison). Pas orchestré par
+# applications/espdisplay pour l'instant (voir EspDisplayService.ts, spécifique au pipeline
+# HAPLAN) — décision actée le 13/08/2026, voir mémoire projet
+# `project_poele_thermostat_espdisplay`.
+#
+# Prérequis HA déjà en place (créés/vérifiés le 30/08/2026) :
+# - climate.salle_a_manger_poele : Thermostat générique HA (Paramètres > Appareils et services >
+#   Aides), chauffage = switch.poele_salle_a_manger_salle_a_manger_rez_de_chaussee, capteur =
+#   sensor.salle_temperature (capteur "Salle" — PAS le TRV de la salle à manger, corrigé le
+#   30/08/2026 après une première tentative avec sensor.temperature_salle_a_manger_trv, un capteur
+#   modèle basé sur le TRV, qui pointait sur la mauvaise pièce ; ce capteur modèle a été supprimé).
+#   Plage 15-25°C.
+# - climate.infra_evoo7_control_thermostat : entité composite EVOO7, activée le 30/08/2026 dans
+#   EVOO7 (app evoo7 sur ha2) > Données > case "Activer le thermostat" (pilotage complet demandé
+#   explicitement par l'utilisateur, cf. fonctionnelles-evoo7_specs_v1.3 §9 — "Autoriser le
+#   refroidissement" laissée décochée, jamais validé). Plage 10-30°C, pas: 0.5, modes off/heat
+#   uniquement (pas de "cool"). ⚠️ L'écriture de la CONSIGNE (field: temperature) est vérifiée en
+#   conditions réelles (§13.6 des specs) ; l'écriture du MODE (field: mode, bouton
+#   MARCHE/ARRÊT ci-dessous) ne l'est PAS avant ce déploiement — ce sera le premier vrai test.
+# - sensor.salle_humidite (capteur "Salle", corrigé le 30/08/2026 — pointait initialement sur
+#   sensor.barometre_bibliotheque_salle_rez_de_chaussee_humidity, mauvaise pièce).
+#
+# Board ESP32-2432S028 ("Cheap Yellow Display") : pinout SPI écran/tactile ci-dessous PAS ENCORE
+# vérifié sur la carte physique (contrairement au pinout de haplan-display.yaml) — recoupé le
+# 30/08/2026 sur plusieurs sources communautaires convergentes (randomnerdtutorials.com,
+# github.com/BOlaerts/ESP32-2432s028, espboards.dev). `rotation:`/`invert_colors:`/calibration
+# tactile à confirmer au premier allumage et ajuster si besoin (image tête en bas/inversée,
+# tactile décalé) — plusieurs révisions de cette carte existent avec de légères variantes.
+#
+# Premier flash : USB obligatoire (device /dev/ttyUSB0) pour embarquer la capacité OTA elle-même :
+#   docker exec esphome esphome run /config/poele-display.yaml --device /dev/ttyUSB0
+# Mises à jour suivantes : OTA (mot de passe réutilisé du parc existant, voir secrets.yaml) :
+#   docker exec esphome esphome upload /config/poele-display.yaml --device poele-display.local
+#
+# ⚠️ Nom d'appareil `poele-display` volontairement distinct de `haplan-display` — un précédent
+# écran avait été appairé sous un nom générique par erreur, créant un conflit dans HA (mémoire
+# projet du 13/08/2026, "piège identité à éviter").
+# =============================================================================
+
+esphome:
+  name: poele-display
+  friendly_name: "Thermostat Poêle"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+  # Framework Arduino plutôt qu'esp-idf (contrairement à haplan-display.yaml, ESP32-S3) : cette
+  # carte est un ESP32 classique (pas S3), et l'écosystème ILI9341/XPT2046/LVGL est plus éprouvé
+  # sous Arduino sur ce matériel d'après la documentation communautaire — à revoir si compilation
+  # échoue ou instable.
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  encryption:
+    key: !secret api_poele-display
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+logger:
+
+# -----------------------------------------------------------------------------
+# Écran SPI 2.8" ILI9341 240x320 (portrait natif) + tactile résistif XPT2046, sur deux bus SPI
+# séparés (écran et tactile n'ont pas les mêmes broches CLK/MOSI/MISO sur cette carte).
+# -----------------------------------------------------------------------------
+spi:
+  - id: lcd_bus
+    clk_pin: GPIO14
+    mosi_pin: GPIO13
+    miso_pin: GPIO12
+  - id: touch_bus
+    clk_pin: GPIO25
+    mosi_pin: GPIO32
+    miso_pin: GPIO39
+
+display:
+  - platform: ili9xxx
+    model: ILI9341
+    id: main_lcd
+    spi_id: lcd_bus
+    cs_pin: GPIO15
+    dc_pin: GPIO2
+    invert_colors: false
+    # ⭐ 30/08/2026 : rotation: 0 rendait bien 240x320 en logiciel (confirmé au boot,
+    # "Dimensions: 240px x 320px") mais s'affichait en paysage sur l'écran physique — la
+    # dalle de cette carte a son adressage natif tourné par rapport à ce que déclare le
+    # préréglage "ILI9341" générique d'ESPHome. rotation: 90 fait pivoter le mappage
+    # logique→physique (LVGL continue de dessiner sur un canevas 240x320, seule
+    # l'adressage des pixels change) — à confirmer visuellement ; 270 est l'autre
+    # candidat si 90 tourne dans le mauvais sens.
+    rotation: 90
+    # LVGL pilote les rafraîchissements — pas de polling périodique ni d'auto-clear interne au
+    # composant display (même contrainte que haplan-display.yaml, ESPHome refuse
+    # auto_clear_enabled: true en présence de lvgl:).
+    update_interval: never
+    auto_clear_enabled: false
+
+output:
+  - platform: ledc
+    pin: GPIO21
+    id: backlight_pwm
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Rétroéclairage"
+    id: backlight
+    restore_mode: ALWAYS_ON
+
+touchscreen:
+  platform: xpt2046
+  id: touch
+  spi_id: touch_bus
+  cs_pin: GPIO33
+  interrupt_pin: GPIO36
+  update_interval: 50ms
+  threshold: 400
+  calibration:
+    x_min: 280
+    x_max: 3860
+    y_min: 340
+    y_max: 3860
+  transform:
+    swap_xy: false
+    mirror_x: true
+    mirror_y: false
+
+# ⭐ 30/08/2026, bug réel constaté à l'écran (accents absents, ex: "Pompe à chaleur") : sans
+# `glyphs:` explicite, ESPHome limite chaque police à son jeu de caractères par défaut (proche
+# ASCII), qui n'inclut PAS les accents français — silencieux à la compilation, juste absent à
+# l'affichage. Un jeu de glyphes par police, couvrant exactement ce qui est utilisé dans les
+# widgets ci-dessous (voir `text:`/`text_font:` de chaque label) — même raisonnement que
+# `font_sensor` dans haplan-display.yaml (glyphes réduits aux caractères réellement produits).
+font:
+  - file: "gfonts://Roboto"
+    id: font_title
+    size: 18
+    glyphs: "0123456789.-+°"
+  - file: "gfonts://Roboto"
+    id: font_value
+    size: 30
+    glyphs: "0123456789.-°%"
+  - file: "gfonts://Roboto"
+    id: font_label
+    size: 14
+    glyphs: " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÀÂÄÉÈÊËÎÏÔÖÙÛÜÇàâäéèêëîïôöùûüç—.,:%°"
+
+# Consignes tenues côté device (pas seulement dans HA) pour permettre un +/- optimiste immédiat à
+# l'écran sans attendre l'aller-retour HA — resynchronisées par on_value des capteurs ha_*_target
+# ci-dessous (si la consigne est changée depuis l'appli HA, l'écran se met à jour aussi).
+globals:
+  - id: poele_target_c
+    type: float
+    restore_value: no
+    initial_value: '20.0'
+  - id: evoo7_target_c
+    type: float
+    restore_value: no
+    initial_value: '18.0'
+
+sensor:
+  - platform: homeassistant
+    id: ha_poele_current
+    entity_id: climate.salle_a_manger_poele
+    attribute: current_temperature
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_poele_current
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--.-°");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°", x);
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_poele_target
+    entity_id: climate.salle_a_manger_poele
+    attribute: temperature
+    internal: true
+    on_value:
+      - lambda: |-
+          if (!std::isnan(x)) id(poele_target_c) = x;
+      - lvgl.label.update:
+          id: lbl_poele_target
+          text: !lambda |-
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°", id(poele_target_c));
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_evoo7_current
+    entity_id: climate.infra_evoo7_control_thermostat
+    attribute: current_temperature
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_evoo7_current
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--.-°");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°", x);
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_evoo7_target
+    entity_id: climate.infra_evoo7_control_thermostat
+    attribute: temperature
+    internal: true
+    on_value:
+      - lambda: |-
+          if (!std::isnan(x)) id(evoo7_target_c) = x;
+      - lvgl.label.update:
+          id: lbl_evoo7_target
+          text: !lambda |-
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°", id(evoo7_target_c));
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_humidity
+    entity_id: sensor.salle_humidite
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_humidity
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--%");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.0f%%", x);
+            return std::string(buf);
+
+text_sensor:
+  - platform: homeassistant
+    id: ha_poele_state
+    entity_id: climate.salle_a_manger_poele
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_poele_toggle
+          text: !lambda |-
+            return (x == "heat") ? std::string("ARRETER") : std::string("CHAUFFER");
+
+  - platform: homeassistant
+    id: ha_evoo7_state
+    entity_id: climate.infra_evoo7_control_thermostat
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_evoo7_toggle
+          text: !lambda |-
+            return (x == "heat") ? std::string("ARRETER") : std::string("CHAUFFER");
+
+lvgl:
+  displays:
+    - main_lcd
+  touchscreens:
+    - touch
+  bg_color: 0x101418
+  pages:
+    - id: main_page
+      bg_color: 0x101418
+      widgets:
+        # ---- Poêle ------------------------------------------------------------------------
+        - label:
+            x: 8
+            y: 6
+            width: 224
+            height: 22
+            text: "POÊLE — Salle à manger"
+            text_font: font_label
+            text_color: 0xFFFFFF
+
+        - label:
+            id: lbl_poele_current
+            x: 8
+            y: 26
+            width: 112
+            height: 36
+            text: "--.-°"
+            text_font: font_value
+            text_color: 0xFFFFFF
+
+        - label:
+            x: 128
+            y: 28
+            width: 104
+            height: 16
+            text: "Consigne"
+            text_font: font_label
+            text_color: 0xAAAAAA
+
+        - label:
+            id: lbl_poele_target
+            x: 128
+            y: 44
+            width: 104
+            height: 26
+            text: "--.-°"
+            text_font: font_title
+            text_color: 0xFFC107
+
+        - button:
+            id: btn_poele_minus
+            x: 8
+            y: 66
+            width: 52
+            height: 34
+            widgets:
+              - label:
+                  text: "-"
+                  text_font: font_title
+            on_click:
+              - lambda: |-
+                  id(poele_target_c) = std::max(15.0f, id(poele_target_c) - 0.5f);
+              - lvgl.label.update:
+                  id: lbl_poele_target
+                  text: !lambda |-
+                    char buf[16];
+                    snprintf(buf, sizeof(buf), "%.1f°", id(poele_target_c));
+                    return std::string(buf);
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.salle_a_manger_poele
+                  data_template:
+                    temperature: !lambda 'return str_sprintf("%.1f", id(poele_target_c));'
+
+        - button:
+            id: btn_poele_plus
+            x: 64
+            y: 66
+            width: 52
+            height: 34
+            widgets:
+              - label:
+                  text: "+"
+                  text_font: font_title
+            on_click:
+              - lambda: |-
+                  id(poele_target_c) = std::min(25.0f, id(poele_target_c) + 0.5f);
+              - lvgl.label.update:
+                  id: lbl_poele_target
+                  text: !lambda |-
+                    char buf[16];
+                    snprintf(buf, sizeof(buf), "%.1f°", id(poele_target_c));
+                    return std::string(buf);
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.salle_a_manger_poele
+                  data_template:
+                    temperature: !lambda 'return str_sprintf("%.1f", id(poele_target_c));'
+
+        - button:
+            id: btn_poele_toggle
+            x: 128
+            y: 66
+            width: 104
+            height: 34
+            widgets:
+              - label:
+                  id: lbl_poele_toggle
+                  text: "..."
+                  text_font: font_label
+            on_click:
+              - homeassistant.service:
+                  service: climate.set_hvac_mode
+                  data:
+                    entity_id: climate.salle_a_manger_poele
+                  data_template:
+                    hvac_mode: !lambda |-
+                      return (id(ha_poele_state).state == "heat") ? std::string("off") : std::string("heat");
+
+        # ---- EVOO7 (pompe à chaleur) --------------------------------------------------------
+        - label:
+            x: 8
+            y: 112
+            width: 224
+            height: 22
+            text: "EVOO7 — Pompe à chaleur"
+            text_font: font_label
+            text_color: 0xFFFFFF
+
+        - label:
+            id: lbl_evoo7_current
+            x: 8
+            y: 132
+            width: 112
+            height: 36
+            text: "--.-°"
+            text_font: font_value
+            text_color: 0xFFFFFF
+
+        - label:
+            x: 128
+            y: 134
+            width: 104
+            height: 16
+            text: "Consigne"
+            text_font: font_label
+            text_color: 0xAAAAAA
+
+        - label:
+            id: lbl_evoo7_target
+            x: 128
+            y: 150
+            width: 104
+            height: 26
+            text: "--.-°"
+            text_font: font_title
+            text_color: 0xFFC107
+
+        - button:
+            id: btn_evoo7_minus
+            x: 8
+            y: 172
+            width: 52
+            height: 34
+            widgets:
+              - label:
+                  text: "-"
+                  text_font: font_title
+            on_click:
+              - lambda: |-
+                  id(evoo7_target_c) = std::max(10.0f, id(evoo7_target_c) - 0.5f);
+              - lvgl.label.update:
+                  id: lbl_evoo7_target
+                  text: !lambda |-
+                    char buf[16];
+                    snprintf(buf, sizeof(buf), "%.1f°", id(evoo7_target_c));
+                    return std::string(buf);
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.infra_evoo7_control_thermostat
+                  data_template:
+                    temperature: !lambda 'return str_sprintf("%.1f", id(evoo7_target_c));'
+
+        - button:
+            id: btn_evoo7_plus
+            x: 64
+            y: 172
+            width: 52
+            height: 34
+            widgets:
+              - label:
+                  text: "+"
+                  text_font: font_title
+            on_click:
+              - lambda: |-
+                  id(evoo7_target_c) = std::min(30.0f, id(evoo7_target_c) + 0.5f);
+              - lvgl.label.update:
+                  id: lbl_evoo7_target
+                  text: !lambda |-
+                    char buf[16];
+                    snprintf(buf, sizeof(buf), "%.1f°", id(evoo7_target_c));
+                    return std::string(buf);
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.infra_evoo7_control_thermostat
+                  data_template:
+                    temperature: !lambda 'return str_sprintf("%.1f", id(evoo7_target_c));'
+
+        # ⚠️ Premier test réel d'écriture du MODE EVOO7 (voir en-tête de fichier) — l'écriture de
+        # la consigne (boutons +/- ci-dessus) est déjà vérifiée, celle du mode ne l'est pas.
+        - button:
+            id: btn_evoo7_toggle
+            x: 128
+            y: 172
+            width: 104
+            height: 34
+            widgets:
+              - label:
+                  id: lbl_evoo7_toggle
+                  text: "..."
+                  text_font: font_label
+            on_click:
+              - homeassistant.service:
+                  service: climate.set_hvac_mode
+                  data:
+                    entity_id: climate.infra_evoo7_control_thermostat
+                  data_template:
+                    hvac_mode: !lambda |-
+                      return (id(ha_evoo7_state).state == "heat") ? std::string("off") : std::string("heat");
+
+        # ---- Humidité (salle) -----------------------------------------------------------------
+        - label:
+            x: 8
+            y: 218
+            width: 224
+            height: 18
+            text: "Humidité — Salle"
+            text_font: font_label
+            text_color: 0xAAAAAA
+
+        - label:
+            id: lbl_humidity
+            x: 8
+            y: 238
+            width: 224
+            height: 40
+            text: "--%"
+            text_font: font_value
+            text_color: 0x00BCD4
