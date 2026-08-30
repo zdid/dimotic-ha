@@ -232,8 +232,20 @@ export class FloorPlanContainer {
       console.log('[FloorPlanContainer] Listener state désabonné');
     }
     
-    // Forcer la sauvegarde des positions en attente
+    // ⭐ 30/08/2026, bug réel trouvé en investigant un retour utilisateur ("les icônes reprennent
+    // la place qu'elles avaient avant, peut-être lorsque plusieurs sont déplacées") : ce
+    // commentaire disait déjà "forcer la sauvegarde", mais le code appelait `cleanup()` — qui
+    // ANNULE le timer de sauvegarde différée (5s, PositionManager.scheduleSave) et VIDE la Map en
+    // mémoire SANS jamais envoyer la dernière position au serveur. `cleanup()` est appelé à CHAQUE
+    // changement de plan (dashboard-app.ts::showFloorplanNow) — tout déplacement fait dans les 5
+    // dernières secondes avant de changer de plan était donc perdu silencieusement ; en revenant
+    // sur ce plan, les positions rechargées depuis le serveur reflétaient l'ancien emplacement.
+    // Plus probable avec plusieurs icônes déplacées à la suite : chaque déplacement réarme le
+    // timer de 5s (debounce), laissant plus de chances qu'un changement de plan survienne avant
+    // l'échéance. `forceSave()` (déjà existant, déjà utilisé par disableEditMode ci-dessus) envoie
+    // la sauvegarde immédiatement avant de nettoyer.
     if (this.positionManager) {
+      this.positionManager.forceSave();
       this.positionManager.cleanup();
     }
     

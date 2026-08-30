@@ -23,6 +23,20 @@ let editMode = false;
 // d'où la boucle de retry DOM observée dans EnhancedLightObject. Un simple jeton ne suffit pas
 // (l'appel périmé doit quand même nettoyer), donc chaque appel attend la fin complet du précédent.
 let showFloorplanQueue: Promise<void> = Promise.resolve();
+// ⭐ 30/08/2026, bug réel trouvé en réappliquant le correctif forceSave() de FloorPlanContainer.
+// cleanup() (voir son commentaire) : `haplan:floorplans:list` est un événement PERSISTANT rejoué à
+// CHAQUE mise à jour de positions (HaplanService.handleFloorplanPositionsUpdate → emitFloorplansList,
+// pas seulement à la connexion initiale) — or `onFloorplansReady` ci-dessous appelait
+// inconditionnellement `showFloorplan()` à CHAQUE réception, y compris pour un simple accusé de
+// sauvegarde de positions n'ayant rien à voir avec une navigation. forceSave() envoyant maintenant
+// une sauvegarde à CHAQUE changement de plan (pas seulement toutes les 5s), ce rebond se produisait
+// quasi systématiquement PENDANT qu'un changement de plan manuel était encore en cours de
+// traitement — la vue retombait alors sur l'ancien plan juste après avoir affiché le nouveau,
+// donnant l'impression d'un blocage. `hasBootstrapped` : `showFloorplan()` n'est nécessaire qu'au
+// tout premier chargement (ou si le plan affiché a disparu) — les diffusions suivantes n'ont qu'à
+// rafraîchir les données déjà tenues à jour par DataService lui-même, pas reconstruire toute la vue.
+let hasBootstrapped = false;
+let lastShownFloorplanId: string | null = null;
 
 const entitySelectorContainer = document.getElementById('entity-selector-container') as HTMLElement;
 const entitySelector = new EntitySelector(entitySelectorContainer, (entity_id: string) => {
@@ -58,6 +72,10 @@ function populateFloorplanSelect(): void {
 }
 
 function showFloorplan(floorplanId: string): Promise<void> {
+  // Point d'entrée UNIQUE pour toute navigation (sélecteur, flèches ‹›, bootstrap initial) — voir
+  // `hasBootstrapped`/`lastShownFloorplanId` plus haut : centraliser la mise à jour ici (plutôt que
+  // chez chaque appelant) garantit qu'elle reste juste quel que soit le chemin emprunté.
+  lastShownFloorplanId = floorplanId;
   showFloorplanQueue = showFloorplanQueue.then(() => showFloorplanNow(floorplanId));
   return showFloorplanQueue;
 }
@@ -336,7 +354,15 @@ dataService.onFloorplansReady(async () => {
   }
 
   populateFloorplanSelect();
-  await showFloorplan(currentId);
+  // Voir le commentaire sur `hasBootstrapped` plus haut — ne (re)construire la vue que si c'est le
+  // tout premier chargement, ou si le plan à afficher a réellement changé sous nos pieds (cas
+  // "plan supprimé" ci-dessus) ; une simple diffusion de données (positions sauvegardées ailleurs,
+  // entité ajoutée sur un autre onglet...) ne doit pas réinitialiser la vue en cours.
+  if (!hasBootstrapped || currentId !== lastShownFloorplanId) {
+    hasBootstrapped = true;
+    lastShownFloorplanId = currentId;
+    await showFloorplan(currentId);
+  }
   updateConnectionStatus();
 });
 
