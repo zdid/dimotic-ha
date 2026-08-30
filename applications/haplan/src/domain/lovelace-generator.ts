@@ -132,9 +132,14 @@ function buildSensorLabelCardMod(entityId: string): string {
  * dedans ne fait que 24px de large et ~16px de haut, centré dans cette boîte — donc son bord droit
  * réel est à seulement ±12px du centre, pas ±20px (vérifié en mesurant `ha-icon` dans le shadow
  * DOM : 8px de marge invisible de chaque côté). 28px laissait donc 16px de vide visuel (28-12), pas
- * les 8px voulus. 18px (12 + 6px de marge) donne un écart visuellement serré mais net.
+ * les 8px voulus.
+ *
+ * ⭐ 30/08/2026, troisième retour : encore trop loin avec 18px ("écart de 2 caractères"). Testé en
+ * direct plusieurs valeurs sur la carte déjà déployée (mesure du bord droit du glyphe au bord
+ * gauche du texte) : 12px donne un écart quasi nul (glyphe et texte pratiquement jointifs, aucun
+ * chevauchement constaté), qui correspond à ce qui était demandé.
  */
-const SENSOR_LABEL_OFFSET_PX = 18;
+const SENSOR_LABEL_OFFSET_PX = 12;
 
 /**
  * Force la couleur de l'icône d'un `state-icon` (au lieu du `state_color` automatique de HA) — ⭐
