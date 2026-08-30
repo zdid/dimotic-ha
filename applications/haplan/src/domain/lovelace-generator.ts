@@ -127,13 +127,14 @@ function buildSensorLabelCardMod(entityId: string): string {
  * appliqué tel quel par `picture-elements` comme n'importe quelle valeur `left`) — même écart
  * visuel quel que soit le plan ou l'appareil.
  *
- * Valeur mesurée en direct : icône `state-icon` toujours rendue à 40px de large (centrée sur son
- * point d'ancrage, donc ± 20px). Avec le bord GAUCHE du texte maintenant ancré exactement à ce
- * décalage (voir `:host { transform: translateY(-50%) }` dans buildSensorLabelCardMod — le texte
- * ne se centre plus horizontalement), 28px laisse ~8px de marge visible après le bord droit de
- * l'icône (28 - 20), quelle que soit la largeur du texte affiché.
+ * ⭐ 30/08/2026, deuxième retour : 28px donnait un écart bien trop grand. Cause trouvée en direct :
+ * la boîte cliquable de `state-icon` fait 40px (± 20px de son centre), mais le GLYPHE visible
+ * dedans ne fait que 24px de large et ~16px de haut, centré dans cette boîte — donc son bord droit
+ * réel est à seulement ±12px du centre, pas ±20px (vérifié en mesurant `ha-icon` dans le shadow
+ * DOM : 8px de marge invisible de chaque côté). 28px laissait donc 16px de vide visuel (28-12), pas
+ * les 8px voulus. 18px (12 + 6px de marge) donne un écart visuellement serré mais net.
  */
-const SENSOR_LABEL_OFFSET_PX = 28;
+const SENSOR_LABEL_OFFSET_PX = 18;
 
 /**
  * Force la couleur de l'icône d'un `state-icon` (au lieu du `state_color` automatique de HA) — ⭐
