@@ -92,14 +92,23 @@ display:
     cs_pin: GPIO15
     dc_pin: GPIO2
     invert_colors: false
-    # ⭐ 30/08/2026 : rotation: 0 rendait bien 240x320 en logiciel (confirmé au boot,
-    # "Dimensions: 240px x 320px") mais s'affichait en paysage sur l'écran physique — la
-    # dalle de cette carte a son adressage natif tourné par rapport à ce que déclare le
-    # préréglage "ILI9341" générique d'ESPHome. rotation: 90 fait pivoter le mappage
-    # logique→physique (LVGL continue de dessiner sur un canevas 240x320, seule
-    # l'adressage des pixels change) — à confirmer visuellement ; 270 est l'autre
-    # candidat si 90 tourne dans le mauvais sens.
+    # rotation: 90 donne bien un rendu portrait (confirmé sur photo le 30/08/2026) — `lvgl:` n'a
+    # pas d'option `rotation:` propre dans cette version d'ESPHome (2025.11.2), la rotation se
+    # gère donc uniquement ici.
     rotation: 90
+    # ⭐ 30/08/2026 : même photo — le premier caractère de chaque titre est coupé à gauche ("alle à
+    # manger" au lieu de "Salle à manger", "ompe à chaleur" au lieu de "Pompe à chaleur") alors que
+    # tout le reste (largeur, alignement) semble correct — signe que la zone réellement adressable
+    # du panneau ne commence pas exactement à la colonne 0 pour cette rotation sur cette carte
+    # (quirk documenté pour plusieurs variantes de cette famille de dalles). offset_width compense
+    # en décalant tout le rendu vers la droite ; valeur estimée à la largeur d'~1 caractère (police
+    # 14px) — PAS ENCORE confirmée visuellement, à ajuster si le recadrage persiste ou déborde à
+    # droite après ce déploiement.
+    dimensions:
+      width: 240
+      height: 320
+      offset_width: 12
+      offset_height: 0
     # LVGL pilote les rafraîchissements — pas de polling périodique ni d'auto-clear interne au
     # composant display (même contrainte que haplan-display.yaml, ESPHome refuse
     # auto_clear_enabled: true en présence de lvgl:).
@@ -317,10 +326,12 @@ lvgl:
             y: 66
             width: 52
             height: 34
+            bg_color: 0x2A3540
             widgets:
               - label:
                   text: "-"
                   text_font: font_title
+                  text_color: 0xFFFFFF
             on_click:
               - lambda: |-
                   id(poele_target_c) = std::max(15.0f, id(poele_target_c) - 0.5f);
@@ -343,10 +354,12 @@ lvgl:
             y: 66
             width: 52
             height: 34
+            bg_color: 0x2A3540
             widgets:
               - label:
                   text: "+"
                   text_font: font_title
+                  text_color: 0xFFFFFF
             on_click:
               - lambda: |-
                   id(poele_target_c) = std::min(25.0f, id(poele_target_c) + 0.5f);
@@ -369,11 +382,13 @@ lvgl:
             y: 66
             width: 104
             height: 34
+            bg_color: 0x2A3540
             widgets:
               - label:
                   id: lbl_poele_toggle
                   text: "..."
                   text_font: font_label
+                  text_color: 0xFFFFFF
             on_click:
               - homeassistant.service:
                   service: climate.set_hvac_mode
@@ -428,10 +443,12 @@ lvgl:
             y: 172
             width: 52
             height: 34
+            bg_color: 0x2A3540
             widgets:
               - label:
                   text: "-"
                   text_font: font_title
+                  text_color: 0xFFFFFF
             on_click:
               - lambda: |-
                   id(evoo7_target_c) = std::max(10.0f, id(evoo7_target_c) - 0.5f);
@@ -454,10 +471,12 @@ lvgl:
             y: 172
             width: 52
             height: 34
+            bg_color: 0x2A3540
             widgets:
               - label:
                   text: "+"
                   text_font: font_title
+                  text_color: 0xFFFFFF
             on_click:
               - lambda: |-
                   id(evoo7_target_c) = std::min(30.0f, id(evoo7_target_c) + 0.5f);
@@ -482,11 +501,13 @@ lvgl:
             y: 172
             width: 104
             height: 34
+            bg_color: 0x2A3540
             widgets:
               - label:
                   id: lbl_evoo7_toggle
                   text: "..."
                   text_font: font_label
+                  text_color: 0xFFFFFF
             on_click:
               - homeassistant.service:
                   service: climate.set_hvac_mode
