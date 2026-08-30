@@ -89,20 +89,37 @@ export class Evoo7SocketIoClient {
       this.logger.info('Evoo7SocketIoClient', 'Tentative de reconnexion au boîtier EVOO7...');
     });
 
+    // ⭐ 31/08/2026, bug réel constaté en conditions réelles : ce handler tournait en `.once()`,
+    // donc ne s'exécutait qu'à la toute première connexion de la vie du process. `reconnection:
+    // true` (option passée à io.connect ci-dessus) fait pourtant reconnecter le transport tout
+    // seul après une coupure et redéclenche bien un `'connect'` — mais ce `.once()` ne l'écoutait
+    // plus, laissant `this.connected` bloqué à `false` pour toujours après la première coupure
+    // (les handlers `close`/`disconnect` ci-dessus, eux, sont en `.on()` et continuaient de le
+    // repasser à `false`). Conséquence : `sendUpdate()` rejetait systématiquement "Client EVOO7
+    // non connecté" dès la première coupure, alors même que les lectures (`datas`, handler en
+    // `.on()`, jamais affecté) continuaient d'arriver normalement — d'où un boîtier qui semblait
+    // "vivant" en lecture mais dont toute écriture échouait, avec un statut "Déconnecté" qui ne se
+    // rétablissait jamais tout seul. `.on()` (persistant) répare l'identification et la mise à
+    // jour d'état à CHAQUE reconnexion, pas seulement la première.
+    socket.on('connect', () => {
+      this.connected = true;
+      this.logger.info('Evoo7SocketIoClient', 'Connecté au boîtier EVOO7, identification...');
+      socket.emit('identification', {
+        user: config.user,
+        passwd: crypto.createHash('md5').update(config.password).digest('hex')
+      });
+      this.notifyConnectionChange();
+    });
+
     return new Promise<void>((resolve, reject) => {
       const connectTimeout = setTimeout(() => {
         reject(new Error('Timeout de connexion au boîtier EVOO7'));
       }, 30000);
 
+      // Résout uniquement la promesse de CE premier appel à connect() — l'état/l'identification
+      // sont désormais gérés par le handler persistant ci-dessus, à chaque connexion.
       socket.once('connect', () => {
         clearTimeout(connectTimeout);
-        this.connected = true;
-        this.logger.info('Evoo7SocketIoClient', 'Connecté au boîtier EVOO7, identification...');
-        socket.emit('identification', {
-          user: config.user,
-          passwd: crypto.createHash('md5').update(config.password).digest('hex')
-        });
-        this.notifyConnectionChange();
         resolve();
       });
 
