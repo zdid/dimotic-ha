@@ -173,11 +173,7 @@ export abstract class HAObject {
         this.dragHandler = new DragAndDropConstrained(
           `#${this.element!.id}`,
           onDragEndCallback,
-          'center', // Mode de contrainte pour les objets HA
-          // ⭐ 30/08/2026, demande explicite : collage sur la grille au relâchement — MÊME valeur que
-          // la grille visuelle en mode édition (styles.css, .floorplan-container.edit-mode
-          // .floorplan-drag-container), à garder synchronisée si l'une des deux change.
-          20
+          'center' // Mode de contrainte pour les objets HA
         );
         console.log(`[TRACE] DragAndDropConstrained créé avec succès avec callback et mode center`);
         
