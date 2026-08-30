@@ -11,8 +11,17 @@
  * protocole Engine.IO v4 par défaut du client v4/v3).
  *
  * Protocole du boîtier (rétro-ingénierie du traducteur `zdidEVOO7mqtt/evoo7connecteur.js`) :
- * - Connexion : `socket.emit('identification', {user, passwd})` — passwd encodé en MD5, jamais en
- *   clair (voir `zdidEVOO7mqtt/appmean.js`, `md5(motdepasse)` avant stockage).
+ * - Connexion : `socket.emit('identification', {user, passwd})`. ⚠️ 31/08/2026, bug réel trouvé
+ *   en conditions réelles (diagnostic par sonde directe, voir TODO.md) : le traducteur legacy
+ *   stockait `evoo7.passwd` déjà haché en MD5 (`appmean.js`, `md5(motdepasse)` fait UNE FOIS à la
+ *   sauvegarde) et l'envoyait tel quel — `config.password` ici a été repris de cette valeur déjà
+ *   hachée. Une implémentation qui hacherait systématiquement `config.password` avant envoi le
+ *   hacherait donc une seconde fois, envoyant un mauvais identifiant au boîtier (accepté en
+ *   apparence — `datas` continue d'arriver, diffusé sans authentification — mais toute commande
+ *   `update` est alors silencieusement ignorée : ni `updateok` ni `updateko`, juste un timeout).
+ *   On envoie donc `config.password` BRUT en premier, et seulement s'il est refusé
+ *   (`unauthorized`) on retente avec son MD5 — couvre aussi bien un mot de passe déjà haché
+ *   (cas vérifié) qu'un mot de passe en clair saisi directement dans l'UI de config.
  * - Réception : `authorized`/`unauthorized` (résultat identification), `datas` (objet complet
  *   nom→valeur — reçu au moins une fois à la connexion, puis à nouveau pour chaque groupe de
  *   valeurs qui changent, pas nécessairement toutes les 43 à chaque fois).
@@ -52,6 +61,10 @@ export class Evoo7SocketIoClient {
   private updateInFlight: QueuedUpdate | null = null;
   private updateTimeout: NodeJS.Timeout | null = null;
 
+  // Brut d'abord, MD5 en repli seulement si le boîtier refuse — voir le commentaire d'en-tête
+  // (31/08/2026) sur le mot de passe déjà haché hérité du traducteur legacy.
+  private identificationAttempt: 'raw' | 'md5' | null = null;
+
   constructor(private readonly logger: Logger) {}
 
   connect(config: Evoo7BoxConfig): Promise<void> {
@@ -68,7 +81,16 @@ export class Evoo7SocketIoClient {
     });
 
     socket.on('unauthorized', (message: unknown) => {
-      this.logger.warn('Evoo7SocketIoClient', `Identification refusée par le boîtier EVOO7: ${JSON.stringify(message)}`);
+      if (this.identificationAttempt === 'raw') {
+        this.logger.warn('Evoo7SocketIoClient', 'Identification refusée avec le mot de passe brut, nouvelle tentative avec son MD5...');
+        this.identificationAttempt = 'md5';
+        socket.emit('identification', {
+          user: config.user,
+          passwd: crypto.createHash('md5').update(config.password).digest('hex')
+        });
+        return;
+      }
+      this.logger.warn('Evoo7SocketIoClient', `Identification refusée par le boîtier EVOO7 (brut et MD5 tous deux rejetés): ${JSON.stringify(message)}`);
     });
 
     socket.on('updateok', () => this.settleInFlightUpdate(null));
@@ -104,10 +126,8 @@ export class Evoo7SocketIoClient {
     socket.on('connect', () => {
       this.connected = true;
       this.logger.info('Evoo7SocketIoClient', 'Connecté au boîtier EVOO7, identification...');
-      socket.emit('identification', {
-        user: config.user,
-        passwd: crypto.createHash('md5').update(config.password).digest('hex')
-      });
+      this.identificationAttempt = 'raw';
+      socket.emit('identification', { user: config.user, passwd: config.password });
       this.notifyConnectionChange();
     });
 
