@@ -92,23 +92,21 @@ display:
     cs_pin: GPIO15
     dc_pin: GPIO2
     invert_colors: false
-    # rotation: 90 donne bien un rendu portrait (confirmé sur photo le 30/08/2026) — `lvgl:` n'a
-    # pas d'option `rotation:` propre dans cette version d'ESPHome (2025.11.2), la rotation se
-    # gère donc uniquement ici.
-    rotation: 90
-    # ⭐ 30/08/2026 : même photo — le premier caractère de chaque titre est coupé à gauche ("alle à
-    # manger" au lieu de "Salle à manger", "ompe à chaleur" au lieu de "Pompe à chaleur") alors que
-    # tout le reste (largeur, alignement) semble correct — signe que la zone réellement adressable
-    # du panneau ne commence pas exactement à la colonne 0 pour cette rotation sur cette carte
-    # (quirk documenté pour plusieurs variantes de cette famille de dalles). offset_width compense
-    # en décalant tout le rendu vers la droite ; valeur estimée à la largeur d'~1 caractère (police
-    # 14px) — PAS ENCORE confirmée visuellement, à ajuster si le recadrage persiste ou déborde à
-    # droite après ce déploiement.
+    # ⭐ 30/08/2026 : `rotation: 90` (essayé d'abord) tournait bien le rendu visuellement mais sans
+    # redimensionner le canevas que LVGL connaît en interne — LVGL continuait de travailler avec un
+    # canevas 240x320 alors que la surface réellement adressée restait 320x240 (native), d'où le
+    # bandeau vide en haut de l'écran, l'ascenseur (contenu jugé débordant par LVGL) et le premier
+    # caractère de chaque titre masqué par cet ascenseur. La doc ESPHome recommande explicitement
+    # `transform:` (rotation matérielle) + `dimensions:` inversées plutôt que `rotation:` quand
+    # `lvgl:` est utilisé — LVGL reçoit alors directement le bon canevas 240x320. `mirror_x` (plutôt
+    # que `mirror_y`) documenté pour 90° — à essayer 270°/`mirror_y` si l'image sort tournée dans le
+    # mauvais sens.
     dimensions:
       width: 240
       height: 320
-      offset_width: 12
-      offset_height: 0
+    transform:
+      swap_xy: true
+      mirror_x: true
     # LVGL pilote les rafraîchissements — pas de polling périodique ni d'auto-clear interne au
     # composant display (même contrainte que haplan-display.yaml, ESPHome refuse
     # auto_clear_enabled: true en présence de lvgl:).
@@ -280,6 +278,14 @@ lvgl:
   pages:
     - id: main_page
       bg_color: 0x101418
+      # ⭐ 30/08/2026 : la barre verticale visible sur la photo de l'écran physique n'était pas un
+      # artefact de rendu mais un ASCENSEUR LVGL (le contenu de la page dépasse légèrement les
+      # 320px de hauteur) — positionné à gauche à cause de la rotation, il se dessinait PAR-DESSUS
+      # le début de chaque titre, d'où le premier caractère qui semblait "coupé" (ex: "alle à
+      # manger"). Cause réelle du souci précédemment attribué à un décalage de colonnes matériel
+      # (dimensions.offset_width, retiré du bloc display: ci-dessus — inutile, ce n'était pas la
+      # bonne piste).
+      scrollbar_mode: "OFF"
       widgets:
         # ---- Poêle ------------------------------------------------------------------------
         - label:
