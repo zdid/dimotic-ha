@@ -21,8 +21,10 @@ Classification et icônes calquées sur le vrai `UnifiedObjectFactory`/`SwitchTy
 interrupteur, VMC, ballon, radiateur, volet, thermostat), rendus via un sous-ensemble de police
 embarqué dans le firmware (fonts/fa-solid-900.ttf, Font Awesome Free 5.15.4 Solid — licence SIL OFL
 1.1 — les codepoints utilisés ici sont identiques en Font Awesome 6, donc cohérents avec le plan web
-qui charge la 6.0.0 par CDN). Les capteurs (sensor.*) restent une étiquette texte, comme sur le web
-(EnhancedTemperatureSensor et consorts n'affichent qu'une valeur, sans icône).
+qui charge la 6.0.0 par CDN). Les capteurs (sensor.*) affichent désormais aussi une icône (⭐
+30/08/2026, même retour utilisateur que côté carte HA Lovelace — voir lovelace-generator.ts) : une
+icône statique colorée par type (température/humidité/pression/puissance/générique, voir
+detect_sensor_type()) devant la valeur, cette dernière restant une étiquette texte blanche.
 
 Identifiants de widgets/capteurs préfixés par plan (ex: icon_original_light_xxx vs
 icon_premier_light_xxx) — indispensable dès qu'un même entity_id apparaît sur plusieurs plans
@@ -77,6 +79,12 @@ SENSOR_FONT_SIZE = 20   # texte des capteurs — auparavant sans police dédiée
 LABEL_WIDTH = 130        # élargi depuis 110 pour accueillir le texte agrandi sans coupure
 LABEL_HEIGHT = 32        # élargi depuis 26, idem
 
+# ⭐ 30/08/2026 : écart entre le bord de l'icône de capteur et le début du texte de la valeur — même
+# raisonnement que SENSOR_LABEL_OFFSET_PX côté lovelace-generator.ts (texte toujours ancré au même
+# point, quelle que soit sa largeur, plutôt que centré dans une boîte qui ferait varier l'écart
+# visible selon le nombre de chiffres affichés).
+SENSOR_ICON_LABEL_GAP_PX = 4
+
 # Flèches de navigation entre plans (top_layer, voir haplan-display.yaml) — police et taille
 # séparées de font_icons (14px, pensée pour des pastilles de 24px) : "4 fois trop petites" au
 # premier essai (retour utilisateur 13/08/2026), d'où une police dédiée bien plus grande.
@@ -94,7 +102,22 @@ ICON_WATER = chr(0xF773)        # ballon d'eau chaude
 ICON_WIND = chr(0xF72E)         # VMC
 ICON_FIRE = chr(0xF06D)         # radiateur en chauffe
 ICON_SNOWFLAKE = chr(0xF2DC)    # radiateur à l'arrêt
-ICON_THERMOMETER = chr(0xF2C9)  # thermostat
+ICON_THERMOMETER = chr(0xF2C9)  # thermostat / capteur de température
+ICON_TINT = chr(0xF043)         # capteur d'humidité (goutte)
+ICON_TACHOMETER = chr(0xF3FD)   # capteur de pression
+ICON_BOLT = chr(0xF0E7)         # capteur de puissance/énergie
+ICON_INFO_CIRCLE = chr(0xF05A)  # capteur générique (type non reconnu)
+
+# Couleurs par type de capteur — reprises telles quelles de sensor-color.ts (getSensorIconColor(),
+# lui-même copié de HAPLAN Enhanced*Sensor.ts/getColorSchemeForType()), pour que l'écran physique et
+# la carte HA Lovelace affichent la même couleur pour un même type de capteur (⭐ 29-30/08/2026).
+# Dupliqué ici plutôt que partagé : ce script tourne hors du runtime Node (voir en-tête du fichier),
+# volontairement indépendant — à resynchroniser à la main si sensor-color.ts change.
+COLOR_SENSOR_TEMPERATURE = "0xF44336"   # Rouge
+COLOR_SENSOR_HUMIDITY = "0x00BCD4"      # Cyan
+COLOR_SENSOR_PRESSURE = "0x9C27B0"      # Violet
+COLOR_SENSOR_POWER_ENERGY = "0xFFC107"  # Jaune/ambre
+COLOR_SENSOR_DEFAULT = "0x607D8B"       # Bleu gris
 
 
 def slug(text: str) -> str:
@@ -127,6 +150,33 @@ def classify(entity_id: str) -> str:
         return "thermostat"
 
     return "light"  # repli par défaut, comme UnifiedObjectFactory.getEntityType()
+
+
+def detect_sensor_type(entity_id: str) -> str:
+    """Reproduit detectSensorType() de sensor-color.ts (mot-clé dans l'entity_id, domaine sensor.*
+    déjà garanti par classify() avant l'appel) — mêmes mots-clés des deux côtés (Python ici, TS pour
+    la carte HA), dupliqués volontairement (voir COLOR_SENSOR_* ci-dessus) plutôt que partagés."""
+    low = entity_id.lower()
+    if "temperature" in low:
+        return "temperature"
+    if "humidity" in low:
+        return "humidity"
+    if "pressure" in low:
+        return "pressure"
+    if "power" in low or "energy" in low:
+        return "power"
+    return "default"
+
+
+# Icône + couleur par type de capteur détecté (voir detect_sensor_type()) — statique, un capteur n'a
+# pas d'état "on/off" à refléter contrairement aux switchs (ICON_BY_KIND ci-dessous).
+ICON_AND_COLOR_BY_SENSOR_TYPE = {
+    "temperature": (ICON_THERMOMETER, COLOR_SENSOR_TEMPERATURE),
+    "humidity": (ICON_TINT, COLOR_SENSOR_HUMIDITY),
+    "pressure": (ICON_TACHOMETER, COLOR_SENSOR_PRESSURE),
+    "power": (ICON_BOLT, COLOR_SENSOR_POWER_ENERGY),
+    "default": (ICON_INFO_CIRCLE, COLOR_SENSOR_DEFAULT),
+}
 
 
 # Pour chaque kind : glyphe statique, ou paire (glyphe_off, glyphe_on) si l'icône elle-même change
@@ -246,8 +296,23 @@ def build_icon_widget(page: str, entity_id: str, kind: str, px: int, py: int, ca
 
 
 def build_sensor_widget(page: str, entity_id: str, px: int, py: int, canvas_w: int, canvas_h: int) -> tuple[list[str], list[str]]:
+    """⭐ 30/08/2026 : icône devant la valeur, comme sur la carte HA Lovelace (voir docstring en tête
+    de fichier). L'icône reste exactement au point placé dans HAPLAN (celui du collage à la grille en
+    mode édition) ; la valeur est décalée à droite et alignée à gauche (`text_align: LEFT`, plus
+    centrée dans sa boîte) pour garder un écart constant quel que soit le nombre de chiffres affichés
+    — même raisonnement que SENSOR_LABEL_OFFSET_PX côté lovelace-generator.ts."""
     eid = f"{page}_{slug(entity_id)}"
-    bx, by = clamp_box(px, py, LABEL_WIDTH, LABEL_HEIGHT, canvas_w, canvas_h)
+    sensor_type = detect_sensor_type(entity_id)
+    icon_glyph, icon_color = ICON_AND_COLOR_BY_SENSOR_TYPE[sensor_type]
+
+    ibx, iby = clamp_box(px, py, ICON_BG_DIAMETER, ICON_BG_DIAMETER, canvas_w, canvas_h)
+
+    # Boîte de la valeur, ancrée par son bord GAUCHE (juste après l'icône) plutôt que son centre —
+    # clamp_box ne connaît que des boîtes centrées, donc on lui passe un "faux centre" égal au bord
+    # gauche voulu + moitié de la largeur : son calcul interne (x = centre - largeur/2) retombe alors
+    # exactement sur ce bord gauche avant d'être borné aux limites du canevas.
+    label_left = px + ICON_BG_DIAMETER // 2 + SENSOR_ICON_LABEL_GAP_PX
+    lbx, lby = clamp_box(label_left + LABEL_WIDTH // 2, py, LABEL_WIDTH, LABEL_HEIGHT, canvas_w, canvas_h)
 
     sensor_lines = [
         f"  - platform: homeassistant",
@@ -266,14 +331,27 @@ def build_sensor_widget(page: str, entity_id: str, px: int, py: int, canvas_w: i
         f"            return std::string(buf);",
     ]
     widget_lines = [
+        # Icône statique — pas de lvgl.label.update sur on_value : contrairement aux switchs, un
+        # capteur n'a pas d'état on/off à refléter, la couleur/le glyphe ne changent jamais.
+        f"  - label:",
+        f"      id: icon_{eid}",
+        f"      x: {ibx}",
+        f"      y: {iby}",
+        f"      width: {ICON_BG_DIAMETER}",
+        f"      height: {ICON_BG_DIAMETER}",
+        f"      text_align: CENTER",
+        f"      text_font: font_icons",
+        f"      text: \"{icon_glyph}\"",
+        f"      text_color: {icon_color}",
+        f"      bg_opa: TRANSP",
         f"  - label:",
         f"      id: lbl_{eid}",
-        f"      x: {bx}",
-        f"      y: {by}",
+        f"      x: {lbx}",
+        f"      y: {lby}",
         f"      width: {LABEL_WIDTH}",
         f"      height: {LABEL_HEIGHT}",
         f"      text: \"--\"",
-        f"      text_align: CENTER",
+        f"      text_align: LEFT",
         f"      text_color: {COLOR_SENSOR_TEXT}",
         f"      text_font: font_sensor",
         # Boîte transparente — un fond opaque (essayé initialement) masquait des morceaux du plan
@@ -504,7 +582,10 @@ def main() -> None:
     lines.append(f"  - file: \"{FONT_FILENAME}\"")
     lines.append(f"    id: font_icons")
     lines.append(f"    size: {ICON_FONT_SIZE}")
-    all_glyphs = sorted(set(g for pair in ICON_BY_KIND.values() for g in pair))
+    all_glyphs = sorted(
+        set(g for pair in ICON_BY_KIND.values() for g in pair)
+        | set(icon for icon, _color in ICON_AND_COLOR_BY_SENSOR_TYPE.values())
+    )
     lines.append(f"    glyphs: [{', '.join(repr(g).replace(chr(39), chr(34)) for g in all_glyphs)}]")
     lines.append(f"  - file: \"{FONT_FILENAME}\"")
     lines.append(f"    id: font_nav")
