@@ -21,8 +21,12 @@ export class EnhancedHumiditySensor extends BaseEntity {
 
   updateState(state: any): void {
     const rawValue = state.state || 0;
-    this.humidity = this.normalizeDisplayValue(rawValue);
-    
+    // ⭐ 30/08/2026, demande explicite : humidité affichée sans décimale (au lieu de la précision
+    // brute renvoyée par HA, ex: "67.6"). Arrondi seulement si la valeur est un nombre valide —
+    // sinon (indisponible/inconnu/etc.) on garde le comportement existant inchangé.
+    const parsed = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue);
+    this.humidity = Number.isFinite(parsed) ? parsed.toFixed(0) : this.normalizeDisplayValue(rawValue);
+
     this.updateDisplay();
   }
 

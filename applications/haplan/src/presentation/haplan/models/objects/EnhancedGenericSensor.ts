@@ -67,7 +67,19 @@ export class EnhancedGenericSensor extends BaseEntity {
 
   updateState(state: any): void {
     const rawValue = state.state || '';
-    this.sensorValue = this.normalizeDisplayValue(rawValue);
+    // ⭐ 30/08/2026, demande explicite : pression affichée sans décimale (au lieu de la précision
+    // brute renvoyée par HA, ex: "1014.5"). Limité à "pressure" — aucune règle donnée pour
+    // puissance/énergie/générique, ne pas deviner un arrondi non demandé pour ces types-là.
+    // `this.entity_id.includes('pressure')`, PAS `this.sensorType` : `sensorType` vient de
+    // `UnifiedObjectFactory` (`entity_id.split('.')[1].split('_')[0]` — le premier segment de
+    // l'id, ex: "barometre" pour `sensor.barometre_..._pressure`), pas fiable pour repérer
+    // "pressure" qui peut être n'importe où dans le nom réel de l'entité.
+    if (this.entity_id.includes('pressure')) {
+      const parsed = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue);
+      this.sensorValue = Number.isFinite(parsed) ? parsed.toFixed(0) : this.normalizeDisplayValue(rawValue);
+    } else {
+      this.sensorValue = this.normalizeDisplayValue(rawValue);
+    }
     this.unit = state.attributes?.unit_of_measurement || '';
 
     this.updateDisplay();

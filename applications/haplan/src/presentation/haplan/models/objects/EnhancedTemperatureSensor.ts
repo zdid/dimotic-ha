@@ -23,9 +23,13 @@ export class EnhancedTemperatureSensor extends BaseEntity {
 
   updateState(state: any): void {
     const rawValue = state.state || 0;
-    this.temperature = this.normalizeDisplayValue(rawValue);
+    // ⭐ 30/08/2026, demande explicite : température affichée avec 1 seule décimale (au lieu de la
+    // précision brute renvoyée par HA, ex: "23.973"). Arrondi seulement si la valeur est un nombre
+    // valide — sinon (indisponible/inconnu/etc.) on garde le comportement existant inchangé.
+    const parsed = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue);
+    this.temperature = Number.isFinite(parsed) ? parsed.toFixed(1) : this.normalizeDisplayValue(rawValue);
     this.unit = state.attributes?.unit_of_measurement || '°C';
-    
+
     this.updateDisplay();
   }
 

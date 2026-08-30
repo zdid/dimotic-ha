@@ -19,14 +19,19 @@
 import * as yaml from 'js-yaml';
 import type { HaplanFloorplanEntry } from './floorplans-config-schema';
 import type { ImageDimensions } from './image-dimensions';
-import { detectSwitchMdiIcon } from './switch-icon';
+import { detectSwitchIconStyle } from './switch-icon';
+import { getSensorIconColor, getSensorRoundDigits } from './sensor-color';
+
+/** Valeur d'un style card_mod : soit du CSS brut (feuille), soit un niveau de perçage
+ *  supplémentaire (`{'<sélecteur>$': ...}`, récursif) — voir buildIconColorCardMod plus bas. */
+type CardModStyleValue = string | { [selector: string]: CardModStyleValue };
 
 interface PictureElement {
   type: 'state-icon' | 'state-label';
   entity: string;
   icon?: string;
   style: Record<string, string>;
-  card_mod?: { style: string };
+  card_mod?: { style: CardModStyleValue };
 }
 
 /**
@@ -41,30 +46,80 @@ interface PictureElement {
  *   inconnu — la vraie valeur (ex: "23.97°C") s'affiche normalement sinon. Vérifié : `state-label`
  *   a son propre shadow root avec un simple `<div>` pour le texte, atteint directement (pas de
  *   piercing nécessaire, contrairement à `hui-image` pour l'image de fond).
+ *
+ * ⭐ 30/08/2026, demande explicite (les deux HAPLAN : ici pour la carte HA, et pareillement dans
+ * l'éditeur HAPLAN lui-même — voir Enhanced{Temperature,Humidity,Generic}Sensor.ts) : humidité et
+ * pression sans décimale, température à 1 décimale — HA affiche par défaut la précision brute
+ * renvoyée par l'intégration (ex: "23.973°C"). `roundDigits` (null = pas de règle, capteur affiché
+ * tel quel comme avant) bascule vers un ::after CALCULÉ (texte source TOUJOURS masqué, pas
+ * seulement si indisponible) — `{{ states(...)|float(0)|round(N) }}` ; `round(0)` d'un float reste
+ * un float en Jinja ("68.0"), d'où `|int` en plus pour ce cas précis. Espace avant l'unité repris
+ * de la convention HA (pas d'espace pour %/° , espace sinon — ex: "68%", "23.9°C", "1015 hPa").
  */
-const SENSOR_LABEL_CARD_MOD_STYLE = [
-  'div {',
-  '  color: white;',
-  '  text-shadow: 0 0 3px black, 0 0 3px black;',
-  "  {% if is_state(config.entity, 'unavailable') or is_state(config.entity, 'unknown') %}",
-  '  font-size: 0;',
-  '  {% endif %}',
-  '}',
-  'div::after {',
-  "  {% if is_state(config.entity, 'unavailable') or is_state(config.entity, 'unknown') %}",
-  '  content: "—";',
-  '  font-size: 14px;',
-  '  color: white;',
-  '  text-shadow: 0 0 3px black, 0 0 3px black;',
-  '  {% endif %}',
-  '}'
-].join('\n');
+function buildSensorLabelCardMod(entityId: string): string {
+  const roundDigits = getSensorRoundDigits(entityId);
+  if (roundDigits === null) {
+    return [
+      'div {',
+      '  color: white;',
+      '  text-shadow: 0 0 3px black, 0 0 3px black;',
+      "  {% if is_state(config.entity, 'unavailable') or is_state(config.entity, 'unknown') %}",
+      '  font-size: 0;',
+      '  {% endif %}',
+      '}',
+      'div::after {',
+      "  {% if is_state(config.entity, 'unavailable') or is_state(config.entity, 'unknown') %}",
+      '  content: "—";',
+      '  font-size: 14px;',
+      '  color: white;',
+      '  text-shadow: 0 0 3px black, 0 0 3px black;',
+      '  {% endif %}',
+      '}'
+    ].join('\n');
+  }
+
+  const roundedValueExpr = roundDigits === 0
+    ? "{{ states(config.entity) | float(0) | round(0) | int }}"
+    : `{{ states(config.entity) | float(0) | round(${roundDigits}) }}`;
+
+  return [
+    'div {',
+    '  color: white;',
+    '  text-shadow: 0 0 3px black, 0 0 3px black;',
+    '  font-size: 0;',
+    '}',
+    'div::after {',
+    '  font-size: 14px;',
+    '  color: white;',
+    '  text-shadow: 0 0 3px black, 0 0 3px black;',
+    "  {% if is_state(config.entity, 'unavailable') or is_state(config.entity, 'unknown') %}",
+    '  content: "—";',
+    '  {% else %}',
+    "  {% set unit = state_attr(config.entity, 'unit_of_measurement') or '' %}",
+    `  content: "${roundedValueExpr}{{ '' if unit[:1] in ['%', '°'] else ' ' }}{{ unit }}";`,
+    '  {% endif %}',
+    '}'
+  ].join('\n');
+}
 
 /** Décalage horizontal (% de la largeur de l'image) entre l'icône d'un capteur et sa valeur —
  *  ⭐ 28/08/2026, demande explicite : icône ET valeur, pas l'une ou l'autre (`state-icon` seul ne
  *  montre jamais l'état, `state-label` seul n'a pas d'icône — même patron que HAPLAN lui-même,
  *  qui affiche déjà les deux côte à côte). */
 const SENSOR_LABEL_OFFSET_PERCENT = 3;
+
+/**
+ * Force la couleur de l'icône d'un `state-icon` (au lieu du `state_color` automatique de HA) — ⭐
+ * 29/08/2026, retour utilisateur : "donner les couleurs de HAPLAN aux capteurs sous HA". Vérifié
+ * en direct que l'icône réelle est enterrée 2 niveaux de shadow DOM sous l'élément `state-icon`
+ * (`hui-state-icon-element` → `state-badge` → `ha-state-icon`, ce dernier portant la couleur via
+ * `:host`) — un simple `color:` au niveau `.` (comme pour l'image de fond) n'atteindrait rien.
+ * Syntaxe de perçage imbriqué confirmée sur la doc officielle de card_mod (chaque `$` = un niveau
+ * de shadow root en plus, valeur = objet pour continuer à percer ou chaîne CSS pour s'arrêter).
+ */
+function buildIconColorCardMod(cssRule: string): CardModStyleValue {
+  return { 'state-badge$': { 'ha-state-icon$': cssRule } };
+}
 
 /**
  * Construit le(s) élément(s) `picture-elements` pour UNE position. `sensor.*` (température,
@@ -80,8 +135,29 @@ function buildElementsForPosition(entityId: string, leftPercent: number, topPerc
     style: { left: `${leftPercent.toFixed(2)}%`, top: `${topPercent.toFixed(2)}%` }
   };
   if (entityId.startsWith('switch.')) {
-    const switchIcon = detectSwitchMdiIcon(entityId);
-    if (switchIcon) icon.icon = switchIcon;
+    const switchIconStyle = detectSwitchIconStyle(entityId);
+    if (switchIconStyle) {
+      icon.icon = switchIconStyle.icon;
+      // Pas d'état "on/off" à refléter pour un capteur (voir plus bas), mais un switch en a un —
+      // gabarit Jinja (déjà utilisé pour le texte "Indisponible", supporté nativement par
+      // card_mod) plutôt qu'une couleur figée, pour retrouver le "bleu éteint / <couleur> allumé"
+      // de HAPLAN.
+      icon.card_mod = {
+        style: buildIconColorCardMod(
+          [
+            ':host {',
+            `  {% if is_state(config.entity, 'on') %} color: ${switchIconStyle.colorOn} !important;`,
+            `  {% else %} color: ${switchIconStyle.colorOff} !important; {% endif %}`,
+            '}'
+          ].join('\n')
+        )
+      };
+    }
+  } else {
+    const sensorColor = getSensorIconColor(entityId);
+    if (sensorColor) {
+      icon.card_mod = { style: buildIconColorCardMod(`:host { color: ${sensorColor} !important; }`) };
+    }
   }
   if (!entityId.startsWith('sensor.')) return [icon];
 
@@ -89,7 +165,7 @@ function buildElementsForPosition(entityId: string, leftPercent: number, topPerc
     type: 'state-label',
     entity: entityId,
     style: { left: `${(leftPercent + SENSOR_LABEL_OFFSET_PERCENT).toFixed(2)}%`, top: `${topPercent.toFixed(2)}%` },
-    card_mod: { style: SENSOR_LABEL_CARD_MOD_STYLE }
+    card_mod: { style: buildSensorLabelCardMod(entityId) }
   };
   return [icon, label];
 }
