@@ -147,6 +147,10 @@ touchscreen:
     swap_xy: false
     mirror_x: true
     mirror_y: false
+  # ⭐ 31/08/2026 : rallume le rétroéclairage à chaque tap — sert de "réveil" après extinction pour
+  # inactivité (voir lvgl:on_idle: plus bas), même mécanisme que haplan-display.yaml.
+  on_touch:
+    - light.turn_on: backlight
 
 # ⭐ 30/08/2026, bug réel constaté à l'écran (accents absents, ex: "Pompe à chaleur") : sans
 # `glyphs:` explicite, ESPHome limite chaque police à son jeu de caractères par défaut (proche
@@ -283,6 +287,14 @@ lvgl:
   touchscreens:
     - touch
   bg_color: 0x101418
+  # ⭐ 31/08/2026, demande explicite : éteint le rétroéclairage après 30s d'inactivité (rallumé au
+  # premier tap, voir touchscreen:on_touch: ci-dessus) — même délai et mécanisme que
+  # haplan-display.yaml. Le minuteur se réarme automatiquement à chaque tap (LVGL), aucune logique
+  # supplémentaire nécessaire côté réveil.
+  on_idle:
+    - timeout: 30s
+      then:
+        - light.turn_off: backlight
   pages:
     - id: main_page
       bg_color: 0x101418
@@ -413,9 +425,12 @@ lvgl:
                       return (id(ha_poele_state).state == "heat") ? std::string("off") : std::string("heat");
 
         # ---- EVOO7 (pompe à chaleur) --------------------------------------------------------
+        # ⭐ 31/08/2026 : y décalé de 112→128 (+16px, ~une ligne) sur retour utilisateur — la
+        # section précédente (Poêle) collait trop à celle-ci. Toutes les positions de la section
+        # EVOO7 et Humidité ci-dessous décalées d'autant pour garder les mêmes écarts internes.
         - label:
             x: 8
-            y: 112
+            y: 128
             width: 224
             height: 24
             text: "EVOO7 — Pompe à chaleur"
@@ -425,7 +440,7 @@ lvgl:
         - label:
             id: lbl_evoo7_current
             x: 8
-            y: 132
+            y: 148
             width: 112
             height: 36
             text: "--.-°"
@@ -434,7 +449,7 @@ lvgl:
 
         - label:
             x: 128
-            y: 132
+            y: 148
             width: 104
             height: 19
             text: "Consigne"
@@ -444,7 +459,7 @@ lvgl:
         - label:
             id: lbl_evoo7_target
             x: 128
-            y: 150
+            y: 166
             width: 104
             height: 26
             text: "--.-°"
@@ -454,7 +469,7 @@ lvgl:
         - button:
             id: btn_evoo7_minus
             x: 8
-            y: 172
+            y: 188
             width: 52
             height: 34
             bg_color: 0x2A3540
@@ -482,7 +497,7 @@ lvgl:
         - button:
             id: btn_evoo7_plus
             x: 64
-            y: 172
+            y: 188
             width: 52
             height: 34
             bg_color: 0x2A3540
@@ -512,7 +527,7 @@ lvgl:
         - button:
             id: btn_evoo7_toggle
             x: 128
-            y: 172
+            y: 188
             width: 104
             height: 34
             bg_color: 0x2A3540
@@ -534,7 +549,7 @@ lvgl:
         # ---- Humidité (salle) -----------------------------------------------------------------
         - label:
             x: 8
-            y: 218
+            y: 234
             width: 224
             height: 20
             text: "Humidité — Salle"
@@ -544,7 +559,7 @@ lvgl:
         - label:
             id: lbl_humidity
             x: 8
-            y: 238
+            y: 254
             width: 224
             height: 40
             text: "--%"
