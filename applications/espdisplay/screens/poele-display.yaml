@@ -98,15 +98,17 @@ display:
     # bandeau vide en haut de l'écran, l'ascenseur (contenu jugé débordant par LVGL) et le premier
     # caractère de chaque titre masqué par cet ascenseur. La doc ESPHome recommande explicitement
     # `transform:` (rotation matérielle) + `dimensions:` inversées plutôt que `rotation:` quand
-    # `lvgl:` est utilisé — LVGL reçoit alors directement le bon canevas 240x320. `mirror_x` (plutôt
-    # que `mirror_y`) documenté pour 90° — à essayer 270°/`mirror_y` si l'image sort tournée dans le
-    # mauvais sens.
+    # `lvgl:` est utilisé — LVGL reçoit alors directement le bon canevas 240x320 (confirmé : plus de
+    # bandeau, plus d'ascenseur, tout le contenu tient). `swap_xy` + `mirror_x` (la combinaison
+    # documentée pour 90°) donnait un canevas de la bonne taille mais un rendu à l'envers (180°,
+    # confirmé par photo) — `mirror_y` à la place corrige le sens (avec swap_xy, l'axe miroir
+    # pertinent n'est pas celui attendu naïvement).
     dimensions:
       width: 240
       height: 320
     transform:
       swap_xy: true
-      mirror_x: true
+      mirror_y: true
     # LVGL pilote les rafraîchissements — pas de polling périodique ni d'auto-clear interne au
     # composant display (même contrainte que haplan-display.yaml, ESPHome refuse
     # auto_clear_enabled: true en présence de lvgl:).
