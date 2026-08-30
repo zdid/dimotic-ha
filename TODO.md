@@ -694,6 +694,19 @@
   manuelles restantes" de l'écran Services post-installation depuis le 25/08/2026 (voir
   `PostInstallManager.ts`) — objectif du projet : que l'écran capture TOUTE la mise en œuvre d'une
   HA reconstruite de zéro, automatisée ou non, pour ne rien oublier (précisé par l'utilisateur).
+- **⭐ 30/08/2026, étape manuelle supplémentaire découverte** : ajouter l'appareil ESPHome dans HA ne
+  suffit pas pour que le tap-to-toggle du plan fonctionne — case à cocher SÉPARÉE, décochée par
+  défaut, à activer À LA MAIN pour CHAQUE appareil ESPHome qui envoie des `homeassistant.service:`
+  (donc pour chaque écran HAPLAN) : Paramètres → Appareils et services → ESPHome → l'appareil →
+  ⚙️ (Options) → "Autoriser l'appareil à effectuer des actions Home Assistant". Sans elle, les
+  actions HA envoyées par l'appareil sont refusées SILENCIEUSEMENT (aucune erreur ni côté HA ni
+  côté écran) — symptôme réel constaté : le plan s'affiche et se met à jour normalement (lecture
+  seule fonctionne, cette case ne concerne qu'ENVOYER des actions), mais taper une icône ne fait
+  rien du tout. Vérifié/corrigé en direct sur l'appareil "Plan HAPLAN" le 30/08/2026. À ajouter à
+  la section "Étapes manuelles restantes" de `PostInstallManager.ts` en même temps que l'ajout de
+  l'intégration ESPHome elle-même (même thème), et à automatiser plus tard si `installEsphome()`
+  est un jour codé (voir "À faire" ci-dessous) — la case correspond à l'option `allow_service_calls`
+  du config entry ESPHome côté HA.
 - **Pourquoi pas codé tout de suite** : contrairement à Wyoming/Ollama/MQTT ci-dessus (flux
   `config_entries/flow` vérifiés en conditions réelles avant d'écrire le code, voir l'en-tête de
   `HaPostInstallService.ts`), le flux d'ajout ESPHome n'a pas été vérifié en direct — il implique

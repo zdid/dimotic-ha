@@ -224,6 +224,17 @@ def build_icon_widget(page: str, entity_id: str, kind: str, px: int, py: int, ca
             # clickable: true est indispensable — un label LVGL n'est pas cliquable par défaut,
             # on_click seul ne suffit pas (constaté en direct le 13/08/2026 : coordonnées de
             # tap correctes à l'écran, mais aucune action déclenchée tant que ce flag manquait).
+            #
+            # ⭐ 30/08/2026, étape manuelle HORS de ce script mais indispensable pour que
+            # `homeassistant.service:` ci-dessous fonctionne réellement : chaque appareil ESPHome
+            # doit être explicitement autorisé côté HA à envoyer des actions — case à cocher
+            # SÉPARÉE de l'ajout de l'intégration elle-même, décochée par défaut (Paramètres →
+            # Appareils et services → ESPHome → l'appareil → ⚙️ Options → "Autoriser l'appareil à
+            # effectuer des actions Home Assistant"). Sans elle, l'action est refusée
+            # SILENCIEUSEMENT (aucune erreur ni côté HA ni côté écran) — l'affichage/lecture des
+            # états fonctionne normalement (cette case ne concerne qu'ENVOYER des actions), seul le
+            # tap ne fait rien. Voir TODO.md, section "Services post-installation : ajouter
+            # l'intégration ESPHome", pour le détail complet.
             f"      clickable: true",
             f"      on_click:",
             f"        - homeassistant.service:",
