@@ -360,6 +360,14 @@ body {
 
 .floorplan-container.edit-mode .floorplan-drag-container {
     border: 2px dashed #ffeb3b;
+    /* ⭐ 30/08/2026, demande explicite : grille visible en mode édition pour aligner les icônes —
+       20px doit rester synchronisé avec GRID_SIZE_PX dans draganddropconstrained.ts (même valeur
+       utilisée pour le collage au relâchement, sinon la grille affichée ne correspondrait pas à
+       celle utilisée pour l'alignement réel). */
+    background-image:
+        linear-gradient(to right, rgba(255, 255, 255, 0.18) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.18) 1px, transparent 1px);
+    background-size: 20px 20px;
 }
 
 /* Style pour les objets draggables */

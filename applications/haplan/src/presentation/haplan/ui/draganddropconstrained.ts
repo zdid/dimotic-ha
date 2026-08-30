@@ -11,17 +11,25 @@ export class DragAndDropConstrained {
   private onDragEnd?:  (finalPosition: {x: number, y: number}) => void;
   private constraintMode: 'full' | 'center';
   private dragBounds: { minX: number; maxX: number; minY: number; maxY: number } | null = null;
+  private gridSizePx?: number;
 
   /**
    * @param elementSelector - Sélecteur CSS de l'élément à rendre "draggable".
    *                         Le conteneur parent sera utilisé automatiquement comme zone de mouvement.
    * @param onDragEnd - Callback appelé à la fin du drag avec la position finale
    * @param constraintMode - Mode de contrainte: 'full' (objet entier dans la zone) ou 'center' (centre dans la zone)
+   * @param gridSizePx - ⭐ 30/08/2026, demande explicite : collage sur une grille au relâchement,
+   *                     pour un meilleur alignement des icônes (voir aussi la grille visuelle en
+   *                     mode édition, styles.css `.floorplan-container.edit-mode
+   *                     .floorplan-drag-container`, MÊME valeur à garder synchronisée). Non fourni
+   *                     = comportement inchangé (pas de collage), pour ne pas affecter un éventuel
+   *                     autre usage de cette classe générique.
    */
   constructor(
     elementSelector: string,
     onDragEnd?: (finalPosition: {x: number, y: number}) => void,
-    constraintMode: 'full' | 'center' = 'center'
+    constraintMode: 'full' | 'center' = 'center',
+    gridSizePx?: number
   ) {
     this.element = document.querySelector<HTMLElement>(elementSelector)!;
     if (!this.element) {
@@ -38,6 +46,7 @@ export class DragAndDropConstrained {
     // Stocker le callback de fin de drag
     this.onDragEnd = onDragEnd;
     this.constraintMode = constraintMode;
+    this.gridSizePx = gridSizePx;
 
     console.log(`[TRACE] DragAndDropConstrained initialisé avec mode de contrainte: ${constraintMode}`);
 
@@ -197,7 +206,21 @@ export class DragAndDropConstrained {
     document.removeEventListener("mousemove", this.drag);
     document.removeEventListener("mouseup", this.endDrag);
     console.log(`[TRACE] Écouteurs globaux retirés`);
-    
+
+    // ⭐ 30/08/2026, demande explicite : collage sur la grille au relâchement — snap AVANT le calcul
+    // de la position finale (ci-dessous) plutôt qu'après, pour que le callback ET le rendu visuel
+    // (élément déjà repositionné ici) reflètent tous les deux la position collée, sans double
+    // calcul. `style.left`/`style.top` représentent déjà le bon point d'ancrage dans les deux modes
+    // ('full' : coin supérieur gauche, 'center' : centre — voir drag() plus haut), donc un simple
+    // arrondi au multiple de `gridSizePx` le plus proche suffit dans les deux cas.
+    if (this.gridSizePx) {
+      const gridSize = this.gridSizePx;
+      const snap = (value: number) => Math.round(value / gridSize) * gridSize;
+      this.element.style.left = `${snap(parseFloat(this.element.style.left) || 0)}px`;
+      this.element.style.top = `${snap(parseFloat(this.element.style.top) || 0)}px`;
+      console.log(`[TRACE] Position collée sur la grille (${gridSize}px):`, {left: this.element.style.left, top: this.element.style.top});
+    }
+
     // Appeler le callback de fin de drag si défini avec les coordonnées finales
     if (this.onDragEnd) {
       const elementRect = this.element.getBoundingClientRect();
