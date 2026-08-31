@@ -468,17 +468,18 @@
 - **Vérifié en direct (2026-07-23)** : serveur sans transceiver physique réel connecté broadcastant tout de même `connected:true` (bibliothèque `rfxcom` en environnement de dev) — badge affiche bien "Connecté" (couleur verte), au lieu du défaut HTML "Déconnecté".
 - **Statut** : Corrigé (2026-07-23)
 
-### 🟡 Sidebar : section "Applications" repliée par défaut au démarrage — un clic supplémentaire à chaque session
+### 🟢 Sidebar : section "Applications" repliée par défaut au démarrage — un clic supplémentaire à chaque session — Corrigé
 - **Demande utilisateur (2026-07-24)** : ouvrir automatiquement la section "Applications" du menu latéral au chargement de la page, comme c'est déjà le cas pour "Paramètres Techniques" — évite un clic manuel systématique avant de pouvoir accéder à une application.
-- **À faire** : identifier le composant Sidebar (`applications/core/src/presentation/ui/ts/components/Sidebar.ts` ou équivalent) et son état initial replié/déplié par section, aligner "Applications" sur le même défaut que "Paramètres Techniques".
-- **Statut** : Non traité
-- **Priorité** : Basse (confort d'usage)
+- **Corrigé (31/08/2026)** : `x-data="{ openSection: 'applications' }"` dans `Sidebar.ts` (au lieu de `null`). En vérifiant : "Paramètres Techniques" n'a en réalité jamais été ouverte par défaut non plus (`openSection` valait déjà `null` au tout premier commit de ce fichier) — la prémisse de la demande était donc légèrement fausse, mais l'objectif réel (pas de clic systématique avant d'atteindre une application) est atteint.
+- **Statut** : Corrigé (2026-08-31)
+- **Priorité** : Résolu
 
-### 🟡 Sidebar : menu latéral pas adapté au téléphone — devrait glisser depuis le côté
+### 🟢 Sidebar : menu latéral pas adapté au téléphone — devrait glisser depuis le côté — Corrigé
 - **Demande utilisateur (31/08/2026)** : sur téléphone, le menu latéral (`Sidebar`) prend toute la largeur / gêne l'affichage — il faudrait un menu qui glisse depuis le côté (drawer rétractable, pattern mobile classique) plutôt que le layout fixe actuel pensé pour desktop.
-- **À faire** : identifier le composant Sidebar (même zone que l'entrée ci-dessus) et son CSS, ajouter un comportement responsive (media query / breakpoint) avec un menu en drawer masqué par défaut sur petit écran, ouvert par un bouton hamburger.
-- **Statut** : Non traité
-- **Priorité** : Basse (confort d'usage)
+- **Corrigé (31/08/2026)** : `Sidebar.ts` — bouton ☰ fixe (hors du `<aside>`, reste visible sidebar masquée), sidebar translatée hors écran par défaut sous 768px (même seuil que `arbreouquoi.css`), ouverte via une classe `mobile-open` pilotée par un nouveau `x-data="{mobileOpen: false}"` sur un wrapper englobant bouton+sidebar, fond semi-transparent cliquable pour refermer. `main.css` : marge de 280px pour `.main-content` neutralisée sous 768px.
+- **Non fait, volontairement laissé pour un futur passage** : pas de fermeture automatique du tiroir après un clic sur un lien de navigation (ouvre/ferme seulement via ☰ ou le fond) — comportement simple mais fonctionnel, pas testé sur un vrai téléphone (seulement en redimensionnant la fenêtre du navigateur).
+- **Statut** : Corrigé (2026-08-31), à confirmer sur un vrai appareil
+- **Priorité** : Résolu (sous réserve de la vérification sur téléphone réel)
 
 ---
 
