@@ -855,6 +855,15 @@
   rpigpio mqtt-io, arexx BS500), import/synchronisation des helpers HA créés à la main (thermostats
   génériques, etc.), et toute autre étape identifiée en le faisant. Décider ensuite, item par item,
   ce qui doit être automatisé par le bouton "post-installation" vs simplement documenté à l'écran.
+- **Étapes déjà identifiées à rattacher (liste à compléter au fil de l'eau)** :
+  - **Bloc `http:` de `configuration.yaml` — `trusted_proxies` + `use_x_forwarded_for`**. Fait à
+    la main sur ha2 le 01/09/2026 : ajout du reverse-proxy `192.168.1.167` (aucun bloc `http:`
+    n'existait auparavant). Sans ça, HA journalise `http.forwarded ... your HTTP integration is
+    not set-up for reverse proxies` et ignore les en-têtes `X-Forwarded-*` du proxy. Backup pris :
+    `/docker/homeassistant/config/configuration.yaml.bak-2026-09-01_011515` sur ha2. À reproduire
+    sur toute nouvelle instance HA placée derrière le proxy — candidat à l'automatisation (même
+    mécanisme `check_config` + redémarrage conteneur que les autres écritures `configuration.yaml`
+    de Services post-installation).
 - **Statut** : Non traité — juste noté, recensement à faire
 - **Priorité** : Moyenne
 
