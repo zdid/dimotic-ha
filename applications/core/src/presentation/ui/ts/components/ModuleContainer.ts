@@ -36,6 +36,16 @@ const createTemplate = (): HTMLTemplateElement => {
         background: #34282c;
         border-radius: 8px;
       }
+
+      /* ⭐ 31/08/2026, demande utilisateur : le bleu par défaut du navigateur est peu lisible sur
+         fond sombre — la page Accueil (HomeView.ts) est rendue DANS ce Shadow DOM, donc la règle
+         globale équivalente posée dans main.css ne l'atteint jamais (encapsulation du Shadow DOM,
+         règles de style non partagées — seules les variables CSS personnalisées traversent la
+         frontière, d'où var() ici plutôt qu'une couleur en dur, pour rester cohérent avec le reste
+         de l'interface). */
+      a { color: var(--color-link, #5dade2); }
+      a:visited { color: var(--color-link-visited, #af7ac5); }
+      a:hover { color: var(--color-accent, #e94560); }
     </style>
     
     <div class="module-container" id="module-container">

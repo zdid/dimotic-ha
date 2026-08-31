@@ -8,6 +8,11 @@
   --color-success: #4caf50;
   --color-warning: #ff9800;
   --color-error: #f44336;
+  /* ⭐ 31/08/2026, demande utilisateur : le bleu par défaut du navigateur pour les liens (HA,
+     sites externes, applications sur les autres machines — page Accueil) est peu lisible sur le
+     fond sombre de l'interface — jamais stylé nulle part jusqu'ici. */
+  --color-link: #5dade2;
+  --color-link-visited: #af7ac5;
   --radius: 8px;
   --font: 'Segoe UI', system-ui, sans-serif;
 }
@@ -23,6 +28,18 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   min-height: 100vh;
+}
+
+a {
+  color: var(--color-link);
+}
+
+a:visited {
+  color: var(--color-link-visited);
+}
+
+a:hover {
+  color: var(--color-accent);
 }
 
 .app-container {
