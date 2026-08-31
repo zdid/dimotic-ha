@@ -728,6 +728,30 @@
 
 ---
 
+### 🟡 Services post-installation : recenser et rattacher toutes les fonctions dispersées de réinstallation HA — À concevoir
+- **Demande utilisateur (31/08/2026)** : dresser la liste et organiser le déploiement de toutes les
+  fonctions actuellement dispersées dans le projet qui concourent à réinstaller une HA complète
+  (nouvelle version ou reconstruction totale à partir de zéro) — les rassembler plutôt que les
+  laisser éparpillées.
+- **Contexte déjà posé, à réutiliser plutôt que reconcevoir** : le sens exact de l'écran "Services
+  post-installation" (`PostInstallManager.ts`/`HaPostInstallService.ts`) a déjà été précisé par
+  l'utilisateur le 25/08/2026 — ce n'est PAS une simple liste d'automatisations pratiques, c'est
+  censé être un **runbook complet** de reconstruction d'une HA depuis zéro, où toute étape non
+  automatisable doit être documentée explicitement dans l'IHM (section "📋 Étapes manuelles
+  restantes"), pas seulement notée dans ce TODO. Couvre aujourd'hui : MQTT, Whisper, Piper,
+  openWakeWord, Ollama, + les étapes manuelles ESPHome documentées au 25/08 et 30/08. Voir aussi
+  `RUNBOOK.md` (racine du dépôt, premier jet du 06/08/2026 : sauvegarde du parc + checklist HA,
+  jamais relu/validé depuis).
+- **À faire** : recenser TOUTES les fonctions de déploiement/installation dispersées dans le projet
+  qui ne sont pas encore rattachées à cet écran ou à `RUNBOOK.md` — au minimum : déploiement des
+  scripts scriptsha (script.*/automation.* embarqués), déploiement des écrans ESP (HAPLAN +
+  poêle-display, `applications/espdisplay`), déploiement des agents distants (teleinfo RPi1,
+  rpigpio mqtt-io, arexx BS500), import/synchronisation des helpers HA créés à la main (thermostats
+  génériques, etc.), et toute autre étape identifiée en le faisant. Décider ensuite, item par item,
+  ce qui doit être automatisé par le bouton "post-installation" vs simplement documenté à l'écran.
+- **Statut** : Non traité — juste noté, recensement à faire
+- **Priorité** : Moyenne
+
 ### 🟡 Services post-installation : ajouter l'intégration ESPHome — À concevoir
 - **Constat (2026-08-25)**, en préparant le passage en production et le test réel des écrans HAPLAN
   (ESP32-S3) : `HaPostInstallService.ts` couvre MQTT/Whisper/Piper/openWakeWord/Ollama, mais pas
