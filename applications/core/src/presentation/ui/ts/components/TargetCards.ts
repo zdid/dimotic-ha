@@ -19,6 +19,15 @@ export type RemoteAction = 'deploy' | 'start' | 'stop' | 'restart' | 'push-confi
 export interface TargetSummary {
   id: string;
   host: string;
+  /** ⭐ 31/08/2026 — absent pour rpigpio/teleinfo/arexx (pas de notion de gossip). `'local'` =
+   *  cible configurée directement sur cette machine, `'gossip'` = apprise d'une autre instance
+   *  dimotic-ha (id préfixé `{machineId}::`, voir TargetGossipService). */
+  origin?: 'local' | 'gossip';
+  /** Uniquement significatif quand `origin === 'gossip'` — calculé côté appelant (voir
+   *  DeploymentManager) à partir de `core:machine:status:list`, ce module ignore tout de Socket.io/
+   *  MQTT. `undefined` = statut jamais reçu (peer pas encore mis à jour, ou pas de message depuis
+   *  le démarrage local) — traité comme "inconnu", ni en ligne ni hors ligne. */
+  online?: boolean;
 }
 
 export interface TargetActionResult {
@@ -42,6 +51,12 @@ export interface RenderTargetCardsOptions {
    *  appelant (⭐ 24/08/2026 : `push-config`, dimotic-ha uniquement — sans objet pour rpigpio/
    *  teleinfo/arexx/HA-stack, qui n'ont pas la notion de `data/core/config.yaml`). */
   extraActions?: RemoteAction[];
+  /** Optionnel (⭐ 31/08/2026) — affiche un bouton "Purger cette machine" sur les cartes
+   *  `origin === 'gossip'`. Reçoit le machineId (préfixe avant `::` dans `target.id`), PAS le
+   *  targetId — une seule purge couvre toutes les cibles gossipées de cette machine à la fois
+   *  (core + haStack + zigbee2mqtt, voir AppService.handleDeploymentTargetPurge), pas 3 flux
+   *  séparés. Suppression définitive, décision humaine explicite — jamais automatique. */
+  onPurge?: (machineId: string) => void;
 }
 
 const ACTION_LABELS: Record<RemoteAction, string> = {
@@ -64,7 +79,7 @@ function findCard(container: HTMLElement, targetId: string): HTMLElement | undef
 }
 
 export function renderTargetCards(container: HTMLElement, options: RenderTargetCardsOptions): void {
-  const { targets, onAction, onDelete, extraActions } = options;
+  const { targets, onAction, onDelete, extraActions, onPurge } = options;
 
   if (targets.length === 0) {
     container.innerHTML = '<div class="empty">Aucune cible configurée — ajouter une cible dans les paramètres de l\'application.</div>';
@@ -77,11 +92,20 @@ export function renderTargetCards(container: HTMLElement, options: RenderTargetC
 
   container.innerHTML = targets.map((target) => {
     const deleteButton = onDelete ? `<button type="button" class="target-delete" data-delete="1">🗑️ Supprimer</button>` : '';
+    // Badge/bouton purge : uniquement pour une cible apprise par gossip d'une autre machine —
+    // jamais sur une cible locale (rien à "purger" d'une machine qui est la nôtre).
+    const isGossip = target.origin === 'gossip';
+    const offlineBadge = isGossip && target.online === false
+      ? `<span class="target-badge-offline">⚠️ Injoignable</span>` : '';
+    const machineId = isGossip ? target.id.split('::')[0] : '';
+    const purgeButton = onPurge && isGossip
+      ? `<button type="button" class="target-purge" data-purge="1" data-machine-id="${escapeHtml(machineId)}">🧹 Purger cette machine</button>` : '';
 
     return `
       <div class="target-card" data-target-id="${escapeHtml(target.id)}">
-        <h4>${escapeHtml(target.id)} <span class="target-host">(${escapeHtml(target.host || '—')})</span></h4>
+        <h4>${escapeHtml(target.id)} <span class="target-host">(${escapeHtml(target.host || '—')})</span>${offlineBadge}</h4>
         ${deleteButton}
+        ${purgeButton}
         <div class="target-actions">
           <button type="button" data-action="deploy">${ACTION_LABELS.deploy}</button>
           <button type="button" data-action="start">${ACTION_LABELS.start}</button>
@@ -127,6 +151,23 @@ export function renderTargetCards(container: HTMLElement, options: RenderTargetC
         const targetId = card?.dataset.targetId;
         if (!targetId) return;
         onDelete(targetId);
+      });
+    });
+  }
+
+  if (onPurge) {
+    container.querySelectorAll<HTMLButtonElement>('button[data-purge]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const machineId = btn.dataset.machineId;
+        if (!machineId) return;
+        const card = btn.closest('.target-card') as HTMLElement | null;
+        const knownOffline = card?.querySelector('.target-badge-offline') !== null;
+        // Décision humaine explicite (jamais automatique, voir en-tête RenderTargetCardsOptions) —
+        // le message s'adapte selon que le statut de présence est déjà connu ou non.
+        const warning = knownOffline
+          ? `Confirmer la suppression définitive de toutes les cibles connues de la machine "${machineId}" (injoignable) ? Cette action est annoncée à toutes les autres instances dimotic-ha.`
+          : `⚠️ La machine "${machineId}" semble actuellement joignable (ou son statut n'a pas encore été reçu). La purger reste possible, mais si elle est réellement encore active, ses cibles réapparaîtront au prochain message gossip.\n\nConfirmer la purge de "${machineId}" ?`;
+        if (window.confirm(warning)) onPurge(machineId);
       });
     });
   }

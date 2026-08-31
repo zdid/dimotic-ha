@@ -78,8 +78,10 @@ const MAX_RECONNECT_DELAY_MS = 60000; // 60 secondes max
 // le broker toutes les ~1-2s indéfiniment, sans jamais ralentir, faute de ce garde-fou).
 const STABLE_CONNECTION_MS = 5000;
 const LWT_TOPIC_PREFIX = 'app';
-const LWT_PAYLOAD_OFFLINE = 'offline';
-const LWT_PAYLOAD_ONLINE = 'online';
+// Exportées (31/08/2026) pour que TargetGossipService compare les statuts reçus contre les
+// chaînes exactes utilisées ici, plutôt que de les redéfinir indépendamment.
+export const LWT_PAYLOAD_OFFLINE = 'offline';
+export const LWT_PAYLOAD_ONLINE = 'online';
 
 /**
  * Durée de vie maximale d'une publication en attente (déconnexion transitoire) avant

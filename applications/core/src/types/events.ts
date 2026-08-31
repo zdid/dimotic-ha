@@ -82,19 +82,22 @@ export interface ServerToClientEvents {
   'app:restart:result': (data: { success: boolean; error?: string }) => void;
 
   // Déploiement de dimotic-ha lui-même (⭐ 23/08/2026, voir CoreDeployService.ts)
-  'core:deployment:targets:list': (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => void;
+  'core:deployment:targets:list': (data: { targets: { id: string; host: string; origin?: 'local' | 'gossip' }[]; isRunningInDocker: boolean; projectRoot: string }) => void;
   'core:deployment:remote-op:result': (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => void;
   /** Ligne de progression pendant l'étape pull-up d'un déploiement (⭐ 24/08/2026) — flux éphémère,
    *  non persistant (pas de rejeu à la reconnexion), voir runSshStreaming (SshClient.ts). */
   'core:deployment:remote-op:progress': (data: { targetId: string; chunk: string }) => void;
 
   // Déploiement Home Assistant + Mosquitto (⭐ nouveau 24/08/2026, voir HaStackDeployService.ts)
-  'core:deployment:ha-stack:targets:list': (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => void;
+  'core:deployment:ha-stack:targets:list': (data: { targets: { id: string; host: string; origin?: 'local' | 'gossip' }[]; isRunningInDocker: boolean; projectRoot: string }) => void;
   'core:deployment:ha-stack:remote-op:result': (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => void;
   'core:deployment:ha-stack:remote-op:progress': (data: { targetId: string; chunk: string }) => void;
 
   // Déploiement zigbee2mqtt (⭐ nouveau 24/08/2026, voir Zigbee2mqttDeployService.ts)
-  'core:deployment:zigbee2mqtt:targets:list': (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => void;
+  'core:deployment:zigbee2mqtt:targets:list': (data: { targets: { id: string; host: string; origin?: 'local' | 'gossip' }[]; isRunningInDocker: boolean; projectRoot: string }) => void;
+  /** ⭐ 31/08/2026 : statuts de présence des machines connues par gossip (LWT MQTT natif, voir
+   *  TargetGossipService). Événement persistant (rejoué à la connexion, comme config:current). */
+  'core:machine:status:list': (data: { statuses: Array<{ machineId: string; online: boolean }> }) => void;
   'core:deployment:zigbee2mqtt:remote-op:result': (data: { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string }) => void;
   'core:deployment:zigbee2mqtt:remote-op:progress': (data: { targetId: string; chunk: string }) => void;
 
@@ -150,6 +153,10 @@ export interface ClientToServerEvents {
   'core:deployment:targets:get': () => void;
   'core:deployment:target:save': (data: unknown) => void;
   'core:deployment:target:delete': (data: { id: string }) => void;
+  /** ⭐ 31/08/2026 : suppression définitive d'une machine disparue (confirmée par un humain, pas
+   *  automatique) — retire ses cibles apprises par gossip sur les 3 listes et annonce la
+   *  suppression à tout le foyer (voir TargetGossipService.purgeMachine). */
+  'core:deployment:target:purge': (data: { machineId: string }) => void;
   'core:deployment:remote-op': (data: { targetId: string; action: string; version?: string }) => void;
 
   // Déploiement Home Assistant + Mosquitto (⭐ 24/08/2026, voir HaStackDeployService.ts)
@@ -230,16 +237,17 @@ export interface AppEvents {
 
   // Déploiement de dimotic-ha lui-même (⭐ 23/08/2026, voir CoreDeployService.ts)
   'core:deployment:targets:get': void;
-  'core:deployment:targets:list': { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string };
+  'core:deployment:targets:list': { targets: { id: string; host: string; origin?: 'local' | 'gossip' }[]; isRunningInDocker: boolean; projectRoot: string };
   'core:deployment:target:save': unknown;
   'core:deployment:target:delete': { id: string };
+  'core:deployment:target:purge': { machineId: string };
   'core:deployment:remote-op': { targetId: string; action: string; version?: string };
   'core:deployment:remote-op:result': { targetId: string; action: string; success: boolean; step?: string; error?: string; output?: string };
   'core:deployment:remote-op:progress': { targetId: string; chunk: string };
 
   // Déploiement Home Assistant + Mosquitto (⭐ 24/08/2026, voir HaStackDeployService.ts)
   'core:deployment:ha-stack:targets:get': void;
-  'core:deployment:ha-stack:targets:list': { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string };
+  'core:deployment:ha-stack:targets:list': { targets: { id: string; host: string; origin?: 'local' | 'gossip' }[]; isRunningInDocker: boolean; projectRoot: string };
   'core:deployment:ha-stack:target:save': unknown;
   'core:deployment:ha-stack:target:delete': { id: string };
   'core:deployment:ha-stack:remote-op': { targetId: string; action: string; version?: string };
@@ -248,7 +256,8 @@ export interface AppEvents {
 
   // Déploiement zigbee2mqtt (⭐ nouveau 24/08/2026)
   'core:deployment:zigbee2mqtt:targets:get': void;
-  'core:deployment:zigbee2mqtt:targets:list': { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string };
+  'core:deployment:zigbee2mqtt:targets:list': { targets: { id: string; host: string; origin?: 'local' | 'gossip' }[]; isRunningInDocker: boolean; projectRoot: string };
+  'core:machine:status:list': { statuses: Array<{ machineId: string; online: boolean }> };
   'core:deployment:zigbee2mqtt:target:save': unknown;
   'core:deployment:zigbee2mqtt:target:delete': { id: string };
   'core:deployment:zigbee2mqtt:remote-op': { targetId: string; action: string; version?: string };

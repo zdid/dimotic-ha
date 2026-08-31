@@ -64,6 +64,14 @@ const createTemplate = (): HTMLTemplateElement => {
         background: transparent; color: #e74c3c; cursor: pointer; font-size: 0.8rem;
       }
       .target-card .target-host { color: #7f8c8d; font-weight: normal; }
+      .target-badge-offline {
+        margin-left: 8px; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem;
+        background: rgba(231, 76, 60, 0.15); border: 1px solid #e74c3c; color: #e74c3c;
+      }
+      .target-purge {
+        float: right; margin-left: 6px; padding: 4px 10px; border-radius: 4px; border: 1px solid #f39c12;
+        background: transparent; color: #f39c12; cursor: pointer; font-size: 0.8rem;
+      }
       .target-docker-hint {
         padding: 8px; border-radius: 4px; background: rgba(255,193,7,0.15);
         border: 1px solid #ffc107; margin: 8px 0; color: #ecf0f1;
@@ -172,8 +180,20 @@ const createTemplate = (): HTMLTemplateElement => {
   return template;
 };
 
+/** Forme large des 3 listes de cibles — `origin` absent = ancienne forme (compat descendante,
+ *  au cas où un serveur pas encore mis à jour émettrait l'ancienne forme sans ce champ). */
+type TargetsListData = { targets: { id: string; host: string; origin?: 'local' | 'gossip' }[] };
+
 export class DeploymentManager extends HTMLElement {
   private socket: any = null;
+  /** ⭐ 31/08/2026 — statuts de présence des machines connues par gossip (core:machine:status:list),
+   *  machineId → online. Absent = statut jamais reçu. */
+  private liveness: Map<string, boolean> = new Map();
+  /** Dernier payload reçu de chacune des 3 listes — permet de re-render sur un simple changement
+   *  de statut de présence, sans attendre une nouvelle liste de cibles. */
+  private lastCoreTargets: TargetsListData['targets'] = [];
+  private lastHaStackTargets: TargetsListData['targets'] = [];
+  private lastZ2mTargets: TargetsListData['targets'] = [];
 
   constructor() {
     super();
@@ -193,9 +213,19 @@ export class DeploymentManager extends HTMLElement {
     }
     this.socket = window.app.socketService.getSocket();
 
-    this.socket.on('core:deployment:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
+    this.socket.on('core:deployment:targets:list', (data: TargetsListData & { isRunningInDocker: boolean; projectRoot: string }) => {
       this.renderSshPrep(data.isRunningInDocker, data.projectRoot);
       this.renderTargets(data);
+    });
+
+    // ⭐ 31/08/2026 : présence des machines connues par gossip (LWT MQTT natif côté serveur, voir
+    // TargetGossipService) — persistant, rejoué à la connexion, donc l'état réel est déjà là dès le
+    // premier rendu des cartes (pas seulement les transitions futures).
+    this.socket.on('core:machine:status:list', (data: { statuses: { machineId: string; online: boolean }[] }) => {
+      this.liveness = new Map(data.statuses.map((s) => [s.machineId, s.online]));
+      this.renderTargets({ targets: this.lastCoreTargets });
+      this.renderHaStackTargets({ targets: this.lastHaStackTargets });
+      this.renderZigbee2mqttTargets({ targets: this.lastZ2mTargets });
     });
 
     this.socket.on('core:deployment:remote-op:result', (result: TargetActionResult) => {
@@ -212,7 +242,7 @@ export class DeploymentManager extends HTMLElement {
 
     this.shadowRoot!.getElementById('add-target-btn')?.addEventListener('click', () => this.addTarget());
 
-    this.socket.on('core:deployment:ha-stack:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
+    this.socket.on('core:deployment:ha-stack:targets:list', (data: TargetsListData) => {
       this.renderHaStackTargets(data);
     });
 
@@ -230,7 +260,7 @@ export class DeploymentManager extends HTMLElement {
 
     this.shadowRoot!.getElementById('add-ha-target-btn')?.addEventListener('click', () => this.addHaStackTarget());
 
-    this.socket.on('core:deployment:zigbee2mqtt:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
+    this.socket.on('core:deployment:zigbee2mqtt:targets:list', (data: TargetsListData) => {
       this.renderZigbee2mqttTargets(data);
     });
 
@@ -254,11 +284,21 @@ export class DeploymentManager extends HTMLElement {
     if (container) renderSshPrepSection(container, { isRunningInDocker, projectRoot });
   }
 
-  private renderTargets(data: { targets: { id: string; host: string }[] }): void {
+  /** ⭐ 31/08/2026 : dérive `online` (uniquement pour les cibles gossipées) à partir de `liveness`,
+   *  côté appelant — TargetCards.ts n'a lui-même aucune idée de Socket.io/MQTT. */
+  private withLiveness(targets: TargetsListData['targets']) {
+    return targets.map((t) => ({
+      ...t,
+      online: t.origin === 'gossip' ? this.liveness.get(t.id.split('::')[0]) : undefined
+    }));
+  }
+
+  private renderTargets(data: TargetsListData): void {
+    this.lastCoreTargets = data.targets;
     const container = this.shadowRoot!.getElementById('targets-container');
     if (!container) return;
     renderTargetCards(container, {
-      targets: data.targets,
+      targets: this.withLiveness(data.targets),
       extraActions: ['push-config'],
       onAction: (targetId: string, action: RemoteAction) => {
         const version = (this.shadowRoot!.getElementById('deploy-version') as HTMLInputElement | null)?.value.trim();
@@ -266,6 +306,9 @@ export class DeploymentManager extends HTMLElement {
       },
       onDelete: (targetId: string) => {
         this.socket.emit('core:deployment:target:delete', { id: targetId });
+      },
+      onPurge: (machineId: string) => {
+        this.socket.emit('core:deployment:target:purge', { machineId });
       }
     });
   }
@@ -284,17 +327,21 @@ export class DeploymentManager extends HTMLElement {
     if (hostEl) hostEl.value = '';
   }
 
-  private renderHaStackTargets(data: { targets: { id: string; host: string }[] }): void {
+  private renderHaStackTargets(data: TargetsListData): void {
+    this.lastHaStackTargets = data.targets;
     const container = this.shadowRoot!.getElementById('ha-targets-container');
     if (!container) return;
     renderTargetCards(container, {
-      targets: data.targets,
+      targets: this.withLiveness(data.targets),
       onAction: (targetId: string, action: RemoteAction) => {
         const version = (this.shadowRoot!.getElementById('ha-deploy-version') as HTMLInputElement | null)?.value.trim();
         this.socket.emit('core:deployment:ha-stack:remote-op', { targetId, action, version: version || undefined });
       },
       onDelete: (targetId: string) => {
         this.socket.emit('core:deployment:ha-stack:target:delete', { id: targetId });
+      },
+      onPurge: (machineId: string) => {
+        this.socket.emit('core:deployment:target:purge', { machineId });
       }
     });
   }
@@ -313,17 +360,21 @@ export class DeploymentManager extends HTMLElement {
     if (hostEl) hostEl.value = '';
   }
 
-  private renderZigbee2mqttTargets(data: { targets: { id: string; host: string }[] }): void {
+  private renderZigbee2mqttTargets(data: TargetsListData): void {
+    this.lastZ2mTargets = data.targets;
     const container = this.shadowRoot!.getElementById('z2m-targets-container');
     if (!container) return;
     renderTargetCards(container, {
-      targets: data.targets,
+      targets: this.withLiveness(data.targets),
       onAction: (targetId: string, action: RemoteAction) => {
         const version = (this.shadowRoot!.getElementById('z2m-deploy-version') as HTMLInputElement | null)?.value.trim();
         this.socket.emit('core:deployment:zigbee2mqtt:remote-op', { targetId, action, version: version || undefined });
       },
       onDelete: (targetId: string) => {
         this.socket.emit('core:deployment:zigbee2mqtt:target:delete', { id: targetId });
+      },
+      onPurge: (machineId: string) => {
+        this.socket.emit('core:deployment:target:purge', { machineId });
       }
     });
   }

@@ -199,6 +199,17 @@ export class SocketBridge {
       this.broadcast('mqtt:disconnected', typed);
     });
 
+    // ⭐ 31/08/2026 : statuts de présence des machines connues par gossip (LWT MQTT natif, voir
+    // TargetGossipService). Persistant comme config:current — un client qui se (re)connecte reçoit
+    // immédiatement l'état courant de TOUTES les machines connues, pas seulement les transitions
+    // futures. Instantané complet à chaque changement (pas un delta) — le nombre de machines d'un
+    // foyer est trivialement petit, pas besoin de rejouer un historique de transitions.
+    this.eventBus.on('core:machine:status:list', (data) => {
+      this.logger.info('SocketBridge', 'EventBus → Socket.io: core:machine:status:list');
+      this.persistentEvents.set('core:machine:status:list', { appId: 'core', eventName: 'core:machine:status:list', lastData: data });
+      this.broadcast('core:machine:status:list', data);
+    });
+
     // Liste des modules
     this.eventBus.on('app:modules:registered', ({ modules }: { modules: ApplicationModule[] }) => {
       this.logger.info('SocketBridge', 'EventBus → Socket.io: app:modules:registered');
@@ -297,7 +308,7 @@ export class SocketBridge {
     // DÉPLOIEMENT DE DIMOTIC-HA LUI-MÊME (⭐ 23/08/2026)
     // ======================================================================
 
-    this.eventBus.on('core:deployment:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
+    this.eventBus.on('core:deployment:targets:list', (data: { targets: { id: string; host: string; origin?: 'local' | 'gossip' }[]; isRunningInDocker: boolean; projectRoot: string }) => {
       this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:targets:list');
       this.broadcast('core:deployment:targets:list', data);
     });
@@ -317,7 +328,7 @@ export class SocketBridge {
     // DÉPLOIEMENT HOME ASSISTANT + MOSQUITTO (⭐ 24/08/2026)
     // ======================================================================
 
-    this.eventBus.on('core:deployment:ha-stack:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
+    this.eventBus.on('core:deployment:ha-stack:targets:list', (data: { targets: { id: string; host: string; origin?: 'local' | 'gossip' }[]; isRunningInDocker: boolean; projectRoot: string }) => {
       this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:ha-stack:targets:list');
       this.broadcast('core:deployment:ha-stack:targets:list', data);
     });
@@ -335,7 +346,7 @@ export class SocketBridge {
     // DÉPLOIEMENT ZIGBEE2MQTT (⭐ 24/08/2026)
     // ======================================================================
 
-    this.eventBus.on('core:deployment:zigbee2mqtt:targets:list', (data: { targets: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
+    this.eventBus.on('core:deployment:zigbee2mqtt:targets:list', (data: { targets: { id: string; host: string; origin?: 'local' | 'gossip' }[]; isRunningInDocker: boolean; projectRoot: string }) => {
       this.logger.info('SocketBridge', 'EventBus → Socket.io: core:deployment:zigbee2mqtt:targets:list');
       this.broadcast('core:deployment:zigbee2mqtt:targets:list', data);
     });
@@ -525,6 +536,12 @@ export class SocketBridge {
       socket.on('core:deployment:target:delete', (data: { id: string }) => {
         this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:target:delete de ${socket.id}, id: ${data.id}`);
         this.eventBus.emit('core:deployment:target:delete', data);
+      });
+
+      // @ts-ignore
+      socket.on('core:deployment:target:purge', (data: { machineId: string }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:deployment:target:purge de ${socket.id}, machineId: ${data.machineId}`);
+        this.eventBus.emit('core:deployment:target:purge', data);
       });
 
       // @ts-ignore

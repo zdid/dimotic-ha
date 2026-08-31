@@ -292,6 +292,18 @@ export class AppService {
       this.handleZigbee2mqttRemoteOp(targetId, action, version);
     });
 
+    // ⭐ 31/08/2026, suppression définitive d'une machine disparue (confirmée par un humain, voir
+    // TargetGossipService en-tête) — couvre les 3 listes de cibles à la fois, pas une par une.
+    this.eventBus.on('core:deployment:target:purge', (data) => this.handleDeploymentTargetPurge(data));
+    // Reflète en direct dans un tableau de bord déjà ouvert une réconciliation gossip (mise à jour
+    // d'hôte, suppression volontaire à la source, suppression confirmée) — sans ça, les 3 listes ne
+    // se rafraîchissent qu'au prochain `*:targets:get` explicite (rechargement de page).
+    this.eventBus.onGeneric('core:deployment:gossip:changed', () => {
+      this.handleDeploymentTargetsGet();
+      this.handleHaStackTargetsGet();
+      this.handleZigbee2mqttTargetsGet();
+    });
+
     // Services post-installation HA (⭐ 24/08/2026, voir HaPostInstallService.ts)
     this.eventBus.on('core:post-install:apply', (data: unknown) => {
       const { requests } = data as { requests: PostInstallRequest[] };
@@ -895,7 +907,7 @@ export class AppService {
 
   private handleDeploymentTargetsGet(): void {
     this.eventBus.emit('core:deployment:targets:list', {
-      targets: this.configService.getTargets().map((t) => ({ id: t.id, host: t.host })),
+      targets: this.configService.getTargets().map((t) => ({ id: t.id, host: t.host, origin: t.origin })),
       isRunningInDocker: isRunningInDocker(),
       projectRoot: process.env.PROJECT_ROOT || process.cwd(),
     });
@@ -925,6 +937,45 @@ export class AppService {
       this.targetGossipService.republish();
     }
     this.handleDeploymentTargetsGet();
+  }
+
+  /**
+   * ⭐ 31/08/2026 : suppression définitive d'une machine disparue, confirmée par un humain (jamais
+   * automatique — voir TargetGossipService en-tête). Une seule purge retire les cibles gossipées
+   * de cette machine sur les 3 listes (core/haStack/zigbee2mqtt) à la fois — pas 3 flux séparés —
+   * puis délègue au réseau (annonce + nettoyage des topics retenus de la machine disparue) à
+   * TargetGossipService, propriétaire du canal MQTT gossip.
+   */
+  private handleDeploymentTargetPurge(data: { machineId: string }): void {
+    const prefix = `${data.machineId}::`;
+
+    const core = this.configService.getTargets();
+    const coreRemaining = core.filter((t) => !t.id.startsWith(prefix));
+    if (coreRemaining.length !== core.length) {
+      const result = this.configService.setTargets(coreRemaining);
+      if (!result.success) this.logger.error('AppService', `Échec de purge des cibles core de ${data.machineId}: ${result.error}`);
+    }
+
+    const haStack = this.configService.getHaStackTargets();
+    const haStackRemaining = haStack.filter((t) => !t.id.startsWith(prefix));
+    if (haStackRemaining.length !== haStack.length) {
+      const result = this.configService.setHaStackTargets(haStackRemaining);
+      if (!result.success) this.logger.error('AppService', `Échec de purge des cibles HA+Mosquitto de ${data.machineId}: ${result.error}`);
+    }
+
+    const zigbee2mqtt = this.configService.getZigbee2mqttTargets();
+    const zigbee2mqttRemaining = zigbee2mqtt.filter((t) => !t.id.startsWith(prefix));
+    if (zigbee2mqttRemaining.length !== zigbee2mqtt.length) {
+      const result = this.configService.setZigbee2mqttTargets(zigbee2mqttRemaining);
+      if (!result.success) this.logger.error('AppService', `Échec de purge des cibles zigbee2mqtt de ${data.machineId}: ${result.error}`);
+    }
+
+    this.targetGossipService.purgeMachine(data.machineId);
+    this.logger.info('AppService', `Machine ${data.machineId} purgée — cibles gossipées retirées localement, suppression annoncée aux autres instances`);
+
+    this.handleDeploymentTargetsGet();
+    this.handleHaStackTargetsGet();
+    this.handleZigbee2mqttTargetsGet();
   }
 
   /**
@@ -974,7 +1025,7 @@ export class AppService {
 
   private handleHaStackTargetsGet(): void {
     this.eventBus.emit('core:deployment:ha-stack:targets:list', {
-      targets: this.configService.getHaStackTargets().map((t) => ({ id: t.id, host: t.host })),
+      targets: this.configService.getHaStackTargets().map((t) => ({ id: t.id, host: t.host, origin: t.origin })),
       isRunningInDocker: isRunningInDocker(),
       projectRoot: process.env.PROJECT_ROOT || process.cwd(),
     });
@@ -1072,7 +1123,7 @@ export class AppService {
 
   private handleZigbee2mqttTargetsGet(): void {
     this.eventBus.emit('core:deployment:zigbee2mqtt:targets:list', {
-      targets: this.configService.getZigbee2mqttTargets().map((t) => ({ id: t.id, host: t.host })),
+      targets: this.configService.getZigbee2mqttTargets().map((t) => ({ id: t.id, host: t.host, origin: t.origin })),
       isRunningInDocker: isRunningInDocker(),
       projectRoot: process.env.PROJECT_ROOT || process.cwd(),
     });
