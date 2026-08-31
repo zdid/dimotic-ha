@@ -2,19 +2,98 @@
 
 ## Problèmes prioritaires
 
-### 🟡 Fonctionnalité d'ajout ou de remplacement d'une application dans `applications/` — À concevoir
+### 🟡 Fonctionnalité d'ajout ou de remplacement d'une application (racine externe) — Conçu, pas implémenté
 - **Demande utilisateur (31/08/2026)** : permettre d'ajouter une nouvelle application, ou de
   remplacer le code d'une application déjà intégrée, directement dans `applications/` — sans passer
   par une opération manuelle (git/copie de fichiers). Aujourd'hui, seules l'activation/désactivation
-  (déplacement `applications/` ↔ `applications_désactivées/`) et la configuration d'une app déjà
-  présente passent par l'UI (*Paramètres Techniques > Gestion des applications*, voir CLAUDE.md
-  règle 7) — l'ajout ou le remplacement du CODE lui-même n'a aucun mécanisme dédié.
-- **À définir** : périmètre exact (dépôt d'une archive/zip ? pointeur vers un dépôt Git distant à
-  cloner ? upload fichier par fichier comme scriptsha ?), garde-fous (build/typecheck avant
-  d'activer une version remplacée, sauvegarde de l'ancienne version avant écrasement — cohérent avec
-  la règle 4 du CLAUDE.md sur les sauvegardes avant modification de masse), et interaction avec le
-  redémarrage du service concerné (superviseur, process séparé par app).
-- **Statut** : Non traité — juste noté, aucune conception
+  (liste `disabledApps` dans `data/core/config.yaml`) et la configuration d'une app déjà présente
+  passent par l'UI (*Paramètres Techniques > Gestion des applications*, voir CLAUDE.md règle 7) —
+  l'ajout ou le remplacement du CODE lui-même n'a aucun mécanisme dédié.
+
+- **⭐ Conception retenue (01/09/2026) — mécanisme « racine externe » qui masque la racine interne** :
+
+  Deux racines d'applications :
+  - **interne** : `applications/` (livrée avec le dépôt / l'image Docker)
+  - **externe** : `data/applications/` (hors dépôt, gitignored) — pour les apps ajoutées à
+    l'exécution
+
+  Nouvelle logique de balayage (au démarrage de core, et rejouée à chaud lors d'un ajout externe —
+  voir « Ajout à chaud » ci-dessous) :
+  ```
+  balayage interne — pour chaque app de applications/ :
+      nom ∈ disabledApps               → ignorer
+      sinon <externe>/<nom> existe      → ignorer (l'externe la remplace)
+      sinon                            → charger / exécuter
+
+  puis balayage externe — pour chaque app de <externe>/ :
+      nom ∈ disabledApps               → ignorer
+      sinon                            → charger / exécuter
+  ```
+
+  Conséquences :
+  - `<externe>/<nom>` inédit = **ajout** d'une nouvelle app
+  - `<externe>/<nom>` == une app interne = **remplacement** ; l'app interne est seulement *masquée*,
+    jamais touchée sur disque (pas de sauvegarde/swap/écrasement à gérer — c'était toute la
+    complexité de la première ébauche de conception, éliminée par ce modèle)
+  - retirer un remplacement = supprimer le dossier dans la racine externe → l'app interne reprend
+    au balayage suivant
+  - `disabledApps` reste une **liste de noms** dans `data/core/config.yaml` → s'applique aux deux
+    racines sans aucune modification de son mécanisme ; une app (interne masquée ou externe) dont
+    le nom est dans `disabledApps` **n'est pas lancée**, point — c'est la réponse au cas « app
+    externe de même nom qu'une interne, mais elle-même désactivée »
+
+- **Ajout à chaud (core déjà démarré)** : un dossier d'application peut être déposé dans la racine
+  externe **pendant que le socle tourne déjà** — l'app n'a pas à être présente au démarrage. Il
+  faut donc un déclencheur de re-balayage à l'exécution (action UI « prendre en compte les
+  nouvelles applications », ou surveillance `fs.watch` de la racine externe) qui rejoue la même
+  logique de chargement que l'activation actuelle : app `runsAsSeparateProcess` → spawn direct via
+  `ProcessSupervisor` sans redémarrer core (`activateSeparateProcessHook` déjà en place) ; app
+  in-process → `RestartManager.scheduleRestart(15s)`. Le retrait/remplacement à chaud suit la même
+  voie (stop du process séparé, ou redémarrage planifié).
+
+- **Code impacté** (aucune nouvelle infra, juste une 2ᵉ racine + la règle de masquage) :
+  - `AppService` — **tous** les résolveurs de chemin de module, pas seulement
+    `detectApplicationModules()` : aussi le hook d'activation en process séparé
+    (`setActivateSeparateProcessHook`, qui reconstruit `appDir`), le résolveur de rechargement
+    (`applications/{moduleId}/dist|src/domain/index`, ~ligne 1429) et le mapping des assets.
+    Extraire une seule fonction « résous `appId` → dossier (externe prioritaire, sinon interne) »
+    et l'appeler partout, sinon les deux copies divergeront.
+  - `ApplicationManager` (`getApplicationsInDir` / `listAll` / `enable` / `disable` / `exists`) —
+    connaître les deux racines ; `listAll` renvoie l'origine de chaque app
+    (interne / externe / interne-remplacée) pour l'affichage UI. **L'activation/désactivation
+    (écran *Gestion des applications*) fonctionne à l'identique pour les apps externes** : même
+    liste `disabledApps` (par nom), mêmes boutons, même redémarrage planifié / spawn ciblé. Le
+    contrôle d'existence de `enable()`/`disable()` (`existsSync(appsDir/appId)`) doit accepter
+    l'une **ou** l'autre racine.
+  - route statique `/applications/:appId/*` dans `presentation/server/index.ts` — résoudre aussi
+    dans la racine externe, sinon les assets UI (`presentation/**`) d'une app externe partent en 404
+  - `ProcessSupervisor` — **rien** : il reçoit déjà `appDir` en paramètre de `register()`, une app
+    externe `runsAsSeparateProcess` se spawn exactement pareil
+
+- **Décisions tranchées (01/09/2026)** :
+  1. **Emplacement de la racine externe** : `data/applications/` — hors dépôt, gitignored. Bonus :
+     `data/` est un volume hôte monté en Docker (voir `Dockerfile` / `compose.yaml`), donc les apps
+     externes **survivent à un `docker compose pull && up -d`**, contrairement à tout ce qui est
+     dans `applications/` (couches d'image, réécrites à chaque version).
+  2. **App dont le nom est dans `disabledApps`** : elle n'est pas lancée, qu'elle soit interne
+     masquée ou externe. Une entrée externe désactivée masque quand même l'interne du même nom
+     (l'app ne tourne pas du tout).
+
+- **Point de cohérence à vérifier — code externe vs données/config** : le code d'une app externe
+  vit dans `data/applications/<appId>/`, mais sa config/données restent dans `data/<appId>/`
+  (convention CLAUDE.md « un sous-répertoire `data/` par application »). Deux sous-répertoires
+  distincts pour une même app externe — léger accroc à l'objectif de portabilité « copier UN seul
+  sous-répertoire » ; à trancher : accepte-t-on les deux, ou l'app externe range-t-elle son code
+  ET ses données sous `data/applications/<appId>/` ? Réserver aussi le nom `applications` comme
+  `appId` interdit (collision avec `data/applications/`).
+
+- **Hors périmètre de cette entrée (sujet distinct, à traiter ensuite)** : la façon dont un dossier
+  d'application *arrive* dans la racine externe — upload d'une archive `.zip` via l'UI + validation
+  (structure, `dist/` présent puisque l'image de prod n'a plus de chaîne de build — cf. `Dockerfile`
+  / `build-apps.sh` : `npm prune --omit=dev` + suppression des `*.ts`), ou simple copie manuelle du
+  sous-répertoire. Le mécanisme de balayage ci-dessus est indépendant de ce choix.
+
+- **Statut** : Conception validée par l'utilisateur (01/09/2026), aucun code écrit
 - **Priorité** : Moyenne
 
 ### 🟢 EVOO7 : écriture (`update`) systématiquement silencieuse — mot de passe haché en double — Corrigé
