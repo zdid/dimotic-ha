@@ -280,15 +280,79 @@ const createTemplate = (): HTMLTemplateElement => {
         padding: 0;
         margin: 0;
       }
+
+      /* ⭐ 31/08/2026, demande utilisateur : sur téléphone, la sidebar glisse depuis le côté au
+         lieu d'être toujours affichée (masquée par défaut, ouverte par le bouton ☰ ci-dessous). */
+      .mobile-toggle {
+        display: none;
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 1100;
+        width: 40px;
+        height: 40px;
+        border: none;
+        border-radius: 6px;
+        background: #2c3e50;
+        color: white;
+        font-size: 1.3rem;
+        line-height: 1;
+        cursor: pointer;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+      }
+
+      .mobile-backdrop {
+        display: none;
+      }
+
+      @media (max-width: 768px) {
+        .mobile-toggle {
+          display: block;
+        }
+
+        .sidebar {
+          transform: translateX(-100%);
+          transition: transform 0.25s ease;
+        }
+
+        .sidebar.mobile-open {
+          transform: translateX(0);
+        }
+
+        .mobile-backdrop {
+          display: block;
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.5);
+          z-index: 999;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.25s ease;
+        }
+
+        .mobile-backdrop.visible {
+          opacity: 1;
+          pointer-events: auto;
+        }
+      }
     </style>
-    
-    <aside class="sidebar">
+
+    <div class="sidebar-root" x-data="{ mobileOpen: false }">
+      <button class="mobile-toggle" @click="mobileOpen = !mobileOpen" :aria-expanded="mobileOpen.toString()" aria-label="Ouvrir/fermer le menu">☰</button>
+      <div class="mobile-backdrop" :class="{ visible: mobileOpen }" @click="mobileOpen = false"></div>
+      <aside class="sidebar" :class="{ 'mobile-open': mobileOpen }">
       <div class="sidebar-header">
         <h1>HA/MQTT</h1>
         <p>Configuration Interface</p>
       </div>
       
-      <nav class="sidebar-nav" x-data="{ openSection: null }">
+      <!-- ⭐ 31/08/2026, demande utilisateur (24/07/2026 à l'origine) : "Applications" ouverte par
+           défaut, pour éviter un clic systématique avant de pouvoir accéder à une application.
+           Revue du code au passage : contrairement à ce que décrivait le TODO, "Paramètres
+           Techniques" n'a jamais été ouverte par défaut non plus (openSection valait déjà null au
+           tout premier commit de ce fichier) — c'est donc "applications" qui devient le défaut ici,
+           pas un alignement sur un comportement de "params" qui n'a en réalité jamais existé. -->
+      <nav class="sidebar-nav" x-data="{ openSection: 'applications' }">
         <!-- PARAMETRES TECHNIQUES - Accordéon -->
         <div class="nav-section">
           <div class="nav-section-header" id="params-header"
@@ -377,7 +441,8 @@ const createTemplate = (): HTMLTemplateElement => {
         </div>
         <div class="host-info" id="host-info"></div>
       </div>
-    </aside>
+      </aside>
+    </div>
   `;
   return template;
 };

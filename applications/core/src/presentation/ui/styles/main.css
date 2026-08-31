@@ -48,6 +48,16 @@ body {
   overflow-y: auto;
 }
 
+/* ⭐ 31/08/2026, demande utilisateur : sur téléphone, la sidebar (280px fixe) devient un tiroir
+   masqué par défaut (voir <app-sidebar>/Sidebar.ts pour le bouton ☰ et le glissement) — le
+   contenu principal n'a donc plus besoin de lui réserver de la place en permanence. */
+@media (max-width: 768px) {
+  .main-content {
+    margin-left: 0;
+    padding: 1rem;
+  }
+}
+
 .content-section {
   animation: fadeIn 0.3s ease-out;
 }
