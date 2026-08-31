@@ -164,9 +164,22 @@
 - **Garde-fou anti-écho (cas identifié par l'utilisateur, traité)** : quand une instance exécute une commande (HA → `applyReceiverCommandInternal` → `transceiver.sendCommand()`), elle transmet réellement un signal RF433 en se faisant passer pour le `primaryEmitter` — un dongle d'une autre instance à portée le capte exactement comme une vraie pression télécommande. Sans garde-fou, le relais ferait remonter à l'émettrice l'écho de sa propre commande. Résolu : `recentlyCommandedEmitters` (Map uniqueId→expiration) posé juste après `sendCommand()`, fenêtre de 5s (`RELAY_ECHO_SUPPRESSION_MS`) — tout relais entrant pour ce device pendant la fenêtre est ignoré.
 - **Construit (16/08/2026)**, `applications/rfxcom/src/domain/RfxComService.ts` : `emitDevicesList()` filtre désormais `discoveredDevices` par `isClaimedByOtherInstance` (recalculé aussi à chaque réception `registered-devices`, pas seulement au chargement — liste UI à jour en direct) ; `handleRfxMessage()` publie sur un nouveau topic `rfxcom/{bridgeInstance}/relayed-value` (non retenu, contrairement à `registered-devices`) dès qu'un signal concerne un device revendiqué ailleurs, et supprime l'émission `rfxcom:device:detected` pour ce cas ; `handleRelayedValueMessage()` (nouveau) reçoit le relais côté propriétaire, vérifie l'anti-écho puis l'appartenance réelle (`deviceManager.getDevice`), reconstruit `timestamp` (Date, perdu en `string` par l'aller-retour JSON du passthrough MQTT — sans quoi tout `.toISOString()` en aval aurait levé une exception), puis rejoue la trame par le même chemin que `handleRfxMessage` (état sensor si `transmitToHa`, `receiverManager.handleEmitterMessage` si type `Lighting*`).
 - **Build propre** (`tsc -b`), pas de suite de tests pour cette application (aucun script `test`, cohérent avec le reste de RFXCOM).
-- **⚠️ Non vérifié en conditions réelles** : nécessiterait deux instances RFXCOM actives avec dongles en recouvrement RF réel — impossible cette session (récepteur physique unique, reparti sur `orangepi`, `rfxcom` désactivée sur `falbala` juste avant ce chantier). À tester au prochain déploiement avec deux dongles simultanément actifs.
-- **Statut** : Implémenté (2026-08-16) — non vérifié en conditions réelles
-- **Priorité** : Résolu pour le code — vérification terrain à faire dès que deux instances RFXCOM tournent simultanément avec du recouvrement RF
+- **⭐ 31/08/2026, débloqué** : il y a désormais bien 2 récepteurs RFXCOM réels et actifs simultanément — `stfort` (192.168.1.53, `bridgeInstance: rfx_bridge_stfort`, instance principale, ~76 devices configurés) et `orangepi` (192.168.1.130, IP changée depuis .32 le 30/08 — voir note plus bas, `bridgeInstance: rfx_bridge_0001`, présent uniquement pour faire relais selon l'utilisateur, 0 device configuré chez lui). Vérifié en direct :
+  - Les deux `rfxcom:status` remontent `connected:true`, même modèle de transceiver (433.92MHz, firmware Ext v1006).
+  - Le broker MQTT partagé contient bien 2 topics `registered-devices` distincts et à jour :
+    `rfxcom/rfx_bridge_stfort/registered-devices` (liste complète des ~76 uniqueId de stfort) et
+    `rfxcom/rfx_bridge_0001/registered-devices` ([], cohérent avec 0 device configuré côté
+    orangepi) — la mécanique de publication/abonnement au recouvrement (§9.4) fonctionne donc
+    bien de bout en bout entre les deux instances. (Un 3e topic orphelin `rfx_bridge_780922`
+    traîne aussi, retenu — reste de l'ancienne instance rfxcom de `ha2`, désactivée depuis ;
+    inoffensif, à purger un jour si ça gêne.)
+  - **Reste non observé** : aucun événement `relayed-value` ni exclusion visible pendant la fenêtre
+    de vérification (nuit, aucune activité RF réelle dans la maison à ce moment-là) — le mécanisme
+    est prêt et branché mais je n'ai pas encore vu un cas réel de recouvrement se produire. À
+    confirmer en surveillant les logs (`relayed-value`, `claimed-elsewhere`) au prochain vrai
+    signal RF émis pour un device déjà revendiqué par `stfort` mais capté aussi par `orangepi`.
+- **Statut** : Implémenté (2026-08-16) — infrastructure des 2 instances confirmée fonctionnelle le 31/08/2026, reste à observer un cas réel de recouvrement/relais
+- **Priorité** : Moyenne (dégradée depuis "vérification terrain à faire" — le blocage matériel n'existe plus, il ne manque qu'un événement RF réel à observer)
 
 ### 🟢 RFXCOM : commande OFF réelle envoyée au démarrage pour tout récepteur sans état connu — pouvait éteindre toute la maison — Corrigé
 - **Constat utilisateur (15/08/2026)**, en creusant la rafale d'échecs "Transceiver RFXCOM non connecté" observée juste après un redémarrage d'`orangepi` : *"parfois ces commandes arrivent à passer et m'éteignent toute la maison"*. `publishReceiverStateAtStartup()` (`RfxComService.ts`) envoyait une vraie commande RF433 `turn_off` à tout récepteur commandable (light/switch) dont `lastOn` n'était pas connu au démarrage — comportement présent depuis l'origine de l'app, initialement pensé pour "initialiser l'état". Un device/récepteur n'ayant jamais reçu de commande individuelle depuis l'import de l'inventaire reconstitué (voir entrée "Reconstitution des équipements RFXCOM" de l'historique) déclenchait donc une vraie transmission OFF à **chaque** redémarrage — avec succès ou échec silencieux selon que le transceiver était déjà connecté à ce moment précis (course avec `protocolsPushGate`), d'où le caractère imprévisible ("parfois").
@@ -940,6 +953,15 @@
 - **Hors périmètre, différé explicitement** : le besoin d'origine (une application modifiée hors
   Docker remplace celle qui est dockerisée) — à reprendre en session dédiée, une fois cette base en
   place. WireGuard lui-même (infrastructure réseau) reste hors du dépôt de code.
+- **⭐ 31/08/2026, petit bug réel trouvé en passant** : l'IP d'`orangepi` a changé le 30/08/2026
+  (192.168.1.32 → 192.168.1.130, DHCP/routeur — voir commentaire dans `docker/rebuild-and-deploy.sh`)
+  mais le `target` gossipé pour `orangepi` dans `data/core/config.yaml` de `ha2` ET `stfort` pointe
+  toujours vers l'ancienne IP — les liens "Applications sur les autres machines" vers orangepi
+  depuis la page d'accueil de ces deux machines sont donc cassés (orangepi lui-même reste joignable
+  directement à la nouvelle IP). Cause probable : le gossip ne republie/écrase un target existant
+  que sur un vrai changement détecté côté émetteur, pas de mécanisme de "heartbeat avec IP actuelle"
+  reçu ailleurs pour forcer la mise à jour. Pas corrigé ce soir — mineur, contournement trivial
+  (accéder directement à orangepi par son IP), mais à garder en tête si le sujet gossip est repris.
 - **Priorité** : Moyenne (base posée, le besoin d'origine qui a motivé la discussion reste à traiter)
 
 ### 🟡 Page d'accueil : couleur des liens (bleu) peu lisible sur le thème sombre — À revoir
