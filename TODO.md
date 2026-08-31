@@ -953,16 +953,39 @@
 - **Hors périmètre, différé explicitement** : le besoin d'origine (une application modifiée hors
   Docker remplace celle qui est dockerisée) — à reprendre en session dédiée, une fois cette base en
   place. WireGuard lui-même (infrastructure réseau) reste hors du dépôt de code.
-- **⭐ 31/08/2026, petit bug réel trouvé en passant** : l'IP d'`orangepi` a changé le 30/08/2026
-  (192.168.1.32 → 192.168.1.130, DHCP/routeur — voir commentaire dans `docker/rebuild-and-deploy.sh`)
-  mais le `target` gossipé pour `orangepi` dans `data/core/config.yaml` de `ha2` ET `stfort` pointe
-  toujours vers l'ancienne IP — les liens "Applications sur les autres machines" vers orangepi
-  depuis la page d'accueil de ces deux machines sont donc cassés (orangepi lui-même reste joignable
-  directement à la nouvelle IP). Cause probable : le gossip ne republie/écrase un target existant
-  que sur un vrai changement détecté côté émetteur, pas de mécanisme de "heartbeat avec IP actuelle"
-  reçu ailleurs pour forcer la mise à jour. Pas corrigé ce soir — mineur, contournement trivial
-  (accéder directement à orangepi par son IP), mais à garder en tête si le sujet gossip est repris.
 - **Priorité** : Moyenne (base posée, le besoin d'origine qui a motivé la discussion reste à traiter)
+
+### 🟡 TargetGossipService : pas de mise à jour ni de suppression d'une cible déjà apprise — À concevoir
+- **Trouvé en passant (31/08/2026)** : l'IP d'`orangepi` a changé le 30/08/2026 (192.168.1.32 →
+  192.168.1.130, DHCP/routeur — voir commentaire dans `docker/rebuild-and-deploy.sh`) mais le
+  `target` gossipé pour `orangepi` dans `data/core/config.yaml` de `ha2` **et** `stfort` pointe
+  toujours vers l'ancienne IP — les liens "Applications sur les autres machines" vers orangepi
+  depuis la page d'accueil de ces deux machines sont cassés (orangepi lui-même reste joignable
+  directement à la nouvelle IP ; `falbala`, source de cette cible, a déjà la bonne IP en local).
+- **Cause racine confirmée dans le code** (`TargetGossipService.mergeTargets()`) : la fusion
+  n'ajoute une cible reçue par gossip **que si son hôte est totalement inconnu**
+  (`!knownHosts.has(t.host)`) — aucun chemin ne met à jour l'hôte d'une cible déjà apprise
+  (identifiée par `{machine source}::{id local}`) quand la machine source republie avec un hôte
+  différent. Un changement d'IP côté source ne se propage donc jamais aux autres machines déjà
+  informées de l'ancien hôte.
+- **Demande utilisateur (31/08/2026), scope élargi au-delà du seul cas IP** : le mécanisme a besoin
+  de fonctionnalités d'**absence constatée** — détecter qu'une cible précédemment gossipée n'est
+  plus annoncée par sa machine source (pas seulement "IP changée", aussi "machine éteinte/retirée
+  pour de bon") —, avec possibilité de **suppression** (locale, ou déclenchée), et **propagation**
+  de cette suppression aux autres machines du réseau gossip. Aujourd'hui le protocole est purement
+  additif (aucune notion de retrait/tombstone) — un target appris ne disparaît jamais tout seul,
+  même si sa machine source ne le republie plus.
+- **À concevoir** : mécanisme de mise à jour en place (upsert par `{machine source, id local}`
+  plutôt que par nouveauté d'hôte), + une forme de "dernière annonce vue" par cible pour détecter
+  l'absence (LWT MQTT par machine ? réannonce périodique avec horodatage, cible retirée après N
+  cycles sans nouvelle annonce ?), + message de retrait explicite propagé (tombstone) pour une
+  suppression volontaire distincte d'une simple absence temporaire. Voir aussi le patron
+  `registered-devices`/RFXCOM (§9.4) déjà retenu ailleurs dans le projet pour un problème apparenté
+  (revendication/désistement d'un device) — pourrait inspirer la conception ici.
+- **Statut** : Non traité — cause du symptôme IP confirmée, conception de la solution complète
+  (mise à jour + absence + suppression + propagation) pas commencée
+- **Priorité** : Moyenne (contournement trivial disponible pour le cas IP isolé — accéder à la
+  machine directement par sa nouvelle adresse)
 
 ### 🟡 Page d'accueil : couleur des liens (bleu) peu lisible sur le thème sombre — À revoir
 - **Signalé (28/08/2026)** par l'utilisateur : sur la page "Accueil" (`HomeView.ts`), la couleur bleue
