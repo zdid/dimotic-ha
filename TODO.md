@@ -468,6 +468,12 @@
 - **Statut** : Non traité
 - **Priorité** : Basse (confort d'usage)
 
+### 🟡 Sidebar : menu latéral pas adapté au téléphone — devrait glisser depuis le côté
+- **Demande utilisateur (31/08/2026)** : sur téléphone, le menu latéral (`Sidebar`) prend toute la largeur / gêne l'affichage — il faudrait un menu qui glisse depuis le côté (drawer rétractable, pattern mobile classique) plutôt que le layout fixe actuel pensé pour desktop.
+- **À faire** : identifier le composant Sidebar (même zone que l'entrée ci-dessus) et son CSS, ajouter un comportement responsive (media query / breakpoint) avec un menu en drawer masqué par défaut sur petit écran, ouvert par un bouton hamburger.
+- **Statut** : Non traité
+- **Priorité** : Basse (confort d'usage)
+
 ---
 
 ## Problèmes secondaires
