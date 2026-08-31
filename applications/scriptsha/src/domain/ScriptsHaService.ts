@@ -278,7 +278,8 @@ const EVOO7_DECALAGE_SCRIPT_TITLE = 'EVOO7 — recalage automatique du décalage
 const EVOO7_DECALAGE_SCRIPT_DESCRIPTION =
   "Recalcule périodiquement le décalage de température ambiante d'EVOO7 pour que sa température " +
   'ambiante affichée colle à la référence de la pièce (sensor.salle_temperature). Ne modifie le ' +
-  'décalage que si la valeur recalculée diffère de celle déjà en place.';
+  'décalage que si la valeur recalculée diffère de celle déjà en place. Remet le décalage à 0 si ' +
+  'sensor.salle_temperature devient indisponible.';
 // ⭐ 30/08/2026 : demande explicite de l'utilisateur — "il faut régulièrement positionner le
 // décalage de température d'evoo7 pour que le décalage soit = différence entre la température de
 // salle et température de evoo7". Formule et sens détaillés dans le commentaire `sens:` ci-dessous
@@ -293,42 +294,64 @@ description: >-
   (number.evoo7_control_decalage_de_la_tdegc_ambiante) pour que sa température ambiante affichée
   (sensor.evoo7_control_temperature_ambiante) colle à la référence de la pièce
   (sensor.salle_temperature). Ne modifie le décalage que s'il diffère de la valeur déjà en place
-  (arrondi à l'entier le plus proche, comme demandé).
+  (arrondi à l'entier le plus proche, comme demandé). Si sensor.salle_temperature devient
+  indisponible, remet le décalage à 0 plutôt que de garder une correction basée sur une référence
+  qui n'est plus fiable.
 trigger:
   - platform: time_pattern
     minutes: "/30"
-condition:
-  # ⭐ 31/08/2026, bug réel corrigé : trois \`numeric_state\` sans \`above\`/\`below\` — schéma HA
-  # rejeté au déploiement ("Message malformed: must contain at least one of below, above.
-  # @ data['conditions'][0]", POST /api/config/automation/config/... → HTTP 400, jamais détecté
-  # avant un vrai déploiement, comme le bug de compréhension Python plus haut dans ce fichier).
-  # L'intention n'était pas un seuil mais "cette entité a bien un état numérique exploitable" —
-  # remplacé par un \`template\` unique qui écarte unknown/unavailable sur les 3 entités.
-  - condition: template
-    value_template: >-
-      {{ states('sensor.salle_temperature') not in ['unknown', 'unavailable', 'none'] and
-         states('sensor.evoo7_control_temperature_ambiante') not in ['unknown', 'unavailable', 'none'] and
-         states('number.evoo7_control_decalage_de_la_tdegc_ambiante') not in ['unknown', 'unavailable', 'none'] }}
 action:
-  - variables:
-      # ⭐ 31/08/2026 : sens du décalage VALIDÉ en conditions réelles (le bug de double hachage MD5
-      # du mot de passe EVOO7 bloquait toute écriture jusque-là, voir TODO.md — corrigé en 2.4.3).
-      # Test empirique (historique HA) : décalage -0.5 → 5 (Δ +5.5) a fait passer temp_amb de
-      # 24.8 → 30.3 (Δ +5.5, correspondance 1:1) — le décalage S'AJOUTE bien à la lecture brute,
-      # confirmant l'hypothèse retenue ci-dessous. sens: 1 est correct, ne pas inverser.
-      sens: 1
-      salle: "{{ states('sensor.salle_temperature') | float }}"
-      temp_amb: "{{ states('sensor.evoo7_control_temperature_ambiante') | float }}"
-      decalage_actuel: "{{ states('number.evoo7_control_decalage_de_la_tdegc_ambiante') | float }}"
-      decalage_cible: >-
-        {{ [10, [-10, (decalage_actuel + sens * (salle - temp_amb)) | round(0) | int] | max] | min }}
-  - condition: template
-    value_template: "{{ decalage_cible != decalage_actuel | round(0) | int }}"
-  - service: number.set_value
-    target:
-      entity_id: number.evoo7_control_decalage_de_la_tdegc_ambiante
-    data:
-      value: "{{ decalage_cible }}"
+  # ⭐ 31/08/2026, bug réel corrigé : les 3 conditions étaient à l'origine des \`numeric_state\`
+  # sans \`above\`/\`below\` — schéma HA rejeté au déploiement ("Message malformed: must contain at
+  # least one of below, above. @ data['conditions'][0]", POST /api/config/automation/config/...
+  # → HTTP 400, jamais détecté avant un vrai déploiement, comme le bug de compréhension Python plus
+  # haut dans ce fichier). L'intention n'était pas un seuil mais "cette entité a bien un état
+  # numérique exploitable" — remplacé par des conditions \`template\` qui écartent unknown/unavailable.
+  - choose:
+      # ⭐ 31/08/2026, demande explicite de l'utilisateur : si sensor.salle_temperature n'est plus
+      # accessible, remettre le décalage à 0 (une correction calculée contre une référence absente
+      # n'a plus de sens et ne doit pas rester figée indéfiniment sur sa dernière valeur).
+      - conditions:
+          - condition: template
+            value_template: "{{ states('sensor.salle_temperature') in ['unknown', 'unavailable', 'none'] }}"
+          - condition: template
+            value_template: >-
+              {{ states('number.evoo7_control_decalage_de_la_tdegc_ambiante') not in ['unknown', 'unavailable', 'none'] }}
+          - condition: template
+            value_template: "{{ states('number.evoo7_control_decalage_de_la_tdegc_ambiante') | float != 0 }}"
+        sequence:
+          - service: number.set_value
+            target:
+              entity_id: number.evoo7_control_decalage_de_la_tdegc_ambiante
+            data:
+              value: 0
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ states('sensor.salle_temperature') not in ['unknown', 'unavailable', 'none'] and
+                 states('sensor.evoo7_control_temperature_ambiante') not in ['unknown', 'unavailable', 'none'] and
+                 states('number.evoo7_control_decalage_de_la_tdegc_ambiante') not in ['unknown', 'unavailable', 'none'] }}
+        sequence:
+          - variables:
+              # ⭐ 31/08/2026 : sens du décalage VALIDÉ en conditions réelles (le bug de double
+              # hachage MD5 du mot de passe EVOO7 bloquait toute écriture jusque-là, voir TODO.md —
+              # corrigé en 2.4.3). Test empirique (historique HA) : décalage -0.5 → 5 (Δ +5.5) a
+              # fait passer temp_amb de 24.8 → 30.3 (Δ +5.5, correspondance 1:1) — le décalage
+              # S'AJOUTE bien à la lecture brute, confirmant l'hypothèse retenue. sens: 1 est
+              # correct, ne pas inverser.
+              sens: 1
+              salle: "{{ states('sensor.salle_temperature') | float }}"
+              temp_amb: "{{ states('sensor.evoo7_control_temperature_ambiante') | float }}"
+              decalage_actuel: "{{ states('number.evoo7_control_decalage_de_la_tdegc_ambiante') | float }}"
+              decalage_cible: >-
+                {{ [10, [-10, (decalage_actuel + sens * (salle - temp_amb)) | round(0) | int] | max] | min }}
+          - condition: template
+            value_template: "{{ decalage_cible != decalage_actuel | round(0) | int }}"
+          - service: number.set_value
+            target:
+              entity_id: number.evoo7_control_decalage_de_la_tdegc_ambiante
+            data:
+              value: "{{ decalage_cible }}"
 mode: single
 `;
 }
