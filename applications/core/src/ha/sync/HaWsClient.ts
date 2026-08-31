@@ -324,7 +324,13 @@ export class HaWsClient {
       body: JSON.stringify(config),
     });
     if (!response.ok) {
-      throw new Error(`POST ${url} → HTTP ${response.status}`);
+      // ⭐ 31/08/2026, bug réel corrigé : le corps de la réponse (message d'erreur HA exploitable,
+      // ex: erreur de schéma/validation Jinja2) était jeté — seul le code HTTP remontait jusqu'aux
+      // logs, rendant tout échec de déploiement (scriptsha) indébogable sans reconstruire la
+      // requête à la main pour la rejouer manuellement. Même correctif déjà en place dans
+      // deleteDomainConfig ci-dessous (25/08/2026) pour la même raison — aligné ici.
+      const bodyText = await response.text().catch(() => '');
+      throw new Error(`POST ${url} → HTTP ${response.status}${bodyText ? `: ${bodyText}` : ''}`);
     }
   }
 

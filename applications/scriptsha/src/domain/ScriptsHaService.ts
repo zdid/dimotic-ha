@@ -298,26 +298,24 @@ trigger:
   - platform: time_pattern
     minutes: "/30"
 condition:
-  - condition: numeric_state
-    entity_id: sensor.salle_temperature
-  - condition: numeric_state
-    entity_id: sensor.evoo7_control_temperature_ambiante
-  - condition: numeric_state
-    entity_id: number.evoo7_control_decalage_de_la_tdegc_ambiante
+  # ⭐ 31/08/2026, bug réel corrigé : trois \`numeric_state\` sans \`above\`/\`below\` — schéma HA
+  # rejeté au déploiement ("Message malformed: must contain at least one of below, above.
+  # @ data['conditions'][0]", POST /api/config/automation/config/... → HTTP 400, jamais détecté
+  # avant un vrai déploiement, comme le bug de compréhension Python plus haut dans ce fichier).
+  # L'intention n'était pas un seuil mais "cette entité a bien un état numérique exploitable" —
+  # remplacé par un \`template\` unique qui écarte unknown/unavailable sur les 3 entités.
+  - condition: template
+    value_template: >-
+      {{ states('sensor.salle_temperature') not in ['unknown', 'unavailable', 'none'] and
+         states('sensor.evoo7_control_temperature_ambiante') not in ['unknown', 'unavailable', 'none'] and
+         states('number.evoo7_control_decalage_de_la_tdegc_ambiante') not in ['unknown', 'unavailable', 'none'] }}
 action:
   - variables:
-      # ⚠️ SENS DU DÉCALAGE NON VALIDÉ EN CONDITIONS RÉELLES (boîtier EVOO7 injoignable le
-      # 30/08/2026 au moment d'écrire ce script — toute commande, même sur un champ déjà validé
-      # fiable ailleurs, timeout côté boîtier). Hypothèse retenue : le décalage s'AJOUTE à la
-      # lecture brute du capteur ambiant (convention la plus courante pour un réglage de
-      # calibration de capteur, ex: "local_temperature_calibration" d'un TRV Zigbee classique).
-      # sens: 1 si cette hypothèse est correcte, -1 si le décalage agit en sens inverse (température
-      # affichée = brute − décalage). Symptôme si le sens retenu est faux : le décalage s'éloigne de
-      # sa valeur correcte à chaque cycle au lieu de s'en rapprocher (température ambiante EVOO7 qui
-      # diverge de la référence salle au fil des exécutions, plutôt que de converger). À valider dès
-      # que le boîtier redevient réactif : imposer un écart volontaire au décalage, vérifier que la
-      # température ambiante affichée se rapproche bien de sensor.salle_temperature après le cycle
-      # suivant — inverser cette valeur sinon.
+      # ⭐ 31/08/2026 : sens du décalage VALIDÉ en conditions réelles (le bug de double hachage MD5
+      # du mot de passe EVOO7 bloquait toute écriture jusque-là, voir TODO.md — corrigé en 2.4.3).
+      # Test empirique (historique HA) : décalage -0.5 → 5 (Δ +5.5) a fait passer temp_amb de
+      # 24.8 → 30.3 (Δ +5.5, correspondance 1:1) — le décalage S'AJOUTE bien à la lecture brute,
+      # confirmant l'hypothèse retenue ci-dessous. sens: 1 est correct, ne pas inverser.
       sens: 1
       salle: "{{ states('sensor.salle_temperature') | float }}"
       temp_amb: "{{ states('sensor.evoo7_control_temperature_ambiante') | float }}"
