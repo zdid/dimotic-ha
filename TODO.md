@@ -156,7 +156,7 @@
 - **Statut** : Corrigé/Implémenté (2026-08-16)
 - **Priorité** : Résolu — **migration superviseur Phase 2 terminée** pour toutes les apps prévues (`espdisplay`, `rpigpio`, `teleinfo`, `arexx`, `evoo7`, `nommage`, `rfxcom`). Restent en in-process par décision explicite : `ia`/`planificateur`/`haplan`/`arbreouquoi` (voir entrée dédiée ci-dessus).
 
-### 🟡 RFXCOM : exclusion réelle + relais entre instances des valeurs captées pour un capteur qui n'est pas le sien — Implémenté, à tester avec 2 récepteurs quand disponible
+### 🟢 RFXCOM : exclusion réelle + relais entre instances des valeurs captées pour un capteur qui n'est pas le sien — Vérifié en conditions réelles
 - **⏳ À FAIRE dès que possible** : tester ce mécanisme (exclusion + relais + anti-écho) avec **2 récepteurs RFXCOM réellement actifs simultanément**, en recouvrement RF — impossible cette session (un seul dongle physique, reparti sur `orangepi`). Pas de suite de tests automatisée pour cette app, seule une vérification en conditions réelles peut confirmer le bon fonctionnement.
 - **Idée utilisateur (16/08/2026)**, dans le prolongement du mécanisme `registered-devices` (chantier 4 du superviseur, `fonctionnelles-supervisor_specs` §9.4) : chaque instance RFXCOM connaît déjà, via ce mécanisme, la liste des devices possédés par les autres instances. Deux volets tranchés avec l'utilisateur avant construction :
   1. **Exclusion réelle de la liste "découverts"** — jusqu'ici `isClaimedByOtherInstance` n'alimentait qu'un avertissement séparé (`claimed-elsewhere`), sans jamais retirer le device de la liste envoyée à l'UI (vérifié dans le code avant de corriger). La déclaration reste **locale, au plus près du signal reçu** (pas de relais des métadonnées de découverte pour déclarer ailleurs — l'utilisateur a explicitement simplifié cette partie de l'idée initiale).
@@ -173,13 +173,27 @@
     bien de bout en bout entre les deux instances. (Un 3e topic orphelin `rfx_bridge_780922`
     traîne aussi, retenu — reste de l'ancienne instance rfxcom de `ha2`, désactivée depuis ;
     inoffensif, à purger un jour si ça gêne.)
-  - **Reste non observé** : aucun événement `relayed-value` ni exclusion visible pendant la fenêtre
-    de vérification (nuit, aucune activité RF réelle dans la maison à ce moment-là) — le mécanisme
-    est prêt et branché mais je n'ai pas encore vu un cas réel de recouvrement se produire. À
-    confirmer en surveillant les logs (`relayed-value`, `claimed-elsewhere`) au prochain vrai
-    signal RF émis pour un device déjà revendiqué par `stfort` mais capté aussi par `orangepi`.
-- **Statut** : Implémenté (2026-08-16) — infrastructure des 2 instances confirmée fonctionnelle le 31/08/2026, reste à observer un cas réel de recouvrement/relais
-- **Priorité** : Moyenne (dégradée depuis "vérification terrain à faire" — le blocage matériel n'existe plus, il ne manque qu'un événement RF réel à observer)
+  - **⭐ 31/08/2026, cas réel de recouvrement observé et confirmé** : l'utilisateur a déclenché
+    physiquement 2 boutons/télécommandes RF (`0x017334A2/10` et `0x0156F0D6/11`, tous deux déjà
+    revendiqués par `stfort`). Capturé en direct sur le broker MQTT (`mosquitto_sub` sur
+    `rfxcom/+/relayed-value`, non retenu) : `orangepi` a bien publié 7 messages `relayed-value`
+    correctement formés (`objectId`, `message` complet avec `commandDeviceId`/`signalLevel`/
+    `batteryLevel`/`data`/`timestamp`) pour ces deux objectId — confirmant qu'il les a détectés,
+    correctement identifiés comme revendiqués ailleurs (pas d'émission `rfxcom:device:detected`
+    côté orangepi), et relayés plutôt que traités localement. **Côté réception, preuve directe et
+    non ambiguë** : le fichier `config-rfxcom-devices-v1.0.yaml` de `stfort` lui-même montre
+    `lastSeen` mis à jour à `2026-08-31T09:43:29.225Z` et `09:43:33.545Z` pour ces deux devices —
+    horodatages qui correspondent exactement aux derniers messages relayés reçus, prouvant que
+    `handleRelayedValueMessage()` a bien tourné côté propriétaire (`deviceManager.handleRawMessage`
+    appelé comme pour une réception directe). Logs applicatifs de `stfort` muets sur toute cette
+    fenêtre (aucun log explicite de succès n'existe sur ce chemin par construction, et ce sont des
+    devices "Bouton"/émetteur sans topic d'état sensor propre — silence attendu, pas un doute) :
+    c'est la preuve par le fichier de config lui-même qui a tranché, pas les logs.
+  - Anti-écho non testé spécifiquement cette fois (aucune commande HA envoyée pendant la fenêtre
+    d'observation), mais le reste de la chaîne (exclusion + relais + réception + mise à jour) est
+    désormais vérifié de bout en bout, sur du vrai matériel, en conditions réelles.
+- **Statut** : Vérifié en conditions réelles (2026-08-31) — exclusion, relais et réception confirmés sur un cas réel de recouvrement RF
+- **Priorité** : Résolu
 
 ### 🟢 RFXCOM : commande OFF réelle envoyée au démarrage pour tout récepteur sans état connu — pouvait éteindre toute la maison — Corrigé
 - **Constat utilisateur (15/08/2026)**, en creusant la rafale d'échecs "Transceiver RFXCOM non connecté" observée juste après un redémarrage d'`orangepi` : *"parfois ces commandes arrivent à passer et m'éteignent toute la maison"*. `publishReceiverStateAtStartup()` (`RfxComService.ts`) envoyait une vraie commande RF433 `turn_off` à tout récepteur commandable (light/switch) dont `lastOn` n'était pas connu au démarrage — comportement présent depuis l'origine de l'app, initialement pensé pour "initialiser l'état". Un device/récepteur n'ayant jamais reçu de commande individuelle depuis l'import de l'inventaire reconstitué (voir entrée "Reconstitution des équipements RFXCOM" de l'historique) déclenchait donc une vraie transmission OFF à **chaque** redémarrage — avec succès ou échec silencieux selon que le transceiver était déjà connecté à ce moment précis (course avec `protocolsPushGate`), d'où le caractère imprévisible ("parfois").
@@ -982,10 +996,16 @@
   suppression volontaire distincte d'une simple absence temporaire. Voir aussi le patron
   `registered-devices`/RFXCOM (§9.4) déjà retenu ailleurs dans le projet pour un problème apparenté
   (revendication/désistement d'un device) — pourrait inspirer la conception ici.
-- **Statut** : Non traité — cause du symptôme IP confirmée, conception de la solution complète
-  (mise à jour + absence + suppression + propagation) pas commencée
-- **Priorité** : Moyenne (contournement trivial disponible pour le cas IP isolé — accéder à la
-  machine directement par sa nouvelle adresse)
+- **⭐ 31/08/2026, contournement appliqué pour le cas orangepi précis** : supprimé `falbala::orangepi`
+  (192.168.1.32) via l'UI Déploiement sur `ha2` ET `stfort`, ajouté `orangepi` (192.168.1.130) en
+  cible locale sur `ha2` — `stfort` a immédiatement réappris la bonne IP par gossip (`ha2::orangepi`)
+  sans action supplémentaire, confirmant que le mécanisme fonctionne bien pour une cible réellement
+  nouvelle (seul le cas "même source+id, hôte différent" reste cassé, voir ci-dessus). Les deux
+  machines ont maintenant la bonne IP — ne règle que ce cas précis, pas le mécanisme lui-même.
+- **Statut** : Non traité (conception de la solution générique) — contournement manuel appliqué pour
+  le cas orangepi du 30/08/2026
+- **Priorité** : Moyenne (plus de symptôme actif pour le cas connu ; la conception générique reste à
+  faire pour éviter de refaire ce contournement à la main à chaque changement d'IP futur)
 
 ### 🟡 Page d'accueil : couleur des liens (bleu) peu lisible sur le thème sombre — À revoir
 - **Signalé (28/08/2026)** par l'utilisateur : sur la page "Accueil" (`HomeView.ts`), la couleur bleue
