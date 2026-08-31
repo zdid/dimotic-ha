@@ -969,7 +969,7 @@
   place. WireGuard lui-même (infrastructure réseau) reste hors du dépôt de code.
 - **Priorité** : Moyenne (base posée, le besoin d'origine qui a motivé la discussion reste à traiter)
 
-### 🟡 TargetGossipService : pas de mise à jour ni de suppression d'une cible déjà apprise — À concevoir
+### 🟢 TargetGossipService : pas de mise à jour ni de suppression d'une cible déjà apprise — Implémenté
 - **Trouvé en passant (31/08/2026)** : l'IP d'`orangepi` a changé le 30/08/2026 (192.168.1.32 →
   192.168.1.130, DHCP/routeur — voir commentaire dans `docker/rebuild-and-deploy.sh`) mais le
   `target` gossipé pour `orangepi` dans `data/core/config.yaml` de `ha2` **et** `stfort` pointe
@@ -1002,20 +1002,48 @@
   sans action supplémentaire, confirmant que le mécanisme fonctionne bien pour une cible réellement
   nouvelle (seul le cas "même source+id, hôte différent" reste cassé, voir ci-dessus). Les deux
   machines ont maintenant la bonne IP — ne règle que ce cas précis, pas le mécanisme lui-même.
-- **Statut** : Non traité (conception de la solution générique) — contournement manuel appliqué pour
-  le cas orangepi du 30/08/2026
-- **Priorité** : Moyenne (plus de symptôme actif pour le cas connu ; la conception générique reste à
-  faire pour éviter de refaire ce contournement à la main à chaque changement d'IP futur)
+- **⭐ 31/08/2026, conçu puis implémenté le même soir** (voir /home/didier/.claude/plans/
+  smooth-wiggling-blum.md pour la conception détaillée) — décisions utilisateur tranchées avant
+  d'écrire le code :
+  1. **Réconciliation automatique tant que la source est vivante** — pas besoin de nouveau
+     message : chaque annonce `known-targets` est déjà un instantané COMPLET des cibles locales de
+     la source, pas un diff. `mergeTargets()` réécrit en upsert (par `{sourceMachineId}::{id}`) +
+     suppression de toute cible apprise de cette source absente de l'annonce reçue. Couvre à la
+     fois le changement d'IP (le bug d'origine) et une suppression volontaire à la source.
+  2. **Présence via LWT MQTT natif** (`willTopic` — déjà pleinement supporté par `MqttTransport`,
+     jamais utilisé jusqu'ici pour ce canal ; même patron que `rfxcom/{bridgeInstance}/status`) sur
+     `dimotic/core/{machineId}/status`. Une machine qui devient silencieuse est une **anomalie
+     signalée** (`core:machine:status:list`, badge "⚠️ Injoignable" sur ses cartes) — **jamais une
+     suppression automatique**, décision explicite de l'utilisateur.
+  3. **Suppression définitive = décision humaine** — bouton "🧹 Purger cette machine" sur les
+     cartes gossipées (`TargetCards.ts`/`DeploymentManager.ts`), publie un tombstone retenu
+     (`dimotic/core/{machineId}/removed`) + nettoie les topics retenus de la machine disparue ; tout
+     pair qui reçoit ce message supprime localement.
+  - Bug distinct trouvé et corrigé au passage : `AppService.ts` tronquait déjà le champ `origin`
+    avant d'envoyer les 3 listes de cibles au navigateur (jamais exploitable côté UI, silencieux).
+  - **Vérifié** : 13 nouveaux tests unitaires (`TargetGossipService.test.ts`), dont le test de
+    régression exact du bug d'origine (mise à jour d'hôte en place) — build core + build:ui propres,
+    suite complète 139 verts (126 avant), aucune régression. **Non encore vérifié en conditions
+    réelles sur le parc ha2/stfort/orangepi** (pas déployé ce soir) — à faire au prochain
+    déploiement : confirmer les topics `status` retenus sur le broker, tester une vraie coupure
+    (badge sans suppression), tester une vraie purge (propagation + nettoyage broker confirmés).
+- **Statut** : Implémenté et testé unitairement (2026-08-31) — vérification en conditions réelles
+  (parc ha2/stfort/orangepi) à faire au prochain déploiement
+- **Priorité** : Résolu (sous réserve de la vérification terrain)
 
-### 🟡 Page d'accueil : couleur des liens (bleu) peu lisible sur le thème sombre — À revoir
+### 🟢 Page d'accueil : couleur des liens (bleu) peu lisible sur le thème sombre — Corrigé
 - **Signalé (28/08/2026)** par l'utilisateur : sur la page "Accueil" (`HomeView.ts`), la couleur bleue
   par défaut des liens (HA, sites externes, applications sur les autres machines) rend le texte
   difficile à lire sur le fond sombre de l'interface.
-- **À faire** : choisir une couleur de lien cohérente avec la palette sombre existante (voir les
-  variables CSS déjà utilisées ailleurs dans `core/src/presentation/ui`), à appliquer à la prochaine
-  modification de cette page plutôt qu'en correctif isolé.
-- **Statut** : Non traité — noté pour la prochaine modification
-- **Priorité** : Basse (cosmétique, pas de perte de fonctionnalité)
+- **Corrigé (31/08/2026)** : nouvelles variables `--color-link`/`--color-link-visited` dans
+  `main.css` (`:root`), règles `a`/`a:visited`/`a:hover`. **Deux endroits nécessaires, pas un
+  seul** — la règle globale de `main.css` ne suffit pas pour la page Accueil, rendue à l'intérieur
+  du Shadow DOM de `ModuleContainer.ts` (encapsulation : les règles de style ne traversent pas la
+  frontière, seules les variables CSS personnalisées le font) — ajoutée donc aussi en scoped dans
+  le `<style>` de `ModuleContainer.ts`, via `var(--color-link)` pour rester cohérent avec la
+  palette définie une seule fois dans `main.css`.
+- **Statut** : Corrigé (2026-08-31)
+- **Priorité** : Résolu
 
 ### 🟡 Nommage : collision `nommage-main` sur MQTT — cause exacte non identifiée
 - **Découvert (28/08/2026)** en diagnostiquant l'épuisement des descripteurs de fichiers de
