@@ -2,6 +2,21 @@
 
 ## Problèmes prioritaires
 
+### 🟡 Fonctionnalité d'ajout ou de remplacement d'une application dans `applications/` — À concevoir
+- **Demande utilisateur (31/08/2026)** : permettre d'ajouter une nouvelle application, ou de
+  remplacer le code d'une application déjà intégrée, directement dans `applications/` — sans passer
+  par une opération manuelle (git/copie de fichiers). Aujourd'hui, seules l'activation/désactivation
+  (déplacement `applications/` ↔ `applications_désactivées/`) et la configuration d'une app déjà
+  présente passent par l'UI (*Paramètres Techniques > Gestion des applications*, voir CLAUDE.md
+  règle 7) — l'ajout ou le remplacement du CODE lui-même n'a aucun mécanisme dédié.
+- **À définir** : périmètre exact (dépôt d'une archive/zip ? pointeur vers un dépôt Git distant à
+  cloner ? upload fichier par fichier comme scriptsha ?), garde-fous (build/typecheck avant
+  d'activer une version remplacée, sauvegarde de l'ancienne version avant écrasement — cohérent avec
+  la règle 4 du CLAUDE.md sur les sauvegardes avant modification de masse), et interaction avec le
+  redémarrage du service concerné (superviseur, process séparé par app).
+- **Statut** : Non traité — juste noté, aucune conception
+- **Priorité** : Moyenne
+
 ### 🟢 EVOO7 : écriture (`update`) systématiquement silencieuse — mot de passe haché en double — Corrigé
 - **Contexte (30-31/08/2026)** : demande utilisateur d'automatiser le recalage du décalage de température ambiante d'EVOO7 (voir entrée `scriptsha` associée) a révélé, en testant en conditions réelles, que TOUTE commande `update` timeoutait après 10s sans `updateok` ni `updateko`, quel que soit le champ visé (`decalage_tdeg_ambiante`, `consigne_normal`, ...) — alors que les lectures (`datas`) arrivaient normalement et que l'interface web propre du boîtier fonctionnait très bien (signalé par l'utilisateur, qui a poussé à chercher la vraie cause côté code plutôt que d'accepter une explication "boîtier indisponible").
 - **Fausse piste éliminée en premier** : un bug réel et distinct existait bel et bien (`socket.once('connect', ...)` ne se réexécutant qu'à la toute première connexion du process, laissant `this.connected` bloqué à `false` après toute coupure — corrigé, déployé en 2.4.2) mais ne suffisait pas à expliquer le symptôme : les écritures timeoutaient encore après ce correctif.
