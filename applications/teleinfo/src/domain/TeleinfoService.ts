@@ -21,6 +21,12 @@ import { DeployService } from './DeployService';
 import { TELEINFO_SOCKET_EVENTS, TELEINFO_CLIENT_EVENTS } from './socket-events';
 
 const AGENT_PRESENCE_TOPIC = 'teleinfo/agent/status';
+// ⭐ 05/09/2026 — voir device-agent/ha-publisher.js::publishDiscovered. Un segment par ADCO
+// (retenu), pas un blob unique : chaque ADCO reste indépendamment rejouable/idempotent si l'agent
+// redémarre, et un abonnement générique (+) couvre tout ADCO même pas encore vu à l'écriture de ce
+// code.
+const AGENT_DISCOVERED_TOPIC_FILTER = 'teleinfo/agent/discovered/+';
+const AGENT_DISCOVERED_TOPIC_PREFIX = 'teleinfo/agent/discovered/';
 
 export interface TeleinfoStatus {
   compteursCount: number;
@@ -46,7 +52,7 @@ export interface ITeleinfoService {
 type SaveCompteurInput = CompteurDefinition & { originalAdco?: number };
 
 export class TeleinfoService implements ITeleinfoService {
-  private readonly config: TeleinfoConfig;
+  private config: TeleinfoConfig;
   private readonly compteursManager: ConfigFileManager<CompteursConfigFile>;
   private compteurs: CompteurDefinition[];
   private readonly deployService: DeployService;
@@ -89,6 +95,27 @@ export class TeleinfoService implements ITeleinfoService {
       const { targetId, action } = data as { targetId: string; action: RemoteAction };
       this.handleRemoteOp(targetId, action);
     });
+
+    // ⭐ 05/09/2026, même bug réel que arexx (corrigé le 25/08/2026, jamais propagé ici bien que
+    // "même patron") : this.config n'était chargé qu'une fois, au démarrage du service — une cible
+    // ou un réglage MQTT modifié depuis Paramètres Techniques était bien écrit sur disque, jamais
+    // relu ici. teleinfo:status continuait de renvoyer targets:[] jusqu'au prochain redémarrage
+    // (ou un rafraîchissement de page qui, en réalité, ne changeait rien côté serveur — la
+    // coïncidence d'un second GET arrivant après un éventuel redémarrage ailleurs masquait la
+    // vraie cause). Recharge simple, pas de reconnexion MQTT ici (lecture seule, présence agent).
+    //
+    // ⭐ `configProvider.reload()` AVANT `getAppConfig()` — indispensable : ce process séparé a sa
+    // PROPRE instance ConfigService (voir standalone.ts), en mémoire depuis son propre démarrage,
+    // distincte de celle de core qui a écrit le fichier. `getAppConfig()` seul relit cette instance
+    // en mémoire, pas le fichier — sans reload() explicite, on obtient encore l'ancienne valeur
+    // malgré le nom de la méthode (piège trouvé en testant ce correctif en conditions réelles :
+    // `teleinfo:status` republiait bien tout seul après sauvegarde, mais avec l'hôte resté ancien).
+    this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (event) => {
+      if (event.moduleId !== 'teleinfo' || !event.success) return;
+      this.configProvider.reload();
+      this.config = teleinfoConfigSchema.parse(this.configProvider.getAppConfig());
+      this.emitStatus();
+    });
   }
 
   async start(): Promise<void> {
@@ -126,6 +153,12 @@ export class TeleinfoService implements ITeleinfoService {
     );
     this.agentTransport.onMessage((message) => {
       const payloadString = Buffer.isBuffer(message.payload) ? message.payload.toString() : message.payload;
+
+      if (message.topic.startsWith(AGENT_DISCOVERED_TOPIC_PREFIX)) {
+        this.handleDiscoveredAdco(payloadString);
+        return;
+      }
+
       let parsed: { status?: string } | null = null;
       try {
         parsed = JSON.parse(payloadString);
@@ -139,7 +172,36 @@ export class TeleinfoService implements ITeleinfoService {
       this.emitStatus();
     });
     this.agentTransport.subscribe(AGENT_PRESENCE_TOPIC, 1);
+    this.agentTransport.subscribe(AGENT_DISCOVERED_TOPIC_FILTER, 1);
     this.agentTransport.connect();
+  }
+
+  /**
+   * ⭐ 05/09/2026 (demande utilisateur) — un ADCO lu par l'agent mais pas encore déclaré crée
+   * automatiquement l'entrée compteur correspondante (quoi/lieu provisoires, "à identifier" —
+   * modifiable ensuite via le formulaire existant, comme n'importe quel compteur). Pas d'action si
+   * cet ADCO est déjà connu (relecture d'un message retenu après redémarrage de l'agent, ou trame
+   * répétée) ou si les 2 emplacements physiques sont déjà occupés — même limite que
+   * handleSaveCompteur, réutilisé tel quel pour ne pas dupliquer la logique de sauvegarde.
+   */
+  private handleDiscoveredAdco(payloadString: string): void {
+    let parsed: { adco?: number } | null = null;
+    try {
+      parsed = JSON.parse(payloadString);
+    } catch {
+      this.logger.warn('TeleinfoService', `Message de découverte agent illisible: ${payloadString}`);
+      return;
+    }
+    const adco = parsed?.adco;
+    if (typeof adco !== 'number') return;
+    if (this.compteurs.some((c) => c.adco === adco)) return;
+    if (this.compteurs.length >= 2) {
+      this.logger.warn('TeleinfoService', `ADCO ${adco} découvert mais 2 compteurs déjà déclarés — ignoré`);
+      return;
+    }
+
+    this.logger.info('TeleinfoService', `ADCO ${adco} découvert sur l'agent RPi1 — création automatique de l'entrée compteur`);
+    this.handleSaveCompteur({ adco, quoi: 'compteur', lieu: 'a-identifier' });
   }
 
   // ==========================================================================
@@ -217,19 +279,28 @@ export class TeleinfoService implements ITeleinfoService {
       return;
     }
 
-    if (action === 'deploy' && this.compteurs.length !== 2) {
+    // ⭐ 05/09/2026 (demande utilisateur) — le déploiement n'exige plus les 2 compteurs déclarés à
+    // l'avance : "il faut envoyer le package, surveiller la lecture des 2 compteurs, et la machine
+    // distante doit répondre si possible avec la valeur de chaque numéro de compteur". Déployer avec
+    // 0/1 compteur lance quand même l'agent (device-agent/main.js accepte désormais 0-2, voir son
+    // en-tête) — tout ADCO lu mais non déclaré est publié sur teleinfo/agent/discovered/<adco>,
+    // repris ci-dessous (handleDiscoveredAdco) pour créer automatiquement l'entrée compteur
+    // correspondante. Seul le maximum physique (2, bascule GPIO à 2 positions) reste bloquant.
+    if (action === 'deploy' && this.compteurs.length > 2) {
       this.eventBus.emit(TELEINFO_SOCKET_EVENTS.REMOTE_OP_RESULT, {
         targetId,
         action,
         success: false,
-        error: `Exactement 2 compteurs doivent être déclarés avant de déployer (actuellement ${this.compteurs.length})`
+        error: `Au plus 2 compteurs (bascule GPIO à 2 positions) — actuellement ${this.compteurs.length}`
       });
       return;
     }
 
     try {
       const result = await (action === 'deploy'
-        ? this.deployService.deploy(target, generateAgentConfig(this.config, this.compteurs))
+        ? this.deployService.deploy(target, generateAgentConfig(this.config, this.compteurs), (chunk) => {
+            this.eventBus.emit(TELEINFO_SOCKET_EVENTS.REMOTE_OP_PROGRESS, { targetId, chunk });
+          })
         : action === 'start'
         ? this.deployService.start(target)
         : action === 'stop'

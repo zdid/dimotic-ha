@@ -2,7 +2,7 @@
  * Script TypeScript pour le tableau de bord Téléinfo.
  */
 
-import { renderTargetCards, renderSshPrepSection, showTargetActionResult, type TargetActionResult, type RemoteAction } from '/js/ts/components/TargetCards.js';
+import { renderTargetCards, renderSshPrepSection, showTargetActionResult, appendTargetProgress, type TargetActionResult, type RemoteAction } from '/js/ts/components/TargetCards.js';
 
 function moduleRoot(): ParentNode {
   return (window as any).__moduleContainerRoot || document;
@@ -70,6 +70,14 @@ function setupEventListeners(): void {
     if (container) showTargetActionResult(container, result);
   });
 
+  // ⭐ 05/09/2026 (demande utilisateur) — lignes de progression pendant "Déployer" (installation
+  // Node.js/npm sur la cible si absents, npm install...), visibles en direct comme pour les
+  // déploiements Docker (core/rpigpio/arexx, même mécanisme runSshStreaming).
+  socket.on('teleinfo:remote-op:progress', (data: { targetId: string; chunk: string }) => {
+    const container = $('targets-container');
+    if (container) appendTargetProgress(container, data.targetId, data.chunk);
+  });
+
   socket.on('teleinfo:error', (data: { message: string }) => {
     const errorEl = $('compteurs-error');
     if (errorEl) {
@@ -107,7 +115,7 @@ function updateStatusDisplay(status: TeleinfoStatus): void {
   const sshPrepContainer = $('ssh-prep-container');
   if (targetsSection) targetsSection.style.display = 'block';
   if (sshPrepContainer) {
-    renderSshPrepSection(sshPrepContainer, { isRunningInDocker: status.isRunningInDocker, projectRoot: status.projectRoot });
+    renderSshPrepSection(sshPrepContainer, { isRunningInDocker: status.isRunningInDocker, projectRoot: status.projectRoot, targets: status.targets });
   }
   if (targetsContainer) {
     renderTargetCards(targetsContainer, {

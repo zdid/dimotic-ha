@@ -23,7 +23,10 @@ const SerialPort = require('serialport');
 
 const FRAME_DELIMITER = String.fromCharCode(13, 3, 2, 10); // CR ETX STX LF
 const MAX_ANOMALIES = 15;
-const HARD_TIMEOUT_MS = 5000;
+// ⭐ 05/09/2026 (demande utilisateur) — relevé de 5s à 25s : 5s s'est montré trop court en
+// conditions réelles (timeouts systématiques observés sur les 2 positions), sans qu'on sache
+// encore si c'est le vrai câblage physique qui est en cause ou juste une marge insuffisante.
+const HARD_TIMEOUT_MS = 25000;
 
 function decodeLine(rawLine, frame) {
   const SEPARATOR = ' ';
@@ -58,14 +61,19 @@ function decodeLine(rawLine, frame) {
  * @param {(err: string|null, frame: object|null) => void} onFrame
  * @param {() => void} onSwitch appelé après fermeture du port, avant le prochain appel
  */
-function readOneFrame(port, onFrame, onSwitch) {
+function readOneFrame(port, onFrame, onSwitch, debug) {
   let serialPort;
   let anomalies = 0;
   let settled = false;
+  let bytesReceived = 0;
+  const log = debug ? (...args) => console.log('[teleinfo-reader]', ...args) : () => {};
 
   const hardTimeout = setTimeout(() => {
-    finish('timeout de lecture (5s)', null);
+    log(`timeout — ${bytesReceived} octets reçus sur ce cycle avant expiration`);
+    finish('timeout de lecture (25s)', null);
   }, HARD_TIMEOUT_MS);
+
+  log('ouverture du port', port);
 
   function finish(err, frame) {
     if (settled) return;
@@ -88,7 +96,10 @@ function readOneFrame(port, onFrame, onSwitch) {
     autoOpen: true
   });
 
+  serialPort.on('open', () => log('port ouvert'));
+
   serialPort.on('error', (err) => {
+    log('erreur port série:', err.message || String(err));
     finish(err.message || String(err), null);
   });
 
@@ -101,6 +112,8 @@ function readOneFrame(port, onFrame, onSwitch) {
   // edfteleinfo.js d'origine par un split('\r\n') supplémentaire dans traitData() — repris ici.
   let buffer = '';
   serialPort.on('data', (chunk) => {
+    bytesReceived += chunk.length;
+    log(`${chunk.length} octets reçus (total cycle: ${bytesReceived})`);
     buffer += chunk.toString('latin1');
     let idx;
     while ((idx = buffer.indexOf(FRAME_DELIMITER)) !== -1) {
@@ -109,16 +122,23 @@ function readOneFrame(port, onFrame, onSwitch) {
       if (!frameBlob) continue;
 
       const frame = {};
-      frameBlob.split('\r\n').forEach((rawLine) => {
-        if (!rawLine) return;
+      const rawLines = frameBlob.split('\r\n').filter(Boolean);
+      log(`trame candidate: ${rawLines.length} ligne(s)`);
+      rawLines.forEach((rawLine) => {
         const isBad = decodeLine(rawLine, frame);
-        if (isBad) anomalies++;
+        if (isBad) {
+          anomalies++;
+          log(`ligne rejetée (checksum/format): ${JSON.stringify(rawLine)}`);
+        }
       });
 
       if (frame.ADCO && frame.OPTARIF) {
+        log('trame longue valide, ADCO:', frame.ADCO);
         finish(null, frame);
         return;
       }
+
+      log('trame incomplète (ADCO/OPTARIF manquant), champs vus:', Object.keys(frame));
 
       if (anomalies > MAX_ANOMALIES) {
         finish(`${MAX_ANOMALIES} anomalies consécutives`, null);

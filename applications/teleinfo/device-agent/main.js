@@ -18,8 +18,14 @@ function loadConfig() {
   const raw = fs.readFileSync(configPath, 'utf8');
   const config = yaml.load(raw);
 
-  if (!Array.isArray(config.compteurs) || config.compteurs.length !== 2) {
-    throw new Error('config.yaml doit déclarer exactement 2 compteurs (bascule GPIO à 2 positions)');
+  // ⭐ 05/09/2026 (demande utilisateur) — 0 ou 1 compteur déclaré n'empêche plus le démarrage : la
+  // lecture matérielle (teleinfo-service.js) et la publication (ha-publisher.js) fonctionnent déjà
+  // sans connaître les ADCO à l'avance (ADCO non déclaré = publié sur teleinfo/agent/discovered/,
+  // pas une erreur) — permet de déployer d'abord, puis de nommer les compteurs une fois leur ADCO
+  // découvert en conditions réelles. Seul le nombre MAXIMUM (2, bascule GPIO à 2 positions) reste
+  // une vraie contrainte matérielle.
+  if (!Array.isArray(config.compteurs) || config.compteurs.length > 2) {
+    throw new Error('config.yaml: au plus 2 compteurs (bascule GPIO à 2 positions)');
   }
   if (!config.mqtt || !config.mqtt.url) {
     throw new Error('config.yaml: mqtt.url manquant');
@@ -36,8 +42,9 @@ function main() {
   const discoveryPrefix = config.discoveryPrefix || 'homeassist';
   const gpio = config.gpio || { pinA: 11, pinB: 12 };
   const cycleIntervalMs = config.cycleIntervalMs || 30000;
+  const debug = config.debug === true;
 
-  console.log('[teleinfo] Démarrage — port:', config.port, 'gpio:', gpio, 'discoveryPrefix:', discoveryPrefix, 'cycleIntervalMs:', cycleIntervalMs);
+  console.log('[teleinfo] Démarrage — port:', config.port, 'gpio:', gpio, 'discoveryPrefix:', discoveryPrefix, 'cycleIntervalMs:', cycleIntervalMs, 'debug:', debug);
 
   const gpioSwitch = createGpioSwitch(gpio.pinA, gpio.pinB);
   const publisher = createHaPublisher(config.mqtt, discoveryPrefix);
@@ -54,7 +61,8 @@ function main() {
     (err) => {
       console.warn('[teleinfo] Anomalie de lecture:', err);
     },
-    cycleIntervalMs
+    cycleIntervalMs,
+    debug
   );
 }
 

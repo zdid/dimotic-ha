@@ -13,6 +13,10 @@ export const TELEINFO_SOCKET_EVENTS = {
   COMPTEUR_SAVED: 'teleinfo:compteur:saved',
   COMPTEUR_DELETED: 'teleinfo:compteur:deleted',
   REMOTE_OP_RESULT: 'teleinfo:remote-op:result',
+  // ⭐ 05/09/2026 (demande utilisateur) — lignes de progression pendant un déploiement (installation
+  // Node.js/npm sur la cible si absents, npm install...), même mécanisme que core/rpigpio/arexx
+  // (runSshStreaming, voir DeployService.ts) — { targetId, chunk }, non persistant.
+  REMOTE_OP_PROGRESS: 'teleinfo:remote-op:progress',
   ERROR: 'teleinfo:error'
 } as const;
 

@@ -21,9 +21,13 @@ const SWITCH_DELAY_MS = 150; // laisse le temps à la carte de commutation maté
  * @param {(frame: object) => void} onFrame appelé pour chaque trame longue valide reçue
  * @param {(err: string) => void} onError appelé sur anomalie/timeout d'une lecture (non fatal, la boucle continue)
  * @param {number} cycleIntervalMs pause après chaque cycle complet (2 compteurs lus une fois)
+ * @param {boolean} [debug] active la trace fine (teleinfo-reader.js) et journalise chaque bascule GPIO
  */
-function start(port, gpioSwitch, onFrame, onError, cycleIntervalMs) {
+function start(port, gpioSwitch, onFrame, onError, cycleIntervalMs, debug) {
+  const log = debug ? (...args) => console.log('[teleinfo-service]', ...args) : () => {};
+
   gpioSwitch.inverse(); // position initiale déterministe
+  log('position GPIO initiale forcée');
   let readsInCycle = 0;
 
   function loop() {
@@ -38,12 +42,17 @@ function start(port, gpioSwitch, onFrame, onError, cycleIntervalMs) {
         readsInCycle++;
         if (readsInCycle >= 2) {
           readsInCycle = 0;
+          log(`cycle complet, pause ${cycleIntervalMs}ms`);
           setTimeout(loop, cycleIntervalMs);
         } else {
           setTimeout(loop, SWITCH_DELAY_MS);
         }
       },
-      gpioSwitch.inverse
+      () => {
+        log('bascule GPIO');
+        gpioSwitch.inverse();
+      },
+      debug
     );
   }
 

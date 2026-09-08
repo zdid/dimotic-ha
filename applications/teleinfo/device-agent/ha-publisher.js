@@ -27,6 +27,14 @@ const HA_STATUS_TOPIC = 'homeassistant/status'; // topic réel de HA, indépenda
 const PRESENCE_TOPIC = 'teleinfo/agent/status';
 const PRESENCE_HEARTBEAT_MS = 30000;
 
+// ⭐ 05/09/2026 (demande utilisateur) — un compteur dont l'ADCO n'est pas encore déclaré n'est plus
+// juste ignoré (voir publishFrame) : son ADCO est publié ici, retenu, pour que dimotic-ha (lecture
+// seule, voir TeleinfoService.ts) puisse créer automatiquement une entrée compteur au retour, sans
+// que l'utilisateur ait besoin de connaître/saisir l'ADCO à l'avance. Permet un déploiement avant
+// même de savoir quels ADCO sont réellement câblés — la lecture matérielle ne dépend jamais des
+// compteurs déclarés (voir teleinfo-service.js), seule cette étape de publication en dépendait.
+const DISCOVERED_TOPIC_PREFIX = 'teleinfo/agent/discovered/';
+
 const SENSORS = [
   { key: 'IINST', label: 'Intensité', unit: 'A', device_class: 'current', state_class: 'measurement' },
   { key: 'PAPP', label: 'Puissance apparente', unit: 'VA', device_class: 'apparent_power', state_class: 'measurement' },
@@ -97,6 +105,7 @@ function createHaPublisher(mqttConfig, discoveryPrefix) {
     const adco = Number(frame.ADCO);
     if (!compteursByAdco[adco]) {
       console.warn('[ha-publisher] ADCO non déclaré, trame ignorée:', adco);
+      publishDiscovered(adco);
       return;
     }
     if (!autodiscoverySent[adco]) sendAutodiscovery(adco);
@@ -106,6 +115,14 @@ function createHaPublisher(mqttConfig, discoveryPrefix) {
       if (frame[sensor.key] !== undefined) payload[sensor.key] = frame[sensor.key];
     });
     client.publish(baseTopicFor(adco) + '/state', JSON.stringify(payload));
+  }
+
+  function publishDiscovered(adco) {
+    client.publish(
+      DISCOVERED_TOPIC_PREFIX + adco,
+      JSON.stringify({ adco: adco, lastSeenAt: new Date().toISOString() }),
+      { qos: 1, retain: true }
+    );
   }
 
   function publishPresence() {

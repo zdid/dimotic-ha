@@ -18,6 +18,7 @@
 import * as path from 'node:path';
 import {
   runSsh,
+  runSshStreaming,
   runScp,
   shellQuote,
   ensureGlobalSshKey,
@@ -35,10 +36,19 @@ function resolveTarget(target: TeleinfoTargetConfig): TeleinfoTargetConfig & { s
 
 export interface DeployResult {
   success: boolean;
-  step?: 'copy-agent' | 'write-config' | 'node-modules' | 'write-service' | 'restart';
+  step?: 'ensure-node' | 'copy-agent' | 'write-config' | 'node-modules' | 'write-service' | 'restart';
   error?: string;
   output?: string;
 }
+
+// ⭐ 05/09/2026 — installation via apt (voir ensureNode ci-dessous) : plus lent qu'une simple
+// vérification, mais reste largement sous le plafond npm install (voir NPM_INSTALL_TIMEOUT_MS).
+const APT_INSTALL_TIMEOUT_MS = 300000;
+// ⭐ 05/09/2026 — version figée du tarball npm autonome (voir ensureNode ci-dessous) : npm 10.8.2
+// est compatible avec Node ^18.17.0 (notre 18.20.4 installé via apt). Version fixée plutôt que
+// "latest" pour rester reproductible — comme le reste du dépôt (rpio@2.4.2, serialport@9.0.7...).
+const NPM_STANDALONE_VERSION = '10.8.2';
+const NPM_STANDALONE_INSTALL_TIMEOUT_MS = 120000;
 
 const NPM_INSTALL_TIMEOUT_MS = 300000; // compilation native sur RPi1 : peut être lente
 // __dirname (src/domain, ou dist/domain une fois compilé) → .. (src ou dist) → .. (teleinfo) →
@@ -74,12 +84,16 @@ export class DeployService {
     return unitController.restart(resolveTarget(target), target.serviceName);
   }
 
-  async deploy(rawTarget: TeleinfoTargetConfig, agentConfigYaml: string): Promise<DeployResult> {
+  async deploy(rawTarget: TeleinfoTargetConfig, agentConfigYaml: string, onProgress?: (line: string) => void): Promise<DeployResult> {
     if (!rawTarget.host) {
       return { success: false, step: 'copy-agent', error: 'Aucun hôte cible configuré (target.host)' };
     }
     const target = resolveTarget(rawTarget);
 
+    const nodeResult = await this.ensureNode(target, onProgress);
+    if (!nodeResult.success) return nodeResult;
+
+    onProgress?.('--- Copie de l\'agent ---');
     const mkdir = await runSsh(target, `mkdir -p ${shellQuote(target.remoteDir)}`);
     if (!mkdir.success) return { success: false, step: 'copy-agent', error: mkdir.error };
 
@@ -100,14 +114,102 @@ export class DeployService {
       return { success: false, step: 'write-config', error: writeConfig.error };
     }
 
-    const nodeModulesResult = await this.ensureNodeModules(target);
+    const nodeModulesResult = await this.ensureNodeModules(target, onProgress);
     if (!nodeModulesResult.success) return nodeModulesResult;
 
     const pureJsResult = await this.copyBundledPureJsDeps(target);
     if (!pureJsResult.success) return pureJsResult;
 
+    onProgress?.('--- Écriture et démarrage du service systemd ---');
     const serviceResult = await this.writeAndRestartService(target);
     return serviceResult;
+  }
+
+  /**
+   * ⭐ 05/09/2026 (demande utilisateur, découvert en conditions réelles après reflash de la carte SD
+   * du RPi1 : node ET npm absents, plus aucune trace de l'ancienne installation domotique) — vérifie
+   * la présence de node/npm sur la cible avant toute autre étape, installe séparément si besoin.
+   *
+   * Contrairement à l'hypothèse historique ("Node officiel n'a plus de build ARMv6" — voir l'en-tête
+   * de ce fichier), le dépôt APT de Raspberry Pi OS (Raspbian Bookworm) fournit son propre paquet
+   * `nodejs` compilé pour ARMv6 (vérifié en conditions réelles : `apt-cache policy nodejs` propose
+   * 18.20.4 sur ce RPi1 précis) — installation légère et rapide via `apt-get install nodejs` seul.
+   * `nodeBinPath` (config-schema.ts, défaut `/usr/bin/node`) reste valide : c'est là que le paquet
+   * Debian/Raspbian installe le binaire.
+   *
+   * ⭐ npm PAS installé via apt — bug réel découvert en conditions réelles (05/09/2026) : le paquet
+   * Debian `npm` entraîne plus de 400 paquets sans rapport en dépendances "automatic" (eslint,
+   * webpack, git, jest, et même une pile graphique X11/Mesa complète — inutile sur un Pi headless qui
+   * ne fait que lire des trames série) — plus de 15 minutes et toujours pas terminé lors du test.
+   * npm est du JS pur (aucune compilation native, contrairement à rpio/serialport) : un simple
+   * tarball téléchargé depuis le registre npm officiel et exécuté par le node déjà installé suffit,
+   * sans passer par apt du tout.
+   */
+  private async ensureNode(target: TeleinfoTargetConfig & { sshKeyPath: string }, onProgress?: (line: string) => void): Promise<DeployResult> {
+    onProgress?.('--- Vérification de Node.js/npm sur la cible ---');
+    // ⭐ `npm -v`, pas `command -v npm` — bug réel corrigé (05/09/2026) : un essai précédent laissait
+    // un symlink npm cassé (pointait vers un mauvais emplacement) sur la cible ; `command -v`
+    // vérifie seulement qu'un fichier exécutable existe sous ce nom, pas qu'il fonctionne
+    // réellement, donc un réessai passait silencieusement à côté de la réparation.
+    const check = await runSsh(target, `node -v >/dev/null 2>&1 && npm -v >/dev/null 2>&1 && echo present`);
+    if (check.success && check.output.trim() === 'present') {
+      onProgress?.('Node.js et npm déjà présents.');
+      return { success: true, step: 'ensure-node' };
+    }
+
+    const nodeCheck = await runSsh(target, `command -v node >/dev/null 2>&1 && echo present`);
+    if (!(nodeCheck.success && nodeCheck.output.trim() === 'present')) {
+      onProgress?.('Node.js absent — installation via apt (paquet Raspbian, compatible ARMv6)...');
+      this.logger.info('DeployService', `Node.js absent sur ${target.host} — installation via apt`);
+      // ⭐ idleTimeoutMs relevé (défaut 90s, ici 3 min) — constaté en conditions réelles sur ce RPi1
+      // précis (ARMv6, très faible puissance CPU) : apt-get, sans TTY, n'émet RIEN sur le canal SSH
+      // pendant qu'il télécharge/vérifie un fichier Packages volumineux (~15-19 Mo) — un
+      // téléchargement direct du même fichier (curl) a pourtant pris moins de 10s, donc ce n'est pas
+      // le débit réseau qui est en cause, mais le silence total d'apt entre deux lignes "Get:" en
+      // mode non-interactif, combiné à la vérification de checksum/décompression lente sur ce CPU.
+      // DEBIAN_FRONTEND=noninteractive évite par ailleurs qu'une invite debconf bloque
+      // silencieusement l'étape install.
+      const installNode = await runSshStreaming(
+        target,
+        'DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs',
+        { onData: onProgress, maxTotalMs: APT_INSTALL_TIMEOUT_MS, idleTimeoutMs: 180000 }
+      );
+      if (!installNode.success) {
+        this.logger.error('DeployService', `Échec d'installation de Node.js sur ${target.host}: ${installNode.error}`);
+        return { success: false, step: 'ensure-node', error: installNode.error, output: installNode.output };
+      }
+    }
+
+    const npmCheck = await runSsh(target, `npm -v >/dev/null 2>&1 && echo present`);
+    if (!(npmCheck.success && npmCheck.output.trim() === 'present')) {
+      onProgress?.(`npm absent — installation autonome (tarball npm ${NPM_STANDALONE_VERSION}, PAS le paquet Debian — voir le commentaire d'en-tête de cette méthode)...`);
+      this.logger.info('DeployService', `npm absent sur ${target.host} — installation autonome (tarball, pas apt)`);
+      // ⭐ bug réel corrigé en conditions réelles (05/09/2026) : un premier essai plaçait le tarball
+      // dans /opt/npm-standalone puis symlinkait bin/npm — npm 9/10 résout ses propres fichiers
+      // (npm-prefix.js etc.) en repartant du binaire `node` lui-même (/usr/bin/node), pas du
+      // symlink, et cherchait donc /usr/bin/node_modules/npm/... (inexistant) au lieu du vrai
+      // emplacement. Corrigé en respectant la disposition standard qu'npm attend d'une installation
+      // globale : le paquet sous <préfixe>/lib/node_modules/npm (préfixe déduit de /usr/bin/node
+      // → /usr), symlink direct vers npm-cli.js (shebang `#!/usr/bin/env node`, exécutable tel
+      // quel — pas besoin du script `bin/npm` intermédiaire, dont la propre résolution de basedir
+      // avait la même fragilité).
+      const installNpm = await runSshStreaming(
+        target,
+        `mkdir -p /usr/lib/node_modules/npm && curl -fsSL https://registry.npmjs.org/npm/-/npm-${NPM_STANDALONE_VERSION}.tgz | tar -xz -C /usr/lib/node_modules/npm --strip-components=1 && chmod +x /usr/lib/node_modules/npm/bin/npm-cli.js && ln -sf /usr/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm`,
+        { onData: onProgress, maxTotalMs: NPM_STANDALONE_INSTALL_TIMEOUT_MS }
+      );
+      if (!installNpm.success) {
+        this.logger.error('DeployService', `Échec d'installation autonome de npm sur ${target.host}: ${installNpm.error}`);
+        return { success: false, step: 'ensure-node', error: installNpm.error, output: installNpm.output };
+      }
+    }
+
+    const recheck = await runSsh(target, `node -v >/dev/null 2>&1 && npm -v >/dev/null 2>&1 && echo present`);
+    if (!recheck.success || recheck.output.trim() !== 'present') {
+      return { success: false, step: 'ensure-node', error: 'node/npm toujours introuvables ou non fonctionnels après installation' };
+    }
+    onProgress?.('Node.js/npm installés.');
+    return { success: true, step: 'ensure-node' };
   }
 
   /**
@@ -124,7 +226,8 @@ export class DeployService {
    * Repli sur `npm install --production` uniquement si le node_modules partagé n'existe pas du tout
    * (autre machine que celle testée) — lent mais fonctionnel en dernier recours.
    */
-  private async ensureNodeModules(target: TeleinfoTargetConfig): Promise<DeployResult> {
+  private async ensureNodeModules(target: TeleinfoTargetConfig, onProgress?: (line: string) => void): Promise<DeployResult> {
+    onProgress?.('--- Résolution des dépendances (node_modules) ---');
     const check = await runSsh(target, `test -d ${shellQuote(target.remoteDir + '/node_modules')} && echo present`);
     if (check.success && check.output.trim() === 'present') {
       return { success: true, step: 'node-modules' };
@@ -142,7 +245,17 @@ export class DeployService {
     }
 
     this.logger.info('DeployService', `node_modules partagé introuvable/incomplet sur ${target.host}, npm install (peut être long)...`);
-    const install = await runSsh(target, `cd ${shellQuote(target.remoteDir)} && npm install --production`, undefined, NPM_INSTALL_TIMEOUT_MS);
+    onProgress?.('node_modules partagé introuvable — npm install (peut être long, compilation native possible)...');
+    // ⭐ idleTimeoutMs relevé (défaut 90s, ici 3 min) — même bug réel que pour apt-get (voir
+    // ensureNode ci-dessus) : constaté en conditions réelles, la compilation native de rpio/
+    // serialport (node-gyp/gcc) sur ce RPi1 ARMv6 peut rester longtemps sans produire une seule
+    // ligne de sortie, tuant le canal SSH prématurément alors que npm install continue de tourner
+    // sur la cible (orphelin) — corrige la cause plutôt que d'ajouter un nettoyage après coup.
+    const install = await runSshStreaming(
+      target,
+      `cd ${shellQuote(target.remoteDir)} && npm install --production`,
+      { onData: onProgress, maxTotalMs: NPM_INSTALL_TIMEOUT_MS, idleTimeoutMs: 180000 }
+    );
     if (!install.success) {
       this.logger.error('DeployService', `Échec npm install sur ${target.host}: ${install.error}`);
       return { success: false, step: 'node-modules', error: install.error, output: install.output };
