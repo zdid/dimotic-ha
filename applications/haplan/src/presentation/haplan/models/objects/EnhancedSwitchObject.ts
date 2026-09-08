@@ -30,6 +30,15 @@ export class EnhancedSwitchObject extends BaseEntity {
     this.updateDisplay();
   }
 
+  /** ⭐ 08/09/2026 : accesseur public pour l'état on/off — utilisé par SwitchWindow.ts, qui lisait
+   *  jusqu'ici `getDisplayValue('status')`, un mécanisme dont `updateState()` (ici et dans
+   *  EnhancedLightObject, dont héritent MinimalLightObject/les switches réels) ne renseigne plus
+   *  rien depuis le passage à "l'affichage simplifié" (voir son commentaire) — le bouton affichait
+   *  donc toujours "Allumer", jamais "Éteindre", quel que soit l'état réel. */
+  getIsOn(): boolean {
+    return this.isOn;
+  }
+
   renderEntity(): HTMLElement {
     const container = this.createStyledElement('div', 'enhanced-switch-object');
     
@@ -39,6 +48,11 @@ export class EnhancedSwitchObject extends BaseEntity {
     }
 
     const statusDisplay = document.createElement('div') as HTMLElement;
+    // ⭐ 08/09/2026, bug réel corrigé : classe manquante — updateDisplay() cherche cet élément via
+    // `.switch-status-display` (querySelector), introuvable sans elle. Le texte ON/OFF restait donc
+    // figé sur sa valeur du premier rendu (l'icône, elle, se mettait à jour normalement, trouvée
+    // génériquement via le sélecteur `i`).
+    statusDisplay.className = 'switch-status-display';
     statusDisplay.style.color = this.isOn ? this.colorScheme.primary : '#999999';
     statusDisplay.textContent = this.isOn ? 'ON' : 'OFF';
 
@@ -58,15 +72,23 @@ export class EnhancedSwitchObject extends BaseEntity {
   }
 
   protected toggle(): void {
-    this.sendCommand('switch', this.isOn ? 'turn_off' : 'turn_on');
+    this.sendCommand(this.getDomain(), this.isOn ? 'turn_off' : 'turn_on');
   }
 
   handleAction(action: string, value?: any): void {
     if (action === 'toggle') {
       this.toggle();
     } else {
-      this.sendCommand('switch', action);
+      this.sendCommand(this.getDomain(), action);
     }
+  }
+
+  /** ⭐ 08/09/2026 : domaine dérivé de l'entity_id (au lieu du littéral 'switch' en dur) — cette
+   *  classe sert aussi de rendu générique pour `input_boolean.*` (voir UnifiedObjectFactory.ts),
+   *  qui a exactement les mêmes services HA (turn_on/turn_off/toggle) mais un domaine différent ;
+   *  un domaine en dur y enverrait `switch.toggle` sur une entité qui n'est pas un switch. */
+  private getDomain(): string {
+    return this.entity_id.split('.')[0];
   }
 
   updateDisplay(): void {
@@ -74,9 +96,14 @@ export class EnhancedSwitchObject extends BaseEntity {
     
     const icon = this.element.querySelector('i') as HTMLElement;
     if (icon) {
+      // ⭐ 08/09/2026, bug réel corrigé : seule la couleur était rafraîchie ici, jamais la classe —
+      // le glyphe restait donc figé sur celui du tout premier rendu (fa-toggle-off/fa-toggle-on,
+      // voir getIconForState()) même une fois l'état changé, malgré deux icônes bien prévues à
+      // l'origine. Même format de classe qu'à la création (createIcon(), BaseEntity.ts).
+      icon.className = `fas ${this.getIconForState()}`;
       icon.style.color = this.isOn ? this.colorScheme.primary : '#999999';
     }
-    
+
     const statusDisplay = this.element.querySelector('.switch-status-display') as HTMLElement;
     if (statusDisplay) {
       statusDisplay.textContent = this.isOn ? 'ON' : 'OFF';

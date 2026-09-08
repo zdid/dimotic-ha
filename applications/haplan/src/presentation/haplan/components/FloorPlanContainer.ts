@@ -21,10 +21,10 @@ export class FloorPlanContainer {
     const currentFloorplanId = dataService.getCurrentFloorplanId();
     console.log(`FloorPlanContainer: Initialisation avec le plan courant: ${currentFloorplanId}`);
 
-    this.positionManager = new PositionManager((floorplanId: string, positions: any) => {
-      console.log(`FloorPlanContainer: Mise à jour positions pour ${floorplanId}`);
+    this.positionManager = new PositionManager((floorplanId: string, positions: any, texts: any) => {
+      console.log(`FloorPlanContainer: Mise à jour positions/textes pour ${floorplanId}`);
       // Fire-and-forget : pas d'attente de réponse
-      this.dataService.updatePositionsForFloorplan(floorplanId, positions);
+      this.dataService.updatePositionsForFloorplan(floorplanId, positions, texts);
     }, currentFloorplanId);
 
     this.floorPlan = new FloorPlan(container, this.positionManager);
@@ -48,7 +48,7 @@ export class FloorPlanContainer {
       if (floorplan && floorplan.filename) {
         // Obtenir l'image depuis le cache de DataService
         const cachedImage = this.dataService.getFloorplanImage(currentFloorplanId);
-        
+
         if (cachedImage) {
           console.log('Plan chargé depuis le cache:', currentFloorplanId);
           await this.floorPlan.loadPlanFromImage(cachedImage);
@@ -59,7 +59,7 @@ export class FloorPlanContainer {
           await this.floorPlan.loadPlan(imagePath);
         }
       } else {
-        // Mode transparent si pas de plan
+        // Aucun plan disponible du tout (ex: liste vide)
         this.container.style.backgroundColor = 'transparent';
         console.log('Pas de plan disponible, mode transparent');
       }
@@ -80,7 +80,7 @@ export class FloorPlanContainer {
       if (positions && positions.length > 0) {
         this.positionManager.loadPositions(currentFloorplanId, positions);
         console.log(`[FloorPlanContainer] Chargement de ${positions.length} objets pour le plan ${currentFloorplanId}`);
-        
+
         positions.forEach((position: any) => {
           if (position.entity_id === "__trash_icon__") {
             return;
@@ -100,6 +100,23 @@ export class FloorPlanContainer {
             position: position.position,
             state: state,
             entity: entity
+          }, true);
+        });
+      }
+
+      // ⭐ 07/09/2026 : pendant du chargement des positions ci-dessus, pour les textes libres.
+      const texts = this.dataService.getTextsForFloorplan(currentFloorplanId);
+      if (texts && texts.length > 0) {
+        this.positionManager.loadTexts(currentFloorplanId, texts);
+        console.log(`[FloorPlanContainer] Chargement de ${texts.length} texte(s) pour le plan ${currentFloorplanId}`);
+
+        texts.forEach((t) => {
+          this.objectManager.createTextFromConfig({
+            id: t.id,
+            text: t.text,
+            position: { x: t.x, y: t.y },
+            size: t.size,
+            color: t.color
           }, true);
         });
       }
@@ -133,16 +150,34 @@ export class FloorPlanContainer {
 
   async disableEditMode(): Promise<void> {
     console.log('Mode édition désactivé');
-    
+
     // Forcer la sauvegarde immédiate des positions en attente
     this.positionManager.forceSave();
-    
+
     this.objectManager.disableEditMode();
+  }
+
+  /** ⭐ 08/09/2026 : sauvegarde immédiate d'une modif encore en attente (debounce 5s, voir
+   *  PositionManager) — utilisée par dashboard-app.ts sur `beforeunload`, seul cas non couvert par
+   *  les appels forceSave() déjà en place (disableEditMode ci-dessus, cleanup() lors d'un
+   *  changement de plan) : fermer l'onglet/quitter la page directement pendant les 5 secondes de
+   *  debounce perdait silencieusement la modif, le timer JS étant détruit avec la page. */
+  forceSave(): void {
+    this.positionManager.forceSave();
   }
 
   createObjectFromConfig(config: any): void {
     console.log('Création objet:', config.entity_id);
     this.objectManager.createObjectFromConfig(config);
+  }
+
+  /** ⭐ 07/09/2026 : ajoute un nouveau texte libre au plan courant (bouton "Ajouter un texte",
+   *  voir dashboard-app.ts) — un identifiant unique est généré ici (pas fourni par l'appelant,
+   *  contrairement à `entity_id` pour une entité HA). */
+  addText(text: string, position: { x: number; y: number } = { x: 0.5, y: 0.5 }): void {
+    const id = `text_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    console.log('Création texte:', id);
+    this.objectManager.createTextFromConfig({ id, text, position });
   }
 
   setObjectScale(scale: number): void {

@@ -2,7 +2,113 @@
 
 ## Problèmes prioritaires
 
-### 🟡 Fonctionnalité d'ajout ou de remplacement d'une application (racine externe) — Conçu, pas implémenté
+### 🟡 HAPLAN : chevauchement léger d'éléments sur l'écran physique ESP32 (page libre) — Non traité, différé volontairement
+- **Contexte (08/09/2026)** : après le portage complet "page libre + texte libre" (web + carte
+  Lovelace HA + écran ESP32-8048S070, voir [[project_haplan_esphome_s3_display]]) et le premier
+  déploiement OTA réussi du plan « Ballons » (page libre, ratio 4:3 portrait) sur l'écran physique,
+  retour utilisateur : "ça se marche un peu dessus" — chevauchement léger de certains
+  éléments (icônes/textes) sur ce nouvel écran.
+- **Cause non investiguée** — hypothèses possibles à vérifier plus tard : positions placées dans
+  l'éditeur web sur un ratio différent de celui réellement rendu sur l'écran 800×480 (letterboxing),
+  ou boîtes de texte (`build_text_widget()`, generate_esphome_floorplan.py) dimensionnées trop
+  généreusement pour l'espace réellement disponible entre deux éléments proches.
+- **Décision explicite de l'utilisateur** : ne pas corriger maintenant, "on reste comme ça" —
+  différé, pas d'action entreprise.
+- **Statut** : Non traité (différé volontairement)
+- **Priorité** : Basse (esthétique, écran fonctionnel malgré le chevauchement)
+
+### 🟡 Teleinfo : conflit UART (login série) corrompait les trames — Corrigé sur le RPi1 en place, à valider par un flash complet
+- **Contexte (06/09/2026)** : après le redéploiement des noms SPA/Pompe à chaleur sur la carte SD
+  reflashée via le nouveau pipeline (voir [[project_sd_card_provisioning_pipeline]]), plus aucune
+  trame téléinfo remontée pendant 15+ minutes (0 à quelques octets reçus par cycle de 25s au lieu
+  d'une trame complète), alors que le même matériel avait fonctionné juste avant.
+- **Root-causé via une trace fine** ajoutée à la demande de l'utilisateur (`debug: true` dans
+  `config.yaml` du device-agent, propagé à `teleinfo-reader.js`/`teleinfo-service.js`) :
+  `serial-getty@ttyAMA0.service` (login série activé par défaut sur une image Raspberry Pi OS non
+  personnalisée) et le process teleinfo se disputaient `/dev/ttyAMA0` (confirmé par `fuser -v`, 2 PID
+  dessus), avec en plus `console=serial0,115200` dans `cmdline.txt`.
+- **Corrigé en direct sur le RPi1** (`systemctl mask serial-getty@ttyAMA0` + retrait de
+  `console=serial0,115200` du cmdline + reboot) — confirmé par la trace fine : trames complètes
+  reçues pour les 2 ADCO à chaque cycle après coup. `debug: true` retiré ensuite (verbosité non
+  destinée à la production).
+- **Fix reporté dans les scripts de provisionnement** (`app_needs_serial_console_disabled` dans
+  `prepare-sd-card.sh`, `APPS_NEEDING_SERIAL_CONSOLE_DISABLED` dans `flash-sd-card.js`) pour qu'une
+  future carte flashée pour `teleinfo` n'ait plus jamais ce problème.
+- **À valider (prévu le 07/09/2026)** : un flash complet de bout en bout avec le pipeline corrigé,
+  pour confirmer que `serial-getty@ttyAMA0` reste bien désactivé dès le premier boot (le correctif
+  n'a été vérifié que syntaxiquement — `bash -n`/`node -c` — pas rejoué sur une vraie carte).
+- **Statut** : Corrigé sur la carte en place ; correctif du pipeline non re-testé en conditions réelles
+- **Priorité** : Haute (bloque la confiance dans le pipeline de flashage pour teleinfo)
+
+### 🟢 Teleinfo : déploiement sur cible sans Node.js/npm — installation auto ajoutée, mais `apt-get install npm` entraînait ~400 paquets sans rapport — Corrigé
+- **Contexte (05/09/2026)** : après reflash de la carte SD du RPi1, `node`/`npm` absents (voir aussi
+  [[project_teleinfo_app]]). `DeployService.ensureNode()` ajouté pour détecter et installer
+  automatiquement, avec progression visible en direct (`teleinfo:remote-op:progress`, même
+  mécanisme `runSshStreaming` que les déploiements Docker core/rpigpio/arexx).
+- **Bug réel découvert en conditions réelles** : `apt-get install -y nodejs npm` — le paquet Debian
+  `npm` entraîne **plus de 400 paquets** en dépendances "automatic" sans rapport avec le besoin
+  (eslint, webpack, git, jest, et une pile graphique X11/Mesa complète — sur un Pi headless qui ne
+  fait que lire des trames série EDF). Plus de 15 minutes et toujours pas terminé lors du test ; un
+  ancien essai tué par le timeout d'inactivité (90s, alors trop court pour ce CPU ARMv6 très faible)
+  a aussi laissé un `apt-get`/`dpkg` **orphelin** tourner en arrière-plan sur la cible, bloquant la
+  tentative suivante (verrou dpkg) — non nettoyé automatiquement (limite connue de `runSshStreaming` :
+  tuer le process SSH local ne tue pas la commande distante, qui n'a pas de TTY à qui envoyer un
+  signal de raccrochage).
+- **Corrigé** : `node` seul reste installé via apt (léger, rapide, paquet Raspbian ARMv6 dédié).
+  `npm` n'est plus jamais installé via apt — remplacé par un tarball autonome téléchargé directement
+  depuis le registre npm officiel (`registry.npmjs.org/npm/-/npm-10.8.2.tgz`, version figée, pur JS
+  donc aucune compilation native ni dépendance système) et exécuté par le node déjà installé.
+- **Limite connue, non corrigée** : un déploiement interrompu en plein milieu d'un `apt-get`/`npm
+  install` peut laisser un process orphelin sur la cible qui doit se terminer de lui-même (ou être
+  tué manuellement) avant de pouvoir réessayer — pas de mécanisme de nettoyage automatique.
+- **Priorité** : Résolu pour le cas npm/apt ; la limite d'orphelin sur timeout reste un angle mort
+  généralisé (`runSshStreaming`, socle partagé core/rpigpio/arexx), pas propre à teleinfo.
+
+### 🟢 Activation à chaud d'une app en process séparé : le formulaire "Paramètres Techniques" restait vide tant que core n'avait pas redémarré — Corrigé
+- **Constaté (05/09/2026)**, en reprenant `teleinfo` en local après un reflash de sa cible RPi1 :
+  activer une app depuis *Gestion des applications* faisait bien apparaître son entrée dans le menu
+  latéral immédiatement (pas de redémarrage), mais cliquer dessus affichait "Pas de configuration UI
+  disponible pour teleinfo" — malgré le message d'accueil de la page annonçant explicitement
+  "Chaque application démarre/s'arrête indépendamment, sans redémarrage de l'application
+  principale". Un redémarrage complet de `core` faisait disparaître le problème — ce qui masquait la
+  vraie cause plutôt que la révéler.
+- **Reproduit en direct** (navigateur piloté, logs serveur en parallèle) pour confirmer avant de
+  corriger à l'aveugle (voir [[feedback_live_testing_workflow]]) : le serveur envoie bien
+  `app:modules:list` (menu à jour, Sidebar.ts s'en sert directement) ET démarre bien le process
+  séparé de l'app — mais `ConfigForm.ts` ne lit PAS ses métadonnées de formulaire depuis cette liste.
+  Il les lit d'un cache client **séparé** (`ModuleManager.moduleUiMetadata`), rempli uniquement par
+  l'événement `app:module:ui:register` — que seul le scan de démarrage complet
+  (`AppService.emitModuleUiMetadata()`) émettait. Le chemin d'activation à chaud
+  (`AppService.tryActivateSeparateProcessApp`, ajouté le 25/08/2026 justement pour éviter le
+  redémarrage) ne l'émettait jamais pour la nouvelle app — deux caches client alimentés par deux
+  chemins serveur différents, l'un mis à jour, l'autre oublié.
+- **Correctif** (`AppService.tryActivateSeparateProcessApp`) : émettre aussi `app:module:ui:register`
+  pour le module fraîchement activé (s'il a un `configUi`), juste après `app:modules:registered` —
+  un seul module concerné, pas besoin de rejouer `emitModuleUiMetadata()` en entier.
+- **Vérifié en conditions réelles** : cycle désactiver → réactiver → clic direct sur l'app dans le
+  menu (sans rafraîchir la page) → formulaire complet affiché immédiatement, testé deux fois de
+  suite avec `teleinfo`.
+- **Effet de bord découvert au passage, non lié** : le menu latéral n'insère pas la nouvelle entrée à
+  sa place triée (`menuOrder`) quand elle arrive après coup — elle est ajoutée en fin de liste
+  (visible : "Téléinfo" après "Scripts HA" au lieu d'avant "ESPDISPLAY"). Purement cosmétique, pas
+  creusé plus loin.
+- **Priorité** : Résolu.
+
+### 🟢 Instructions `ssh-copy-id` (déploiement d'une cible) : hôte générique `<hôte-de-la-cible>` à remplacer à la main — Corrigé
+- **Retour utilisateur (05/09/2026)**, en configurant `teleinfo` pour la première fois sans être
+  informaticien : les instructions de préparation SSH (`renderSshPrepSection`, `TargetCards.ts`,
+  mutualisé rpigpio/teleinfo/arexx/core) affichaient toujours un placeholder générique
+  `root@<hôte-de-la-cible>`, même une fois une cible réellement configurée avec un hôte connu —
+  demande explicite : *"une fois paramétré le ssh-copy dans cible doit se compléter avec l'hôte
+  cible"*.
+- **Corrigé** : `renderSshPrepSection` accepte désormais un paramètre `targets` optionnel — dès
+  qu'au moins une cible a un hôte renseigné, un bloc de commande complet (hôte réel déjà substitué)
+  est affiché par hôte connu ; le placeholder générique ne reste qu'en repli si aucune cible n'a
+  encore d'hôte. Câblé dans les 4 appelants (`rpigpio`, `teleinfo`, `arexx`, `core/DeploymentManager`
+  — ce dernier combine ses 3 listes de cibles core/HA-stack/zigbee2mqtt et se re-rend à chaque mise à
+  jour de l'une des trois, pas seulement au premier chargement).
+- **Priorité** : Résolu.
+
 - **Demande utilisateur (31/08/2026)** : permettre d'ajouter une nouvelle application, ou de
   remplacer le code d'une application déjà intégrée, directement dans `applications/` — sans passer
   par une opération manuelle (git/copie de fichiers). Aujourd'hui, seules l'activation/désactivation

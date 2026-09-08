@@ -130,24 +130,52 @@ function setupEntityPickerToggle(): void {
   });
 }
 
+/** ⭐ 07/09/2026 : "Ajouter un texte" — même patron minimal que addEntityToCurrentFloorplan
+ *  ci-dessus (petite invite pour le contenu, position par défaut au centre, l'utilisateur le
+ *  repositionne ensuite par glisser-déposer en mode édition). */
+function setupAddTextButton(): void {
+  const btn = document.getElementById('btn-add-text') as HTMLButtonElement | null;
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    if (!currentContainer) return;
+    const text = window.prompt('Texte à afficher :');
+    const trimmed = text?.trim();
+    if (!trimmed) return;
+    currentContainer.addText(trimmed);
+  });
+}
+
 function setupNewFloorplanPanel(): void {
   const btn = document.getElementById('btn-new-floorplan') as HTMLButtonElement | null;
   const panel = document.getElementById('new-floorplan-panel');
   const form = document.getElementById('new-floorplan-form') as HTMLFormElement | null;
   const nameInput = document.getElementById('new-floorplan-name') as HTMLInputElement | null;
   const fileInput = document.getElementById('new-floorplan-file') as HTMLInputElement | null;
-  if (!btn || !panel || !form || !nameInput || !fileInput) return;
+  const blankCheckbox = document.getElementById('new-floorplan-blank') as HTMLInputElement | null;
+  if (!btn || !panel || !form || !nameInput || !fileInput || !blankCheckbox) return;
 
   btn.addEventListener('click', () => panel.classList.toggle('active'));
 
+  // "Page libre" : le champ fichier devient inutile et non requis (voir DataService.uploadFloorplan,
+  // file désormais optionnel).
+  blankCheckbox.addEventListener('change', () => {
+    const blank = blankCheckbox.checked;
+    fileInput.required = !blank;
+    fileInput.style.display = blank ? 'none' : '';
+    if (blank) fileInput.value = '';
+  });
+
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const file = fileInput.files?.[0];
-    if (!file || !nameInput.value.trim()) return;
+    const isBlank = blankCheckbox.checked;
+    const file = isBlank ? null : (fileInput.files?.[0] ?? null);
+    if ((!isBlank && !file) || !nameInput.value.trim()) return;
 
     try {
       await dataService.uploadFloorplan(file, nameInput.value.trim());
       form.reset();
+      fileInput.required = true;
+      fileInput.style.display = '';
       panel.classList.remove('active');
     } catch (error) {
       console.error('[dashboard-app] Échec de création du plan:', error);
@@ -368,6 +396,7 @@ dataService.onFloorplansReady(async () => {
 
 setupEditModeToggle();
 setupEntityPickerToggle();
+setupAddTextButton();
 setupNewFloorplanPanel();
 setupDeleteFloorplanButton();
 setupDeployFloorplanButton();
@@ -377,3 +406,11 @@ setupFloorplanArrows();
 setupPlanScaleControl();
 setupEntityFocusLabel();
 setInterval(updateConnectionStatus, 3000);
+
+// ⭐ 08/09/2026 : sauvegarde immédiate d'une modif de position/texte encore en attente (debounce
+// 5s, voir PositionManager) quand la page se ferme directement — fermer l'onglet/quitter HAPLAN
+// sans passer par un changement de plan ou une sortie de mode édition (les deux appellent déjà
+// forceSave()) perdait silencieusement la modif, le timer JS étant détruit avec la page.
+window.addEventListener('beforeunload', () => {
+  currentContainer?.forceSave();
+});

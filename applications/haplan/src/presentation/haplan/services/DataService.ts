@@ -24,6 +24,7 @@ let dataServiceInstance: DataService;
 interface HaplanFloorplan {
   filename: string;
   positions: Array<{ entity_id: string; x: number | null; y: number | null }>;
+  texts: Array<{ id: string; text: string; x: number; y: number; size: 'small' | 'medium' | 'large'; color: string }>;
 }
 
 type StateListener = (data: { entity_id: string; state: string; attributes: Record<string, unknown> }) => void;
@@ -237,6 +238,12 @@ export class DataService {
       .map((p) => ({ entity_id: p.entity_id, position: { x: p.x as number, y: p.y as number } }));
   }
 
+  /** ⭐ 07/09/2026 : pendant de `getPositionsForFloorplan` ci-dessus pour les textes libres. */
+  getTextsForFloorplan(id: string): Array<{ id: string; text: string; x: number; y: number; size: 'small' | 'medium' | 'large'; color: string }> {
+    const floorplan = this.floorplans.get(id);
+    return floorplan?.texts ?? [];
+  }
+
   getFloorplanImage(id: string): HTMLImageElement | undefined {
     return this.floorplanImages.get(id);
   }
@@ -269,9 +276,13 @@ export class DataService {
    * par le canal habituel (`haplan:floorplans:list`) — cette méthode ne fait que vérifier que la
    * requête HTTP elle-même a été acceptée (mauvais type de fichier → rejet immédiat).
    */
-  async uploadFloorplan(file: File, name: string, _description?: string): Promise<void> {
+  async uploadFloorplan(file: File | null, name: string, _description?: string): Promise<void> {
     const formData = new FormData();
-    formData.append('image', file);
+    // ⭐ 07/09/2026 : `file` est désormais optionnel — absent = "page libre" (voir
+    // PresentationServer.ts, route qui ne requiert plus que `floorplanId`).
+    if (file) {
+      formData.append('image', file);
+    }
     formData.append('floorplanId', name);
 
     const response = await fetch('/api/haplan/floorplans/upload', { method: 'POST', body: formData });
@@ -318,11 +329,17 @@ export class DataService {
     this.errorListeners.add(callback);
   }
 
-  /** Ajout/déplacement/suppression d'icône — PositionManager.ts envoie toujours la liste COMPLÈTE
-   *  des positions du plan (jamais un delta), sous la forme {entity_id, position:{x,y}}[]. */
-  updatePositionsForFloorplan(floorplanId: string, positions: Array<{ entity_id: string; position: { x: number; y: number } }>): void {
+  /** Ajout/déplacement/suppression d'icône OU de texte libre — PositionManager.ts envoie toujours
+   *  la liste COMPLÈTE des positions ET des textes du plan (jamais un delta), positions sous la
+   *  forme {entity_id, position:{x,y}}[]. `texts` reprend directement la forme attendue côté
+   *  serveur (voir HaplanTextEntry), aucun aplatissement nécessaire contrairement aux positions. */
+  updatePositionsForFloorplan(
+    floorplanId: string,
+    positions: Array<{ entity_id: string; position: { x: number; y: number } }>,
+    texts: Array<{ id: string; text: string; x: number; y: number; size: 'small' | 'medium' | 'large'; color: string }> = []
+  ): void {
     const flatPositions = positions.map((p) => ({ entity_id: p.entity_id, x: p.position.x, y: p.position.y }));
-    this.socket.emit('haplan:floorplan:positions:update', { floorplanId, positions: flatPositions });
+    this.socket.emit('haplan:floorplan:positions:update', { floorplanId, positions: flatPositions, texts });
   }
 
   /** Non présent dans le DataService original — sélecteur d'entité (voir plan de portage Phase 2). */

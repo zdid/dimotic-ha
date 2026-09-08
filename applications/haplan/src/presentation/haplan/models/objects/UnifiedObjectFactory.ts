@@ -111,6 +111,16 @@ export class UnifiedObjectFactory {
     });
 
     this.registerWindowType('thermostat', (entity) => new ThermostatWindow(entity));
+
+    // ⭐ 08/09/2026 : réglage booléen manuel (input_boolean.*, ex: "petit ballon en premier") —
+    // même rendu qu'un switch générique (icône bascule ON/OFF), mais SANS passer par
+    // SwitchTypeDetector (voir createObjectWithWindow, 'input_boolean' hors de isSwitch) : un nom
+    // de réglage peut contenir "ballon"/"vmc"/etc. sans être l'appareil physique correspondant.
+    this.registerEntityType('input_boolean', (entity_id, position, state, dataService) => {
+      return new EnhancedSwitchObject(entity_id, position, { width: 24, height: 24 }, dataService);
+    });
+
+    this.registerWindowType('input_boolean', (entity) => new SwitchWindow(entity as MinimalLightObject));
   }
 
   /**
@@ -224,7 +234,16 @@ export class UnifiedObjectFactory {
     }
     
     if (domain === 'climate') return 'thermostat';
-    
+
+    // ⭐ 08/09/2026 : un helper input_boolean (réglage manuel utilisé par une automation, ex:
+    // "petit ballon en premier") n'est ni une lumière ni un switch réel — le laisser tomber dans
+    // le repli 'light' par défaut le faisait passer par la détection de sous-type par mot-clé
+    // (SwitchTypeDetector), qui matchait à tort "ballon d'eau chaude" sur de simples noms de
+    // réglage contenant le mot "ballon". Type dédié, enregistré dans registerDefaultTypes()
+    // ci-dessous, qui court-circuite cette détection (voir createObjectWithWindow : 'input_boolean'
+    // n'est pas dans isSwitch).
+    if (domain === 'input_boolean') return 'input_boolean';
+
     return 'light'; // Type par défaut
   }
 }

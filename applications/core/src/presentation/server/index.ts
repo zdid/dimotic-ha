@@ -295,8 +295,8 @@ export class PresentationServer {
         }
         const file = (req as Request & { file?: Express.Multer.File }).file;
         const floorplanId = req.body?.floorplanId;
-        if (!file || !floorplanId) {
-          res.status(400).json({ error: 'Bad Request', message: 'Champs "image" et "floorplanId" requis' });
+        if (!floorplanId) {
+          res.status(400).json({ error: 'Bad Request', message: 'Champ "floorplanId" requis' });
           return;
         }
         if (!this.eventBus) {
@@ -304,10 +304,11 @@ export class PresentationServer {
           return;
         }
 
+        // ⭐ 07/09/2026 : `image` est désormais optionnel — un plan "page libre" (sans image de
+        // fond) se crée avec le même champ `floorplanId` seul, aucun fichier joint.
         this.eventBus.emitGeneric('haplan:internal:floorplan:create', {
           floorplanId,
-          imageBuffer: file.buffer,
-          imageMimeType: file.mimetype
+          ...(file ? { imageBuffer: file.buffer, imageMimeType: file.mimetype } : {})
         });
         res.status(200).json({ success: true });
       });

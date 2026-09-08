@@ -62,6 +62,10 @@ export class EnhancedRadiatorObject extends EnhancedSwitchObject {
 
     const iconElement = this.element.querySelector('i') as HTMLElement;
     if (iconElement) {
+      // ⭐ 08/09/2026, même bug que EnhancedSwitchObject.ts corrigé juste avant : seule la couleur
+      // était rafraîchie ici, jamais la classe — le glyphe restait figé sur fa-fire/fa-snowflake
+      // du tout premier rendu malgré les deux icônes prévues (feu/flocon, voir getIconForState()).
+      iconElement.className = `fas ${this.getIconForState()}`;
       iconElement.style.color = this.isOn ? this.colorScheme.primary : this.colorScheme.secondary;
     }
   }

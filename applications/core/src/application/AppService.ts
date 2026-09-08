@@ -159,11 +159,15 @@ export class AppService {
     // topic depuis n'importe où) — indépendant de `ha.mqtt_enable` (bridges d'intégration HA).
     const projectRoot = process.env.PROJECT_ROOT || path.resolve(path.join(__dirname, '../../../'));
     const coreDir = path.join(projectRoot, 'applications', 'core');
-    this.supervisorBridge = new SupervisorEventBridge(this.eventBus, logger);
-    this.processSupervisor = new ProcessSupervisor(logger, coreDir, this.supervisorBridge);
-
     const bootConfig = configService.getConfig();
     const machineId = bootConfig.core.machineId;
+    this.supervisorBridge = new SupervisorEventBridge(this.eventBus, logger);
+    // ⭐ 06/09/2026 — machineId transmis aux apps en process séparé (variable d'environnement
+    // DIMOTIC_MACHINE_ID, voir ProcessSupervisor.spawnChild()) : leur bridgeInstance devient
+    // `<préfixe configurable>_<machineId>` calculé à la volée au lieu d'un suffixe aléatoire généré
+    // et persisté par app (voir arexx/evoo7/rfxcom/rpigpio ConfigSchema/Service.ts).
+    this.processSupervisor = new ProcessSupervisor(logger, coreDir, machineId, this.supervisorBridge);
+
     const mqttConfig = bootConfig.ha?.mqtt;
     if (mqttConfig) {
       const brokerConfig = {
@@ -648,6 +652,19 @@ export class AppService {
         // que core n'a pas redémarré — voir deactivateSeparateProcessApp() ci-dessous, même bug,
         // sens inverse.
         this.eventBus.emit('app:modules:registered', { modules: this.modules });
+        // ⭐ 05/09/2026, bug réel corrigé (retour utilisateur teleinfo) : `app:modules:list` (ci-
+        // dessus) alimente le MENU (Sidebar.ts), qui affichait bien la nouvelle app aussitôt
+        // activée — mais le FORMULAIRE "Paramètres Techniques" (ConfigForm.ts) lit ses métadonnées
+        // depuis un cache CLIENT séparé (`ModuleManager.moduleUiMetadata`), rempli uniquement par
+        // `app:module:ui:register` — événement que seul `emitModuleUiMetadata()` (scan de démarrage
+        // complet) émettait jusqu'ici, jamais ce chemin d'activation à chaud. Résultat observé :
+        // "Pas de configuration UI disponible" tant que core n'était pas redémarré, malgré une
+        // activation "réussie" côté menu. Corrigé en émettant aussi cet événement ici, pour CE seul
+        // module fraîchement activé (pas emitModuleUiMetadata() en entier, inutile de reproposer
+        // les modules déjà connus).
+        if (appModule.configUi) {
+          this.eventBus.emit('app:module:ui:register', { moduleId: appModule.id, metadata: appModule.configUi });
+        }
       }
       return true;
     } catch (error) {
@@ -1061,9 +1078,17 @@ export class AppService {
    * Dépôt de la carte Plan Lovelace HAPLAN — pas de sélecteur de cible pour cette première version
    * (voir specs §17.9/hors périmètre) : avec exactement une cible `haStackTargets` configurée (cas
    * réel), on la choisit implicitement ; sinon erreur claire plutôt qu'un choix risqué.
+   *
+   * ⭐ 08/09/2026, bug réel corrigé : `getHaStackTargets()` renvoie AUSSI les auto-annonces gossip
+   * (`origin: 'gossip'`, voir TargetGossipService) — cette même machine s'annonce sous un
+   * `machineId` DIFFÉRENT à chaque redémarrage, sans jamais nettoyer les anciennes annonces
+   * (constaté en réel : 4 entrées `origin: gossip` pour le même hôte que l'unique entrée `local`,
+   * `haStackTargets.length` valant 5 pour une seule vraie cible HA). Seules les cibles `origin:
+   * 'local'` (celles que l'utilisateur a lui-même configurées sur CETTE instance) comptent pour ce
+   * dépôt — n'importe quel nombre de doublons gossip du même hôte n'a alors plus d'effet.
    */
   private async handleHaplanLovelaceDeploy(data: { yaml: string; images: Array<{ localPath: string; filename: string }> }): Promise<void> {
-    const targets = this.configService.getHaStackTargets();
+    const targets = this.configService.getHaStackTargets().filter((t) => t.origin === 'local');
     if (targets.length !== 1) {
       const error = targets.length === 0
         ? 'Aucune cible HA+Mosquitto configurée (Paramètres Techniques > Déploiement HA)'

@@ -1,4 +1,5 @@
 import { HAObject } from '../models/objects/HAObject';
+import { HAText, type HATextSize } from '../models/objects/HAText';
 import { UnifiedObjectFactory } from '../models/objects/UnifiedObjectFactory';
 import { FloorPlan } from '../models/FloorPlan';
 import { PositionManager } from '../models/PositionManager';
@@ -11,9 +12,10 @@ export class ObjectManager {
   private floorPlan: FloorPlan;
   private positionManager: PositionManager;
   private objects: Map<string, HAObject> = new Map();
+  private texts: Map<string, HAText> = new Map();
   private commandService : DataService;
   private objectScale: number = 1;
-  
+
 
   constructor(floorPlan: FloorPlan, positionManager: PositionManager, commandService: DataService) {
     this.floorPlan = floorPlan;
@@ -92,6 +94,62 @@ export class ObjectManager {
     return entity;
   }
 
+  /**
+   * ⭐ 07/09/2026 : pendant de `createObjectFromConfig` pour un texte libre — pas de fabrique/état
+   * HA à résoudre (voir HAText.ts), juste l'instanciation + ajout au plan + activation du drag si
+   * le mode édition est déjà actif (même garde que pour les entités ci-dessus).
+   */
+  async createTextFromConfig(
+    config: { id: string; text: string; position: { x: number; y: number }; size?: HATextSize; color?: string },
+    skipSave: boolean = false
+  ): Promise<HAText> {
+    const existing = this.texts.get(config.id);
+    if (existing) {
+      console.warn(`[ObjectManager] Texte déjà existant pour ${config.id}, suppression avant recréation`);
+      this.floorPlan.removeText(config.id);
+      this.texts.delete(config.id);
+    }
+
+    const text = new HAText(config.id, config.text, config.position, config.size ?? 'medium', config.color ?? '#FFFFFF');
+    text.setPositionManager(this.positionManager);
+
+    this.texts.set(config.id, text);
+    this.floorPlan.addText(text);
+
+    if (!skipSave) {
+      this.positionManager.updateText(config.id, {
+        text: config.text,
+        x: config.position.x,
+        y: config.position.y,
+        size: config.size ?? 'medium',
+        color: config.color ?? '#FFFFFF'
+      });
+    }
+
+    if (this.floorPlan && this.floorPlan['container']?.classList.contains('edit-mode')) {
+      text.enableDrag();
+    }
+
+    return text;
+  }
+
+  removeText(id: string): void {
+    const text = this.texts.get(id);
+    if (text) {
+      this.floorPlan.removeText(id);
+      this.texts.delete(id);
+      this.positionManager.removeText(id);
+    }
+  }
+
+  hasText(id: string): boolean {
+    return this.texts.has(id);
+  }
+
+  getAllTexts(): HAText[] {
+    return Array.from(this.texts.values());
+  }
+
   setObjectScale(scale: number): void {
     this.objectScale = scale;
     this.objects.forEach(object => {
@@ -141,7 +199,7 @@ export class ObjectManager {
     const enableDragPromises = Array.from(this.objects.values()).map(object => {
       return object.enableDrag();
     });
-    
+
     try {
       await Promise.all(enableDragPromises);
       console.log('All objects drag enabled successfully');
@@ -149,6 +207,10 @@ export class ObjectManager {
       console.error('Failed to enable drag for some objects:', error);
       throw error;
     }
+
+    // ⭐ 07/09/2026 : mêmes règles pour les textes libres (synchrone, pas de conteneur à attendre —
+    // voir HAText.enableDrag, contrairement à HAObject.enableDrag qui attend .floorplan-drag-container).
+    this.texts.forEach(text => text.enableDrag());
   }
 
   disableEditMode(): void {
@@ -157,6 +219,7 @@ export class ObjectManager {
     this.objects.forEach(object => {
       object.disableDrag();
     });
+    this.texts.forEach(text => text.disableDrag());
   }
 
   setCommandService(commandService: DataService): void {

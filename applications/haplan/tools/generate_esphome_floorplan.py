@@ -31,6 +31,15 @@ icon_premier_light_xxx) — indispensable dès qu'un même entity_id apparaît s
 ("original" duplique tout le monde), sans quoi deux widgets porteraient le même id LVGL (erreur de
 compilation ESPHome, id non unique).
 
+⭐ 08/09/2026, texte libre (fonctionnalité "page libre") : chaque texte de `floorplan["texts"]`
+devient un `label:` LVGL statique (build_text_widget()), même transformation de coordonnées que les
+icônes. Une "page libre" (créée sans image, voir HaplanService.handleFloorplanCreate) est une vraie
+image PNG générée une fois à la création (fond transparent) — traitée ici EXACTEMENT comme n'importe
+quel autre plan, aucun cas spécial : fit_and_pad() la ramène déjà correctement au 800x480 cible avec
+son propre ratio préservé. Police par palier de taille (small/medium/large) plutôt que par texte,
+glyphes restreints aux caractères réellement utilisés à ce palier (voir build_glyphs_literal()),
+même principe que font_sensor pour les valeurs de capteur.
+
 Corrige plusieurs bugs réels trouvés en testant sur écran physique le 13/08/2026 (voir mémoire
 projet `project_haplan_esphome_s3_display` pour le détail complet) :
 - `align: CENTER` sur un widget LVGL positionne le WIDGET par rapport à son PARENT, pas le texte
@@ -84,6 +93,17 @@ LABEL_HEIGHT = 32        # élargi depuis 26, idem
 # point, quelle que soit sa largeur, plutôt que centré dans une boîte qui ferait varier l'écart
 # visible selon le nombre de chiffres affichés).
 SENSOR_ICON_LABEL_GAP_PX = 4
+
+# ⭐ 08/09/2026, texte libre (fonctionnalité "page libre") — mêmes trois paliers en px que
+# HA_TEXT_FONT_SIZE_PX côté web (HAText.ts) et TEXT_FONT_SIZE_PX côté carte Lovelace
+# (lovelace-generator.ts), pour un rendu cohérent d'un rendu à l'autre même si le DPI réel de
+# l'écran ESP32 diffère de celui d'un navigateur/téléphone.
+TEXT_FONT_SIZE_BY_SIZE = {"small": 14, "medium": 20, "large": 28}
+# Largeur moyenne d'un caractère en fraction de la taille de police (Roboto, proportionnelle) —
+# approximation généreuse pour dimensionner la boîte du label à partir du nombre de caractères
+# (aucune mesure réelle possible hors du firmware, contrairement à un navigateur/une carte HA qui
+# mesurent le texte réellement rendu).
+TEXT_CHAR_WIDTH_FACTOR = 0.62
 
 # Flèches de navigation entre plans (top_layer, voir haplan-display.yaml) — police et taille
 # séparées de font_icons (14px, pensée pour des pastilles de 24px) : "4 fois trop petites" au
@@ -362,6 +382,56 @@ def build_sensor_widget(page: str, entity_id: str, px: int, py: int, canvas_w: i
     return sensor_lines, widget_lines
 
 
+def escape_lvgl_string(text: str) -> str:
+    """Échappe pour insertion dans une chaîne YAML/C++ entre guillemets doubles — un texte libre
+    est saisi librement par l'utilisateur, peut contenir des guillemets ou antislashs."""
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def build_text_widget(page: str, text_entry: dict, px: int, py: int, canvas_w: int, canvas_h: int) -> list[str]:
+    """Texte libre — un seul `label:` LVGL statique, contenu figé au moment de la génération
+    (jamais recalculé à l'exécution, contrairement aux icônes/capteurs : ⭐ 08/09/2026, fonctionnalité
+    "page libre"/texte libre, voir fonctionnelles-haplan_specs). Boîte dimensionnée à partir du
+    nombre de caractères (voir TEXT_CHAR_WIDTH_FACTOR) plutôt qu'une largeur fixe, qui tronquerait
+    un texte long ou laisserait un vide excessif pour un texte court — même souci que LABEL_WIDTH
+    pour les capteurs, mais le contenu variable ici interdit une constante unique."""
+    size = text_entry.get("size") or "medium"
+    font_size = TEXT_FONT_SIZE_BY_SIZE.get(size, TEXT_FONT_SIZE_BY_SIZE["medium"])
+    color = (text_entry.get("color") or "#FFFFFF").lstrip("#").upper()
+    content = text_entry["text"]
+
+    box_w = min(canvas_w - 8, max(font_size * 2, round(len(content) * font_size * TEXT_CHAR_WIDTH_FACTOR)))
+    box_h = round(font_size * 1.4)
+    bx, by = clamp_box(px, py, box_w, box_h, canvas_w, canvas_h)
+
+    return [
+        f"  - label:",
+        f"      id: text_{page}_{slug(text_entry['id'])}",
+        f"      x: {bx}",
+        f"      y: {by}",
+        f"      width: {box_w}",
+        f"      height: {box_h}",
+        f"      text: \"{escape_lvgl_string(content)}\"",
+        f"      text_align: CENTER",
+        f"      text_color: 0x{color}",
+        f"      text_font: font_text_{size}",
+        # Boîte transparente — même raisonnement que les capteurs plus haut : un fond opaque
+        # masquerait le plan/les icônes voisines dès que la boîte déborde légèrement.
+        f"      bg_opa: TRANSP",
+    ]
+
+
+def build_glyphs_literal(chars: set) -> str:
+    """Construit la valeur `glyphs: "..."` d'une police à partir d'un ensemble de caractères
+    réellement utilisés (voir font_text_<size> dans main()) — même technique que font_sensor
+    (glyphes restreints au contenu réel plutôt qu'une police complète), généralisée : le contenu
+    d'un texte libre est saisi librement par l'utilisateur (accents français compris), calculé
+    dynamiquement ici plutôt que codé en dur. Échappé pour rester une chaîne YAML/C++ valide."""
+    ordered = "".join(sorted(chars))
+    escaped = ordered.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def process_floorplan(floorplan_id: str, floorplan: dict, args, out_dir: Path) -> dict:
     """Génère l'image + les widgets d'un plan. Retourne un résumé (page id, lignes générées)."""
     page = slug(floorplan_id) or "plan"
@@ -377,6 +447,7 @@ def process_floorplan(floorplan_id: str, floorplan: dict, args, out_dir: Path) -
     final_img.save(out_dir / image_filename)
 
     positions = [p for p in floorplan.get("positions", []) if p.get("x") is not None and p.get("y") is not None]
+    texts = [t for t in floorplan.get("texts", []) if t.get("text")]
 
     sensor_block: list[str] = []
     text_sensor_block: list[str] = []
@@ -400,14 +471,29 @@ def process_floorplan(floorplan_id: str, floorplan: dict, args, out_dir: Path) -
             text_sensor_block.extend(sensor_lines)
         widget_block.extend(widget_lines)
 
+    # ⭐ 08/09/2026, texte libre — même transformation de coordonnées que les positions ci-dessus
+    # (même espace normalisé 0-1 relatif à l'image source). `text_entries_used` remonté à main()
+    # pour agréger les polices réellement nécessaires (voir build font: dans main()) : les textes
+    # hors cadre (skip) ne doivent pas réserver une police pour rien.
+    text_entries_used: list[dict] = []
+    for t in texts:
+        px = round(offset_x + t["x"] * src_img.width * scale)
+        py = round(offset_y + t["y"] * src_img.height * scale)
+        if not (0 <= px <= args.width and 0 <= py <= args.height):
+            skipped += 1
+            continue
+        widget_block.extend(build_text_widget(page, t, px, py, args.width, args.height))
+        text_entries_used.append(t)
+
     return {
         "page": page,
         "floorplan_id": floorplan_id,
         "image_filename": image_filename,
+        "text_entries_used": text_entries_used,
         "sensor_block": sensor_block,
         "text_sensor_block": text_sensor_block,
         "widget_block": widget_block,
-        "placed": len(positions) - skipped,
+        "placed": len(positions) + len(texts) - skipped,
         "skipped": skipped,
     }
 
@@ -599,6 +685,26 @@ def main() -> None:
     lines.append(f"    id: font_sensor")
     lines.append(f"    size: {SENSOR_FONT_SIZE}")
     lines.append('    glyphs: "0123456789.-"')
+
+    # ⭐ 08/09/2026, texte libre — une police par PALIER DE TAILLE réellement utilisé (pas par
+    # texte : LVGL référence une police par id, pas par caractères), glyphes = union des caractères
+    # de tous les textes de ce palier à travers TOUS les plans générés. Un palier non utilisé par
+    # aucun texte n'a pas d'entrée (évite une police vide, refusée par ESPHome).
+    text_sizes_used: dict[str, set] = {}
+    for r in results:
+        for t in r["text_entries_used"]:
+            size = t.get("size") or "medium"
+            chars = text_sizes_used.setdefault(size, set())
+            chars.update(t["text"])
+            chars.add(" ")  # toujours inclus (texte multi-mots), même si un texte isolé n'en a pas
+    for size in ("small", "medium", "large"):
+        if size not in text_sizes_used:
+            continue
+        lines.append('  - file: "gfonts://Roboto"')
+        lines.append(f"    id: font_text_{size}")
+        lines.append(f"    size: {TEXT_FONT_SIZE_BY_SIZE[size]}")
+        lines.append(f"    glyphs: {build_glyphs_literal(text_sizes_used[size])}")
+
     lines.append("")
 
     all_text_sensor = [l for r in results for l in r["text_sensor_block"]]

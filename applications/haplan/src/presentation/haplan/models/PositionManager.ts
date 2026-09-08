@@ -1,18 +1,33 @@
 import { HAObject } from './objects/HAObject';
 
+/** ⭐ 07/09/2026 : un texte libre (voir HAText.ts) — même Map par plan que les positions d'entités,
+ *  mais indexée par un identifiant de texte (pas un entity_id) et portant le contenu/style, pas
+ *  seulement des coordonnées. */
+export interface TextEntry {
+  text: string;
+  x: number;
+  y: number;
+  size: 'small' | 'medium' | 'large';
+  color: string;
+}
+
 export class PositionManager {
   private positionsByFloorplan: Map<string, Map<string, {x: number, y: number}>> = new Map();
+  private textsByFloorplan: Map<string, Map<string, TextEntry>> = new Map();
   private currentFloorplanId: string = 'default';
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private saveCallback: (floorplanId: string, positions: any[]) => void;
+  private saveCallback: (floorplanId: string, positions: any[], texts: any[]) => void;
 
-  constructor(saveCallback: (floorplanId: string, positions: any[]) => void, currentFloorplanId: string = 'default') {
+  constructor(saveCallback: (floorplanId: string, positions: any[], texts: any[]) => void, currentFloorplanId: string = 'default') {
     this.saveCallback = saveCallback;
     this.currentFloorplanId = currentFloorplanId;
-    
+
     // Initialiser le plan courant s'il n'existe pas
     if (!this.positionsByFloorplan.has(this.currentFloorplanId)) {
       this.positionsByFloorplan.set(this.currentFloorplanId, new Map());
+    }
+    if (!this.textsByFloorplan.has(this.currentFloorplanId)) {
+      this.textsByFloorplan.set(this.currentFloorplanId, new Map());
     }
   }
 
@@ -25,7 +40,10 @@ export class PositionManager {
       this.positionsByFloorplan.set(floorplanId, new Map());
       console.log(`[TRACE] Nouveau plan ${floorplanId} initialisé avec un Map vide`);
     }
-    
+    if (!this.textsByFloorplan.has(floorplanId)) {
+      this.textsByFloorplan.set(floorplanId, new Map());
+    }
+
     this.currentFloorplanId = floorplanId;
     console.log(`[TRACE] Plan courant mis à jour: ${this.currentFloorplanId}`);
   }
@@ -82,20 +100,67 @@ export class PositionManager {
 
   private savePositions(): void {
     const currentPositions = this.positionsByFloorplan.get(this.currentFloorplanId);
-    
+
     if (currentPositions) {
       const positions = Array.from(currentPositions.entries()).map(([entity_id, pos]) => ({
         entity_id: entity_id,
         position: pos
       }));
+      const texts = this.getAllTextsForFloorplan(this.currentFloorplanId);
 
-      console.log(`[TRACE] PositionManager.savePositions appelé pour plan ${this.currentFloorplanId} avec les positions:`, positions);
+      console.log(`[TRACE] PositionManager.savePositions appelé pour plan ${this.currentFloorplanId} avec les positions:`, positions, 'et les textes:', texts);
       console.log(`[TRACE] Appel du callback de sauvegarde...`);
-      
-      this.saveCallback(this.currentFloorplanId, positions);
+
+      this.saveCallback(this.currentFloorplanId, positions, texts);
     } else {
       console.error(`[TRACE] Impossible de sauvegarder les positions: aucun Map trouvé pour le plan ${this.currentFloorplanId}`);
     }
+  }
+
+  // ==========================================================================
+  // Textes libres (⭐ 07/09/2026) — mêmes règles que les positions ci-dessus : debounce partagé
+  // (une modif de texte déclenche la même sauvegarde 5s que le déplacement d'une icône), liste
+  // toujours complète (jamais un delta), remplacée en bloc côté serveur.
+  // ==========================================================================
+
+  updateText(id: string, entry: TextEntry, skipSave: boolean = false): void {
+    if (!this.textsByFloorplan.has(this.currentFloorplanId)) {
+      this.textsByFloorplan.set(this.currentFloorplanId, new Map());
+    }
+    this.textsByFloorplan.get(this.currentFloorplanId)!.set(id, entry);
+    if (!skipSave) {
+      this.scheduleSave();
+    }
+  }
+
+  removeText(id: string): void {
+    const currentTexts = this.textsByFloorplan.get(this.currentFloorplanId);
+    if (currentTexts) {
+      currentTexts.delete(id);
+      this.scheduleSave();
+    }
+  }
+
+  getText(id: string): TextEntry | undefined {
+    return this.textsByFloorplan.get(this.currentFloorplanId)?.get(id);
+  }
+
+  /** Charge les textes reçus du serveur pour un plan (chargement initial, `skipSave` implicite —
+   *  aucun appel à `scheduleSave` ici, même convention que `loadPositions` ci-dessous). */
+  loadTexts(floorplanId: string, texts: Array<{ id: string; text: string; x: number; y: number; size: 'small' | 'medium' | 'large'; color: string }>): void {
+    if (!this.textsByFloorplan.has(floorplanId)) {
+      this.textsByFloorplan.set(floorplanId, new Map());
+    }
+    const floorplanTexts = this.textsByFloorplan.get(floorplanId)!;
+    texts.forEach((t) => {
+      floorplanTexts.set(t.id, { text: t.text, x: t.x, y: t.y, size: t.size, color: t.color });
+    });
+  }
+
+  getAllTextsForFloorplan(floorplanId: string): Array<{ id: string; text: string; x: number; y: number; size: 'small' | 'medium' | 'large'; color: string }> {
+    const texts = this.textsByFloorplan.get(floorplanId);
+    if (!texts) return [];
+    return Array.from(texts.entries()).map(([id, entry]) => ({ id, ...entry }));
   }
 
   /**
@@ -203,5 +268,6 @@ export class PositionManager {
       console.log('[TRACE] PositionManager.cleanup: Timer annulé');
     }
     this.positionsByFloorplan.clear();
+    this.textsByFloorplan.clear();
   }
 }

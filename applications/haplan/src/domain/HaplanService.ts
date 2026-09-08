@@ -25,9 +25,9 @@ import type { HaplanStatus } from './types';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { HAPLAN_SOCKET_EVENTS, HAPLAN_CLIENT_EVENTS, HAPLAN_ALL_EVENTS, HAPLAN_PERSISTENT_EVENTS } from './socket-events';
 import { buildEntityPickerTree } from './taxonomy-tree';
-import type { HaplanPositionEntry } from './floorplans-config-schema';
+import type { HaplanPositionEntry, HaplanTextEntry } from './floorplans-config-schema';
 import { buildLovelaceDashboardYaml } from './lovelace-generator';
-import { flattenPngOntoDarkBackground } from './image-flatten';
+import { flattenPngOntoDarkBackground, createBlankBackgroundPng } from './image-flatten';
 import { readImageDimensions, type ImageDimensions } from './image-dimensions';
 
 const MODULE_NAME = 'haplan';
@@ -39,6 +39,20 @@ const EXTENSION_BY_MIME: Record<string, string> = {
   'image/jpeg': '.jpg',
   'image/webp': '.webp'
 };
+
+/**
+ * ⭐ 08/09/2026, correction de conception (demande explicite) : une "page libre" (créée sans
+ * image, voir handleFloorplanCreate) n'est PAS un cas spécial "pas de filename" propagé partout —
+ * c'est une vraie image unie générée UNE FOIS à la création, ensuite traitée en tout point comme
+ * n'importe quelle image uploadée (même chemin dans FloorPlan.ts/lovelace-generator.ts/
+ * generate_esphome_floorplan.py, aucune branche "sans image" à maintenir). Portrait, ratio
+ * hauteur/largeur 4:3 (essai initial en 16:9 jugé trop étroit — retour utilisateur : ce ratio 4:3
+ * remplit mieux la surface d'un téléphone avec les titres en haut) — même logique de contain-fit
+ * qu'un vrai plan (Math.min(widthRatio, heightRatio), voir FloorPlan.ts) s'applique alors
+ * automatiquement, sans rien coder de spécifique.
+ */
+const BLANK_PLAN_WIDTH = 1080;
+const BLANK_PLAN_HEIGHT = 1440;
 
 /** Même logique que `sanitizeFloorplanBaseName` du haplanserver original (routes.ts) —
  *  alphanumérique/tiret/underscore uniquement, jamais vide. */
@@ -118,7 +132,7 @@ export class HaplanService implements IHaplanService {
 
     // Signal interne (PresentationServer.ts, route POST /api/haplan/floorplans/upload) — jamais
     // exposé à un client Socket.io, volontairement absent de HAPLAN_ALL_EVENTS.
-    this.eventBus.onGeneric<{ floorplanId: string; imageBuffer: Buffer; imageMimeType: string }>(
+    this.eventBus.onGeneric<{ floorplanId: string; imageBuffer?: Buffer; imageMimeType?: string }>(
       'haplan:internal:floorplan:create',
       (data) => this.handleFloorplanCreate(data)
     );
@@ -268,7 +282,7 @@ export class HaplanService implements IHaplanService {
 
     this.eventBus.onGeneric(HAPLAN_CLIENT_EVENTS.GET_TAXONOMY_TREE, () => this.emitTaxonomyTree());
 
-    this.eventBus.onGeneric<{ floorplanId: string; positions: HaplanPositionEntry[] }>(
+    this.eventBus.onGeneric<{ floorplanId: string; positions: HaplanPositionEntry[]; texts?: HaplanTextEntry[] }>(
       HAPLAN_CLIENT_EVENTS.FLOORPLAN_POSITIONS_UPDATE,
       (data) => this.handleFloorplanPositionsUpdate(data)
     );
@@ -298,11 +312,13 @@ export class HaplanService implements IHaplanService {
   }
 
   /**
-   * Ajout/déplacement/suppression d'icône — un seul point d'entrée pour les trois cas (voir
-   * PositionManager.ts côté client, qui envoie toujours la liste COMPLÈTE des positions du plan,
-   * jamais un delta). Remplace entièrement les positions du plan concerné.
+   * Ajout/déplacement/suppression d'icône OU de texte libre — un seul point d'entrée pour tous les
+   * cas (voir PositionManager.ts côté client, qui envoie toujours la liste COMPLÈTE des positions
+   * ET des textes du plan, jamais un delta). Remplace entièrement les deux tableaux du plan
+   * concerné. `texts` est optionnel côté payload (rétrocompatibilité d'un vieux client) — absent =
+   * inchangé, jamais vidé silencieusement.
    */
-  private handleFloorplanPositionsUpdate(data: { floorplanId: string; positions: HaplanPositionEntry[] }): void {
+  private handleFloorplanPositionsUpdate(data: { floorplanId: string; positions: HaplanPositionEntry[]; texts?: HaplanTextEntry[] }): void {
     const floorplan = this.floorplansConfig.floorplans[data.floorplanId];
     if (!floorplan) {
       this.logger.warn('HaplanService', `Positions reçues pour un plan inconnu: ${data.floorplanId}`);
@@ -312,11 +328,16 @@ export class HaplanService implements IHaplanService {
     }
 
     const previousPositions = floorplan.positions;
+    const previousTexts = floorplan.texts;
     floorplan.positions = data.positions;
+    if (data.texts !== undefined) {
+      floorplan.texts = data.texts;
+    }
 
     const result = this.configFileManager.save(this.floorplansConfig);
     if (!result.success) {
       floorplan.positions = previousPositions;
+      floorplan.texts = previousTexts;
       this.logger.error('HaplanService', `Échec de sauvegarde des positions pour ${data.floorplanId}: ${result.error}`);
       this.eventBus.emitGeneric('haplan:error',
         createHaplanError('HAPLAN_SAVE_FAILED', `Échec de sauvegarde: ${result.error}`, 'haplan:floorplan'));
@@ -335,8 +356,12 @@ export class HaplanService implements IHaplanService {
    * et le commentaire sur handleFloorplanPositionsUpdate pour le choix Socket.io vs REST). Écrit
    * l'image sur disque puis ajoute l'entrée ; si la sauvegarde YAML échoue, supprime le fichier
    * déjà écrit pour ne pas laisser une image orpheline.
+   *
+   * ⭐ 07/09/2026 : `imageBuffer`/`imageMimeType` optionnels — leur absence crée une "page libre"
+   * (pas de `filename`, fond uni sur les 3 rendus, voir floorplans-config-schema.ts). Aucun fichier
+   * n'est alors écrit, donc rien à nettoyer côté disque en cas d'échec de sauvegarde YAML.
    */
-  private handleFloorplanCreate(data: { floorplanId: string; imageBuffer: Buffer; imageMimeType: string }): void {
+  private handleFloorplanCreate(data: { floorplanId: string; imageBuffer?: Buffer; imageMimeType?: string }): void {
     if (this.floorplansConfig.floorplans[data.floorplanId]) {
       this.logger.warn('HaplanService', `Création refusée, plan déjà existant: ${data.floorplanId}`);
       this.eventBus.emitGeneric('haplan:error',
@@ -344,34 +369,51 @@ export class HaplanService implements IHaplanService {
       return;
     }
 
-    const extension = EXTENSION_BY_MIME[data.imageMimeType];
-    if (!extension) {
-      this.logger.warn('HaplanService', `Type d'image non supporté: ${data.imageMimeType}`);
-      this.eventBus.emitGeneric('haplan:error',
-        createHaplanError('HAPLAN_SAVE_FAILED', `Type d'image non supporté: ${data.imageMimeType}`, 'haplan:floorplan'));
-      return;
+    let filename: string;
+
+    if (data.imageBuffer && data.imageMimeType) {
+      const extension = EXTENSION_BY_MIME[data.imageMimeType];
+      if (!extension) {
+        this.logger.warn('HaplanService', `Type d'image non supporté: ${data.imageMimeType}`);
+        this.eventBus.emitGeneric('haplan:error',
+          createHaplanError('HAPLAN_SAVE_FAILED', `Type d'image non supporté: ${data.imageMimeType}`, 'haplan:floorplan'));
+        return;
+      }
+
+      filename = `${sanitizeFloorplanFilename(data.floorplanId)}${extension}`;
+      try {
+        fs.mkdirSync(this.resolveImagesDir(), { recursive: true });
+        fs.writeFileSync(path.join(this.resolveImagesDir(), filename), data.imageBuffer);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error('HaplanService', `Échec d'écriture de l'image pour ${data.floorplanId}: ${message}`);
+        this.eventBus.emitGeneric('haplan:error',
+          createHaplanError('HAPLAN_SAVE_FAILED', `Échec d'écriture de l'image: ${message}`, 'haplan:floorplan'));
+        return;
+      }
+    } else {
+      // ⭐ 08/09/2026 : "page libre" — aucun fichier fourni, on en génère un nous-mêmes (fond uni,
+      // portrait, voir BLANK_PLAN_WIDTH/HEIGHT ci-dessus) plutôt que de stocker un plan sans
+      // filename. À partir d'ici, ce plan est indiscernable d'un plan uploadé par l'utilisateur.
+      filename = `${sanitizeFloorplanFilename(data.floorplanId)}.png`;
+      try {
+        fs.mkdirSync(this.resolveImagesDir(), { recursive: true });
+        createBlankBackgroundPng(BLANK_PLAN_WIDTH, BLANK_PLAN_HEIGHT, path.join(this.resolveImagesDir(), filename));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error('HaplanService', `Échec de génération de l'image "page libre" pour ${data.floorplanId}: ${message}`);
+        this.eventBus.emitGeneric('haplan:error',
+          createHaplanError('HAPLAN_SAVE_FAILED', `Échec de génération de l'image: ${message}`, 'haplan:floorplan'));
+        return;
+      }
     }
 
-    const filename = `${sanitizeFloorplanFilename(data.floorplanId)}${extension}`;
-    const imagePath = path.join(this.resolveImagesDir(), filename);
-
-    try {
-      fs.mkdirSync(this.resolveImagesDir(), { recursive: true });
-      fs.writeFileSync(imagePath, data.imageBuffer);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error('HaplanService', `Échec d'écriture de l'image pour ${data.floorplanId}: ${message}`);
-      this.eventBus.emitGeneric('haplan:error',
-        createHaplanError('HAPLAN_SAVE_FAILED', `Échec d'écriture de l'image: ${message}`, 'haplan:floorplan'));
-      return;
-    }
-
-    this.floorplansConfig.floorplans[data.floorplanId] = { filename, positions: [] };
+    this.floorplansConfig.floorplans[data.floorplanId] = { filename, positions: [], texts: [] };
 
     const result = this.configFileManager.save(this.floorplansConfig);
     if (!result.success) {
       delete this.floorplansConfig.floorplans[data.floorplanId];
-      try { fs.unlinkSync(imagePath); } catch { /* best-effort */ }
+      try { fs.unlinkSync(path.join(this.resolveImagesDir(), filename)); } catch { /* best-effort */ }
       this.logger.error('HaplanService', `Échec de sauvegarde du nouveau plan ${data.floorplanId}: ${result.error}`);
       this.eventBus.emitGeneric('haplan:error',
         createHaplanError('HAPLAN_SAVE_FAILED', `Échec de sauvegarde: ${result.error}`, 'haplan:floorplan'));
@@ -466,32 +508,36 @@ export class HaplanService implements IHaplanService {
     this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.LOVELACE_DEPLOY_STARTED, {});
 
     const cacheBust = Date.now();
-    // Dimensions réelles de chaque image — nécessaires pour graver le bon ratio (aspect-ratio) dans
-    // le CSS de chaque vue (voir lovelace-generator.ts) : sans ça, les icônes superposées se
-    // décalent du plan dès que son ratio diffère de celui de l'écran (retour réel, 28/08/2026). Un
-    // plan dont l'image est illisible est juste omis de `dimensions` plutôt que de bloquer tout le
-    // dépôt — buildLovelaceDashboardYaml gère l'absence d'entrée.
-    const dimensions: Record<string, ImageDimensions> = {};
-    for (const [floorplanId, floorplan] of Object.entries(this.floorplansConfig.floorplans)) {
-      try {
-        dimensions[floorplanId] = readImageDimensions(path.join(this.resolveImagesDir(), floorplan.filename));
-      } catch (error) {
-        this.logger.warn('HaplanService', `Dimensions illisibles pour le plan "${floorplanId}" (${floorplan.filename}) : ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-    const yamlContent = buildLovelaceDashboardYaml(this.floorplansConfig.floorplans, dimensions, cacheBust);
-    // Fusionné sur le fond sombre HAPLAN avant envoi (voir image-flatten.ts) — l'original reste
-    // inchangé (toujours utilisé par HAPLAN lui-même, sur son propre fond déjà sombre). Seul le
-    // PNG peut avoir un fond transparent problématique ici (JPEG n'a pas de canal alpha — pas de
-    // fond blanc-sur-blanc possible) ; WEBP transparent non couvert (pngjs ne le décode pas),
-    // limitation connue plutôt qu'un décodeur supplémentaire pour un cas non rencontré à ce jour.
     // Sous-dossier dédié (pas de préfixe sur le nom de fichier lui-même) : le dépôt SSH copie
     // toutes les images en une seule fois vers un répertoire distant (scp source multiple ->
     // répertoire, voir HaplanLovelaceDeployService.ts), qui préserve le nom de fichier LOCAL tel
     // quel — il doit donc déjà être le nom final attendu par le YAML (/local/<filename>).
     const flattenedDir = path.join(this.resolveImagesDir(), '.lovelace-tmp');
     fs.mkdirSync(flattenedDir, { recursive: true });
-    const images = Object.values(this.floorplansConfig.floorplans).map((floorplan) => {
+
+    // Dimensions réelles de chaque image — nécessaires pour graver le bon ratio (aspect-ratio) dans
+    // le CSS de chaque vue (voir lovelace-generator.ts) : sans ça, les icônes superposées se
+    // décalent du plan dès que son ratio diffère de celui de l'écran (retour réel, 28/08/2026). Un
+    // plan dont l'image est illisible est juste omis de `dimensions` plutôt que de bloquer tout le
+    // dépôt — buildLovelaceDashboardYaml gère l'absence d'entrée.
+    //
+    // ⭐ 08/09/2026 : chaque plan (y compris une "page libre") a désormais TOUJOURS un vrai
+    // `filename` (voir handleFloorplanCreate) — même traitement pour tous, aucun cas spécial ici.
+    const dimensions: Record<string, ImageDimensions> = {};
+    const images: Array<{ localPath: string; filename: string }> = [];
+
+    for (const [floorplanId, floorplan] of Object.entries(this.floorplansConfig.floorplans)) {
+      try {
+        dimensions[floorplanId] = readImageDimensions(path.join(this.resolveImagesDir(), floorplan.filename));
+      } catch (error) {
+        this.logger.warn('HaplanService', `Dimensions illisibles pour le plan "${floorplanId}" (${floorplan.filename}) : ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      // Fusionné sur le fond sombre HAPLAN avant envoi (voir image-flatten.ts) — l'original reste
+      // inchangé (toujours utilisé par HAPLAN lui-même, sur son propre fond déjà sombre). Seul le
+      // PNG peut avoir un fond transparent problématique ici (JPEG n'a pas de canal alpha — pas de
+      // fond blanc-sur-blanc possible) ; WEBP transparent non couvert (pngjs ne le décode pas),
+      // limitation connue plutôt qu'un décodeur supplémentaire pour un cas non rencontré à ce jour.
       const sourceImagePath = path.join(this.resolveImagesDir(), floorplan.filename);
       let localPath = sourceImagePath;
       if (floorplan.filename.toLowerCase().endsWith('.png')) {
@@ -499,8 +545,10 @@ export class HaplanService implements IHaplanService {
         flattenPngOntoDarkBackground(sourceImagePath, flattenedImagePath);
         localPath = flattenedImagePath;
       }
-      return { localPath, filename: floorplan.filename };
-    });
+      images.push({ localPath, filename: floorplan.filename });
+    }
+
+    const yamlContent = buildLovelaceDashboardYaml(this.floorplansConfig.floorplans, dimensions, cacheBust);
 
     this.eventBus.emitGeneric('core:haplan-lovelace:deploy', { yaml: yamlContent, images });
   }

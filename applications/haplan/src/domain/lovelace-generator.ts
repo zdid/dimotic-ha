@@ -17,18 +17,39 @@
  */
 
 import * as yaml from 'js-yaml';
-import type { HaplanFloorplanEntry } from './floorplans-config-schema';
+import type { HaplanFloorplanEntry, HaplanTextEntry } from './floorplans-config-schema';
 import type { ImageDimensions } from './image-dimensions';
 import { detectSwitchIconStyle } from './switch-icon';
 import { getSensorIconColor, getSensorRoundDigits } from './sensor-color';
+
+/** ⭐ 08/09/2026, texte libre — mêmes trois paliers que HAText.ts côté web (HA_TEXT_FONT_SIZE_PX)
+ *  et generate_esphome_floorplan.py côté ESP32, pour un rendu cohérent d'un rendu à l'autre même
+ *  si les valeurs exactes en px ne peuvent pas être strictement identiques (échelles différentes). */
+const TEXT_FONT_SIZE_PX: Record<HaplanTextEntry['size'], number> = {
+  small: 14,
+  medium: 20,
+  large: 28
+};
 
 /** Valeur d'un style card_mod : soit du CSS brut (feuille), soit un niveau de perçage
  *  supplémentaire (`{'<sélecteur>$': ...}`, récursif) — voir buildIconColorCardMod plus bas. */
 type CardModStyleValue = string | { [selector: string]: CardModStyleValue };
 
 interface PictureElement {
-  type: 'state-icon' | 'state-label';
-  entity: string;
+  type: 'state-icon' | 'state-label' | 'action-button';
+  entity?: string;
+  /** Texte affiché — `type: 'action-button'` uniquement (texte libre, voir buildTextElement).
+   *  ⭐ 08/09/2026 : `type: 'markdown'` (essai précédent) n'existe PAS comme type d'ÉLÉMENT de
+   *  `picture-elements` (à ne pas confondre avec la carte `markdown`, un type de CARTE) — HA
+   *  affichait "Configuration error" à la place de chaque texte (constaté en réel). Les seuls types
+   *  d'éléments valides sont state-badge/state-icon/state-label/action-button/icon/image/
+   *  conditional/custom (doc officielle) ; aucun n'affiche de texte libre sans entité SAUF
+   *  `action-button`, dont `title` est le texte visible du bouton (`icon`.`title` n'est qu'une
+   *  infobulle au survol, jamais affiché en permanence). `action` est obligatoire côté HA même
+   *  si l'action n'est jamais déclenchée en pratique (voir `pointer-events: none` dans le style).
+   */
+  title?: string;
+  action?: string;
   icon?: string;
   style: Record<string, string>;
   card_mod?: { style: CardModStyleValue };
@@ -204,6 +225,65 @@ function buildElementsForPosition(entityId: string, leftPercent: number, topPerc
 }
 
 /**
+ * ⭐ 08/09/2026, texte libre (voir HaplanTextEntry, fonctionnalité "page libre") — élément
+ * `action-button` de `picture-elements` (voir commentaire sur PictureElement.title/action plus
+ * haut pour l'historique : `markdown` essayé d'abord, invalide comme type d'ÉLÉMENT).
+ *
+ * Couleur — DOM réel inspecté en direct (clic droit > Inspecter sur la carte déployée) après deux
+ * essais infructueux (`color` puis `--primary-color`/`--mdc-theme-primary` seuls, jamais lus) :
+ * `hui-service-button-element` (nous) → shadow → `ha-call-service-button` → shadow →
+ * `ha-progress-button` → shadow → `ha-button` (composant "Web Awesome", pas Material — d'où
+ * l'échec de `--mdc-theme-primary`), dont le `<button part="base">` interne expose `part="base"`
+ * et `part="label"`. Le texte lui-même est du contenu SLOTTÉ (léger DOM de `ha-call-service-
+ * button`) : sa couleur suit l'arbre APLATI (styles définis dans le shadow DOM de `ha-button` sur
+ * l'emplacement du slot), pas l'ascendance en lumière — un `color`/variable posé sur notre propre
+ * élément ne l'atteint donc jamais, quel que soit son nom. `::part()` est le mécanisme standard
+ * pour styliser depuis l'extérieur un élément interne explicitement exposé par un web component
+ * (traverse UNE frontière de shadow DOM par usage) — combiné à `card_mod` pour percer les deux
+ * frontières intermédiaires (`ha-call-service-button`, `ha-progress-button`) qui n'exposent rien
+ * elles-mêmes.
+ */
+function buildTextColorCardMod(color: string): CardModStyleValue {
+  return {
+    'ha-call-service-button$': {
+      'ha-progress-button$': [
+        `ha-button::part(label) { color: ${color} !important; }`,
+        `ha-button::part(base) { color: ${color} !important; }`
+      ].join('\n')
+    }
+  };
+}
+
+function buildTextElement(text: HaplanTextEntry): PictureElement {
+  return {
+    type: 'action-button',
+    title: text.text,
+    // Obligatoire côté HA (voir commentaire sur PictureElement.action) mais jamais réellement
+    // déclenché : `pointer-events: none` ci-dessous empêche tout clic/tap d'atteindre le bouton —
+    // service inoffensif choisi par prudence si jamais un jour ce garde venait à sauter.
+    action: 'persistent_notification.dismiss',
+    card_mod: { style: buildTextColorCardMod(text.color) },
+    style: {
+      left: `${(text.x * 100).toFixed(2)}%`,
+      top: `${(text.y * 100).toFixed(2)}%`,
+      transform: 'translate(-50%, -50%)',
+      'font-size': `${TEXT_FONT_SIZE_PX[text.size]}px`,
+      // Neutralise l'apparence "bouton" par défaut (fond/bordure/ombre) — texte libre, pas une
+      // vraie action, doit se lire comme une étiquette.
+      background: 'transparent',
+      border: 'none',
+      'box-shadow': 'none',
+      padding: '0',
+      // Ombre portée — même raisonnement que buildSensorLabelCardMod plus haut : lisibilité
+      // garantie quelle que soit la zone du fond (image sombre ou "page libre" unie) sous le texte.
+      'text-shadow': '0 0 3px black, 0 0 3px black',
+      'white-space': 'pre',
+      'pointer-events': 'none'
+    }
+  };
+}
+
+/**
  * Une position sur deux (x/y nullables tant que non placée, voir floorplans-config-schema.ts) —
  * seules les positions effectivement placées produisent une ligne. Coordonnées déjà normalisées
  * 0-1 côté HAPLAN, identiques à la convention `left`/`top` en % de HA (§17.7 de la spec).
@@ -294,9 +374,12 @@ function buildCardModStyle(imageWidth: number, imageHeight: number): Record<stri
 }
 
 function buildView(floorplanId: string, floorplan: HaplanFloorplanEntry, dimensions: ImageDimensions, cacheBust?: string | number) {
-  const elements: PictureElement[] = floorplan.positions
-    .filter((p) => p.x !== null && p.y !== null)
-    .flatMap((p) => buildElementsForPosition(p.entity_id, p.x! * 100, p.y! * 100));
+  const elements: PictureElement[] = [
+    ...floorplan.positions
+      .filter((p) => p.x !== null && p.y !== null)
+      .flatMap((p) => buildElementsForPosition(p.entity_id, p.x! * 100, p.y! * 100)),
+    ...floorplan.texts.map(buildTextElement)
+  ];
 
   return {
     title: floorplanId,

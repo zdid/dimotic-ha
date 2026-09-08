@@ -400,6 +400,30 @@ body {
     box-shadow: 0 0 8px rgba(0,0,0,0.2);
 }
 
+/* ⭐ 07/09/2026 : texte libre (voir HAText.ts) — même échelle réglable que les icônes
+   (--plan-scale, §12.2 de la spec, appliqué en CSS ici — pas en JS, même raisonnement que
+   .base-entity.minimal-style ci-dessous pour les capteurs) — pas de fond ni de bordure : seule
+   l'ombre portée posée en JS (textShadow) assure la lisibilité, quel que soit le plan (image ou
+   "page libre"). Taille de base par palier posée en JS via une classe dédiée (pas de style inline
+   qui écraserait ce calc), 3 paliers alignés sur HA_TEXT_FONT_SIZE_PX (HAText.ts). */
+.haplan-text-object {
+    line-height: 1.2;
+    padding: 2px 4px;
+}
+.haplan-text-object.haplan-text-small { font-size: calc(14px * var(--plan-scale, 1)); }
+.haplan-text-object.haplan-text-medium { font-size: calc(20px * var(--plan-scale, 1)); }
+.haplan-text-object.haplan-text-large { font-size: calc(28px * var(--plan-scale, 1)); }
+
+.haplan-text-editor {
+    font-family: inherit;
+    color: #000;
+    background: #fff;
+    border: 2px solid var(--color-primary, #4CAF50);
+    border-radius: 4px;
+    padding: 4px 6px;
+    resize: both;
+}
+
 /* Styles pour les nouvelles entités améliorées */
 .base-entity {
     position: relative;

@@ -1,5 +1,6 @@
 import { DragAndDropConstrained } from '../ui/draganddropconstrained';
 import { HAObject } from './objects/HAObject';
+import { HAText } from './objects/HAText';
 import { PositionManager } from './PositionManager';
 
 
@@ -7,6 +8,7 @@ export class FloorPlan {
   private container: HTMLElement;
   private planImage: HTMLImageElement | null = null;
   private objects: Map<string, HAObject> = new Map();
+  private texts: Map<string, HAText> = new Map();
   private scale: number = 1;
   private offset: {x: number, y: number} = {x: 0, y: 0};
   private lastMousePosition: { x: number, y: number } | null = null;
@@ -108,7 +110,14 @@ export class FloorPlan {
           }
           this.positionObjectElement(element, object.getPosition());
         });
-        
+        this.texts.forEach(text => {
+          const element = text.getElement() || text.render();
+          if (this.dragContainer && element.parentElement !== this.dragContainer) {
+            this.dragContainer.appendChild(element);
+          }
+          this.positionObjectElement(element, text.getPosition());
+        });
+
         resolve();
       };
     });
@@ -144,7 +153,14 @@ export class FloorPlan {
             }
             this.positionObjectElement(element, object.getPosition());
           });
-          
+          this.texts.forEach(text => {
+            const element = text.getElement() || text.render();
+            if (this.dragContainer && element.parentElement !== this.dragContainer) {
+              this.dragContainer.appendChild(element);
+            }
+            this.positionObjectElement(element, text.getPosition());
+          });
+
           resolve();
         });
       });
@@ -203,6 +219,26 @@ export class FloorPlan {
     this.positionObjectElement(element, object.getPosition());
   }
 
+  /** ⭐ 07/09/2026 : pendant de `addObject` pour un texte libre (voir HAText.ts). */
+  addText(text: HAText): void {
+    this.texts.set(text.getId(), text);
+    const element = text.render();
+    this.dragContainer!.appendChild(element);
+    this.positionObjectElement(element, text.getPosition());
+  }
+
+  removeText(id: string): void {
+    const text = this.texts.get(id);
+    if (text) {
+      text.destroy();
+      this.texts.delete(id);
+    }
+  }
+
+  getAllTexts(): HAText[] {
+    return Array.from(this.texts.values());
+  }
+
   /**
    * Méthode unique pour dimensionner le plan et le dragContainer
    * Utilisée à la fois pour le chargement initial et le redimensionnement
@@ -216,7 +252,7 @@ export class FloorPlan {
     // Utiliser le measurementDiv pour obtenir les dimensions réelles
     // Même si le container parent est en display:none
     const measurementRect = this.measurementDiv?.getBoundingClientRect();
-    
+
     if (!measurementRect || measurementRect.width === 0 || measurementRect.height === 0) {
       console.warn('[FloorPlan] Dimensions du measurementDiv nulles, utilisation du container');
       // Fallback sur le container si le measurementDiv a des dimensions nulles
@@ -226,10 +262,10 @@ export class FloorPlan {
         return;
       }
     }
-    
+
     const containerWidth = measurementRect?.width || this.container.getBoundingClientRect().width;
     const containerHeight = measurementRect?.height || this.container.getBoundingClientRect().height;
-    
+
     console.log(`[FloorPlan] Dimensions disponibles: ${containerWidth}x${containerHeight}`);
 
     const imageRect = {
@@ -296,8 +332,20 @@ export class FloorPlan {
         this.dragContainer.appendChild(element);
       }
       const position = object.getPosition();
-      
+
       // Positionner l'élément en pourcentage par rapport au dragContainer
+      element.style.position = 'absolute';
+      element.style.left = `${position.x * 100}%`;
+      element.style.top = `${position.y * 100}%`;
+      element.style.transform = 'translate(-50%, -50%)';
+    });
+
+    this.texts.forEach(text => {
+      const element = text.getElement() || text.render();
+      if (this.dragContainer && element.parentElement !== this.dragContainer) {
+        this.dragContainer.appendChild(element);
+      }
+      const position = text.getPosition();
       element.style.position = 'absolute';
       element.style.left = `${position.x * 100}%`;
       element.style.top = `${position.y * 100}%`;
@@ -580,13 +628,30 @@ export class FloorPlan {
       trashIcon.replaceWith(newTrashIcon);
     }
     
-    // Retirer les écouteurs des objets
+    // Retirer les écouteurs des objets — ⭐ 08/09/2026, bug réel corrigé : `object.render()`
+    // crée à chaque appel un élément FLAMBANT NEUF, jamais inséré dans le DOM (voir HAObject.render(),
+    // toujours appelé via `getElement() || render()` partout ailleurs dans ce fichier, jamais seul).
+    // `element.replaceWith(clone)` sur un nœud sans parent est un no-op silencieux (spec DOM) — la
+    // référence de l'objet était donc réassignée à un clone ORPHELIN, jamais rattaché à
+    // `.floorplan-drag-container`. Sans effet visible immédiatement (l'ancien élément, toujours
+    // affiché, n'était pas celui référencé), mais `enableDrag()` au prochain passage en mode édition
+    // cherchait alors le conteneur depuis cet orphelin et échouait pour TOUS les objets/textes après
+    // un premier aller-retour édition ON/OFF (`Drag container (.floorplan-drag-container) not found
+    // after 2 seconds` en console, TOUS deviennent alors non déplaçables/supprimables).
     this.objects.forEach(object => {
-      const element = object.render();
+      const element = object.getElement() || object.render();
       if (element) {
         const clone = element.cloneNode(true) as HTMLElement;
         element.replaceWith(clone);
         object.setElement(clone); // Mettre à jour la référence
+      }
+    });
+    this.texts.forEach(text => {
+      const element = text.getElement() || text.render();
+      if (element) {
+        const clone = element.cloneNode(true) as HTMLElement;
+        element.replaceWith(clone);
+        text.setElement(clone);
       }
     });
   }

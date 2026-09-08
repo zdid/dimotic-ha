@@ -35,15 +35,45 @@ export class SwitchWindow implements ContextWindow {
     // Appliquer la taille de police
     applyFontSizeToWindow(cwindow);
 
-    // Bouton d'état
-    const toggleBtn = document.createElement('button');
-    toggleBtn.className = 'toggle-button';
-    toggleBtn.textContent = this.entity.getDisplayValue('status') === 'ON' ? 'Éteindre' : 'Allumer';
-    toggleBtn.addEventListener('click', () => {
+    // ⭐ 08/09/2026, demande explicite : toujours les deux boutons Allumer/Éteindre plutôt qu'un
+    // seul bouton bascule dont le libellé dépend de l'état actuel — certaines entités (RF
+    // notamment) ont un retour d'état peu fiable, un bouton unique peut alors afficher le libellé
+    // opposé à l'action réellement voulue. Chaque bouton appelle explicitement turn_on/turn_off
+    // (jamais toggle), même patron que SwitchContextWindow.ts (VMC/ballon/radiateur).
+    const controlsContainer = document.createElement('div');
+    controlsContainer.style.display = 'flex';
+    controlsContainer.style.justifyContent = 'center';
+    controlsContainer.style.gap = '15px';
+    controlsContainer.style.marginTop = '10px';
+
+    const offBtn = document.createElement('button');
+    offBtn.textContent = 'Éteindre';
+    offBtn.style.padding = '8px 16px';
+    offBtn.style.backgroundColor = '#F44336';
+    offBtn.style.color = 'white';
+    offBtn.style.border = 'none';
+    offBtn.style.borderRadius = '4px';
+    offBtn.style.cursor = 'pointer';
+    offBtn.addEventListener('click', () => {
       // Fermeture automatique gérée par ContextWindowManager (isSimple = true)
-      this.onAction('toggle');
+      this.onAction('turn_off');
     });
-    cwindow.appendChild(toggleBtn);
+    controlsContainer.appendChild(offBtn);
+
+    const onBtn = document.createElement('button');
+    onBtn.textContent = 'Allumer';
+    onBtn.style.padding = '8px 16px';
+    onBtn.style.backgroundColor = '#4CAF50';
+    onBtn.style.color = 'white';
+    onBtn.style.border = 'none';
+    onBtn.style.borderRadius = '4px';
+    onBtn.style.cursor = 'pointer';
+    onBtn.addEventListener('click', () => {
+      this.onAction('turn_on');
+    });
+    controlsContainer.appendChild(onBtn);
+
+    cwindow.appendChild(controlsContainer);
 
     return cwindow;
   }

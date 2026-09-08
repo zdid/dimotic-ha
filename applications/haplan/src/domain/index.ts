@@ -108,7 +108,15 @@ export const HAPLAN_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = 
   // plus, listener mort depuis cette date sans jamais avoir été détecté (autoBridgeSocketEvents ne
   // ponte que les valeurs de HAPLAN_SOCKET_EVENTS, pas les événements internes reçus d'une autre
   // application). Corrigé au passage.
-  bridgedEvents: ['espdisplay:deploy-result', 'core:haplan-lovelace:deploy:result']
+  //
+  // ⭐ 07/09/2026, même bug retrouvé en testant "page libre" en local : 'haplan:internal:floorplan:
+  // create' (émis par PresentationServer.ts, route POST /api/haplan/floorplans/upload — CORE lui-
+  // même, pas une autre app) n'était PAS non plus dans cette liste. Écran muet depuis la migration
+  // en process séparé du 24/08 : la route HTTP répondait 200 (accusé de réception seul, voir son
+  // commentaire), mais l'événement n'atteignait jamais HaplanService.handleFloorplanCreate — AUCUN
+  // plan (avec ou sans image) ne pouvait donc être créé depuis l'UI, vérifié en direct par un appel
+  // HTTP direct (curl) qui confirme l'absence totale de trace côté HaplanService.
+  bridgedEvents: ['espdisplay:deploy-result', 'core:haplan-lovelace:deploy:result', 'haplan:internal:floorplan:create']
 };
 
 // ============================================================================
