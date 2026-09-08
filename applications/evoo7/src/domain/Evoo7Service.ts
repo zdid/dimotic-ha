@@ -12,7 +12,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
-import { createEvoo7Error, getStateTopic, getCommandTopic, generateRandomBridgeInstance } from '../../../core/dist/exports';
+import { createEvoo7Error, getStateTopic, getCommandTopic, computeBridgeInstance } from '../../../core/dist/exports';
 import { evoo7ConfigSchema, type Evoo7Config } from './config-schema';
 import type { Evoo7DonneesConfigFile } from './donnees-config-schema';
 import type { Evoo7DataDefinition, Evoo7Status, Evoo7ThermostatConfig } from './types';
@@ -57,6 +57,11 @@ export interface IEvoo7Service {
 
 export class Evoo7Service implements IEvoo7Service {
   private config: Evoo7Config;
+  /** ⭐ 06/09/2026 — `<config.bridgeInstance (préfixe)>_<machineId>`, calculé une fois à la
+   *  construction, jamais persisté (voir computeBridgeInstance/DIMOTIC_MACHINE_ID). Remplace toute
+   *  utilisation de `this.config.bridgeInstance` pour les topics/identités MQTT — `config.
+   *  bridgeInstance` reste le champ éditable (préfixe seul, duplicable sans risque entre machines). */
+  private effectiveBridgeInstance: string;
   private donneesConfig: Evoo7DonneesConfigFile;
   private donnees: Map<string, Evoo7DataDefinition> = new Map();
   private thermostat: Evoo7ThermostatConfig = { enabled: false, allowCooling: false };
@@ -76,6 +81,7 @@ export class Evoo7Service implements IEvoo7Service {
     private readonly configProvider: IAppConfigProvider<Evoo7Config>
   ) {
     this.config = this.loadConfig();
+    this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
     this.configFileManager = new ConfigFileManager(
       this.resolveDonneesConfigPath(),
       this.resolveSeedJsonPath(),
@@ -101,19 +107,9 @@ export class Evoo7Service implements IEvoo7Service {
   /**
    * Charge la config depuis le provider et applique les valeurs par défaut du schéma (le
    * provider retourne {} si la section 'evoo7' n'existe pas encore dans config.yaml).
-   *
-   * ⭐ fonctionnelles-supervisor_specs v2.3 §9.2 : `bridgeInstance` absent de la config sur disque
-   * → tirage aléatoire généré et persisté immédiatement (pas juste un défaut Zod en mémoire).
-   * N'affecte pas une instance déjà en production (valeur déjà écrite en dur, jamais régénérée).
    */
   private loadConfig(): Evoo7Config {
     const raw = this.configProvider.getAppConfig() as Partial<Evoo7Config>;
-    if (!raw.bridgeInstance) {
-      const parsed = evoo7ConfigSchema.parse({ ...raw, bridgeInstance: generateRandomBridgeInstance('evoo7') });
-      this.configProvider.savePartialConfig(parsed);
-      this.logger.info('Evoo7Service', `bridgeInstance généré et persisté au premier démarrage: ${parsed.bridgeInstance}`);
-      return parsed;
-    }
     return evoo7ConfigSchema.parse(raw);
   }
 
@@ -133,7 +129,7 @@ export class Evoo7Service implements IEvoo7Service {
 
     this.eventBus.emitGeneric('integration:bridge:register', {
       moduleName: MODULE_NAME,
-      bridgeInstance: this.config.bridgeInstance
+      bridgeInstance: this.effectiveBridgeInstance
     });
 
     this.evoo7Client.onData((name, value) => this.handleEvoo7Data(name, value));
@@ -166,7 +162,7 @@ export class Evoo7Service implements IEvoo7Service {
     await this.evoo7Client.disconnect();
     this.eventBus.emitGeneric('integration:bridge:unregister', {
       moduleName: MODULE_NAME,
-      bridgeInstance: this.config.bridgeInstance
+      bridgeInstance: this.effectiveBridgeInstance
     });
     this.emitStatus();
     this.logger.info('Evoo7Service', 'Service EVOO7 arrêté');
@@ -216,6 +212,7 @@ export class Evoo7Service implements IEvoo7Service {
   private async reconnectBoxIfConfigChanged(): Promise<void> {
     const previousBox = this.config.box;
     this.config = this.loadConfig();
+    this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
 
     if (JSON.stringify(previousBox) === JSON.stringify(this.config.box)) {
       return;
@@ -256,7 +253,7 @@ export class Evoo7Service implements IEvoo7Service {
     // Pas de traduction serveur pour les énumérations : le code brut est relayé tel quel, HA
     // traduit code→libellé côté affichage via value_template (voir classification.ts).
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       deviceId: id,
       state: { state: value }
     });
@@ -329,7 +326,7 @@ export class Evoo7Service implements IEvoo7Service {
     };
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       component,
       objectId: donnee.id,
       deviceId: donnee.id,
@@ -345,7 +342,7 @@ export class Evoo7Service implements IEvoo7Service {
   private removeDonneeDiscovery(donnee: Evoo7DataDefinition): void {
     const component = determineComponent(donnee);
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       component,
       objectId: donnee.id
     });
@@ -366,7 +363,7 @@ export class Evoo7Service implements IEvoo7Service {
    */
   private publishThermostatDiscovery(): void {
     const taxonomy = resolveTaxonomy(THERMOSTAT_TAXONOMY_SOURCE);
-    const bridge = this.config.bridgeInstance;
+    const bridge = this.effectiveBridgeInstance;
     const commandTopic = getCommandTopic(MODULE_NAME, bridge, THERMOSTAT_DEVICE_ID);
 
     const modes = this.thermostat.allowCooling ? ['off', 'heat', 'cool'] : ['off', 'heat'];
@@ -421,7 +418,7 @@ export class Evoo7Service implements IEvoo7Service {
 
   private removeThermostatDiscovery(): void {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       component: 'climate',
       objectId: THERMOSTAT_DEVICE_ID
     });
@@ -446,7 +443,7 @@ export class Evoo7Service implements IEvoo7Service {
     const tempExt = this.lastRawValues.get('temp_ext');
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       deviceId: THERMOSTAT_DEVICE_ID,
       state: {
         state: action,

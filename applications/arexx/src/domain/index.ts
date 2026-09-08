@@ -84,9 +84,10 @@ export const AREXX_UI_METADATA: ModuleUiMetadata = {
         },
         {
           name: 'bridgeInstance',
-          label: 'Identifiant du bridge MQTT (côté HA)',
+          label: 'Préfixe du bridge MQTT (côté HA)',
           type: 'string',
-          default: 'arexx_bridge_0001'
+          default: 'arexx_bridge',
+          description: 'Un suffixe unique par machine (core.machineId) y est ajouté automatiquement — ce champ peut être identique sur toutes les machines dimotic-ha.'
         },
         {
           name: 'waitForHaWsBeforeDiscovery',

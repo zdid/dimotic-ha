@@ -8,17 +8,15 @@
 import { z } from 'zod';
 
 export const rfxcomConfigSchema = z.object({
-  enabled: z.boolean().default(true),
 
   // Port série du transceiver RFXtrx433
   port: z.string().min(1).default('/dev/ttyUSB0'),
   baudRate: z.number().int().positive().default(38400),
 
   // bridge_instance utilisé pour la connexion MQTT au socle (techniques-socle-ha-mqtt_specs §8.5.1).
-  // Ce défaut fixe n'est en pratique jamais appliqué : RfxComService.loadConfig() génère et
-  // persiste un tirage aléatoire au premier démarrage avant que ce schéma ne soit parsé (voir
-  // fonctionnelles-supervisor_specs v2.3 §9.2) — conservé ici comme filet, pas comme vrai défaut.
-  bridgeInstance: z.string().min(1).default('rfx_bridge_0001'),
+  // ⭐ 06/09/2026 — n'est plus qu'un PRÉFIXE, duplicable sans risque entre machines dimotic-ha : voir
+  // le commentaire équivalent dans arexx/config-schema.ts (même correctif dans les 4 apps).
+  bridgeInstance: z.string().min(1).default('rfx_bridge'),
 
   // Fichier de configuration centralisé (devices/récepteurs/scènes), relatif à la racine du projet
   devicesConfigFile: z.string().min(1).default('config-rfxcom-devices-v1.0.yaml'),
@@ -46,10 +44,9 @@ export const rfxcomConfigSchema = z.object({
 export type RfxComConfig = z.infer<typeof rfxcomConfigSchema>;
 
 export const DEFAULT_RFXCOM_CONFIG: RfxComConfig = {
-  enabled: true,
   port: '/dev/ttyUSB0',
   baudRate: 38400,
-  bridgeInstance: 'rfx_bridge_0001',
+  bridgeInstance: 'rfx_bridge',
   devicesConfigFile: 'config-rfxcom-devices-v1.0.yaml',
   autoDiscovery: true,
   enabledHardwareProtocols: [],

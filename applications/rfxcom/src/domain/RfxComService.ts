@@ -11,7 +11,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
-import { createRfxComError, getCommandTopic, generateRandomBridgeInstance } from '../../../core/dist/exports';
+import { createRfxComError, getCommandTopic, computeBridgeInstance } from '../../../core/dist/exports';
 import { rfxcomConfigSchema, type RfxComConfig } from './config-schema';
 import type { RfxComDevicesConfigFile, ReceiverConfigEntry } from './devices-config-schema';
 import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult, RfxComOrderTrace } from './types';
@@ -45,6 +45,14 @@ export class RfxComService implements IRfxComService {
   private static readonly PROTOCOLS_PUSH_SAFETY_TIMEOUT_MS = 20 * 1000;
 
   private config: RfxComConfig;
+  /** ⭐ 06/09/2026 — `<config.bridgeInstance (préfixe)>_<machineId>`, calculé une fois à la
+   *  construction, jamais persisté (voir computeBridgeInstance/DIMOTIC_MACHINE_ID). Remplace toute
+   *  utilisation de `this.config.bridgeInstance` pour les topics/identités MQTT — `config.
+   *  bridgeInstance` reste le champ éditable (préfixe seul, duplicable sans risque entre machines).
+   *  Le recouvrement RF entre deux VRAIES instances (deux machines, chacune son dongle, voir
+   *  otherInstancesRegisteredDevices ci-dessous) reste distingué : machineId diffère forcément
+   *  d'une machine à l'autre. */
+  private effectiveBridgeInstance: string;
   private devicesConfig: RfxComDevicesConfigFile;
   private configFileManager: ConfigFileManager;
   private deviceManager: DeviceManager;
@@ -133,6 +141,7 @@ export class RfxComService implements IRfxComService {
     private readonly configProvider: IAppConfigProvider<RfxComConfig>
   ) {
     this.config = this.loadConfig();
+    this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
     this.configFileManager = new ConfigFileManager(this.resolveDevicesConfigPath(), this.logger);
     this.devicesConfig = { rfxcom_devices: {}, rfxcom_receivers: {} };
     this.deviceManager = new DeviceManager(this.logger);
@@ -151,22 +160,9 @@ export class RfxComService implements IRfxComService {
    * Charge la config depuis le provider et applique les valeurs par défaut du schéma (le
    * provider retourne {} si la section 'rfxcom' n'existe pas encore dans config.yaml — première
    * installation, jamais configuré via l'UI).
-   *
-   * ⭐ fonctionnelles-supervisor_specs v2.3 §9.2 : si `bridgeInstance` est absent de la config sur
-   * disque (jamais configuré manuellement), un tirage aléatoire est généré et persisté
-   * IMMÉDIATEMENT (pas juste un défaut Zod en mémoire, qui serait réévalué à chaque redémarrage) —
-   * remplace l'ancien défaut fixe partagé ('rfx_bridge_0001'), vulnérable à une collision entre
-   * deux instances non reconfigurées. N'affecte pas une instance déjà en production : son
-   * `bridgeInstance` est déjà écrit en dur sur disque, jamais régénéré.
    */
   private loadConfig(): RfxComConfig {
     const raw = this.configProvider.getAppConfig() as Partial<RfxComConfig>;
-    if (!raw.bridgeInstance) {
-      const parsed = rfxcomConfigSchema.parse({ ...raw, bridgeInstance: generateRandomBridgeInstance('rfx') });
-      this.configProvider.savePartialConfig(parsed);
-      this.logger.info('RfxComService', `bridgeInstance généré et persisté au premier démarrage: ${parsed.bridgeInstance}`);
-      return parsed;
-    }
     return rfxcomConfigSchema.parse(raw);
   }
 
@@ -199,7 +195,7 @@ export class RfxComService implements IRfxComService {
 
     this.eventBus.emitGeneric('integration:bridge:register', {
       moduleName: MODULE_NAME,
-      bridgeInstance: this.config.bridgeInstance
+      bridgeInstance: this.effectiveBridgeInstance
     });
 
     // ⚠️ Limitation connue : si le transceiver perd le matériel (ex: USB débranché) sans que la
@@ -267,7 +263,7 @@ export class RfxComService implements IRfxComService {
     this.transceiver.disconnect();
     this.eventBus.emitGeneric('integration:bridge:unregister', {
       moduleName: MODULE_NAME,
-      bridgeInstance: this.config.bridgeInstance
+      bridgeInstance: this.effectiveBridgeInstance
     });
     this.emitStatus();
     this.logger.info('RfxComService', 'Service RFXCOM arrêté');
@@ -348,6 +344,7 @@ export class RfxComService implements IRfxComService {
     const previousPort = this.resolvePort();
     const previousBaudRate = this.config.baudRate;
     this.config = this.loadConfig();
+    this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
     const newPort = this.resolvePort();
 
     if (previousPort === newPort && previousBaudRate === this.config.baudRate) {
@@ -523,7 +520,7 @@ export class RfxComService implements IRfxComService {
   /** S'abonne, une fois, à la liste des devices enregistrés par TOUTES les instances RFXCOM. */
   private subscribeRegisteredDevices(): void {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:subscribe`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       topic: `${MODULE_NAME}/+/registered-devices`,
       qos: 1
     });
@@ -537,8 +534,8 @@ export class RfxComService implements IRfxComService {
       ...this.sceneManager.getAllScenes().filter((s) => s.transmitToHa).map((s) => `${SCENE_DEVICE_ID_PREFIX}${s.receiverId}`)
     ];
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:publish`, {
-      bridgeInstance: this.config.bridgeInstance,
-      topic: `${MODULE_NAME}/${this.config.bridgeInstance}/registered-devices`,
+      bridgeInstance: this.effectiveBridgeInstance,
+      topic: `${MODULE_NAME}/${this.effectiveBridgeInstance}/registered-devices`,
       payload: objectIds,
       qos: 1,
       retain: true
@@ -549,7 +546,7 @@ export class RfxComService implements IRfxComService {
     const match = event.topic.match(new RegExp(`^${MODULE_NAME}/([^/]+)/registered-devices$`));
     if (!match) return;
     const remoteBridgeInstance = match[1] as string;
-    if (remoteBridgeInstance === this.config.bridgeInstance) return; // écho de notre propre publication
+    if (remoteBridgeInstance === this.effectiveBridgeInstance) return; // écho de notre propre publication
 
     let objectIds: string[];
     try {
@@ -584,7 +581,7 @@ export class RfxComService implements IRfxComService {
    *  16/08/2026) — topic distinct de registered-devices, non retenu (événements ponctuels). */
   private subscribeRelayedValues(): void {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:subscribe`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       topic: `${MODULE_NAME}/+/relayed-value`,
       qos: 1
     });
@@ -598,8 +595,8 @@ export class RfxComService implements IRfxComService {
    */
   private publishRelayedValue(uniqueId: string, message: RfxComRawMessage): void {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:publish`, {
-      bridgeInstance: this.config.bridgeInstance,
-      topic: `${MODULE_NAME}/${this.config.bridgeInstance}/relayed-value`,
+      bridgeInstance: this.effectiveBridgeInstance,
+      topic: `${MODULE_NAME}/${this.effectiveBridgeInstance}/relayed-value`,
       payload: { objectId: uniqueId, message },
       qos: 1,
       retain: false
@@ -623,7 +620,7 @@ export class RfxComService implements IRfxComService {
     const match = event.topic.match(new RegExp(`^${MODULE_NAME}/([^/]+)/relayed-value$`));
     if (!match) return;
     const remoteBridgeInstance = match[1] as string;
-    if (remoteBridgeInstance === this.config.bridgeInstance) return; // écho de notre propre publication
+    if (remoteBridgeInstance === this.effectiveBridgeInstance) return; // écho de notre propre publication
 
     let parsed: { objectId: string; message: RfxComRawMessage };
     try {
@@ -741,7 +738,7 @@ export class RfxComService implements IRfxComService {
     }
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       component,
       objectId: device.uniqueId,
       deviceId,
@@ -762,7 +759,7 @@ export class RfxComService implements IRfxComService {
     this.persistDevicesConfig();
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       deviceId,
       state: {
         state: stateValue,
@@ -793,7 +790,7 @@ export class RfxComService implements IRfxComService {
 
     const deviceId = buildStateDeviceId(device.protocole, device.subType, device.sensorId, device.unitCode);
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       deviceId,
       state: { state: device.lastValue as string | number },
       retain: false
@@ -821,7 +818,7 @@ export class RfxComService implements IRfxComService {
   private removeDeviceDiscovery(device: RfxComDeviceInfo): void {
     const { component } = getDefaultComponent(device.type, device.subType);
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       component,
       objectId: device.uniqueId
     });
@@ -845,7 +842,7 @@ export class RfxComService implements IRfxComService {
 
     const { component, essential } = receiver.getDiscoveryEssential();
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       component,
       objectId: receiver.config.receiverId,
       deviceId: receiver.config.receiverId,
@@ -856,7 +853,7 @@ export class RfxComService implements IRfxComService {
   private publishReceiverState(receiver: ReturnType<ReceiverManager['getReceiver']>): void {
     if (!receiver) return;
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       deviceId: receiver.config.receiverId,
       state: receiver.getState(),
       retain: false
@@ -893,7 +890,7 @@ export class RfxComService implements IRfxComService {
    */
   private removeReceiverDiscovery(receiverId: string, component: string): void {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       component,
       objectId: receiverId
     });
@@ -922,7 +919,7 @@ export class RfxComService implements IRfxComService {
 
     const taxonomy = extractTaxonomy(scene.name);
     const deviceId = `${SCENE_DEVICE_ID_PREFIX}${scene.receiverId}`;
-    const commandTopic = getCommandTopic(MODULE_NAME, this.config.bridgeInstance, deviceId);
+    const commandTopic = getCommandTopic(MODULE_NAME, this.effectiveBridgeInstance, deviceId);
 
     const essential: EssentialEntityData = {
       // null — voir ReceiverLight.ts::getDiscoveryEssential (corrigé le 08/08/2026).
@@ -957,7 +954,7 @@ export class RfxComService implements IRfxComService {
     };
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       component: 'device_automation',
       objectId: `rfxcom_scene_${scene.receiverId}`,
       deviceId,
@@ -967,7 +964,7 @@ export class RfxComService implements IRfxComService {
 
   private publishSceneResult(sceneId: string, result: SceneExecutionResult): void {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       deviceId: `${SCENE_DEVICE_ID_PREFIX}${sceneId}`,
       state: {
         state: result.success ? 'completed' : 'failed',
@@ -988,7 +985,7 @@ export class RfxComService implements IRfxComService {
    */
   private removeSceneDiscovery(sceneId: string): void {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       component: 'device_automation',
       objectId: `rfxcom_scene_${sceneId}`
     });

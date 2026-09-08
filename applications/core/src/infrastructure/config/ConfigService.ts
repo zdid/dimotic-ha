@@ -98,6 +98,7 @@ export class ConfigService {
     if (!this.config.ha?.ws) return { success: true };
     const ha = { ...this.config.ha, ws: undefined };
     const socleConfig = {
+      core: this.config.core,
       ha,
       web: this.config.web,
       logging: this.config.logging,
@@ -170,6 +171,7 @@ export class ConfigService {
     // Home Assistant+Mosquitto) : même risque, même traitement préventif — jamais envoyés par ce
     // formulaire non plus.
     const socleConfig = {
+      core: this.config.core,
       ha: newConfig.ha,
       web: newConfig.web,
       logging: newConfig.logging,
@@ -228,7 +230,7 @@ export class ConfigService {
    * transitent jamais par ce chemin, chacune a son propre fichier (saveModuleConfig).
    */
   setDisabledApps(disabledApps: string[]): SaveResult {
-    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps, targets: this.config.targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets, externalSites: this.config.externalSites } as AppConfig;
+    const socleConfig = { core: this.config.core, ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps, targets: this.config.targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets, externalSites: this.config.externalSites } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
       this.config = { ...this.config, disabledApps };
@@ -250,7 +252,7 @@ export class ConfigService {
    * depuis un payload client partiel).
    */
   setTargets(targets: DeploymentTargetConfig[]): SaveResult {
-    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets, externalSites: this.config.externalSites } as AppConfig;
+    const socleConfig = { core: this.config.core, ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets, externalSites: this.config.externalSites } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
       this.config = { ...this.config, targets };
@@ -270,7 +272,7 @@ export class ConfigService {
    * Sauvegarde la liste des cibles HA+Mosquitto, même narrowing défensif que setTargets().
    */
   setHaStackTargets(haStackTargets: HaStackTargetConfig[]): SaveResult {
-    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets, externalSites: this.config.externalSites } as AppConfig;
+    const socleConfig = { core: this.config.core, ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets, externalSites: this.config.externalSites } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
       this.config = { ...this.config, haStackTargets };
@@ -290,7 +292,7 @@ export class ConfigService {
    * Sauvegarde la liste des cibles zigbee2mqtt, même narrowing défensif que setTargets().
    */
   setZigbee2mqttTargets(zigbee2mqttTargets: Zigbee2mqttTargetConfig[]): SaveResult {
-    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets, externalSites: this.config.externalSites } as AppConfig;
+    const socleConfig = { core: this.config.core, ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets, externalSites: this.config.externalSites } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
       this.config = { ...this.config, zigbee2mqttTargets };
@@ -310,7 +312,7 @@ export class ConfigService {
    * Sauvegarde la liste des sites externes, même narrowing défensif que setZigbee2mqttTargets().
    */
   setExternalSites(externalSites: ExternalSiteConfig[]): SaveResult {
-    const socleConfig = { ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets, externalSites } as AppConfig;
+    const socleConfig = { core: this.config.core, ha: this.config.ha, web: this.config.web, logging: this.config.logging, disabledApps: this.config.disabledApps, targets: this.config.targets, haStackTargets: this.config.haStackTargets, zigbee2mqttTargets: this.config.zigbee2mqttTargets, externalSites } as AppConfig;
     const result = this.writer.save(socleConfig);
     if (result.success) {
       this.config = { ...this.config, externalSites };

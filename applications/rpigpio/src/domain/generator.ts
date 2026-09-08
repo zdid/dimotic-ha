@@ -56,8 +56,13 @@ function buildPinEntry(pin: PinDefinition): Record<string, unknown> {
 /**
  * Génère le contenu YAML complet du config.yaml mqtt-io — déployé tel quel sur la machine cible
  * (voir DeployService).
+ *
+ * @param effectiveBridgeInstance `<config.bridgeInstance (préfixe)>_<machineId>` déjà calculé par
+ *   l'appelant (voir RpigpioService.effectiveBridgeInstance/computeBridgeInstance, core/ha-mqtt.ts)
+ *   — jamais `config.bridgeInstance` seul, qui n'est plus qu'un préfixe duplicable entre machines
+ *   depuis le 06/09/2026 (voir config-schema.ts).
  */
-export function generateMqttIoConfig(config: RpigpioConfig, pins: PinDefinition[]): string {
+export function generateMqttIoConfig(config: RpigpioConfig, pins: PinDefinition[], effectiveBridgeInstance: string): string {
   const digitalInputs = pins.filter((p) => p.direction === 'input').map(buildPinEntry);
   const digitalOutputs = pins.filter((p) => p.direction === 'output').map(buildPinEntry);
 
@@ -72,10 +77,10 @@ export function generateMqttIoConfig(config: RpigpioConfig, pins: PinDefinition[
       port: config.mqtt.port,
       user: config.mqtt.user,
       password: config.mqtt.password,
-      topic_prefix: `${config.mqtt.topicPrefix}/${config.bridgeInstance}`,
+      topic_prefix: `${config.mqtt.topicPrefix}/${effectiveBridgeInstance}`,
       ha_discovery: {
         enabled: true,
-        prefix: `${config.mqtt.discoveryPrefix}/${config.bridgeInstance}`,
+        prefix: `${config.mqtt.discoveryPrefix}/${effectiveBridgeInstance}`,
         name: 'RPI GPIO'
       }
     },

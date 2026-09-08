@@ -38,13 +38,24 @@ const haConfigSchema = z.object({
 
 // Porte d'authentification OAuth2 HA (accès externe, désactivée par défaut) — absente du fichier
 // tant qu'elle n'est pas explicitement configurée, voir infrastructure/auth/AuthService.
-// ⭐ fonctionnelles-supervisor_specs v2.6 §4 : identité de cette machine pour le futur registre de
-// présence multi-machines (superviseur) — os.hostname() est stable d'un démarrage à l'autre sur une
-// même machine, contrairement au tirage aléatoire utilisé pour bridgeInstance (voir ha-mqtt.ts
-// generateRandomBridgeInstance) : pas besoin de générer une fois puis persister, un défaut Zod
-// simple suffit ici.
+/**
+ * Génère un `machineId` par défaut : `<hostname>_<6 chiffres aléatoires>` — ⭐ 06/09/2026, demande
+ * utilisateur suite à un vrai risque identifié : `os.hostname()` seul (ancien défaut) n'est PAS
+ * garanti unique (deux Pi/conteneurs Docker au hostname générique identique), alors que ce champ
+ * sert déjà d'identité pour le gossip inter-machines (TargetGossipService/AppGossipService) et les
+ * topics MQTT du superviseur (ProcessSupervisor) — une collision y casserait silencieusement la
+ * distinction entre deux machines. Garde le hostname en préfixe (lisible dans l'IHM/les logs),
+ * ajoute un suffixe aléatoire pour l'unicité — même patron que generateRandomBridgeInstance
+ * (ha-mqtt.ts) : à appeler UNE SEULE FOIS si absent du fichier sur disque, puis à PERSISTER
+ * immédiatement (voir ConfigLoader.load()) — ne jamais régénérer, la valeur doit rester stable.
+ */
+export function generateRandomMachineId(hostname: string = os.hostname()): string {
+  const suffix = Math.floor(100000 + Math.random() * 900000); // 6 chiffres, 100000-999999
+  return `${hostname}_${suffix}`;
+}
+
 const coreSchema = z.object({
-  machineId: z.string().min(1).default(() => os.hostname())
+  machineId: z.string().min(1).default(() => generateRandomMachineId())
 });
 
 const authSchema = z.object({

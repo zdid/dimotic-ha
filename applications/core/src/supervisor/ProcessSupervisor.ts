@@ -63,6 +63,11 @@ export class ProcessSupervisor {
   constructor(
     private readonly logger: Logger,
     private readonly coreDir: string,
+    /** ⭐ 06/09/2026 — identité de cette machine (core.machineId), transmise à chaque enfant via la
+     *  variable d'environnement DIMOTIC_MACHINE_ID (voir spawnChild()) : permet à une app en process
+     *  séparé de calculer un `bridgeInstance` unique sans avoir à en générer/persister un elle-même
+     *  (voir arexx/evoo7/rfxcom/rpigpio). Optionnel pour ne pas casser un usage minimal (tests). */
+    private readonly machineId?: string,
     /** Pont EventBus local ↔ IPC (16/08/2026) — attaché/détaché à chaque (re)spawn/sortie
      *  d'enfant, voir spawnChild()/handleExit(). Optionnel pour ne pas casser un usage minimal
      *  (tests) sans pont réel. */
@@ -247,7 +252,8 @@ export class ProcessSupervisor {
     // communication EventBus avec cet enfant.
     const child = spawn(entry.command, entry.args, {
       stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
-      cwd: app.appDir
+      cwd: app.appDir,
+      env: this.machineId ? { ...process.env, DIMOTIC_MACHINE_ID: this.machineId } : process.env
     });
     app.child = child;
     this.eventBridge?.attachChild(app.appId, child);

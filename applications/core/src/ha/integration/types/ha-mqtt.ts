@@ -269,6 +269,20 @@ export function generateRandomBridgeInstance(appId: string): string {
 }
 
 /**
+ * ⭐ 06/09/2026, remplace generateRandomBridgeInstance() ci-dessus pour arexx/evoo7/rfxcom/rpigpio —
+ * demande utilisateur : rendre `bridgeInstance` duplicable entre machines dimotic-ha (voir
+ * core.machineId/generateRandomMachineId, infrastructure/config/schema.ts) sans risque de
+ * collision. Le champ configuré (`prefix`) n'est plus qu'un simple préfixe fixe, duplicable sans
+ * risque — l'unicité entre machines vient de `machineId` (généré une fois, persisté, jamais
+ * dupliqué — voir ConfigLoader.ensureMachineIdPersisted), calculé à la volée, JAMAIS persisté sous
+ * ce nom. `machineId` absent (app lancée hors du superviseur, ex. tests) : replie sur le préfixe
+ * seul plutôt que de planter — dégrade en perdant l'unicité multi-machines, pas en cassant l'app.
+ */
+export function computeBridgeInstance(prefix: string, machineId: string | undefined): string {
+  return machineId ? `${prefix}_${machineId}` : prefix;
+}
+
+/**
  * Réécrit le premier segment d'un topic source en `homeassistant`.
  * Utilisé par le mode "découverte" du Passthrough MQTT (techniques-socle-ha-mqtt_specs v4.9 §8.5.6) :
  * une application relaie un message de découverte lu sur un préfixe étranger

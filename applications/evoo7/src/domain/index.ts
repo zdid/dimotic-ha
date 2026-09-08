@@ -71,10 +71,10 @@ export const EVOO7_UI_METADATA: ModuleUiMetadata = {
         },
         {
           name: 'bridgeInstance',
-          label: 'Identifiant du bridge MQTT (côté HA)',
+          label: 'Préfixe du bridge MQTT (côté HA)',
           type: 'string',
-          default: 'evoo7_bridge_0001',
-          description: 'Identifie cette instance EVOO7 dans les topics MQTT du socle (LWT) — sans rapport avec la connexion au boîtier lui-même.'
+          default: 'evoo7_bridge',
+          description: 'Identifie cette instance EVOO7 dans les topics MQTT du socle (LWT) — sans rapport avec la connexion au boîtier lui-même. Un suffixe unique par machine (core.machineId) y est ajouté automatiquement — ce champ peut être identique sur toutes les machines dimotic-ha.'
         }
       ]
     }

@@ -16,7 +16,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, RemoteAction } from '../../../core/dist/exports';
-import { generateRandomBridgeInstance, MqttTransport, isRunningInDocker, ensureGlobalSshKey } from '../../../core/dist/exports';
+import { computeBridgeInstance, MqttTransport, isRunningInDocker, ensureGlobalSshKey } from '../../../core/dist/exports';
 import { rpigpioConfigSchema, type RpigpioConfig } from './config-schema';
 import { pinsConfigSchema, DEFAULT_PINS_CONFIG, type PinDefinition, type PinsConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
@@ -49,7 +49,13 @@ export interface IRpigpioService {
 type SavePinInput = Omit<PinDefinition, 'id' | 'createdAt' | 'updatedAt'> & { id?: string };
 
 export class RpigpioService implements IRpigpioService {
-  private readonly config: RpigpioConfig;
+  private config: RpigpioConfig;
+  /** ⭐ 06/09/2026 — `<config.bridgeInstance (préfixe)>_<machineId>`, recalculé à chaque
+   *  (re)chargement de config (voir loadConfig()/computeBridgeInstance/DIMOTIC_MACHINE_ID).
+   *  Remplace toute utilisation de `this.config.bridgeInstance` pour les topics/identités MQTT —
+   *  `config.bridgeInstance` reste le champ éditable (préfixe seul, duplicable sans risque entre
+   *  machines). */
+  private effectiveBridgeInstance: string;
   private readonly pinsManager: ConfigFileManager<PinsConfigFile>;
   private pins: PinDefinition[];
   private readonly deployService: DeployService;
@@ -63,6 +69,7 @@ export class RpigpioService implements IRpigpioService {
     private readonly configProvider: IAppConfigProvider<RpigpioConfig>
   ) {
     this.config = this.loadConfig();
+    this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
 
     const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'rpigpio');
     this.pinsManager = new ConfigFileManager<PinsConfigFile>(
@@ -83,21 +90,8 @@ export class RpigpioService implements IRpigpioService {
     return new RpigpioService(eventBus, logger, configProvider);
   }
 
-  /**
-   * ⭐ fonctionnelles-supervisor_specs v2.3 §9.2 : `bridgeInstance` absent de la config sur disque
-   * → tirage aléatoire généré et persisté immédiatement (pas juste un défaut Zod en mémoire).
-   * Contrairement à rfxcom/evoo7/arexx, rpigpio n'avait jusqu'ici AUCUN bridgeInstance — deux
-   * instances non reconfigurées à la main partageaient réellement le même topicPrefix/
-   * discoveryPrefix mqtt-io (voir generator.ts::generateMqttIoConfig).
-   */
   private loadConfig(): RpigpioConfig {
     const raw = this.configProvider.getAppConfig() as Partial<RpigpioConfig>;
-    if (!raw.bridgeInstance) {
-      const parsed = rpigpioConfigSchema.parse({ ...raw, bridgeInstance: generateRandomBridgeInstance('rpigpio') });
-      this.configProvider.savePartialConfig(parsed);
-      this.logger.info('RpigpioService', `bridgeInstance généré et persisté au premier démarrage: ${parsed.bridgeInstance}`);
-      return parsed;
-    }
     return rpigpioConfigSchema.parse(raw);
   }
 
@@ -109,6 +103,20 @@ export class RpigpioService implements IRpigpioService {
     this.eventBus.on(RPIGPIO_CLIENT_EVENTS.REMOTE_OP, (data: unknown) => {
       const { targetId, action } = data as { targetId: string; action: RemoteAction };
       this.handleRemoteOp(targetId, action);
+    });
+
+    // ⭐ 05/09/2026 — même bug réel que arexx (corrigé le 25/08/2026, jamais propagé ici) : this.config
+    // n'était chargé qu'une fois au démarrage du service, une cible modifiée depuis Paramètres
+    // Techniques n'était jamais relue avant un redémarrage complet. `configProvider.reload()`
+    // indispensable AVANT `loadConfig()`/`getAppConfig()` — ce process séparé a sa propre instance
+    // ConfigService en mémoire depuis son propre démarrage, distincte de celle de core qui a écrit
+    // le fichier (voir le commentaire détaillé dans TeleinfoService.ts, même correctif).
+    this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (event) => {
+      if (event.moduleId !== 'rpigpio' || !event.success) return;
+      this.configProvider.reload();
+      this.config = this.loadConfig();
+      this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
+      this.emitStatus();
     });
   }
 
@@ -132,12 +140,12 @@ export class RpigpioService implements IRpigpioService {
   // ==========================================================================
 
   private connectAgentPresence(): void {
-    const statusTopic = `${this.config.mqtt.topicPrefix}/${this.config.bridgeInstance}/status`;
+    const statusTopic = `${this.config.mqtt.topicPrefix}/${this.effectiveBridgeInstance}/status`;
     this.agentTransport = new MqttTransport(
       {
         host: this.config.mqtt.host,
         port: this.config.mqtt.port,
-        clientId: `rpigpio-presence-${this.config.bridgeInstance}`,
+        clientId: `rpigpio-presence-${this.effectiveBridgeInstance}`,
         username: this.config.mqtt.user || '',
         password: this.config.mqtt.password || '',
         keepalive: 60,
@@ -270,7 +278,7 @@ export class RpigpioService implements IRpigpioService {
 
     try {
       const result = await (action === 'deploy'
-        ? this.deployService.deploy(target, generateMqttIoConfig(this.config, this.pins), generateComposeFile(target))
+        ? this.deployService.deploy(target, generateMqttIoConfig(this.config, this.pins, this.effectiveBridgeInstance), generateComposeFile(target))
         : action === 'start'
         ? this.deployService.start(target)
         : action === 'stop'

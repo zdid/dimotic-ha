@@ -24,12 +24,11 @@ const evoo7BoxConfigSchema = z.object({
 });
 
 export const evoo7ConfigSchema = z.object({
-  enabled: z.boolean().default(true),
 
   // bridge_instance utilisé pour la connexion MQTT au socle (techniques-socle-ha-mqtt_specs §8.5.1).
-  // Ce défaut fixe n'est en pratique jamais appliqué : Evoo7Service.loadConfig() génère et persiste
-  // un tirage aléatoire au premier démarrage (voir fonctionnelles-supervisor_specs v2.3 §9.2).
-  bridgeInstance: z.string().min(1).default('evoo7_bridge_0001'),
+  // ⭐ 06/09/2026 — n'est plus qu'un PRÉFIXE, duplicable sans risque entre machines dimotic-ha : voir
+  // le commentaire équivalent dans arexx/config-schema.ts (même correctif dans les 4 apps).
+  bridgeInstance: z.string().min(1).default('evoo7_bridge'),
 
   // Connexion directe Socket.IO au boîtier EVOO7 (protocole natif — indépendante du broker HA du
   // socle, voir Evoo7SocketIoClient.ts).
@@ -43,8 +42,7 @@ export type Evoo7Config = z.infer<typeof evoo7ConfigSchema>;
 export type Evoo7BoxConfig = z.infer<typeof evoo7BoxConfigSchema>;
 
 export const DEFAULT_EVOO7_CONFIG: Evoo7Config = {
-  enabled: true,
-  bridgeInstance: 'evoo7_bridge_0001',
+  bridgeInstance: 'evoo7_bridge',
   box: {
     address: '192.168.1.55',
     port: 80,

@@ -1,16 +1,15 @@
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import { z } from 'zod';
-import { AppConfig, configSchema } from './schema';
+import { AppConfig, configSchema, generateRandomMachineId } from './schema';
 
 /**
  * Valeurs par défaut complètes pour la configuration
  */
 const DEFAULT_CONFIG: AppConfig = {
   core: {
-    machineId: os.hostname()
+    machineId: generateRandomMachineId()
   },
   disabledApps: [],
   targets: [],
@@ -130,6 +129,7 @@ export class ConfigLoader {
     }
 
     const configWithDefaults = deepMerge(DEFAULT_CONFIG, parsedConfig as Partial<AppConfig>);
+    this.ensureMachineIdPersisted(parsedConfig as Partial<AppConfig> | null | undefined, configWithDefaults);
     this.omitDisabledHaSections(configWithDefaults);
 
     if (this.appDataRoot) {
@@ -146,6 +146,33 @@ export class ConfigLoader {
         throw new Error(`Configuration validation failed: ${errorDetails}`);
       }
       throw new Error(`Configuration validation error: ${error}`);
+    }
+  }
+
+  /**
+   * ⭐ 06/09/2026 — `core.machineId` doit rester STABLE une fois généré (voir generateRandomMachineId
+   * dans schema.ts), ce que le seul défaut Zod ne garantit pas : un défaut Zod se recalcule à
+   * chaque `parse()` tant que la valeur n'est pas écrite sur le fichier, donc à chaque redémarrage
+   * tant qu'on ne persiste rien explicitement — l'identité de la machine changerait alors à chaque
+   * redémarrage, cassant le gossip inter-machines et les topics MQTT du superviseur qui en
+   * dépendent. Si le fichier RÉEL sur disque n'a pas encore de `core.machineId` (première
+   * installation, ou fichier antérieur à l'introduction de ce champ), on le génère une fois ici et
+   * on l'écrit IMMÉDIATEMENT dans le fichier (fusion minimale — on ne réécrit que `core`, pas tout
+   * le fichier avec les valeurs par défaut de chaque section, pour rester proche de ce que
+   * l'utilisateur a réellement saisi).
+   */
+  private ensureMachineIdPersisted(rawConfig: Partial<AppConfig> | null | undefined, configWithDefaults: AppConfig): void {
+    if ((rawConfig as any)?.core?.machineId) return; // déjà présent sur disque, rien à faire
+
+    const onDiskConfig = (rawConfig && typeof rawConfig === 'object' ? { ...(rawConfig as Record<string, unknown>) } : {}) as Record<string, unknown>;
+    onDiskConfig.core = { ...(onDiskConfig.core as Record<string, unknown> | undefined), machineId: configWithDefaults.core.machineId };
+
+    try {
+      fs.mkdirSync(path.dirname(this.configPath), { recursive: true });
+      fs.writeFileSync(this.configPath, yaml.dump(onDiskConfig, { indent: 2, sortKeys: false }), 'utf-8');
+    } catch {
+      // Best-effort : si l'écriture échoue (permissions, disque plein...), configWithDefaults
+      // reste utilisable pour CE démarrage — seul un futur redémarrage regénérerait un id différent.
     }
   }
 

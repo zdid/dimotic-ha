@@ -51,16 +51,11 @@ const mqttConfigSchema = z.object({
 });
 
 export const rpigpioConfigSchema = z.object({
-  enabled: z.boolean().default(true),
-  // ⭐ fonctionnelles-supervisor_specs v2.3 §9.2 : contrairement à rfxcom/evoo7/arexx, rpigpio ne
-  // passait par AUCUNE convention de bridgeInstance jusqu'ici — sa découverte/ses topics d'état
-  // passent par mqtt-io (processus externe), pas par le socle. Deux instances rpigpio non
-  // reconfigurées à la main partageaient donc déjà, réellement, le même topicPrefix/discoveryPrefix
-  // (`mqttio/rpigpio`/`homeassist`, valeurs fixes ci-dessous). RpigpioService.loadConfig() génère et
-  // persiste un tirage aléatoire au premier démarrage si absent, injecté par generator.ts dans le
-  // config.yml de mqtt-io (topic_prefix/ha_discovery.prefix). Défaut fixe ci-dessous conservé comme
-  // filet (comme rfxcom/evoo7/arexx), jamais vraiment appliqué en pratique.
-  bridgeInstance: z.string().min(1).default('rpigpio_bridge_0001'),
+  // bridge_instance — sa découverte/ses topics d'état passent par mqtt-io (processus externe), pas
+  // par le socle, injecté par generator.ts dans le config.yml de mqtt-io (topic_prefix/
+  // ha_discovery.prefix). ⭐ 06/09/2026 — n'est plus qu'un PRÉFIXE, duplicable sans risque entre
+  // machines dimotic-ha : voir le commentaire équivalent dans arexx/config-schema.ts.
+  bridgeInstance: z.string().min(1).default('rpigpio_bridge'),
   targets: z.array(targetConfigSchema).max(1).default([]),
   mqtt: mqttConfigSchema.default({})
 })
@@ -74,8 +69,7 @@ export type RpigpioTargetConfig = z.infer<typeof targetConfigSchema>;
 export type RpigpioMqttConfig = z.infer<typeof mqttConfigSchema>;
 
 export const DEFAULT_RPIGPIO_CONFIG: RpigpioConfig = {
-  enabled: true,
-  bridgeInstance: 'rpigpio_bridge_0001',
+  bridgeInstance: 'rpigpio_bridge',
   targets: [],
   mqtt: {
     host: '',

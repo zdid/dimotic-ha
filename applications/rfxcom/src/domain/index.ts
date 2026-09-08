@@ -57,10 +57,10 @@ export const RFXCOM_UI_METADATA: ModuleUiMetadata = {
         },
         {
           name: 'bridgeInstance',
-          label: 'Identifiant du bridge MQTT',
+          label: 'Préfixe du bridge MQTT',
           type: 'string',
-          default: 'rfx_bridge_0001',
-          description: 'Identifie ce transceiver dans les topics MQTT (LWT par bridge)'
+          default: 'rfx_bridge',
+          description: 'Identifie ce transceiver dans les topics MQTT (LWT par bridge). Un suffixe unique par machine (core.machineId) y est ajouté automatiquement — ce champ peut être identique sur toutes les machines dimotic-ha.'
         },
         {
           name: 'autoDiscovery',

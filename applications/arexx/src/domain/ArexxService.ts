@@ -12,7 +12,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData, RemoteAction } from '../../../core/dist/exports';
-import { generateRandomBridgeInstance, isRunningInDocker, ensureGlobalSshKey } from '../../../core/dist/exports';
+import { computeBridgeInstance, isRunningInDocker, ensureGlobalSshKey } from '../../../core/dist/exports';
 import { arexxConfigSchema, type ArexxConfig } from './config-schema';
 import type { ArexxSensorsConfigFile } from './devices-config-schema';
 import type { ArexxRawReading, ArexxSensorInfo, ArexxStatus } from './types';
@@ -43,6 +43,11 @@ export class ArexxService implements IArexxService {
   private static readonly LAST_VALUE_MAX_AGE_MS = 30 * 60 * 1000;
 
   private config: ArexxConfig;
+  /** ⭐ 06/09/2026 — `<config.bridgeInstance (préfixe)>_<machineId>`, calculé une fois à la
+   *  construction, jamais persisté (voir computeBridgeInstance/DIMOTIC_MACHINE_ID). Remplace toute
+   *  utilisation de `this.config.bridgeInstance` pour les topics/identités MQTT — `config.
+   *  bridgeInstance` reste le champ éditable (préfixe seul, duplicable sans risque entre machines). */
+  private effectiveBridgeInstance: string;
   private sensorsConfig: ArexxSensorsConfigFile;
   private configFileManager: ConfigFileManager;
   private sensorRegistry: SensorRegistry;
@@ -61,25 +66,15 @@ export class ArexxService implements IArexxService {
     private readonly configProvider: IAppConfigProvider<ArexxConfig>
   ) {
     this.config = this.loadConfig();
+    this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
     this.configFileManager = new ConfigFileManager(this.resolveSensorsConfigPath(), this.logger);
     this.sensorsConfig = { arexx_sensors: {} };
     this.sensorRegistry = new SensorRegistry(this.logger);
     this.deployService = new ArexxDeployService(this.logger);
   }
 
-  /**
-   * ⭐ fonctionnelles-supervisor_specs v2.3 §9.2 : `bridgeInstance` absent de la config sur disque
-   * → tirage aléatoire généré et persisté immédiatement (pas juste un défaut Zod en mémoire).
-   * N'affecte pas une instance déjà en production (valeur déjà écrite en dur, jamais régénérée).
-   */
   private loadConfig(): ArexxConfig {
     const raw = this.configProvider.getAppConfig() as Partial<ArexxConfig>;
-    if (!raw.bridgeInstance) {
-      const parsed = arexxConfigSchema.parse({ ...raw, bridgeInstance: generateRandomBridgeInstance('arexx') });
-      this.configProvider.savePartialConfig(parsed);
-      this.logger.info('ArexxService', `bridgeInstance généré et persisté au premier démarrage: ${parsed.bridgeInstance}`);
-      return parsed;
-    }
     return arexxConfigSchema.parse(raw);
   }
 
@@ -101,7 +96,7 @@ export class ArexxService implements IArexxService {
 
     this.eventBus.emitGeneric('integration:bridge:register', {
       moduleName: MODULE_NAME,
-      bridgeInstance: this.config.bridgeInstance
+      bridgeInstance: this.effectiveBridgeInstance
     });
 
     await this.startAcquisition();
@@ -121,7 +116,7 @@ export class ArexxService implements IArexxService {
     this.usbBridge?.stop();
     this.eventBus.emitGeneric('integration:bridge:unregister', {
       moduleName: MODULE_NAME,
-      bridgeInstance: this.config.bridgeInstance
+      bridgeInstance: this.effectiveBridgeInstance
     });
     this.logger.info('ArexxService', 'Service AREXX arrêté');
   }
@@ -196,7 +191,7 @@ export class ArexxService implements IArexxService {
     if (!isFresh) return;
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       deviceId: sensor.uniqueId,
       state: { state: sensor.lastValue as number }
     });
@@ -228,7 +223,7 @@ export class ArexxService implements IArexxService {
     };
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       component: 'sensor',
       objectId: sensor.uniqueId,
       deviceId: sensor.uniqueId,
@@ -238,7 +233,7 @@ export class ArexxService implements IArexxService {
 
   private publishSensorState(sensor: ArexxSensorInfo, reading: ArexxRawReading): void {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
-      bridgeInstance: this.config.bridgeInstance,
+      bridgeInstance: this.effectiveBridgeInstance,
       deviceId: sensor.uniqueId,
       state: {
         state: reading.value,
@@ -299,6 +294,7 @@ export class ArexxService implements IArexxService {
     this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (event) => {
       if (event.moduleId !== MODULE_NAME || !event.success) return;
       this.config = this.loadConfig();
+      this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
       this.emitStatus();
     });
 

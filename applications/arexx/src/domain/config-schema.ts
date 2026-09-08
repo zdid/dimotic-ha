@@ -25,7 +25,6 @@ const arexxTargetSchema = z.object({
 });
 
 export const arexxConfigSchema = z.object({
-  enabled: z.boolean().default(true),
 
   // Émetteurs USB pilotables à distance (⭐ 23/08/2026) — voir arexxTargetSchema ci-dessus.
   targets: z.array(arexxTargetSchema).default([]),
@@ -49,9 +48,11 @@ export const arexxConfigSchema = z.object({
   usbDevicePath: z.string().optional(),
 
   // bridge_instance utilisé pour la connexion MQTT au socle (via IntegrationBridge, comme RFXCOM).
-  // Ce défaut fixe n'est en pratique jamais appliqué : ArexxService.loadConfig() génère et persiste
-  // un tirage aléatoire au premier démarrage (voir fonctionnelles-supervisor_specs v2.3 §9.2).
-  bridgeInstance: z.string().min(1).default('arexx_bridge_0001'),
+  // ⭐ 06/09/2026 — n'est plus qu'un PRÉFIXE, duplicable sans risque entre machines dimotic-ha :
+  // ArexxService calcule la vraie valeur utilisée sur le fil via computeBridgeInstance(bridgeInstance,
+  // machineId) (core/ha-mqtt.ts) — l'unicité entre machines vient de core.machineId, jamais de ce
+  // champ. Avant cette date, ce champ portait un suffixe aléatoire généré+persisté par l'app elle-même.
+  bridgeInstance: z.string().min(1).default('arexx_bridge'),
 
   // Fichier de configuration centralisé (capteurs), relatif à la racine du projet
   sensorsConfigFile: z.string().min(1).default('arexx-sensors-v1.0.yaml'),
@@ -69,13 +70,12 @@ export type ArexxConfig = z.infer<typeof arexxConfigSchema>;
 export type ArexxTargetConfig = z.infer<typeof arexxTargetSchema>;
 
 export const DEFAULT_AREXX_CONFIG: ArexxConfig = {
-  enabled: true,
   targets: [],
   acquisitionMode: 'push',
   httpservPort: 49161,
   bs1000Port: 80,
   pollIntervalSeconds: 50,
-  bridgeInstance: 'arexx_bridge_0001',
+  bridgeInstance: 'arexx_bridge',
   sensorsConfigFile: 'arexx-sensors-v1.0.yaml',
   waitForHaWsBeforeDiscovery: true
 };
