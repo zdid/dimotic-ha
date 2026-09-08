@@ -31,7 +31,7 @@ function init(): void {
   socket.on('arexx:status', (status: { isRunningInDocker: boolean; projectRoot: string; targets: { id: string; host: string }[] }) => {
     const sshPrepContainer = document.getElementById('ssh-prep-container');
     if (sshPrepContainer) {
-      renderSshPrepSection(sshPrepContainer, { isRunningInDocker: status.isRunningInDocker, projectRoot: status.projectRoot });
+      renderSshPrepSection(sshPrepContainer, { isRunningInDocker: status.isRunningInDocker, projectRoot: status.projectRoot, targets: status.targets });
     }
     const container = document.getElementById('targets-container');
     if (container) {

@@ -107,7 +107,7 @@ function updateStatusDisplay(status: RpigpioStatus): void {
   const sshPrepContainer = $('ssh-prep-container');
   if (targetsSection) targetsSection.style.display = 'block';
   if (sshPrepContainer) {
-    renderSshPrepSection(sshPrepContainer, { isRunningInDocker: status.isRunningInDocker, projectRoot: status.projectRoot });
+    renderSshPrepSection(sshPrepContainer, { isRunningInDocker: status.isRunningInDocker, projectRoot: status.projectRoot, targets: status.targets });
   }
   if (targetsContainer) {
     renderTargetCards(targetsContainer, {

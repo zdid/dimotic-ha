@@ -178,34 +178,47 @@ export interface RenderSshPrepSectionOptions {
   /** Racine réelle du projet sur l'hôte (`process.env.PROJECT_ROOT`), utilisée pour le `cd`
    *  préalable à `ssh-copy-id` hors Docker. */
   projectRoot: string;
+  /** ⭐ 05/09/2026 — cibles déjà configurées (juste `id`/`host` nécessaires ici) : dès qu'une cible a
+   *  un hôte renseigné, sa commande `ssh-copy-id` est affichée complète, hôte réel déjà substitué —
+   *  demande explicite (retour utilisateur teleinfo) : « une fois paramétré le ssh-copy dans cible
+   *  doit se compléter avec l'hôte cible », plus de `<hôte-de-la-cible>` à remplacer à la main.
+   *  Cibles sans hôte encore renseigné (nouvelle cible tout juste créée) ou tableau absent/vide :
+   *  repli sur l'unique bloc générique avec placeholder, comme avant. */
+  targets?: { id: string; host: string }[];
 }
 
 /**
  * Section unique, affichée une fois en tête de page (⭐ 24/08/2026) — explique comment autoriser la
  * clé SSH (désormais unique pour toute l'installation, voir `ensureGlobalSshKey`,
  * core/infrastructure/remote/SshClient.ts) sur une nouvelle cible. Remplace le bloc "Copier la
- * clé" auparavant répété identique sur chaque carte (seul l'hôte variait) — l'hôte reste à
- * remplacer manuellement ici, un seul modèle de commande couvre toutes les cibles.
+ * clé" auparavant répété identique sur chaque carte (seul l'hôte variait) — un bloc de commande par
+ * hôte réel connu depuis le ⭐ 05/09/2026 (voir `targets` ci-dessus), placeholder générique en repli
+ * si aucun hôte n'est encore configuré.
  *
  * ⭐ 25/08/2026 : `mkdir -p ~/.ssh` ajouté avant `ssh-copy-id` — dans le conteneur, ce dossier
  * n'existe pas pour l'utilisateur `node` ; sans lui, `ssh-copy-id` échoue avec "failed to create
  * required temporary directory under ~/.ssh" (constaté en conditions réelles).
  */
 export function renderSshPrepSection(container: HTMLElement, options: RenderSshPrepSectionOptions): void {
-  const { isRunningInDocker, projectRoot } = options;
+  const { isRunningInDocker, projectRoot, targets = [] } = options;
 
   const dockerHint = isRunningInDocker
     ? `<div class="target-docker-hint">⚠️ Cette instance tourne dans un conteneur Docker — la clé (déjà générée automatiquement) doit être lisible par ce conteneur. Ouvrir d'abord un terminal <strong>dans</strong> le conteneur :<pre>docker exec -it &lt;nom du conteneur&gt; bash</pre></div>`
     : '';
   const cdCommand = isRunningInDocker ? 'cd /app' : `cd ${escapeHtml(projectRoot)}`;
 
+  const knownHosts = Array.from(new Set(targets.map((t) => t.host).filter((host) => !!host)));
+  const commandBlock = knownHosts.length > 0
+    ? knownHosts
+        .map((host) => `${cdCommand}\nmkdir -p ~/.ssh\nssh-copy-id -i data/core/ssh/id_ed25519.pub root@${escapeHtml(host)}`)
+        .join('\n\n')
+    : `${cdCommand}\nmkdir -p ~/.ssh\nssh-copy-id -i data/core/ssh/id_ed25519.pub root@&lt;hôte-de-la-cible&gt;`;
+
   container.innerHTML = `
     <div class="ssh-prep-section">
       <p>Une seule clé SSH est générée automatiquement au démarrage, partagée par toutes les applications et toutes les cibles. Avant le premier déploiement vers une nouvelle machine, y copier la clé publique (une fois par machine) :</p>
       ${dockerHint}
-      <pre>${cdCommand}
-mkdir -p ~/.ssh
-ssh-copy-id -i data/core/ssh/id_ed25519.pub root@&lt;hôte-de-la-cible&gt;</pre>
+      <pre>${commandBlock}</pre>
     </div>
   `;
 }

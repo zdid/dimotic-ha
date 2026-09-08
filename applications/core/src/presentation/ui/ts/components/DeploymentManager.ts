@@ -194,6 +194,11 @@ export class DeploymentManager extends HTMLElement {
   private lastCoreTargets: TargetsListData['targets'] = [];
   private lastHaStackTargets: TargetsListData['targets'] = [];
   private lastZ2mTargets: TargetsListData['targets'] = [];
+  /** ⭐ 05/09/2026 — mis en cache pour pouvoir re-rendre `renderSshPrep()` (hôtes réels dans la
+   *  commande ssh-copy-id) à chaque mise à jour d'une des 3 listes de cibles, pas seulement au
+   *  premier événement `core:deployment:targets:list` qui les porte. */
+  private cachedIsRunningInDocker = false;
+  private cachedProjectRoot = '';
 
   constructor() {
     super();
@@ -214,7 +219,9 @@ export class DeploymentManager extends HTMLElement {
     this.socket = window.app.socketService.getSocket();
 
     this.socket.on('core:deployment:targets:list', (data: TargetsListData & { isRunningInDocker: boolean; projectRoot: string }) => {
-      this.renderSshPrep(data.isRunningInDocker, data.projectRoot);
+      this.cachedIsRunningInDocker = data.isRunningInDocker;
+      this.cachedProjectRoot = data.projectRoot;
+      this.renderSshPrep();
       this.renderTargets(data);
     });
 
@@ -244,6 +251,7 @@ export class DeploymentManager extends HTMLElement {
 
     this.socket.on('core:deployment:ha-stack:targets:list', (data: TargetsListData) => {
       this.renderHaStackTargets(data);
+      this.renderSshPrep();
     });
 
     this.socket.on('core:deployment:ha-stack:remote-op:result', (result: TargetActionResult) => {
@@ -262,6 +270,7 @@ export class DeploymentManager extends HTMLElement {
 
     this.socket.on('core:deployment:zigbee2mqtt:targets:list', (data: TargetsListData) => {
       this.renderZigbee2mqttTargets(data);
+      this.renderSshPrep();
     });
 
     this.socket.on('core:deployment:zigbee2mqtt:remote-op:result', (result: TargetActionResult) => {
@@ -279,9 +288,17 @@ export class DeploymentManager extends HTMLElement {
     this.shadowRoot!.getElementById('add-z2m-target-btn')?.addEventListener('click', () => this.addZigbee2mqttTarget());
   }
 
-  private renderSshPrep(isRunningInDocker: boolean, projectRoot: string): void {
+  /** ⭐ 05/09/2026 — combine les 3 listes de cibles (core/HA-stack/zigbee2mqtt) pour que la commande
+   *  ssh-copy-id affiche un bloc par hôte réel déjà connu, quelle que soit la liste d'où il vient. */
+  private renderSshPrep(): void {
     const container = this.shadowRoot!.getElementById('ssh-prep-container');
-    if (container) renderSshPrepSection(container, { isRunningInDocker, projectRoot });
+    if (!container) return;
+    const targets = [...this.lastCoreTargets, ...this.lastHaStackTargets, ...this.lastZ2mTargets];
+    renderSshPrepSection(container, {
+      isRunningInDocker: this.cachedIsRunningInDocker,
+      projectRoot: this.cachedProjectRoot,
+      targets
+    });
   }
 
   /** ⭐ 31/08/2026 : dérive `online` (uniquement pour les cibles gossipées) à partir de `liveness`,

@@ -69,6 +69,47 @@ export interface RemoteOpResult {
 
 const DEFAULT_TIMEOUT_MS = 30000;
 
+/**
+ * ⭐ 05/09/2026 (demande utilisateur, après plusieurs reflashages réels de carte SD RPi1 pendant la
+ * même session) — une carte SD réinstallée présente TOUJOURS une nouvelle clé d'identification SSH
+ * au premier boot (comportement normal de SSH, pas une anomalie) : sans repli, `BatchMode=yes` (pas
+ * de TTY pour la question interactive habituelle) fait échouer silencieusement tout `runSsh`/
+ * `runSshStreaming`/`runScp` suivant, jusqu'à ce qu'un humain lance `ssh-keygen -R <host>` à la
+ * main — fait manuellement une demi-douzaine de fois dans cette seule session avant ce correctif.
+ * Comme ce projet reflashe des cartes régulièrement par conception (voir scripts/flash-sd-card.js,
+ * scripts/prepare-sd-card.sh), ce n'est pas un cas rare à laisser à un humain : les 3 fonctions
+ * ci-dessous détectent ce message précis et se auto-réparent (une seule fois, pas de boucle) en
+ * effaçant l'ancienne entrée puis en refaisant exactement la même tentative.
+ */
+const HOST_KEY_CHANGED_PATTERN = /REMOTE HOST IDENTIFICATION HAS CHANGED|Host key verification failed/;
+
+function clearStaleHostKey(host: string): void {
+  try {
+    execFileSync('ssh-keygen', ['-R', host], { stdio: 'ignore' });
+    console.warn(`[SshClient] Clé d'identification SSH obsolète détectée pour ${host} — entrée effacée de known_hosts, nouvelle tentative...`);
+  } catch {
+    // ssh-keygen -R peut renvoyer un code non-zéro même en cas de succès partiel (entrée déjà
+    // absente d'un des fichiers known_hosts consultés) — sans conséquence, la tentative SSH
+    // suivante fait foi de toute façon.
+  }
+}
+
+/**
+ * Options `-o` communes aux 3 fonctions ci-dessous. `retriedHostKey` (true UNIQUEMENT sur la
+ * relance automatique après `clearStaleHostKey`, jamais sur une tentative normale) ajoute
+ * `StrictHostKeyChecking=accept-new` — sinon, une fois l'ancienne entrée effacée, l'hôte redevient
+ * "inconnu" aux yeux de SSH, et `BatchMode=yes` (aucun TTY pour la question interactive habituelle)
+ * le refuse tout autant qu'un hôte dont la clé a changé — testé en conditions réelles, la relance
+ * échouait encore sans cette option. Restreint à la seule relance (jamais la première tentative)
+ * pour ne pas affaiblir la vérification dans le cas normal — un premier `ssh-copy-id` manuel (voir
+ * `renderSshPrepSection`, TargetCards.ts) reste le geste attendu pour une cible réellement nouvelle.
+ */
+function baseSshArgs(retriedHostKey: boolean): string[] {
+  const args = ['-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes'];
+  if (retriedHostKey) args.push('-o', 'StrictHostKeyChecking=accept-new');
+  return args;
+}
+
 export function expandHome(p: string): string {
   return p.startsWith('~') ? p.replace(/^~/, os.homedir()) : p;
 }
@@ -83,10 +124,11 @@ export function runSsh(
   target: RemoteTarget,
   remoteCommand: string,
   stdin?: string,
-  timeoutMs = DEFAULT_TIMEOUT_MS
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  _retriedHostKey = false
 ): Promise<{ success: boolean; output: string; error?: string }> {
   return new Promise((resolve) => {
-    const args = ['-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes'];
+    const args = baseSshArgs(_retriedHostKey);
     if (target.sshKeyPath) args.push('-i', expandHome(target.sshKeyPath));
     args.push(`root@${target.host}`, remoteCommand);
 
@@ -112,7 +154,13 @@ export function runSsh(
       if (code === 0) {
         resolve({ success: true, output: stdout });
       } else {
-        resolve({ success: false, output: stdout, error: stderr || `ssh a quitté avec le code ${code}` });
+        const errMsg = stderr || `ssh a quitté avec le code ${code}`;
+        if (!_retriedHostKey && HOST_KEY_CHANGED_PATTERN.test(errMsg)) {
+          clearStaleHostKey(target.host);
+          resolve(runSsh(target, remoteCommand, stdin, timeoutMs, true));
+        } else {
+          resolve({ success: false, output: stdout, error: errMsg });
+        }
       }
     });
 
@@ -153,12 +201,13 @@ const DEFAULT_MAX_TOTAL_MS = 2700000;
 export function runSshStreaming(
   target: RemoteTarget,
   remoteCommand: string,
-  opts: RunSshStreamingOptions = {}
+  opts: RunSshStreamingOptions = {},
+  _retriedHostKey = false
 ): Promise<{ success: boolean; output: string; error?: string }> {
   const { stdin, onData, idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS, maxTotalMs = DEFAULT_MAX_TOTAL_MS } = opts;
 
   return new Promise((resolve) => {
-    const args = ['-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes'];
+    const args = baseSshArgs(_retriedHostKey);
     if (target.sshKeyPath) args.push('-i', expandHome(target.sshKeyPath));
     args.push(`root@${target.host}`, remoteCommand);
 
@@ -220,6 +269,17 @@ export function runSshStreaming(
       flushPendingLine();
       if (code === 0) {
         finish({ success: true, output });
+      } else if (!_retriedHostKey && HOST_KEY_CHANGED_PATTERN.test(output)) {
+        // Pas de finish() ici : finish() résout la promesse, or on veut la résoudre avec le
+        // résultat de LA RELANCE, pas un résultat intermédiaire (une promesse ne se résout qu'une
+        // fois — un `finish()` suivi d'un `resolve()` séparé serait silencieusement ignoré).
+        if (!settled) {
+          settled = true;
+          clearTimeout(idleTimer);
+          clearTimeout(maxTimer);
+          clearStaleHostKey(target.host);
+          resolve(runSshStreaming(target, remoteCommand, opts, true));
+        }
       } else {
         finish({ success: false, output, error: `ssh a quitté avec le code ${code}` });
       }
@@ -237,10 +297,11 @@ export function runScp(
   target: RemoteTarget,
   localPaths: string[],
   remoteDest: string,
-  timeoutMs = DEFAULT_TIMEOUT_MS
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  _retriedHostKey = false
 ): Promise<{ success: boolean; error?: string }> {
   return new Promise((resolve) => {
-    const args = ['-r', '-o', 'ConnectTimeout=10', '-o', 'BatchMode=yes'];
+    const args = ['-r', ...baseSshArgs(_retriedHostKey)];
     if (target.sshKeyPath) args.push('-i', expandHome(target.sshKeyPath));
     args.push(...localPaths, `root@${target.host}:${remoteDest}`);
 
@@ -252,8 +313,17 @@ export function runScp(
     child.on('error', (err) => { clearTimeout(timer); resolve({ success: false, error: err.message }); });
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (code === 0) resolve({ success: true });
-      else resolve({ success: false, error: stderr || `scp a quitté avec le code ${code}` });
+      if (code === 0) {
+        resolve({ success: true });
+        return;
+      }
+      const errMsg = stderr || `scp a quitté avec le code ${code}`;
+      if (!_retriedHostKey && HOST_KEY_CHANGED_PATTERN.test(errMsg)) {
+        clearStaleHostKey(target.host);
+        resolve(runScp(target, localPaths, remoteDest, timeoutMs, true));
+      } else {
+        resolve({ success: false, error: errMsg });
+      }
     });
   });
 }
