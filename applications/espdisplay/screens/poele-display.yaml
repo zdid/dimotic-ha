@@ -135,7 +135,20 @@ touchscreen:
   id: touch
   spi_id: touch_bus
   cs_pin: GPIO33
-  interrupt_pin: GPIO36
+  # ⭐ 08/09/2026, retiré (était GPIO36) — bug réel signalé par l'utilisateur : le rétroéclairage se
+  # rallumait tout seul après son extinction pour inactivité (30s, voir lvgl:on_idle: plus bas), et
+  # ne s'éteignait plus jamais ensuite. Aucune autre action ne pilote `backlight` que
+  # `on_touch:`/`on_idle:` ci-dessous — donc uniquement explicable par un faux contact tactile
+  # ("ghost touch"). Confirmé indépendant du poêle lui-même (à l'arrêt au moment du signalement,
+  # donc pas de bruit de commutation d'un contacteur à proximité) — cohérent avec le défaut
+  # matériel documenté sur ce modèle de carte (ESP32-2432S028 "Cheap Yellow Display") : GPIO36 est
+  # une broche entrée-seule sans résistance de tirage interne disponible, sujette à flotter et
+  # capter du bruit propre à la carte (alimentation à découpage, diaphonie entre les deux bus SPI
+  # écran/tactile) — lu comme une interruption tactile valide sans aucun contact réel. Passage en
+  # pur sondage (`update_interval` ci-dessous, déjà présent) plutôt qu'en interruption : évite de
+  # dépendre de cette broche. **Validé en conditions réelles le 08/09/2026** : tap manuel toujours
+  # réactif (rallume l'écran), extinction après 30s d'inactivité confirmée, plus de rallumage
+  # spontané observé depuis.
   update_interval: 50ms
   threshold: 400
   calibration:
