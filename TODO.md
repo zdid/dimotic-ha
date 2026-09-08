@@ -2,6 +2,26 @@
 
 ## Problèmes prioritaires
 
+### 🟡 Guide de création d'une nouvelle application obsolète — Marqué comme tel, contenu pas encore mis à jour
+- **Contexte (08/09/2026)** : `guide-nouvelle-application_specs_v1.10.md` date du 04/08/2026 et ne
+  couvre aucun des changements d'architecture devenus standard depuis (migration process séparé
+  mi-août→24/08). Un avertissement a été ajouté en tête du document (voir CHANGELOG v1.10), mais le
+  **contenu lui-même n'a pas été réécrit** — le suivre tel quel produirait toujours une application
+  construite à l'ancienne.
+- **À couvrir à la reprise** (liste identifiée en marquant le document obsolète, non exhaustive) :
+  - Process séparé (`runsAsSeparateProcess`, `ProcessSupervisor`) — standard pour toutes les apps.
+  - `HaBridgeClient` — remplace l'accès direct à `HaStructureRegistry`/`HaWsClient`.
+  - `bridgedEvents` / `computeBridgeInstance()` / `DIMOTIC_MACHINE_ID` — pont d'événements et
+    identifiants uniques par machine.
+  - `core.disabledApps` comme seul vrai interrupteur d'activation (le champ `enabled` de chaque
+    schéma n'est lu nulle part).
+  - Cibles multi-machines (`targets[]`/`haStackTargets`, `TargetCards.js`, socle SSH/SCP partagé).
+  - Registre gossip (`TargetGossipService`/`AppGossipService`) pour la visibilité inter-machines.
+- **Statut** : Avertissement en place, contenu non mis à jour — différé, demande explicite de
+  l'utilisateur pour plus tard.
+- **Priorité** : Moyenne (bloquant seulement si une nouvelle application est créée avant la mise à
+  jour — pas de nouvelle application prévue dans l'immédiat)
+
 ### 🟡 HAPLAN : chevauchement léger d'éléments sur l'écran physique ESP32 (page libre) — Non traité, différé volontairement
 - **Contexte (08/09/2026)** : après le portage complet "page libre + texte libre" (web + carte
   Lovelace HA + écran ESP32-8048S070, voir [[project_haplan_esphome_s3_display]]) et le premier
