@@ -63,6 +63,60 @@ Objectif : une fois Home Assistant démarré (instance neuve, décision du 05/08
 
 *Point ouvert, non traité ce soir : intégrations Wyoming (Whisper `10300`/Piper `10200`, conteneurs actuellement arrêtés à la demande) — à ajouter à cette checklist si/quand l'assistant vocal est remis en service.*
 
+### 2bis. Climatisations (splits) — ajouté le 06/09/2026, complété le 06/09/2026
+
+**Seulement nécessaire en reconstruction complète** (nouvelle instance HA, pas une restauration de
+sauvegarde — une restauration de `config/.storage/` récupère tout automatiquement, y compris les
+tokens/clés).
+
+**⭐ Identifiants déjà sauvegardés** (token Midea, local_key Tuya × 2, tous les champs de connexion) :
+`backups/core.config_entries_backup_2026-09-06_climatisation-splits.json` (gitignored, permissions
+600, JAMAIS commité — extrait directement de `ha2:/docker/homeassistant/config/.storage/
+core.config_entries` via SSH). Contexte : les API cloud des fournisseurs (Tuya, Midea/NetHome Plus)
+se resserrent progressivement (Midea a déjà fermé Meiju/SmartHome par le passé, cf. §2bis ci-dessous)
+— sauvegarder le token *pendant qu'il fonctionne encore* évite de dépendre d'un compte/API qui
+pourrait ne plus être accessible le jour où il faut reconstruire.
+
+**Méthode de restauration préférée — rejouer SANS toucher au cloud** : dans l'assistant HA de chaque
+intégration, choisir le chemin **manuel** (pas l'assistant cloud) et coller directement les valeurs
+du fichier de sauvegarde ci-dessus :
+- Tuya Local → "**Fournissez manuellement les informations de connexion**" → `device_id`, `host`,
+  `local_key`, `protocol_version`, `type` (tous présents dans le JSON, par device).
+- Midea AC LAN → "**Configure manually**" → `device_id`, `type`, `ip_address` (champ "Address IP"),
+  `port`, `protocol`, `model`, `subtype`, `token`, `key` (tous présents dans le JSON).
+
+Ce chemin manuel n'a jamais été scriptable via l'API WS de HA (`config_entries/flow/init` renvoie
+"unknown_command" pour un jeton d'accès longue durée — restriction de sécurité délibérée, fonctionne
+seulement depuis un vrai navigateur connecté) — à refaire à la main (ou via navigateur piloté) le
+jour venu, mais reste très rapide (~1 min/appareil) et ne nécessite aucun compte fournisseur.
+
+**Si le fichier de sauvegarde est perdu/périmé** (device reconfiguré depuis), il faut repasser par
+l'assistant cloud — procédure complète :
+- `make-all/tuya-local` (domaine `tuya_local`) — 2 appareils Tuya :
+  - "Clim Chambre d'ami" (`climate.chambre_d_ami_climatiseur`, device_id Tuya `bf045991ad6b50e545fsta`)
+  - "Bureau Climatiseur" (`climate.bureau_climatiseur`, device_id Tuya `bf3cf4e6387e43ecd0dvbs`)
+  - Setup : Ajouter une intégration → Tuya Local → **"Configuration assistée par le cloud SmartLife"**
+    → se connecter avec le compte Tuya/SmartLife app (pas besoin de compte développeur Tuya IoT).
+- `wuwentao/midea_ac_lan` (domaine `midea_ac_lan`) — 1 appareil NetHome Plus :
+  - "Salle Climatiseur" (`climate.salle_climatiseur`), IP `192.168.1.46`, device_id `153931629788358`,
+    modèle `00000Q13`, soustype `8`, protocole `3`.
+  - **NetHome Plus (l'appli d'origine) ne permet PAS la récupération de token** — l'appareil doit être
+    ré-appairé via l'appli **SmartHome** (ou Meiju) au préalable.
+  - Setup : Ajouter une intégration → Midea AC LAN → "Discover automatically" → dans le champ IP,
+    **saisir l'IP exacte de l'appareil** (`192.168.1.46`) — la découverte broadcast/"auto" ne trouve
+    rien sur cette installation. Si l'écran ne propose jamais le login (juste une erreur "Can't get
+    available token"), refaire depuis le début en choisissant d'abord **"Remove login cache"**. Sur
+    l'écran de login, le menu "server" est par défaut sur "美的美居" (chinois) — choisir **"SmartHome"**
+    dans la liste (2e position).
+
+**Reste ouvert** : le mécanisme de sauvegarde régulière décrit en §1.4 (script cron/rsync vers
+OwnCloud) n'a toujours pas été construit — cette extraction ponctuelle du 06/09/2026 est un instantané
+manuel, pas un processus automatique. Si un nouveau device local (Tuya/Midea/autre) est ajouté plus
+tard sans repasser par cette extraction, il ne sera pas protégé de la même façon.
+
+Voir mémoire Claude `project_climatisation_splits_local` (session dimotic-ha) pour le détail complet
+si cette section devient insuffisante.
+
 ---
 
 ## 3. Pistes futures — non traitées ce soir
