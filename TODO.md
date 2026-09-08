@@ -41,7 +41,7 @@
 - **Priorité** : Moyenne (bloquant seulement si une nouvelle application est créée avant la mise à
   jour — pas de nouvelle application prévue dans l'immédiat)
 
-### 🟡 Teleinfo : conflit UART (login série) corrompait les trames — Corrigé sur le RPi1 en place, à valider par un flash complet
+### 🟢 Teleinfo : conflit UART (login série) corrompait les trames — Corrigé, validé par un flash complet de bout en bout
 - **Contexte (06/09/2026)** : après le redéploiement des noms SPA/Pompe à chaleur sur la carte SD
   reflashée via le nouveau pipeline (voir [[project_sd_card_provisioning_pipeline]]), plus aucune
   trame téléinfo remontée pendant 15+ minutes (0 à quelques octets reçus par cycle de 25s au lieu
@@ -58,11 +58,15 @@
 - **Fix reporté dans les scripts de provisionnement** (`app_needs_serial_console_disabled` dans
   `prepare-sd-card.sh`, `APPS_NEEDING_SERIAL_CONSOLE_DISABLED` dans `flash-sd-card.js`) pour qu'une
   future carte flashée pour `teleinfo` n'ait plus jamais ce problème.
-- **À valider (prévu le 07/09/2026)** : un flash complet de bout en bout avec le pipeline corrigé,
-  pour confirmer que `serial-getty@ttyAMA0` reste bien désactivé dès le premier boot (le correctif
-  n'a été vérifié que syntaxiquement — `bash -n`/`node -c` — pas rejoué sur une vraie carte).
-- **Statut** : Corrigé sur la carte en place ; correctif du pipeline non re-testé en conditions réelles
-- **Priorité** : Haute (bloque la confiance dans le pipeline de flashage pour teleinfo)
+- **Validé le 08/09/2026** : flash complet de bout en bout avec le pipeline corrigé (carte de
+  secours, `flash-sd-card.js`/`prepare-sd-card.sh`), carte inspectée avant insertion (montage
+  `udisksctl`, sans sudo) puis RPi1 testé en direct après boot par SSH (clé dimotic-ha) — les deux
+  volets du correctif tiennent dès le premier boot, sans aucune intervention manuelle :
+  `systemctl is-enabled serial-getty@ttyAMA0.service` → `masked` (pas juste arrêté), `/proc/cmdline`
+  réel (pas juste le fichier) sans `console=serial0,115200`, `/dev/ttyAMA0` libre (`fuser` vide).
+  Device-agent teleinfo + `node_modules` déjà présents (pré-installés en chroot).
+- **Statut** : Corrigé et validé de bout en bout (carte en place + pipeline de flashage)
+- **Priorité** : —
 
 ### 🟢 Teleinfo : déploiement sur cible sans Node.js/npm — installation auto ajoutée, mais `apt-get install npm` entraînait ~400 paquets sans rapport — Corrigé
 - **Contexte (05/09/2026)** : après reflash de la carte SD du RPi1, `node`/`npm` absents (voir aussi
