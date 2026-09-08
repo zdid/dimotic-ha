@@ -36,6 +36,10 @@ npm-debug.log*
 # Alpine.js backup
 sauvealpine/
 
+# Bytecode compilé Python (généré par generate_esphome_floorplan.py, pas de source)
+__pycache__/
+*.pyc
+
 # pnpm
 .pnp
 .pnp.js
