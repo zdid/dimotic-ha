@@ -9,14 +9,15 @@
   [[project_sd_card_provisioning_pipeline]]) en une vraie application du projet. Détail complet de
   la conception dans [[project_provisioning_app_conception]].
 - **Résumé** : support bootable (SD/clé/disque USB), distribution Raspbian selon le type de
-  machine, toutes options en oui/non (WiFi, fuseau horaire par défaut Paris, Node.js avec
-  package.json gabarit ou téléversé, Python3, Docker CE réel + liste d'apps Docker à installer).
-  Changement d'architecture confirmé : l'appli web génère un **script à télécharger**, exécuté par
-  l'utilisateur lui-même en `sudo` (jamais par l'appli/Claude directement — bloqué par une demande
-  de mot de passe en tentant de lancer le pipeline actuel, mot de passe jamais saisi à sa place).
+  machine, toutes options en oui/non (WiFi, fuseau horaire par défaut Paris, clavier par défaut
+  français, Node.js avec package.json gabarit ou téléversé, Python3, Docker CE réel + liste d'apps
+  Docker à installer). Changement d'architecture confirmé : l'appli web génère un **script à
+  télécharger**, exécuté par l'utilisateur lui-même en `sudo` (jamais par l'appli/Claude
+  directement — bloqué par une demande de mot de passe en tentant de lancer le pipeline actuel,
+  mot de passe jamais saisi à sa place).
 - **Points ouverts** : second paquet Node "oublié" par l'utilisateur (deviné `mqtt`, pas confirmé),
-  lib de gestion de queue Node (question posée, sans réponse), disposition clavier (pas confirmée),
-  liste précise des applications Docker installables, authentification SSH mot de passe vs clé.
+  lib de gestion de queue Node (question posée, sans réponse), liste précise des applications
+  Docker installables, authentification SSH mot de passe vs clé.
 - **Statut** : Conception en cours de discussion, rien codé
 - **Priorité** : Moyenne (pas bloquant, mais des points restent à clarifier avant de pouvoir coder)
 
