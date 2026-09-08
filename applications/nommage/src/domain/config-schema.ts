@@ -20,6 +20,9 @@ const sourceMqttConfigSchema = z.object({
   port: z.number().min(1).max(65535).default(1883),
   username: z.string().optional(),
   password: z.string().optional(),
+  // ⭐ 08/09/2026 — n'est plus qu'un PRÉFIXE, duplicable sans risque entre machines dimotic-ha :
+  // voir computeBridgeInstance/DIMOTIC_MACHINE_ID (NommageMqttIntegrationService.connectSource),
+  // même correctif que `bridgeInstance` dans arexx/evoo7/rfxcom/rpigpio.
   clientId: z.string().default('nommage-app'),
   keepalive: z.number().min(0).max(300).default(60),
   reconnectPeriod: z.number().min(1000).max(300000).default(5000),
@@ -110,7 +113,6 @@ const languageConfigSchema = z.object({
 
 export const nommageConfigSchema = z.object({
   // Activation générale
-  enabled: z.boolean().default(true),
 
   // Une ou plusieurs sources MQTT, toutes connectées et traitées simultanément
   sources: z.array(nommageSourceSchema).min(1).default([
@@ -167,7 +169,6 @@ const DEFAULT_NOMMAGE_SOURCE: NommageSourceConfig = {
 };
 
 export const DEFAULT_NOMMAGE_CONFIG: NommageConfig = {
-  enabled: true,
   sources: [DEFAULT_NOMMAGE_SOURCE],
   ha: {
     injectTaxonomyAttributes: true,

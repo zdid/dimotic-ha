@@ -92,8 +92,17 @@ export const NOMMAGE_UI_METADATA: ModuleUiMetadata = {
           default: DEFAULT_NOMMAGE_CONFIG.sources,
           itemFields: [
             { name: 'id', label: 'Identifiant de la source', type: 'text', required: true, placeholder: 'ha-broker', hint: 'Identifiant unique (ex: "ha-broker", "zigbee2mqtt")' },
-            { name: 'mqtt.clientId', label: 'Client ID MQTT', type: 'text', required: true, placeholder: 'nommage-app', hint: 'Doit être unique entre toutes les sources' },
-            { name: 'mqtt.host', label: 'Hôte MQTT', type: 'text', required: true, placeholder: '192.168.1.100', default: 'localhost' },
+            { name: 'mqtt.clientId', label: 'Client ID MQTT', type: 'text', required: true, placeholder: 'nommage-app', hint: 'Préfixe seul (doit être unique entre toutes les sources de CETTE machine) — un identifiant de machine y est ajouté automatiquement à la connexion, ce champ reste donc dupliable tel quel entre machines dimotic-ha sans risque de collision.' },
+            {
+              name: 'mqtt.host', label: 'Hôte MQTT', type: 'text', required: true, placeholder: '192.168.1.100', default: 'localhost',
+              // ⭐ 08/09/2026 : ne JAMAIS mettre '127.0.0.1'/'localhost' ici, même quand le broker
+              // tourne sur cette même machine — voir [[project_multimachine_config_duplication_design]]
+              // (conception "duplication config multi-machines", en pause) : `data/nommage/
+              // config.yaml` est candidat à une diffusion identique vers d'autres machines, où une
+              // adresse de boucle locale pointerait vers le mauvais broker (ou aucun), cassé
+              // silencieusement. Toujours l'adresse LAN réelle de la machine hébergeant le broker.
+              hint: 'Toujours l\'adresse IP LAN réelle du broker (ex: 192.168.1.51) — jamais "127.0.0.1" ni "localhost", même si le broker tourne sur cette machine (ce fichier peut être diffusé vers d\'autres machines).'
+            },
             { name: 'mqtt.port', label: 'Port MQTT', type: 'number', required: true, min: 1, max: 65535, default: 1883 },
             { name: 'mqtt.username', label: 'Utilisateur MQTT', type: 'text', placeholder: 'user' },
             { name: 'mqtt.password', label: 'Mot de passe MQTT', type: 'password', placeholder: 'password' },

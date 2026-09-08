@@ -14,6 +14,7 @@
  */
 
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../../../core/dist/exports';
+import { computeBridgeInstance } from '../../../../../core/dist/exports';
 import { nommageConfigSchema, type NommageConfig, type NommageSourceConfig } from '../../../domain/config-schema';
 import type { DiscoveryMessage, SourceStatus } from '../../../domain/types';
 import * as mqtt from 'mqtt';
@@ -94,8 +95,17 @@ export class NommageMqttIntegrationService implements INommageMqttIntegrationSer
     this.logger.info('NommageMqttIntegrationService',
       `[${source.id}] Tentative de connexion MQTT à ${brokerUrl}...`);
 
+    // ⭐ 08/09/2026 — même règle que `bridgeInstance` (arexx/evoo7/rfxcom/rpigpio, voir
+    // computeBridgeInstance) : `source.mqtt.clientId` n'est plus qu'un PRÉFIXE, duplicable sans
+    // risque entre machines dimotic-ha — l'identifiant réellement utilisé pour la connexion MQTT
+    // (unique par machine) est calculé à la volée en y ajoutant `DIMOTIC_MACHINE_ID`, jamais
+    // persisté sous cette forme suffixée. Sans ce correctif, deux machines actives simultanément
+    // sur la même source avec le même `clientId` littéral se feraient s'éjecter en boucle par le
+    // broker (le protocole MQTT exige un `clientId` unique par connexion).
+    const effectiveClientId = computeBridgeInstance(source.mqtt.clientId, process.env.DIMOTIC_MACHINE_ID);
+
     const options: mqtt.IClientOptions = {
-      clientId: source.mqtt.clientId,
+      clientId: effectiveClientId,
       keepalive: source.mqtt.keepalive,
       reconnectPeriod: source.mqtt.reconnectPeriod,
       clean: source.mqtt.cleanSession,
