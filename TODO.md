@@ -22,21 +22,6 @@
 - **Priorité** : Moyenne (bloquant seulement si une nouvelle application est créée avant la mise à
   jour — pas de nouvelle application prévue dans l'immédiat)
 
-### 🟡 HAPLAN : chevauchement léger d'éléments sur l'écran physique ESP32 (page libre) — Non traité, différé volontairement
-- **Contexte (08/09/2026)** : après le portage complet "page libre + texte libre" (web + carte
-  Lovelace HA + écran ESP32-8048S070, voir [[project_haplan_esphome_s3_display]]) et le premier
-  déploiement OTA réussi du plan « Ballons » (page libre, ratio 4:3 portrait) sur l'écran physique,
-  retour utilisateur : "ça se marche un peu dessus" — chevauchement léger de certains
-  éléments (icônes/textes) sur ce nouvel écran.
-- **Cause non investiguée** — hypothèses possibles à vérifier plus tard : positions placées dans
-  l'éditeur web sur un ratio différent de celui réellement rendu sur l'écran 800×480 (letterboxing),
-  ou boîtes de texte (`build_text_widget()`, generate_esphome_floorplan.py) dimensionnées trop
-  généreusement pour l'espace réellement disponible entre deux éléments proches.
-- **Décision explicite de l'utilisateur** : ne pas corriger maintenant, "on reste comme ça" —
-  différé, pas d'action entreprise.
-- **Statut** : Non traité (différé volontairement)
-- **Priorité** : Basse (esthétique, écran fonctionnel malgré le chevauchement)
-
 ### 🟡 Teleinfo : conflit UART (login série) corrompait les trames — Corrigé sur le RPi1 en place, à valider par un flash complet
 - **Contexte (06/09/2026)** : après le redéploiement des noms SPA/Pompe à chaleur sur la carte SD
   reflashée via le nouveau pipeline (voir [[project_sd_card_provisioning_pipeline]]), plus aucune
