@@ -1,10 +1,11 @@
 import { z } from 'zod';
 
 // Schema de configuration pour l'application ArbreOuquoi
+// ⭐ 06/09/2026 — pas de champ `enabled` ici : l'activation réelle d'une application passe
+// exclusivement par `core.disabledApps` (Paramètres Techniques > Gestion des applications) — un
+// champ `enabled` par app n'était lu nulle part dans le code, jamais consulté (trouvé en auditant
+// les 13 apps pour la duplication de paramètres entre machines).
 export const arbreouquoiConfigSchema = z.object({
-  // Activation/désactivation
-  enabled: z.boolean().default(true),
-  
   // Options d'affichage
   display: z.object({
     expandAll: z.boolean().default(false),

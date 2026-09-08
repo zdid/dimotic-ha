@@ -6,7 +6,6 @@
 import { z } from 'zod';
 
 export const planificateurConfigSchema = z.object({
-  enabled: z.boolean().default(true),
 
   // Fichiers de données (relatifs à data/), voir specs §5
   macrosFile: z.string().min(1).default('planificateur-macros-v1.0.yaml'),
@@ -26,7 +25,6 @@ export const planificateurConfigSchema = z.object({
 export type PlanificateurConfig = z.infer<typeof planificateurConfigSchema>;
 
 export const DEFAULT_PLANIFICATEUR_CONFIG: PlanificateurConfig = {
-  enabled: true,
   macrosFile: 'planificateur-macros-v1.0.yaml',
   planificationsFile: 'planificateur-planifications-v1.0.yaml',
   deployTimeoutMs: 15000,

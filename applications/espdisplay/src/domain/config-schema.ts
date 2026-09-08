@@ -27,7 +27,6 @@ const remoteTargetSchema = z.object({
 });
 
 export const espDisplayConfigSchema = z.object({
-  enabled: z.boolean().default(true),
   esphomeContainer: z.string().default('esphome'),
   esphomeConfigDir: z.string().default('/docker/esphome/config'),
   // Vide = résolu par défaut vers applications/haplan/tools/generate_esphome_floorplan.py
@@ -42,7 +41,6 @@ export type EspDisplayRemoteTarget = z.infer<typeof remoteTargetSchema>;
 export type EspDisplayConfig = z.infer<typeof espDisplayConfigSchema>;
 
 export const DEFAULT_ESPDISPLAY_CONFIG: EspDisplayConfig = {
-  enabled: true,
   esphomeContainer: 'esphome',
   esphomeConfigDir: '/docker/esphome/config',
   pipelineScriptPath: '',

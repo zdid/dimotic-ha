@@ -9,7 +9,6 @@
 import { z } from 'zod';
 
 export const haplanConfigSchema = z.object({
-  enabled: z.boolean().default(true),
 
   // Fichier de configuration des plans/positions, relatif à data/haplan/
   floorplansConfigFile: z.string().min(1).default('config-haplan-floorplans-v1.0.yaml')
@@ -18,6 +17,5 @@ export const haplanConfigSchema = z.object({
 export type HaplanConfig = z.infer<typeof haplanConfigSchema>;
 
 export const DEFAULT_HAPLAN_CONFIG: HaplanConfig = {
-  enabled: true,
   floorplansConfigFile: 'config-haplan-floorplans-v1.0.yaml'
 };

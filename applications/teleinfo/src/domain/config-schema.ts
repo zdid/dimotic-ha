@@ -43,7 +43,6 @@ const mqttConfigSchema = z.object({
 });
 
 export const teleinfoConfigSchema = z.object({
-  enabled: z.boolean().default(true),
   targets: z.array(targetConfigSchema).max(1).default([]),
   gpio: gpioConfigSchema.default({}),
   serialPort: z.string().default('/dev/ttyAMA0'),
@@ -65,7 +64,6 @@ export type TeleinfoGpioConfig = z.infer<typeof gpioConfigSchema>;
 export type TeleinfoMqttConfig = z.infer<typeof mqttConfigSchema>;
 
 export const DEFAULT_TELEINFO_CONFIG: TeleinfoConfig = {
-  enabled: true,
   targets: [],
   gpio: { pinA: 11, pinB: 12 },
   serialPort: '/dev/ttyAMA0',

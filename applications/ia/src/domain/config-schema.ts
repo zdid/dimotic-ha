@@ -30,7 +30,6 @@ export const mistralRateLimitsSchema = z.record(mistralRateLimitSchema).default(
 });
 
 export const iaConfigSchema = z.object({
-  enabled: z.boolean().default(true),
 
   mistralApiKey: z.string().optional(),
   mistralBaseUrl: z.string().default('https://api.mistral.ai/v1'),
@@ -110,7 +109,6 @@ export const iaConfigSchema = z.object({
 export type IaConfig = z.infer<typeof iaConfigSchema>;
 
 export const DEFAULT_IA_CONFIG: IaConfig = {
-  enabled: true,
   mistralBaseUrl: 'https://api.mistral.ai/v1',
   defaultMistralModel: 'mistral-small-latest',
   modelMap: {
