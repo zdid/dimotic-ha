@@ -2,6 +2,24 @@
 
 ## Problèmes prioritaires
 
+### 🟡 Nouvelle application "provisioning" (support bootable) — Conception, rien implémenté
+- **Contexte (08/09/2026)** : en marge de la validation du correctif UART teleinfo (entrée
+  ci-dessous), besoin exprimé de généraliser `scripts/flash-sd-card.js`+`prepare-sd-card.sh`
+  (actuellement hors-git, root, câblés en dur pour `teleinfo` uniquement — voir
+  [[project_sd_card_provisioning_pipeline]]) en une vraie application du projet. Détail complet de
+  la conception dans [[project_provisioning_app_conception]].
+- **Résumé** : support bootable (SD/clé/disque USB), distribution Raspbian selon le type de
+  machine, toutes options en oui/non (WiFi, fuseau horaire par défaut Paris, Node.js avec
+  package.json gabarit ou téléversé, Python3, Docker CE réel + liste d'apps Docker à installer).
+  Changement d'architecture confirmé : l'appli web génère un **script à télécharger**, exécuté par
+  l'utilisateur lui-même en `sudo` (jamais par l'appli/Claude directement — bloqué par une demande
+  de mot de passe en tentant de lancer le pipeline actuel, mot de passe jamais saisi à sa place).
+- **Points ouverts** : second paquet Node "oublié" par l'utilisateur (deviné `mqtt`, pas confirmé),
+  lib de gestion de queue Node (question posée, sans réponse), disposition clavier (pas confirmée),
+  liste précise des applications Docker installables, authentification SSH mot de passe vs clé.
+- **Statut** : Conception en cours de discussion, rien codé
+- **Priorité** : Moyenne (pas bloquant, mais des points restent à clarifier avant de pouvoir coder)
+
 ### 🟡 Guide de création d'une nouvelle application obsolète — Marqué comme tel, contenu pas encore mis à jour
 - **Contexte (08/09/2026)** : `guide-nouvelle-application_specs_v1.10.md` date du 04/08/2026 et ne
   couvre aucun des changements d'architecture devenus standard depuis (migration process séparé
