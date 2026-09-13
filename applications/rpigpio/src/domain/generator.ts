@@ -41,12 +41,32 @@ function buildHaDiscoveryDevice(pin: PinDefinition): Record<string, unknown> {
   };
 }
 
+/**
+ * ⭐ 13/09/2026 (bug réel constaté sur noisy — les 12 sorties basculaient à un état électrique
+ * arbitraire à chaque redémarrage du conteneur mqtt-io) : traduit `pin.initial` ("on"/"off",
+ * logique, même convention que PAYLOAD_ON/PAYLOAD_OFF de gpiobridge.js) vers `initial`
+ * ("high"/"low", électrique — ce que mqtt-io attend réellement, voir mqtt_io/config/
+ * config.schema.yml) en tenant compte de `inverted`, exactement comme le fait déjà `write()` côté
+ * gpiobridge.js pour les commandes ON/OFF elles-mêmes. `publish_initial: true` republie cet état
+ * en MQTT dès le démarrage (utile pour resynchroniser HA/le reste du système sans attendre une
+ * commande). Seulement pertinent pour une sortie (`direction: output`) : mqtt-io n'a pas ce
+ * concept pour une entrée. Ne couvre que le TOUT premier démarrage (rien encore en MQTT) — les
+ * redémarrages suivants sont couverts par le message MQTT retenu que publie gpiobridge.js
+ * (`retain: true`), qui restaure le dernier état RÉEL plutôt qu'une valeur figée en config.
+ */
+function buildInitialFields(pin: PinDefinition): { initial?: 'high' | 'low'; publish_initial?: boolean } {
+  if (pin.direction !== 'output' || !pin.initial) return {};
+  const isHigh = pin.inverted ? pin.initial === 'off' : pin.initial === 'on';
+  return { initial: isHigh ? 'high' : 'low', publish_initial: true };
+}
+
 function buildPinEntry(pin: PinDefinition): Record<string, unknown> {
   return {
     name: pin.id,
     module: GPIO_MODULE_NAME,
     pin: pin.pin,
     inverted: pin.inverted,
+    ...buildInitialFields(pin),
     ha_discovery: {
       device: buildHaDiscoveryDevice(pin)
     }

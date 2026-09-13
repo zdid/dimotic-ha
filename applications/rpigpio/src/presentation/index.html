@@ -38,6 +38,7 @@
     .badge.input { background: #1e4a5e; color: #a6d6e6; }
     .badge.output { background: #1e5e2e; color: #a6e6ae; }
     .badge.inverted { background: var(--color-warning); color: white; }
+    .badge.initial { background: #3a2e5e; color: #cbb8f0; }
 
     .empty { color: var(--color-text-muted); font-style: italic; padding: 10px; }
     .loading { text-align: center; padding: 40px; color: var(--color-text-muted); }
@@ -181,6 +182,14 @@
         <input type="checkbox" id="pin-inverted">
         <label for="pin-inverted">Inversé (niveau bas = actif)</label>
       </div>
+      <div class="form-row">
+        <label for="pin-initial">État au tout premier démarrage (sortie uniquement)</label>
+        <select id="pin-initial">
+          <option value="">Ne pas forcer (comportement mqtt-io par défaut)</option>
+          <option value="on">Allumé</option>
+          <option value="off">Éteint</option>
+        </select>
+      </div>
       <div class="alert alert-error" id="pin-form-error"></div>
       <div class="modal-actions">
         <button class="btn btn-secondary" id="pin-cancel">Annuler</button>
@@ -191,6 +200,6 @@
 
   <script type="module" src="/applications/rpigpio/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-08-12 00:00:00 - Création de l'application rpigpio -->
+  <!-- Derniere modification: 2026-09-13 00:00:00 - Champ "état au premier démarrage" (initial) -->
 </body>
 </html>

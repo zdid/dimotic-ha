@@ -22,6 +22,7 @@ interface PinDefinition {
   pin: number;
   direction: 'input' | 'output';
   inverted: boolean;
+  initial?: 'on' | 'off';
 }
 
 interface RpigpioStatus {
@@ -157,6 +158,7 @@ function renderPins(): void {
         <div class="pin-name">${escapeHtml(buildQuoiOuLabel(p))}
           <span class="badge ${p.direction}">${p.direction === 'input' ? 'entrée' : 'sortie'}</span>
           ${p.inverted ? '<span class="badge inverted">inversé</span>' : ''}
+          ${p.initial ? `<span class="badge initial">init: ${p.initial === 'on' ? 'allumé' : 'éteint'}</span>` : ''}
         </div>
         <div class="pin-detail">GPIO ${p.pin} — id: ${escapeHtml(p.id)}</div>
       </div>
@@ -223,6 +225,7 @@ function openPinModalForEdit(id: string): void {
   setInputValue('pin-number', String(pin.pin));
   setInputValue('pin-direction', pin.direction);
   setCheckboxValue('pin-inverted', pin.inverted);
+  setInputValue('pin-initial', pin.initial || '');
 
   const title = $('pin-modal-title');
   if (title) title.textContent = '✏️ Modifier le pin';
@@ -239,6 +242,7 @@ function clearPinForm(): void {
   setInputValue('pin-number', '');
   setInputValue('pin-direction', 'output');
   setCheckboxValue('pin-inverted', false);
+  setInputValue('pin-initial', '');
   hideElement('pin-form-error');
 }
 
@@ -276,6 +280,7 @@ function submitPinForm(): void {
   const pinNumberRaw = (($('pin-number') as HTMLInputElement)?.value || '').trim();
   const direction = (($('pin-direction') as HTMLSelectElement)?.value || 'output') as 'input' | 'output';
   const inverted = (($('pin-inverted') as HTMLInputElement)?.checked) || false;
+  const initial = (($('pin-initial') as HTMLSelectElement)?.value || '') as '' | 'on' | 'off';
 
   if (!quoi || !lieu || !pinNumberRaw) {
     if (errorEl) { errorEl.textContent = 'Quoi, lieu et numéro de pin sont obligatoires.'; errorEl.style.display = 'block'; }
@@ -293,6 +298,7 @@ function submitPinForm(): void {
   if (lieuPrecis) payload.lieuPrecis = lieuPrecis;
   if (lieuPere) payload.lieuPere = lieuPere;
   if (lieuGrandPere) payload.lieuGrandPere = lieuGrandPere;
+  if (initial) payload.initial = initial;
 
   socket?.emit('rpigpio:pin:save', payload);
   closePinModal();

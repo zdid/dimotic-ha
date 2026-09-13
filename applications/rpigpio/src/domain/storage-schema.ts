@@ -24,6 +24,16 @@ export const pinDefinitionSchema = z.object({
   // "low" est considéré actif quand inverted=true (voir generator.ts et doc mqtt-io ha_discovery).
   inverted: z.boolean().default(false),
 
+  // ⭐ 13/09/2026 (bug réel trouvé en conditions réelles sur noisy — les 12 sorties basculaient à
+  // un état électrique arbitraire à chaque redémarrage du conteneur mqtt-io, aucune persistance
+  // entre config.yml/schéma jusqu'ici) : état logique ("on"/"off", pas "high"/"low" — mêmes
+  // conventions que PAYLOAD_ON/PAYLOAD_OFF de gpiobridge.js) forcé au tout premier démarrage
+  // (avant toute commande MQTT reçue). Traduit en `initial: high|low` selon `inverted` dans
+  // generator.ts::buildPinEntry, voir son commentaire pour le second mécanisme complémentaire
+  // (retain MQTT côté gpiobridge.js) qui couvre les redémarrages SUIVANTS. Optionnel : un pin sans
+  // valeur ici garde le comportement mqtt-io par défaut (état électrique indéterminé au boot).
+  initial: z.enum(['on', 'off']).optional(),
+
   createdAt: z.string().optional(),
   updatedAt: z.string().optional()
 });
