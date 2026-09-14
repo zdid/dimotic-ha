@@ -37,8 +37,17 @@ export class SwitchTypeDetector {
       return 'water_heater';
     }
     
-    // Radiateur/élément chauffant : contient souvent "radiator", "heating", "chauffage"
-    if (lowerId.includes('radiator') || lowerId.includes('heating') || lowerId.includes('chauffage')) {
+    // Radiateur/élément chauffant : contient souvent "radiateur" (FR), "radiator" (EN), "heating",
+    // "chauffage" — ⭐ 14/09/2026 : "radiateur" ajouté, absent jusqu'ici alors que c'est le nom
+    // français réellement utilisé (ex. switch.salle_radiateur_18 sur noisy2) ; "radiator" ne le
+    // matchait pas ("radiateur" n'est pas un sur-mot de "radiator", lettres différentes après
+    // "radiat").
+    if (
+      lowerId.includes('radiateur') ||
+      lowerId.includes('radiator') ||
+      lowerId.includes('heating') ||
+      lowerId.includes('chauffage')
+    ) {
       return 'radiator';
     }
     
