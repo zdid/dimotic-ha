@@ -1,0 +1,4 @@
+# Profils de flashage de carte SD — contiennent un mot de passe en clair (voir le commentaire
+# dans teleinfo-rpi1.yaml). Jamais commité, même si scripts/ lui-même l'est.
+*.yaml
+!.gitignore
