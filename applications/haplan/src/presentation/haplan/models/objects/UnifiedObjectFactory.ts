@@ -18,6 +18,7 @@ import { SwitchWindow } from './windows/SwitchWindow';
 import { ThermostatWindow } from './windows/ThermostatWindow';
 import { GenericWindow } from './windows/GenericWindow';
 import { SwitchContextWindow } from './windows/SwitchContextWindow';
+import { CoverWindow } from './windows/CoverWindow';
 import { DataService } from '../../services/DataService';  // ✅ GARDER SEUL import
 
 export class UnifiedObjectFactory {
@@ -94,7 +95,10 @@ export class UnifiedObjectFactory {
       return cover;
     });
 
-    this.registerWindowType('cover', (entity) => new GenericWindow(entity));
+    // ⭐ 14/09/2026 : GenericWindow (lecture seule, aucun bouton) remplacé par CoverWindow
+    // (Ouvrir/Stop/Fermer → entity.handleAction()) — EnhancedCoverObject avait déjà toute la
+    // logique mais rien ne l'appelait, un tap sur un volet n'affichait donc que le titre.
+    this.registerWindowType('cover', (entity) => new CoverWindow(entity));
 
     // Store spécifique
     this.registerEntityType('blind', (entity_id, position, state, dataService) => {  // ✅ CHANGER
@@ -102,7 +106,9 @@ export class UnifiedObjectFactory {
       return blind;
     });
 
-    this.registerWindowType('blind', (entity) => new GenericWindow(entity));
+    // ⭐ 14/09/2026 : même correctif que 'cover' — EnhancedBlindObject hérite d'EnhancedCoverObject,
+    // même bug (GenericWindow sans bouton).
+    this.registerWindowType('blind', (entity) => new CoverWindow(entity));
 
     // Thermostat
     this.registerEntityType('thermostat', (entity_id, position, state, dataService) => {  // ✅ CHANGER
