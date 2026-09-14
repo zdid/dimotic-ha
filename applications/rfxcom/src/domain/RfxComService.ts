@@ -17,6 +17,7 @@ import type { RfxComDevicesConfigFile, ReceiverConfigEntry } from './devices-con
 import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult, RfxComOrderTrace } from './types';
 import { DeviceManager } from './devices/DeviceManager';
 import { ReceiverManager } from './receivers/ReceiverManager';
+import type { IReceiverModule, ReceiverCommandResult } from './receivers/BaseReceiver';
 import { SceneManager } from './scenes/SceneManager';
 import { SceneExecutor } from './scenes/SceneExecutor';
 import { RfxComTransceiver } from './transceiver/RfxComTransceiver';
@@ -447,12 +448,20 @@ export class RfxComService implements IRfxComService {
     const isEmitter = message.type.startsWith('Lighting');
     if (isEmitter) {
       const affectedReceivers = this.receiverManager.handleEmitterMessage(uniqueId);
+      // ⭐ 14/09/2026, pont protocole (ex: bouton Lighting2 associé à un volet Somfy) : le device
+      // réellement commandé n'a rien reçu du bouton (protocoles/adresses différents) —
+      // ReceiverCover.applyEmitterCommand a détecté le cas et retourné la commande native à
+      // retransmettre. Cas courant (bouton = même adresse que le device) : toTransmit est null,
+      // rien à faire de plus, le device a déjà reçu le signal directement.
+      for (const { receiver, toTransmit } of affectedReceivers) {
+        if (toTransmit) this.transmitReceiverCommand(receiver, toTransmit);
+      }
       if (affectedReceivers.length > 0) {
         // applyEmitterCommand (appelé par handleEmitterMessage) a déjà mis à jour lastOn/lastLevel
         // dans la config de chaque récepteur affecté — une seule sauvegarde pour tous.
         this.persistDevicesConfig();
       }
-      for (const receiver of affectedReceivers) {
+      for (const { receiver } of affectedReceivers) {
         this.publishReceiverState(receiver);
       }
 
@@ -657,9 +666,12 @@ export class RfxComService implements IRfxComService {
 
     if (message.type.startsWith('Lighting')) {
       const affectedReceivers = this.receiverManager.handleEmitterMessage(objectId);
+      for (const { receiver, toTransmit } of affectedReceivers) {
+        if (toTransmit) this.transmitReceiverCommand(receiver, toTransmit);
+      }
       if (affectedReceivers.length > 0) {
         this.persistDevicesConfig();
-        for (const receiver of affectedReceivers) {
+        for (const { receiver } of affectedReceivers) {
           this.publishReceiverState(receiver);
         }
       }
@@ -1108,6 +1120,34 @@ export class RfxComService implements IRfxComService {
       return { success: false, error: `Commande ${command} non applicable à ${receiverId} (état inchangé ou non supportée)` };
     }
 
+    const sendResult = this.transmitReceiverCommand(receiver, result);
+    if (!sendResult.success) return sendResult;
+
+    // Mise à jour optimiste de l'état interne : contrairement à ce qu'on pouvait supposer, le
+    // primaryEmitter n'est PAS réécouté en écho après l'envoi — findReceiversForEmitter ne
+    // matche que receiver.config.emitters[] (télécommandes secondaires appairées), jamais
+    // primaryEmitter lui-même. Sans cet appel explicite, l'état interne (et lastOn/lastLevel
+    // persisté) ne bougeait jamais suite à une commande envoyée via ce chemin — vérifié en
+    // conditions réelles (2026-07-30) : lastOn absent du YAML après un OFF réellement envoyé.
+    // ⭐ 14/09/2026 : SAUF pour 'cover', dont translateHaCommand mute déjà directement son propre
+    // état (position/direction) — rappeler applyEmitterCommand ici rejouerait la même action
+    // juste après coup et la logique toggle (ReceiverCover) l'interpréterait à tort comme "le
+    // relais vient de s'arrêter tout seul", annulant la commande qu'on vient d'envoyer.
+    if (receiver.config.type !== 'cover') {
+      receiver.applyEmitterCommand(result.action, result.value);
+    }
+    this.persistDevicesConfig();
+    this.publishReceiverState(receiver);
+    return { success: true };
+  }
+
+  /**
+   * Émet réellement une commande RFXCOM vers le primaryEmitter d'un récepteur — partagé entre les
+   * commandes HA (applyReceiverCommandInternal) et le pont de retransmission bouton→device quand
+   * leurs protocoles diffèrent (ReceiverCover.applyEmitterCommand, ex: bouton Lighting2 associé à
+   * un volet Somfy — voir ReceiverManager.handleEmitterMessage).
+   */
+  private transmitReceiverCommand(receiver: IReceiverModule, result: ReceiverCommandResult): { success: boolean; error?: string } {
     const primaryDevice = this.deviceManager.getDevice(receiver.config.primaryEmitter);
     if (!primaryDevice) {
       return { success: false, error: `primaryEmitter ${receiver.config.primaryEmitter} introuvable` };
@@ -1132,15 +1172,6 @@ export class RfxComService implements IRfxComService {
       // recevoir ce relais (le réseau/MQTT a de toute façon une latence bien supérieure à cet appel
       // synchrone), pour être sûr que handleRelayedValueMessage trouve l'entrée à temps.
       this.recentlyCommandedEmitters.set(primaryDevice.uniqueId, Date.now() + RfxComService.RELAY_ECHO_SUPPRESSION_MS);
-      // Mise à jour optimiste de l'état interne : contrairement à ce qu'on pouvait supposer, le
-      // primaryEmitter n'est PAS réécouté en écho après l'envoi — findReceiversForEmitter ne
-      // matche que receiver.config.emitters[] (télécommandes secondaires appairées), jamais
-      // primaryEmitter lui-même. Sans cet appel explicite, l'état interne (et lastOn/lastLevel
-      // persisté) ne bougeait jamais suite à une commande envoyée via ce chemin — vérifié en
-      // conditions réelles (2026-07-30) : lastOn absent du YAML après un OFF réellement envoyé.
-      receiver.applyEmitterCommand(result.action, result.value);
-      this.persistDevicesConfig();
-      this.publishReceiverState(receiver);
       return { success: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

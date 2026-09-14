@@ -27,13 +27,14 @@ export class ReceiverSwitch implements IReceiverModule {
     }
   }
 
-  applyEmitterCommand(action: EmitterAction): void {
+  applyEmitterCommand(action: EmitterAction): ReceiverCommandResult | null {
     if (action === 'toggle') this.on = !this.on;
     else if (action === 'on') this.on = true;
     else if (action === 'off') this.on = false;
     // Reflété dans la config persistée pour être rejoué au démarrage — voir
     // RfxComService.publishReceiverStateAtStartup (le service appelant se charge de sauvegarder).
     this.config.lastOn = this.on;
+    return null; // bouton et device partagent la même adresse — rien à retransmettre
   }
 
   getState(): HaMqttStateMessage {

@@ -10,7 +10,7 @@
 import type { Logger } from '../../../../core/dist/exports';
 import type { DeviceManager } from '../devices/DeviceManager';
 import type { AssociatedEmitter, ReceiverConfig } from '../types';
-import type { IReceiverModule } from './BaseReceiver';
+import type { IReceiverModule, ReceiverCommandResult } from './BaseReceiver';
 import { ReceiverSwitch } from './ReceiverSwitch';
 import { ReceiverLight } from './ReceiverLight';
 import { ReceiverCover } from './ReceiverCover';
@@ -18,6 +18,13 @@ import { ReceiverCover } from './ReceiverCover';
 export interface EmitterMatch {
   receiver: IReceiverModule;
   associated: AssociatedEmitter;
+}
+
+/** Récepteur affecté par un message émetteur, avec une éventuelle commande à retransmettre
+ * (pont protocole — ex: bouton Lighting2 associé à un volet Somfy, voir ReceiverCover). */
+export interface AffectedReceiver {
+  receiver: IReceiverModule;
+  toTransmit: ReceiverCommandResult | null;
 }
 
 export class ReceiverManager {
@@ -89,14 +96,14 @@ export class ReceiverManager {
    * récepteur associé (recepteurs-emetteurs-rfxcom_specs §8.2). Retourne les récepteurs affectés
    * (pour publication d'état par l'appelant).
    */
-  handleEmitterMessage(emitterId: string): IReceiverModule[] {
+  handleEmitterMessage(emitterId: string): AffectedReceiver[] {
     const matches = this.findReceiversForEmitter(emitterId);
-    for (const { receiver, associated } of matches) {
-      receiver.applyEmitterCommand(associated.action, associated.value);
-    }
     if (matches.length === 0) {
       this.logger.debug('ReceiverManager', `Émetteur ${emitterId} non associé à un récepteur`);
     }
-    return matches.map((m) => m.receiver);
+    return matches.map(({ receiver, associated }) => ({
+      receiver,
+      toTransmit: receiver.applyEmitterCommand(associated.action, associated.value)
+    }));
   }
 }

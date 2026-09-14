@@ -64,28 +64,42 @@ export class ReceiverCover implements IReceiverModule {
     if (command === 'set_position' && value !== undefined) {
       const current = this.computePosition();
       if (Math.round(value) === Math.round(current)) return null;
-      this.startMoving(value > current ? 'opening' : 'closing');
+      const desiredDirection: CoverDirection = value > current ? 'opening' : 'closing';
+      // Déjà en train de bouger dans la bonne direction (ex: slider glissé progressivement,
+      // plusieurs set_position rapprochés) — ne PAS renvoyer on/off : sur Lighting2, une commande
+      // répétée dans le même sens arrête le moteur (toggle physique, voir plus bas), ce qui
+      // interromprait le mouvement en cours pour rien.
+      if (this.direction === desiredDirection) return null;
+      this.startMoving(desiredDirection);
       return usesLighting2
-        ? { action: this.direction === 'opening' ? 'on' : 'off' }
-        : { action: this.direction === 'opening' ? 'open' : 'close' };
+        ? { action: desiredDirection === 'opening' ? 'on' : 'off' }
+        : { action: desiredDirection === 'opening' ? 'open' : 'close' };
     }
 
     if (usesLighting2) {
-      // fonctionnelles-rfxcom_specs §16.4 : pas de STOP natif, on/off réinterprétés
-      const state = this.runtimeState();
+      // fonctionnelles-rfxcom_specs §16.4 : pas de STOP natif, on/off réinterprétés. Comportement
+      // matériel (relais AC) : renvoyer la MÊME commande que celle en cours d'exécution arrête le
+      // moteur (toggle) — c'est le seul moyen de l'arrêter. Inverser directement de sens (monte→
+      // descend ou l'inverse) ne nécessite PAS de stop intermédiaire (confirmé — le relais gère
+      // lui-même l'interverrouillage électrique entre les deux sens).
       if (command === 'open') {
-        if (state === 'up') return null; // déjà ouvert, ignoré
+        if (this.direction === 'opening') return null; // déjà en train de monter, ignoré
+        if (this.direction === null && this.runtimeState() === 'up') return null; // déjà ouvert
         this.startMoving('opening');
         return { action: 'on' };
       }
       if (command === 'close') {
-        if (state === 'down') return null;
+        if (this.direction === 'closing') return null;
+        if (this.direction === null && this.runtimeState() === 'down') return null;
         this.startMoving('closing');
         return { action: 'off' };
       }
       if (command === 'stop') {
+        if (this.direction === null) return null; // déjà arrêté, rien à envoyer
+        // Arrêter un moteur Lighting2 en mouvement = renvoyer la commande qui l'a fait démarrer.
+        const stopAction = this.direction === 'opening' ? 'on' : 'off';
         this.freeze();
-        return null; // rien à envoyer au device : on fige juste la position calculée côté HA
+        return { action: stopAction };
       }
       return null;
     }
@@ -106,14 +120,37 @@ export class ReceiverCover implements IReceiverModule {
     }
   }
 
-  applyEmitterCommand(action: EmitterAction): void {
-    if (action === 'on' || action === 'open') {
-      this.startMoving('opening');
-    } else if (action === 'off' || action === 'close') {
-      this.startMoving('closing');
-    } else if (action === 'stop') {
-      this.freeze();
+  applyEmitterCommand(action: EmitterAction): ReceiverCommandResult | null {
+    // 'on'/'off' : seul Lighting2 parle ce vocabulaire — le bouton associé est donc forcément un
+    // bouton Lighting2 (ex: interrupteur mural), quel que soit le protocole du primaryEmitter
+    // réellement commandé.
+    if (action === 'on' || action === 'off') {
+      const wasMoving = this.direction;
+      // Répéter le signal qui a démarré le mouvement en cours = stop (comportement toggle d'un
+      // relais AC, cf. translateHaCommand) — s'applique ici aussi car c'est la même sémantique
+      // physique vue depuis le bouton plutôt que depuis HA.
+      const isToggleStop =
+        (action === 'on' && wasMoving === 'opening') || (action === 'off' && wasMoving === 'closing');
+
+      if (isToggleStop) this.freeze();
+      else this.startMoving(action === 'on' ? 'opening' : 'closing');
+
+      if (this.primaryEmitterProtocol === 'lighting2') {
+        // Bouton ET device commandé = même adresse Lighting2 — le device a déjà reçu ce signal
+        // directement (le dongle ne fait qu'écouter), rien à retransmettre.
+        return null;
+      }
+      // Bouton Lighting2 associé à un récepteur piloté nativement (ex: volet Somfy) — protocoles
+      // et adresses différents, le moteur n'a RIEN reçu : retransmettre dans son vocabulaire natif.
+      return { action: isToggleStop ? 'stop' : action === 'on' ? 'open' : 'close' };
     }
+
+    // Bouton lui-même sur protocole natif (ex: vraie télécommande Somfy) : action déjà explicite
+    // et sans ambiguïté toggle, et déjà reçue directement par le device — rien à retransmettre.
+    if (action === 'open') this.startMoving('opening');
+    else if (action === 'close') this.startMoving('closing');
+    else if (action === 'stop') this.freeze();
+    return null;
   }
 
   getState(): HaMqttStateMessage {

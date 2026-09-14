@@ -26,9 +26,13 @@ export interface IReceiverModule {
 
   /**
    * Met à jour l'état interne suite à l'action déclenchée par un émetteur appairé (bouton
-   * physique) — voir recepteurs-emetteurs-rfxcom_specs §8.2.
+   * physique) — voir recepteurs-emetteurs-rfxcom_specs §8.2. Retourne une commande RFXCOM à
+   * retransmettre au primaryEmitter si le protocole du bouton diffère de celui du device
+   * réellement commandé (ex: bouton Lighting2 associé à un volet Somfy) — `null` si rien à
+   * retransmettre (cas courant : bouton et device partagent la même adresse, le device a déjà
+   * reçu le signal directement, on ne fait que refléter l'état).
    */
-  applyEmitterCommand(action: EmitterAction, value?: number): void;
+  applyEmitterCommand(action: EmitterAction, value?: number): ReceiverCommandResult | null;
 
   /** État courant à publier vers HA. */
   getState(): HaMqttStateMessage;
