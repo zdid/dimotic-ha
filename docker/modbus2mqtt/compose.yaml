@@ -1,0 +1,84 @@
+# =============================================================================
+# modbus2mqtt — pont générique Modbus RTU/TCP -> MQTT, avec découverte HA native.
+# Déployé en COMPAGNON de dimotic-ha (comme zigbee2mqtt sur ha2), PAS comme une
+# application dimotic-ha (décision utilisateur du 14/09/2026) : ce service publie
+# sur le préfixe "étranger" `homeassist/` (même convention que zigbee2mqtt/
+# mqtt-io), relayé vers `homeassistant/` par `nommage` — voir
+# specs/current/fonctionnelles-nommage_specs pour le mécanisme de relais, déjà en
+# place et ne nécessitant AUCUNE modification pour ce nouveau service (nommage
+# regarde déjà tout `homeassist/#`).
+#
+# Contexte : lecture du compteur électrique (pilotage de charge batterie), RS485
+# branché sur la machine qui héberge physiquement l'adaptateur (le RPi3 "noisy"
+# dans le cas du site distant — voir MIGRATION_noisy_2026-09-10.md et TODO.md).
+#
+# Device testé au départ : compteur Chint DDSU666H (confirmé par l'utilisateur le
+# 14/09/2026). Protocole officiel (manuel Chint DDSU666, ZTY0.464.1224) :
+#   - Modbus RTU, fonction 03H (Read Holding Registers) UNIQUEMENT pour la
+#     lecture (pas de fonction 04H contrairement à d'autres compteurs de la
+#     même famille, ex. Eastron SDM) — adresse esclave 1-247.
+#   - Trame série : 8 bits de données, PAS de parité, 2 bits de stop (8-N-2).
+#     ⚠️ Différent du DDZY422-D2 (logger Solarman, 8-E-1 — voir TODO.md) : ne
+#     pas confondre les deux réglages si plusieurs compteurs coexistent.
+#   - Baud rate non trouvé dans le manuel public (table des registres de mesure
+#     absente du manuel officiel téléchargé — probablement un document
+#     "protocole de communication" séparé, non publié). À lire sur l'écran/le
+#     menu de configuration du compteur une fois sur place, ou scanner en
+#     9600/19200/38400 (valeurs les plus courantes chez Chint).
+#   - Adresses de registres à découvrir empiriquement (scan modbus2mqtt +
+#     comparaison avec l'affichage local du compteur, cf. TODO.md) — aucune
+#     spec toute faite trouvée pour DDSU666/DTSU666 dans le dépôt communautaire
+#     modbus2mqtt.config au 14/09/2026.
+#
+# Test prévu AVANT expédition : l'utilisateur a le compteur encore sur SON
+# tableau électrique ici — brancher le RPi4 "noisy2" dessus pour valider toute
+# la chaîne technique (adaptateur RS485, port série, lecture Modbus) ; les
+# valeurs mesurées ne seront pas pertinentes (pas le vrai tableau de noisy).
+# =============================================================================
+
+services:
+  modbus2mqtt:
+    # ⚠️ PAS sur Docker Hub malgré ce que dit la doc officielle (docs/installation-docker.md,
+    # "modbus2mqtt/modbus2mqtt:latest" — image introuvable là, testé le 14/09/2026) — c'est en
+    # fait sur GitHub Container Registry.
+    image: ghcr.io/modbus2mqtt/modbus2mqtt:latest
+    container_name: modbus2mqtt
+    restart: unless-stopped
+
+    # ⭐ 14/09/2026, trouvé en testant en direct : sans network_mode: host, "127.0.0.1" dans l'URL
+    # MQTT pointe vers le conteneur lui-même (ECONNREFUSED), pas vers le mosquitto de l'hôte — même
+    # convention que dimotic-ha/mqtt-io sur ces machines (voir compose.yaml racine du dépôt). Rend
+    # `ports:` sans effet (le port 3000 est directement exposé sur l'hôte via ce mode).
+    network_mode: host
+
+    devices:
+      # Adaptateur RS485->USB — chemin à corriger une fois le matériel branché
+      # (vérifier /dev/serial/by-id/ pour un chemin stable si plusieurs
+      # adaptateurs USB peuvent être présents, même logique que RFXCOM — voir
+      # compose.yaml racine du dépôt).
+      - "/dev/ttyUSB0:/dev/ttyUSB0"
+
+    volumes:
+      # Bus/devices/specs modbus2mqtt (persistant, gitignored comme data/ du
+      # reste du projet).
+      - ./config:/config
+
+    environment:
+      - TZ=Europe/Paris
+      # Broker MQTT LOCAL de la machine hébergeant ce service (mosquitto natif
+      # sur noisy, PAS celui de noisy2/HA) — cohérent avec la convention
+      # `mqtt.host` déjà utilisée pour rpigpio/arexx sur cette machine.
+      - MQTT_URL=mqtt://127.0.0.1:1883
+
+    logging:
+      # Même limite que dimotic-ha (voir compose.yaml racine, incident du
+      # 14/09/2026 : json-file sans rotation = plusieurs Go/jour).
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+# ⚠️ Étape manuelle restante (pas scriptable via ce compose) : dans l'UI web
+# (port 3000), régler le "base topic"/"discovery topic" sur `homeassist` (pas
+# le défaut `homeassistant` du projet modbus2mqtt lui-même) — exactement le
+# même réglage manuel déjà fait pour zigbee2mqtt sur ha2 (voir RUNBOOK.md).
