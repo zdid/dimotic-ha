@@ -1,6 +1,267 @@
 # Liste des problèmes à résoudre
 
+## 🔧 Plan : écoute passive RS485 du DDZY422-D2 chez noisy (préparé le 14/09/2026, pas encore exécuté)
+- **Idée de l'utilisateur** : plutôt que d'interroger activement le DDZY422-D2 (bloqué depuis des
+  semaines, `AcknowledgeError` systématique quel que soit l'esclave testé — voir plus bas), envoyer
+  une **deuxième clé RS485→USB** à noisy et l'écouter **en parallèle, en mode passif** sur le même
+  bus A/B que le module WiFi du compteur (déjà confirmé au connecteur du DDZY422-D2 sur photo) —
+  capturer le vrai trafic Modbus RTU que le module WiFi échange en interne avec le compteur (LED
+  "COM" du guide Huawei = cette liaison), sans jamais émettre. Approche jugée solide : évite de
+  deviner l'adresse/les registres, on lit le protocole réel en observant un maître qui, lui,
+  fonctionne déjà.
+- **Répartition matérielle décidée** : le DDSU666H (interrogation active, modbus2mqtt/Docker)
+  reste sur une machine capable type noisy (RPi3, ARMv7, qui héberge déjà RFXCOM) ; l'écoute
+  passive du DDZY422-D2 ira sur un **Pi 1 dédié** (ARMv6, matériel séparé — évite tout risque
+  d'ambiguïté entre deux adaptateurs USB identiques sur la même machine, cf. discussion `by-id`
+  vs `by-path`). Adaptateur pas encore trouvé/précâblé par l'utilisateur — pas prêt à être expédié
+  pour l'instant.
+- **Deux versions du script préparées** (même logique : jamais d'émission, découpage par silence
+  inter-octets ≥3.5 temps-caractère, décodage adresse/fonction/données, vérification CRC16) :
+  - `scripts/rs485-sniffer.cjs` (Node.js) — pour du matériel Docker-friendly (ARMv7/8, ex. noisy2).
+    Dépend du paquet npm `serialport` (déjà présent dans l'image
+    `ghcr.io/modbus2mqtt/modbus2mqtt`, réutilisable via `docker run` comme les scripts de test du
+    DDSU666H ce soir — commande complète en commentaire d'en-tête). Paramètres par défaut
+    `/dev/ttyUSB1 9600 8N1`.
+  - `scripts/rs485-sniffer.py` (Python, **retenu pour le Pi 1**) — pas de Docker (abandonné sur
+    ARMv6 en 2026), juste `python3-serial` (`sudo apt-get install -y python3-serial`), léger.
+    Paramètres par défaut déjà réglés sur ceux confirmés du DDZY422-D2 : `/dev/ttyUSB0 9600 8 E 1`
+    (adresse 001/9600 bauds/parité paire/8 bits/1 stop — reconfirmés via la fiche Solarman
+    helpcenter le 14/09, voir plus bas).
+  - Aucune des deux versions testée en conditions réelles (pas de deuxième adaptateur disponible
+    ce soir) — seulement `node --check`/`py_compile` (syntaxe validée).
+- **Câblage** : brancher A-A, B-B en parallèle sur les mêmes bornes que le module WiFi existant,
+  ne rien débrancher — le module WiFi continue de fonctionner normalement pendant l'écoute.
+- **Reste à faire** : expédier la deuxième clé, la brancher sur place, lancer le script, identifier
+  empiriquement débit/adresse/registres à partir des trames réelles capturées.
+
+## Idées de fonctionnalité (à concevoir/implémenter plus tard)
+
+### 💡 Procédure stop/start/restart généralisée pour TOUS les dockers de TOUTES les machines (14/09/2026)
+- **Demande utilisateur** : "c'est une procédure qu'il faudra rajouter à dimotic-ha pour l'arrêt de
+  tous les dockers de toutes les machines et de les relancer 'start' 'stop' 'restart'" — évoqué en
+  contexte du nettoyage des messages MQTT retenus fantômes (voir rpigpio stfort ci-dessous),
+  reporté à une exécution via cet outil plutôt qu'un nettoyage manuel `mosquitto_pub -n -r`.
+- **Existant à ce jour** (insuffisant, à généraliser) : `docker/start-all.sh`/`docker/stop-all.sh`
+  à la racine du dépôt — scripts **ad hoc pour un cas précis** ("cycle de test HA vierge" : tout
+  arrêter + supprimer la config HA de ha2 + tout relancer avec ré-onboarding), pas une procédure
+  générale. Périmètre actuel limité à ha2 (`dimotic-ha`, `zigbee2mqtt`, `mosquitto`,
+  `homeassistant`) + orangepi (`dimotic-ha` seul) — **ne couvre pas** noisy/noisy2/stfort, ni
+  `mqtt-io-rpigpio`/`portainer-agent`. `ORANGEPI_HOST` y est resté à l'ancienne IP `192.168.1.32`
+  (obsolète, corrigée en `192.168.1.130` ailleurs le 30/08 — pas resynchronisé dans ce script).
+  `stop-all.sh` est en plus destructif par conception (supprime `/docker/homeassistant/config`),
+  donc pas réutilisable tel quel pour un simple cycle stop/start de maintenance.
+- **Besoin réel** : une vraie procédure (probablement une commande/UI dans `core`, ou un script
+  dédié séparé de `start-all.sh`/`stop-all.sh`) qui, pour CHAQUE machine connue du projet (ha2,
+  noisy, noisy2, orangepi, stfort — liste à tenir à jour, cf. doublons d'IP déjà rencontrés) et
+  CHAQUE conteneur qui y tourne (liste dynamique via `docker ps`, pas une liste figée dans le
+  script comme aujourd'hui — sinon nouveau conteneur = oublié à chaque fois, cf. `mqtt-io-rpigpio`/
+  `portainer-agent` absents des scripts actuels), permette : `stop` (tout arrêter proprement, ordre
+  dépendant à respecter — voir `MIGRATION_noisy_2026-09-10.md` pour un exemple d'ordre correct côté
+  noisy), `start` (tout relancer), `restart` (les deux) — **sans** le comportement destructif de
+  l'actuel `stop-all.sh`.
+- **Pas encore conçu** : mécanisme précis (nouvelle app dimotic-ha ? extension de `core` ? script
+  seul ?), inventaire dynamique des machines/conteneurs, gestion de l'ordre de démarrage/arrêt.
+
 ## Problèmes prioritaires (suite du 14/09/2026, session noisy2)
+
+### ✅ rpigpio de stfort corrigé — même bug de `config.yml` que noisy, PAS un problème côté nommage (14/09/2026)
+- **Contexte** : question utilisateur "le rpigpio de stfort tourne bien ?" — vérifié en détail.
+- `mqtt-io-rpigpio` sur stfort fonctionnait déjà correctement côté GPIO (connecté au MQTT de ha2,
+  3 relais réels pilotés `phys7`/`phys13`/`phys15`) mais ses 3 entités n'ont jamais atteint HA.
+- **Diagnostic corrigé par l'utilisateur en cours de route** : mon premier diagnostic ("nommage pas
+  à jour sur ha2") était **faux** — le vrai problème était le **`config.yml` de mqtt-io-rpigpio sur
+  stfort lui-même**, resté sur l'ancien format buggé : `ha_discovery.prefix:
+  homeassist/rpigpio_bridge_stfort_stfort_578666` (bridge instance injecté en segment de topic
+  supplémentaire → 6 segments après `homeassist/`, jamais couvert par aucun motif de `nommage`,
+  même bug déjà trouvé et corrigé côté générateur cette nuit sur noisy dans
+  `applications/rpigpio/src/domain/generator.ts`) — mais le fichier `config.yml` **déployé sur
+  stfort** n'avait jamais été régénéré/redéployé avec le correctif, contrairement à celui de noisy.
+- **Corrigé directement** (pas besoin d'attendre une diffusion) : `config.yml` de stfort édité pour
+  matcher exactement le format déjà validé sur noisy — `client_id:
+  rpigpio_bridge_stfort_stfort_578666` ajouté, `ha_discovery.prefix` remis à `homeassist` (nu, sans
+  bridge instance). Sauvegarde `.bak-20260914` faite avant modif, conteneur recréé, **vérifié de
+  bout en bout** : nouveaux topics à 5 segments (`homeassist/switch/rpigpio_bridge_.../15/config`),
+  relayés par `nommage` jusqu'à `homeassistant/switch/...` avec les bons noms de pièce ("Relais15",
+  "Radiateur"/Salle de bain du bas, "Petit grenier"/Grenier) — HA devrait créer les 3 entités.
+  Anciens messages retenus (ancien format 6 segments, jamais parvenus à HA) laissés en l'état pour
+  l'instant (nettoyage différé, voir entrée ci-dessous sur l'outil stop/start/restart généralisé).
+
+### ✅ Rotation des logs Docker généralisée à TOUS les conteneurs, TOUTES les machines (14/09/2026)
+- **Contexte** : le correctif de rotation (`logging: json-file, max-size: 10m, max-file: 5`) fait
+  plus tôt dans la session n'avait été appliqué qu'au conteneur `dimotic-ha` lui-même (via
+  `compose.yaml`/`compose.deploy.yaml` du dépôt), pas aux conteneurs compagnons ni aux autres
+  machines. Audit demandé explicitement par l'utilisateur : "tu vas me vérifier pour tous les
+  dockers installés les logs pour qu'elles rotatent... sur tous les modèles portés par dimotic-ha".
+- **Inventaire complet fait** (`docker inspect $(docker ps -aq)` sur les 5 machines) : 16
+  conteneurs trouvés sans rotation (sur ha2, noisy2, noisy, stfort, orangepi — `homeassistant`,
+  `mosquitto`, `zigbee2mqtt`, `mqtt-io-rpigpio`, `dimotic-ha` sur les 3 machines pas encore
+  resynchronisées avec le fix du dépôt, `portainer-agent`). Tous corrigés, vérifiés par un second
+  balayage complet après coup — 100% des conteneurs actifs ont maintenant la limite (sauf
+  `infallible_cohen` sur stfort, un `hello-world` de test arrêté depuis 2024, inoffensif, laissé
+  tel quel).
+- **Sauvegardes** : chaque `compose.yaml` modifié a été copié en `.bak-20260914` avant modification
+  (14 fichiers au total, dont 1 nouveau créé — voir plus bas).
+- **⭐ Découverte + correction (stfort) : conteneur `zigbee2mqtt` fantôme, supprimé** — trouvé en
+  `docker run` brut, sans `compose.yaml` (seul cas non conforme à la convention `/docker/<app>/` du
+  projet), planté depuis sa création en août 2025 (`/dev/ttyACM0` absent, seul `/dev/ttyUSB0` — déjà
+  pris par RFXCOM — présent sur cette machine). D'abord régularisé en compose par erreur (pensant
+  qu'un dongle avait été débranché depuis) — **corrigé par l'utilisateur** : stfort n'a **jamais** eu
+  de clé/dongle Zigbee physique. `zdidnodezigbee` (bridge legacy — confirmé en lisant `zigbeeserv.js`
+  : pont MQTT `zigbee2mqtt/#` ↔ `listsurvey`, même patron que `zdidnoderfxcom433e`/`zdidnodegpio`)
+  est abonné aux messages MQTT **distants de ha2** (`zigbee.mq.address` dans `domo.properties`,
+  cross-machine) et les traite normalement depuis là — aucun zigbee2mqtt local n'a jamais été
+  nécessaire sur stfort. Conteneur arrêté + supprimé (`docker compose down`), fichier renommé
+  `/docker/zigbee2mqtt/compose.yaml.disabled-20260914` avec une note explicative (gardé pour
+  mémoire, à ne pas réactiver).
+- **Incident annexe pendant le chantier** : un transfert `scp` vers stfort a été corrompu en route
+  (même taille de fichier, MD5 différent — connexion instable ce soir-là, plusieurs timeouts SSH au
+  niveau de l'échange de bannière malgré un ping qui répondait normalement) — détecté par
+  vérification systématique des sommes MD5 locale/distante après coup sur les 14 fichiers touchés
+  (tous les autres étaient intacts), re-transféré et revérifié avant de continuer. **Leçon** :
+  toujours vérifier un MD5 après un `scp` vers une machine dont la connexion a montré des signes
+  d'instabilité, ne pas se fier au code de retour de `scp` seul.
+
+### 🟡 Compteur Solarman DDZY422-D2 (pilotage charge batterie) — conception faite, bloqué sur la doc registres (14/09/2026)
+- **Contexte** : besoin de piloter la charge d'une batterie sur noisy → nécessite de lire le
+  compteur électrique (grid side) de façon fiable. Le 3e logger Solarman (`10.10.10.7`, série
+  2618005808, cf. section Solarman ci-dessous) est en fait ce compteur, pas un onduleur.
+- **Diagnostic confirmé** : le module WiFi du compteur (protocole Solarman V5) rejette
+  systématiquement les lectures Modbus locales (`AcknowledgeError`, indépendant du slave id/du
+  profil) — cohérent avec les retours de la communauté HA francophone (fil dédié sur forum.hacf.fr,
+  personne n'a de solution locale qui fonctionne pour ce modèle précis, y compris avec le fork plus
+  complet `davidrapan/ha-solarman` — aucun profil `ddzy422-d2` n'existe dans aucun des deux forks,
+  seul un cousin triphasé `solarman_dtsd422-d3.yaml` existe et ne fonctionne pas pour ce modèle).
+- **✅ Bonne nouvelle trouvée** : le compteur a un vrai port RS485 (bornes A/B) **sur le compteur
+  lui-même**, séparé du module WiFi (guide d'installation officiel Solarman, confirmé) —
+  `Adresse 001, 9600 bps, parité Even, 8 bits, 1 stop`. Le module WiFi n'est qu'un relais RS485→cloud
+  branché en interne ; en direct sur les bornes A/B on contourne le cloud et son "AcknowledgeError"
+  intermittent. Le compteur a aussi un relais de coupure interne intégré (borne L↓ entrée grid /
+  L↑ sortie vers charge, "Remote Control Meter" = coupure à distance native — pertinent pour le
+  pilotage de charge envisagé).
+- **Matériel** : l'utilisateur a un adaptateur RS485→USB, expédié avec le RPi4 ("noisy2") mais à
+  brancher sur le **RPi3 "noisy"** (à côté physiquement du compteur — le RPi4 sera trop loin). HA
+  tourne sur noisy2, pas sur noisy → architecture prévue : `ser2net`/`socat` sur noisy exposant
+  `/dev/ttyUSB<N>` en Modbus-RTU-over-TCP, intégration `modbus:` native de HA (protocole
+  `rtuovertcp`) sur noisy2 pointant sur `noisy:<port>` — pas besoin d'écrire une nouvelle app
+  dimotic-ha, `mqtt-io` (déjà utilisé pour rpigpio) **ne supporte pas le Modbus RTU générique**
+  (vérifié, seulement capteurs I2C/1-Wire/GPIO simples).
+- **❌ Bloquant réel** : la table de registres Modbus du DDZY422-D2 n'est publiée nulle part
+  publiquement trouvé (recherchée en profondeur : docs officielles Solarman = uniquement guides
+  d'installation WiFi, pas de table de registres ; le document existe et est référencé par son nom
+  — *"DDZY422-D2型单相远程费控智能电能表-modbus通讯内容 (HT-YF2018-0929-01)"* — mais son contenu
+  n'est nulle part en ligne, même les mainteneurs des deux intégrations HA open-source ne l'ont pas).
+  **Deux pistes pour la suite** : (1) contacter le support Solarman (`info@solarmanpv.com`) en
+  citant ce nom de document exact ; (2) une fois le matériel sur place, scanner les registres
+  0-100 en Modbus RTU standard (adresse 1, 9600/E/8/1) et comparer aux valeurs affichées sur
+  l'écran du compteur (tension/courant/puissance/fréquence/PF/énergie déjà visibles en local) —
+  probablement plus rapide que d'attendre une réponse du support.
+  - **Reconfirmé le 14/09/2026** via la fiche produit Solarman helpcenter (variante GPRS
+    DDZY422-D2-G, 3 pages, photos + caractéristiques, **toujours pas d'annexe table de
+    registres**) : adresse esclave **001** par défaut, **9600 bauds, parité paire (E), 8 bits,
+    1 stop** — identique à ce qui était déjà connu du guide rapide WiFi lu en début de soirée,
+    rien de nouveau côté registres. Voir le plan d'écoute passive RS485 en tête de ce fichier
+    (`scripts/rs485-sniffer.cjs`) — piste retenue pour obtenir la vraie table par l'observation
+    du trafic réel plutôt que par la documentation (introuvable publiquement).
+- **🟢 Piste alternative privilégiée : compteur Huawei DDSU666H de récupération** — l'utilisateur a
+  un compteur Chint **DDSU666H** inutilisé, actuellement encore sur SON tableau électrique ici (pas
+  encore chez noisy). Famille bien plus documentée que le DDZY422-D2 (intégration HA dédiée
+  existante `helixzz/ha-modbus-powermeter`, registres connus pour la famille DDSU/DTSU666 en
+  général : tension `0x2000`, courant `0x2002`, puissance `0x2004`, énergie import/export
+  `0x4000`/`0x400A`). **Manuel officiel Chint DDSU666 lu en entier (ZTY0.464.1224, 21 pages)** —
+  confirme : fonction Modbus **03H (Read Holding Registers) uniquement** (pas de 04H, à la
+  différence d'autres compteurs de la même famille comme l'Eastron SDM), adresse esclave 1-247,
+  trame série **8 bits données, PAS de parité, 2 bits de stop (8-N-2)** — ⚠️ **différent du
+  DDZY422-D2 qui est en 8-E-1**, ne pas confondre si les deux coexistent un jour. Débit en bauds
+  non trouvé dans ce manuel (table des registres de mesure absente — document séparé non publié) ;
+  à lire sur l'écran/menu du compteur ou scanner (9600/19200/38400 les plus courants chez Chint).
+  **Aucune spec DDSU666/DTSU666 toute faite** dans le dépôt communautaire `modbus2mqtt.config`
+  (vérifié le 14/09/2026) — à construire empiriquement une fois branché (scan + comparaison avec
+  l'affichage local, via l'UI web de modbus2mqtt qui a justement un outil de scan/découverte).
+- **Outil retenu : [modbus2mqtt](https://github.com/modbus2mqtt)** (pas une nouvelle app
+  dimotic-ha — décision utilisateur du 14/09/2026) — pont générique Modbus→MQTT avec découverte HA
+  native, TypeScript/Node.js, déployable en conteneur compagnon **comme zigbee2mqtt sur ha2** (pas
+  fusionné dans le `compose.yaml` de dimotic-ha lui-même). Template créé :
+  `docker/modbus2mqtt/compose.yaml` (broker MQTT local, device RS485 à ajuster, publication prévue
+  sur le préfixe `homeassist/` — même relais `nommage` déjà en place pour rpigpio/arexx, aucune
+  modification de `nommage` nécessaire). Reste manuel (comme pour zigbee2mqtt à l'époque) : régler
+  le "base/discovery topic" sur `homeassist` dans l'UI web de modbus2mqtt (port 3000) après premier
+  démarrage.
+- **✅✅ RÉSOLU le 14/09/2026 (après-midi) — carte de registres DDSU666H complète et vérifiée**.
+  Adaptateur RS485→USB branché sur noisy2 pour test avant expédition (`/dev/ttyUSB0`, puce CH341,
+  énumération USB instable au premier branchement — power-cycle automatique du port, résolu tout
+  seul). `modbus2mqtt` déployé (`ghcr.io/modbus2mqtt/modbus2mqtt:latest` — **pas sur Docker Hub
+  contrairement à sa propre doc**, corrigé dans `docker/modbus2mqtt/compose.yaml`,
+  `network_mode: host` ajouté — sans ça `127.0.0.1` dans l'URL MQTT pointe vers le conteneur
+  lui-même, `ECONNREFUSED`). **Éditeur web de spec trouvé très instable** (corruption de champs à
+  plusieurs reprises, ex. `modbusAddress` empilant les saisies au lieu de remplacer) → **édition
+  directe des fichiers JSON/YAML côté serveur** (`/docker/modbus2mqtt/config/modbus2mqtt/
+  specifications/chint-ddsu666h.json`, `busses/bus.0/s1.yaml`) retenue, bien plus fiable.
+  - **Paramètres réels confirmés par l'utilisateur sur l'appareil** : 9600 bauds, **adresse
+    esclave 11** — 11 est l'adresse par défaut documentée dans le "DTSU666-HW Smart Power Sensor
+    Quick Guide" officiel Huawei (confirme écosystème Huawei, cohérent avec son passé de moniteur
+    sur un onduleur Huawei 5KTL).
+  - **Carte de registres trouvée via <https://github.com/bcdiaconu/chint-mqtt-modbus-bridge/blob/main/docs/DDSU666-H.md>**
+    (trouvé par l'utilisateur) puis **corrigée/complétée empiriquement** (2 adresses du doc
+    original étaient fausses — trouvées par lecture brute + vérification physique
+    P²+Q²=S² et PF=P/S, qui matchent exactement) :
+
+    | Registre | Grandeur | Échelle | Note |
+    |---|---|---|---|
+    | `0x2000` | Tension (V) | ×1 | confirmé doc |
+    | `0x2002` | Courant (A) | ×1 | confirmé doc |
+    | `0x2006` | Puissance active (W) | **×1000** | confirmé doc — `0x2004` (hypothèse initiale) est toujours à 0, PAS le bon registre |
+    | `0x200c` | Puissance réactive (var) | ×1000 | trouvé empiriquement, absent du doc GitHub |
+    | `0x2012` | Puissance apparente (VA) | ×1000 | confirmé doc |
+    | `0x2018` | Facteur de puissance | ×1 | **doc GitHub disait `0x2020`, faux** — corrigé par calcul PF=P/S |
+    | `0x2020` | Fréquence (Hz) | ×1 | **doc GitHub disait `0x2021`, faux** — confirmé 49.98Hz |
+    | `0x4000` | Énergie totale (kWh) | ×1 | confirmé doc |
+    | `0x400A` | Énergie importée (kWh) | ×1 | confirmé doc + cohérence import−export=total |
+    | `0x4014` | Énergie exportée (kWh) | ×1 | confirmé doc + cohérence import−export=total |
+
+    Format commun à tous : Holding Registers (FC 03H), float32 (2 registres), big-endian. Signe
+    puissance active : **négatif = injecté au réseau, positif = tiré du réseau** (convention Huawei).
+  - **Plage de lecture valide** : `0x2000` à `0x2023` environ (au-delà, `Illegal data address`) —
+    pas un bloc parfaitement contigu, certains registres intermédiaires (`0x2004`, `0x200a`,
+    `0x2010`, `0x2016`, `0x201e`, `0x2022`) répondent mais valent 0 (réservé/non câblé sur cette
+    variante monophasée).
+  - **Fausse piste explorée et abandonnée** : au cours du diagnostic, une comparaison croisée avec
+    `sensor.emma_puissance_active` (EMMA, compteur Huawei déjà en prod sur ha2) avait fait suspecter
+    une pince ampèremétrique mal fermée (EMMA stable pendant que le courant du DDSU fluctuait) — en
+    fait c'était juste le mauvais registre/la mauvaise échelle (`0x2004` au lieu de `0x2006`×1000) ;
+    une fois corrigé, les valeurs sont cohérentes en interne (triangle des puissances vérifié) même
+    si elles ne collent pas exactement à EMMA à tout instant (charge de la maison qui varie vite,
+    pas la même prise de mesure au même moment). **Pas de problème matériel réel identifié.**
+
+### ✅ Thermostats virtuels de l'ancienne domotique migrés vers `generic_thermostat` HA (14/09/2026)
+- **Contexte** : l'ancien système avait 8 "thermostats virtuels" (`protocol: virtualther` dans
+  `equipements.json`) — un trio {thermostat virtuel, capteur température, radiateur GPIO} par
+  pièce, liés uniquement par correspondance de nom (`sarahname`/`lieu`). Le module
+  `zdidnodevirtualther` ne gérait que la consigne (slider) ; la vraie logique de pilotage vivait
+  dans `zdidnodedomoregles/regles/r0060chauffage.js` — hystérésis simple : ON si
+  température ≤ consigne, OFF si température ≥ consigne + tolérance (tolérance globale, 0 par
+  défaut sur ce site), bande morte entre les deux, avec un interrupteur global manuel/désactivation
+  (`regles.chauffage.reglage.disable`/`.manuel`).
+- **8 trios identifiés** (pièce → capteur → radiateur) : chambre de evan, salon (GPIO 18) et salle
+  à manger (GPIO 13) — les deux dans le même `lieu` "salle" mais distingués par `sarahname` —,
+  cuisine, chambre de drystan, chambre, salle de bain, toilettes (seule à utiliser un capteur
+  RFXCOM `temp2` 0xde01 au lieu d'arexx).
+- **Migré vers `generic_thermostat`** (intégration native HA, pas de code à écrire) :
+  `/docker/homeassistant/config/climate.yaml` sur noisy2 (8 entrées, `!include` depuis
+  `configuration.yaml`, backup `configuration.yaml.bak-pre-climate-20260914`), consignes/état
+  initial repris de la dernière sauvegarde réelle (`thermostats.json`, 27/05/2026) ; `min_temp`/
+  `max_temp` repris d'`equipements.json`. **Écart volontaire du comportement legacy** :
+  `cold_tolerance`/`hot_tolerance` réglés à 0,3°C (l'ancien système utilisait 0/0, pas de marge —
+  risque de cyclage rapide du relais si reproduit à l'identique) — à ajuster si un comportement
+  plus strict est voulu.
+- **Vérifié en conditions réelles** : `check_config` HA OK, 8 entités `climate.*` créées, cibles
+  correctes. 2 sur 8 fonctionnels immédiatement avec de vraies valeurs (chambre : 24.8°C, chambre
+  de drystan : 25.4°C) — les 6 autres capteurs arexx `unavailable` : **piles à changer** (confirmé
+  utilisateur, pas un bug de config) ; `sensor.toilettes_temperature` (RFXCOM) à `unknown`, aucune
+  trame reçue pour l'instant. Reprendra automatiquement sans reconfiguration une fois les capteurs
+  de nouveau actifs.
+- **Reste à faire** : changer les piles des capteurs arexx concernés ; vérifier que le capteur
+  RFXCOM toilettes remonte bien une trame ; tester un vrai cycle de chauffe complet une fois les
+  capteurs actifs.
 
 ### ✅ rpigpio : `ha_discovery.prefix` de mqtt-io décalait le format du topic de découverte HA d'un segment — corrigé, validé en conditions réelles sur `noisy`
 - **Contexte (14/09/2026)**, trouvé en essayant de faire remonter les entités `rpigpio` de `noisy`
@@ -78,13 +339,37 @@ dans `compose.yaml`/`compose.deploy.yaml` du dépôt depuis plus tôt le 14/09).
   vraies entités dans le HA de noisy2**, plus besoin de se limiter à arexx seul comme envisagé plus
   tôt dans la soirée.
 
-- **📌 14/09/2026 (demain)** : mise en service/utilisation réelle de **rfxcom sur noisy** — demande
-  explicite utilisateur (13/09/2026 au soir). Pas encore déployé à ce jour sur noisy (`rfxcombridge.js`
-  déjà corrigé préventivement — `BRIDGE_INSTANCE: rfx_bridge_noisy_noisy` — voir entrée
-  `gpiobridge.js/rfxcombridge.js` ci-dessous §"risque réel sur stfort en prod", mais uniquement le
-  volet gpio a été réellement testé/validé sur noisy jusqu'ici). À vérifier en priorité en
-  démarrant : `rfxcom` toujours dans `disabledApps` du `data/core/config.yaml` de noisy ? Port série
-  RFXtrx433 (`/dev/ttyUSB0` sur noisy, à confirmer le nom exact du device).
+### ✅✅ rfxcom activé sur noisy — trouvaille critique en route : conflit RÉEL d'accès au port série (pas juste théorique), corrigé
+- **Contexte (14/09/2026 nuit)**, mise en service réelle de `rfxcom` sur noisy (demande explicite du
+  13/09 au soir) : retrait de `rfxcom` de `disabledApps` (`data/core/config.yaml`), redémarrage de
+  `dimotic-ha` — transceiver RFXCOM initialisé avec succès sur `/dev/ttyUSB0` (détecté via
+  `/dev/serial/by-id/usb-RFXCOM_RFXtrx433_A1YKN7SN...`), 35 devices/20 récepteurs chargés,
+  `bridgeInstance` correct (`rfx_bridge_noisy_noisy`), découverte publiée (55 topics).
+- **⚠️ Trouvaille critique** : contrairement à ce qui était noté ("rfxcombridge.js déjà corrigé
+  préventivement"), **le dossier live `/home/domotique/node_applications/zdidnoderfxcom433e/` sur
+  noisy n'avait EN RÉALITÉ jamais reçu l'adaptation pont** — fichier `appmean.js` daté d'octobre
+  2023, aucun `rfxcombridge.js` présent. Les fichiers adaptés (`zdidnoderfxcom433e-ha/`) n'avaient
+  été préparés que dans `~/noisy-migration/noisy-stick/` sur le PC de dev, jamais réellement
+  déployés sur le vrai noisy (contrairement au GPIO, qui lui avait bien été déployé le 13/09).
+  **Conséquence concrète** : `vrfx` (module legacy) et le vrai driver `rfxcom` de dimotic-ha
+  avaient **tous les deux `/dev/ttyUSB0` ouvert simultanément** (confirmé via `fuser`) — un vrai
+  risque de corruption des trames RF reçues (lectures partagées de façon imprévisible entre deux
+  processus), pas juste un risque théorique.
+- **Corrigé** : backup du dossier live
+  (`zdidnoderfxcom433e.bak-pre-bridge-20260914`), `supervisor forcestop rfx` (arrêt réel, pas juste
+  un rebond), déploiement des 4 fichiers adaptés (`app.js`/`appmean.js`/`rfxcomserv.js`/
+  `rfxcombridge.js`, `node --check` OK sur les 4), `supervisor start rfx`. **Premier `start` sans
+  effet** (aucun process `vrfx` relancé) — cause : `appmean.js` lit `rfx.dimoticha` dans
+  `domo.properties` (mécanisme jumeau de `gpio.dimoticha`, déjà écrit dans le fichier lors de la
+  préparation mais jamais activé) pour choisir entre pont MQTT et accès matériel réel — valeur
+  encore à `dimotic` (défaut), donc `appmean.js` tentait de charger le mode matériel réel envers
+  et contre le port déjà tenu par dimotic-ha. **Corrigé** : `rfx.dimoticha=dimotic` → `ha` dans
+  `domo.properties` (backup `domo.properties.bak-pre-rfx-dimoticha-20260914`) — modifier ce fichier
+  déclenche un redémarrage complet du superviseur (fs.watch, comportement connu), `vrfx` reparti
+  automatiquement. **Vérifié stable** : `fuser /dev/ttyUSB0` ne montre plus que le PID de
+  dimotic-ha, `vrfx` confirmé actif sans le port (pont MQTT pur).
+- **Reste à faire** : tester une vraie commande depuis l'ancienne interface (pas fait cette nuit),
+  vérifier réception RF passive réelle (comme fait pour le GPIO plus tôt cette session).
 
 - **📌 14/09/2026 (demain)** : construire un **utilitaire de diagnostic Solarman** (décoder les
   trames + vérifier qu'on a tout ce qu'il faut pour réussir une vraie intégration HA native

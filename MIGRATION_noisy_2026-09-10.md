@@ -577,6 +577,34 @@ Dans `~/noisy-migration/noisy-src/datadomo/` (original en `.orig`), **rien touch
   j172/j24/j149 → "chambre de Evan" ; j162/j45 (qui listaient déjà "chambre d'Evan" **et** "bureau")
   → "et du bureau" devient "et de la chambre de Drystan" (ajoute la couverture de la chambre de
   Drystan). Caches `__commands`/`__sensors` de j162/j45 figés — re-parsés au boot du superviseur.
+
+## 5quater. Portage du plan HAPLAN de noisy — fait le 14/09/2026
+
+Matière de départ (§4bis) : `/home/datadomo/plan-original.png` (620×750 PNG, portrait) +
+`equipements.json` corrigé (§5ter, swap Evan↔Drystan déjà appliqué) — `coordonnees`/`newcoordonnees`
+par matériel/type (portrait, pixels) → converties en fractions 0-1 (`px/620`, `py/750`) pour le
+schéma HAPLAN (`positions: [{entity_id, x, y}]`, `x`/`y` nullable si non placé).
+
+Mapping matériel → entity_id HA (noisy2) fait par croisement `lieu`/`sarahname`/`num` avec :
+- `arexx-sensors-v1.0.yaml` déployé sur noisy (rawId → nom de pièce, source d'autorité)
+- `rpigpio` : 12 pins phys7/11/12/13/15/16/18/22/29/31/33/37 → switches (déjà croisés le 13/09)
+- Les entités RFXCOM (`light.*`/`cover.*`) : désambiguïsation des doublons par pièce via `sarahname`
+  (ex. `sarahname="chevet"` → `light.chevet_chambre_de_evan`, `sarahname="entrée"` sur `lieu="salle"`
+  → `switch.entree_salle`, `/11` vs `/12` sur la même adresse RFXCOM → salon vs salle à manger)
+
+**50 entités placées** (8 climate, 8 arexx, 13 switch [12 gpio + 1 rfxcom], 16 light, 4 cover,
+1 sensor.toilettes_temperature) sur 56 matériels legacy — **5 laissées non placées** (`x`/`y`
+`null`, à positionner manuellement via "Ajouter une entité") faute de coordonnées dans l'original
+(`sensor.couloir_arexx_temperature_temperature`, `switch.garage_journuit_16`,
+`switch.garage_ballon_12`, `switch.garage_ballon_7`, `sensor.garage_puissance`) — **6 matériels
+exclus volontairement** (télécommandes/boutons RFXCOM `binary_sensor.*`, pas pertinents sur un plan ;
+`essaizigbee`, device de test). Tous les 50 `entity_id` vérifiés existants dans l'état HA réel de
+noisy2 avant déploiement (aucun typo).
+
+Déployé sur noisy2 (`/docker/dimotic-ha/data/haplan/`) : image copiée dans `images/`, config
+générée écrite (ancienne config vide sauvegardée en `.bak-vide-20260914`), conteneur `dimotic-ha`
+redémarré — `HaplanService` démarré sans erreur, plan affiché et validé visuellement dans l'éditeur
+web (icônes correctement positionnées dans les pièces correspondantes).
 - Les 4 crons qui nomment explicitement Evan/Drystan (j162/j45/j194/j242) ne sont **pas** swappés :
   ils visent la chambre de l'enfant nommé, pas la pièce physique (décision utilisateur).
 
