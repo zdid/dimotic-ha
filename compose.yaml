@@ -68,6 +68,16 @@ services:
     environment:
       - TZ=Europe/Paris
 
+    # ⭐ 14/09/2026, trouvé en conditions réelles (noisy2) : sans limite explicite, le driver
+    # json-file de Docker n'a AUCUNE rotation par défaut (6 Go constatés en une seule journée sur
+    # cette machine, `docker logs`/`docker compose` en timeout) — voir compose.deploy.yaml pour le
+    # détail complet.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
     volumes:
       # Données/config persistantes (un sous-répertoire par application, voir
       # techniques-socle-ha-mqtt_specs §7) et logs — bind-mounts hôte pour rester

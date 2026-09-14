@@ -86,21 +86,35 @@ export function generateMqttIoConfig(config: RpigpioConfig, pins: PinDefinition[
   const digitalInputs = pins.filter((p) => p.direction === 'input').map(buildPinEntry);
   const digitalOutputs = pins.filter((p) => p.direction === 'output').map(buildPinEntry);
 
-  // ⭐ fonctionnelles-supervisor_specs v2.3 §9.2 : bridgeInstance injecté en segment final des deux
-  // préfixes — sans ça, deux instances rpigpio (deux machines) partagent réellement le même
-  // topicPrefix/discoveryPrefix mqtt-io par défaut (aucune convention de bridgeInstance ici avant
-  // ce correctif, contrairement à rfxcom/evoo7/arexx qui embarquent bridgeInstance dans leurs
-  // topics via getStateTopic()/getCommandTopic() du socle).
+  // ⭐ fonctionnelles-supervisor_specs v2.3 §9.2 : bridgeInstance injecté dans `topic_prefix` — sans
+  // ça, deux instances rpigpio (deux machines) partagent réellement le même topicPrefix mqtt-io par
+  // défaut (aucune convention de bridgeInstance ici avant ce correctif, contrairement à
+  // rfxcom/evoo7/arexx qui embarquent bridgeInstance dans leurs topics via getStateTopic()/
+  // getCommandTopic() du socle). `topic_prefix` ne concerne que les topics état/commande internes
+  // (mqttio/rpigpio/...), aucune contrainte de format là-dessus.
+  //
+  // ⭐ 14/09/2026 (trouvé en conditions réelles, noisy2) : la MÊME disambiguïsation avait été
+  // appliquée par erreur à `ha_discovery.prefix` — décale le format du topic de DÉCOUVERTE HA d'un
+  // segment (`prefix/bridgeInstance/component/node_id/object_id/config`, 4 niveaux), alors que HA
+  // lui-même (et notre `nommage`) n'acceptent que le format officiel à 2-3 niveaux
+  // (`prefix/component/[node_id/]object_id/config`). Corrigé en laissant `ha_discovery.prefix`
+  // intact et en fournissant `client_id` explicitement à la place : mqtt-io l'utilise déjà nativement
+  // comme `node_id` du topic de découverte ET comme base de `unique_id` (voir home_assistant.py,
+  // `mqtt_options.client_id`) — donc la même désambiguïsation multi-machines est obtenue SANS
+  // segment de topic supplémentaire. Sans `client_id` explicite, mqtt-io serait retombé sur un hash
+  // SHA1 opaque de `topic_prefix` (`server.py::_run()`, `"mqtt-io-%s" % sha1(topic_prefix)...`) —
+  // fonctionnellement correct (déjà unique) mais illisible en debug.
   const doc = {
     mqtt: {
       host: config.mqtt.host,
       port: config.mqtt.port,
       user: config.mqtt.user,
       password: config.mqtt.password,
+      client_id: effectiveBridgeInstance,
       topic_prefix: `${config.mqtt.topicPrefix}/${effectiveBridgeInstance}`,
       ha_discovery: {
         enabled: true,
-        prefix: `${config.mqtt.discoveryPrefix}/${effectiveBridgeInstance}`,
+        prefix: config.mqtt.discoveryPrefix,
         name: 'RPI GPIO'
       }
     },

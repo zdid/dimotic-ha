@@ -1,6 +1,347 @@
 # Liste des problèmes à résoudre
 
+## Problèmes prioritaires (suite du 14/09/2026, session noisy2)
+
+### ✅ rpigpio : `ha_discovery.prefix` de mqtt-io décalait le format du topic de découverte HA d'un segment — corrigé, validé en conditions réelles sur `noisy`
+- **Contexte (14/09/2026)**, trouvé en essayant de faire remonter les entités `rpigpio` de `noisy`
+  dans le HA de `noisy2` (voir plus bas, chantier "noisy2 : bring-up complet") : les switches GPIO
+  n'apparaissaient jamais dans HA, ni via `nommage`, ni nativement.
+- **Cause racine** : `generateMqttIoConfig()` (`applications/rpigpio/src/domain/generator.ts`)
+  injectait `/${effectiveBridgeInstance}` à la fois dans `topic_prefix` ET dans
+  `ha_discovery.prefix` (fait le 06/09/2026, fonctionnelles-supervisor_specs v2.3 §9.2, pour éviter
+  que deux machines rpigpio partagent le même préfixe mqtt-io par défaut). Pour `topic_prefix`
+  (état/commande interne), aucun souci. Mais pour `ha_discovery.prefix`, ça décale le topic de
+  découverte HA à **4 niveaux** (`prefix/bridgeInstance/component/node_id/object_id/config`) —
+  or le format officiel de découverte MQTT HA n'accepte que **2-3 niveaux**
+  (`prefix/component/[node_id/]object_id/config`). Ni HA lui-même, ni notre `nommage` (même
+  contrainte, voir schéma ci-dessous) ne reconnaissent un topic à 4 niveaux — rejet **silencieux**
+  des deux côtés (aucune erreur logguée, juste aucune entité créée).
+- **Correctif** (`generator.ts`) : au lieu d'injecter le bridgeInstance dans `ha_discovery.prefix`,
+  il est maintenant fourni comme `mqtt.client_id` explicite dans le config.yaml généré. mqtt-io
+  l'utilise déjà nativement comme `node_id` du topic de découverte ET comme base d'`unique_id`
+  (`home_assistant.py::hass_announce_digital_output`, `mqtt_options.client_id`) — même
+  désambiguïsation multi-machines obtenue, sans segment de topic en plus. Bénéfice annexe : sans
+  `client_id` explicite, mqtt-io serait retombé sur un hash SHA1 opaque du `topic_prefix`
+  (`server.py::_run()`) — maintenant un identifiant lisible (`rpigpio_bridge_noisy_noisy`) au lieu
+  d'un hash.
+- **Vérifié en conditions réelles sur `noisy`** (pas juste en local) : `client_id:
+  rpigpio_bridge_noisy_noisy` et `ha_discovery.prefix: homeassist` (propre) dans le config.yml
+  généré ; topic réel confirmé à 3 niveaux (`homeassist/switch/rpigpio_bridge_noisy_noisy/7/config`) ;
+  `unique_id: rpigpio_bridge_noisy_noisy_rpi_output_7` (lisible). Déployé via le bouton "Déployer"
+  de l'UI rpigpio (tunnel SSH + navigateur), `mqtt-io-rpigpio` redémarré avec succès sur `noisy`.
+  **Build fait** (`npm run build` dans `applications/rpigpio`), pas de tests automatisés existants
+  pour ce module. **Patché en direct sur le conteneur `dimotic-ha` de `noisy`** (`docker cp` du
+  `dist/domain/generator.js` compilé) pour validation avant relâchement versionné — **pas encore
+  publié comme nouvelle version Docker officielle** (reste à faire : bump version, `docker buildx`
+  multi-arch, push, redéploiement propre sur toutes les machines rpigpio — actuellement stfort tourne
+  encore l'ancien code, fonctionnellement inchangé pour stfort tant que personne n'essaie de relayer
+  ses entités via `nommage`/un pont comme ici).
+
+### ✅ nommage : schéma `discoveryTopics` étendu à un 3e niveau (4 wildcards) — nécessaire mais pas suffisant à lui seul
+- **Contexte (14/09/2026)** : avant de trouver le vrai correctif rpigpio ci-dessus, `nommage`
+  (`applications/nommage/src/domain/config-schema.ts`) a été étendu pour accepter un pattern à 4
+  wildcards (`prefix/+/+/+/+/config`), en plus des 2 patterns officiels HA déjà supportés — motivé à
+  l'origine par le besoin (mal diagnostiqué sur le coup) de lire les topics rpigpio à 4 niveaux.
+  Reste BORNÉ (pas un joker `#`), donc pas la même classe de risque que l'incident historique déjà
+  documenté dans ce fichier (crash par afflux de messages). Build fait, patché en direct sur
+  `noisy2` (`docker cp`), validé sans boucle (12 messages parsés puis stable). **Conservé** même
+  après le vrai correctif rpigpio (utile si une future source a un format à 4 niveaux), mais **n'est
+  plus le chemin emprunté par rpigpio** désormais (ses topics sont repassés à 3 niveaux).
+- **Bug distinct trouvé au passage, PAS corrigé** : `emitPassthroughDiscovery()`
+  (`NommageService.ts:479`) calcule `json_attributes_topic` à partir du topic SOURCE (préfixe
+  étranger, ex. `homeassist/...`) au lieu du topic REWRITTEN (`homeassistant/...`) réellement publié
+  — le champ `json_attributes_topic` dans le payload relayé pointe donc vers un préfixe que HA ne
+  surveille pas, les attributs de taxonomie n'atteignent jamais l'entité HA. Cosmétique (n'empêche
+  pas la création de l'entité elle-même), pas corrigé ce soir, à reprendre — vérifié en conditions
+  réelles sur les switches rpigpio ET les capteurs arexx (même bug des deux côtés).
+
+### ✅ Bug daemon Docker (conteneur fantôme après pull interrompu) et log sans rotation — voir entrées existantes plus bas
+Retrouvés à nouveau ce soir sur `noisy2` pendant ce chantier — mêmes correctifs déjà appliqués
+(`systemctl restart docker` pour le fantôme, `logging: {max-size, max-file}` pour la rotation, déjà
+dans `compose.yaml`/`compose.deploy.yaml` du dépôt depuis plus tôt le 14/09).
+
+## Prochaine session
+
+- **📌 14/09/2026 (nuit même)** : **publier une vraie version Docker** des correctifs `nommage`
+  (3e pattern discoveryTopics) + `rpigpio` (client_id au lieu du hash) validés ce soir sur `noisy`/
+  `noisy2` uniquement en patch à chaud (`docker cp`, pas relâché officiellement) — bump version,
+  `docker buildx` multi-arch, push `zdid2/dimotic-ha`, redéploiement propre sur `noisy`, `noisy2`,
+  `stfort`, `ha2`, `orangepi` (stfort tourne encore l'ancien `generator.ts`, sans impact tant que
+  personne n'y relaie via un pont comme celui posé sur noisy2 ce soir). Corriger au passage le bug
+  `json_attributes_topic` de `nommage` trouvé au passage (voir entrée dédiée ci-dessus).
+- **📌 14/09/2026** : `noisy2` a maintenant un **pont mosquitto permanent vers `noisy`**
+  (`/docker/mosquitto/config/mosquitto.conf`, via le tunnel WireGuard) — à réévaluer une fois `noisy2`
+  physiquement sur le LAN de `noisy` (probablement à retirer, LAN direct suffira).
+- **📌 14/09/2026** : reprendre la migration du plan **HAPLAN** pour noisy (mise de côté ce soir le
+  temps de résoudre la chaîne rpigpio→HA) — matière prête (`plan-original.png`, coordonnées
+  `equipements.json`), et **maintenant que les 12 switches rpigpio ET les 8 capteurs arexx sont de
+  vraies entités dans le HA de noisy2**, plus besoin de se limiter à arexx seul comme envisagé plus
+  tôt dans la soirée.
+
+- **📌 14/09/2026 (demain)** : mise en service/utilisation réelle de **rfxcom sur noisy** — demande
+  explicite utilisateur (13/09/2026 au soir). Pas encore déployé à ce jour sur noisy (`rfxcombridge.js`
+  déjà corrigé préventivement — `BRIDGE_INSTANCE: rfx_bridge_noisy_noisy` — voir entrée
+  `gpiobridge.js/rfxcombridge.js` ci-dessous §"risque réel sur stfort en prod", mais uniquement le
+  volet gpio a été réellement testé/validé sur noisy jusqu'ici). À vérifier en priorité en
+  démarrant : `rfxcom` toujours dans `disabledApps` du `data/core/config.yaml` de noisy ? Port série
+  RFXtrx433 (`/dev/ttyUSB0` sur noisy, à confirmer le nom exact du device).
+
+- **📌 14/09/2026 (demain)** : construire un **utilitaire de diagnostic Solarman** (décoder les
+  trames + vérifier qu'on a tout ce qu'il faut pour réussir une vraie intégration HA native
+  Modbus/Solarman sur les loggers Deye de noisy) — intention exprimée par l'utilisateur le
+  13/09/2026 au soir (contexte de la demande perdu, discuté plus tôt le 13/09 dans une partie de
+  session antérieure non conservée en mémoire — repartir de zéro sur le "pourquoi"/le détail exact
+  si besoin).
+  - **Déjà validé ce soir (13/09/2026 tard)** : chemin réseau complet OK bout en bout — tunnel
+    WireGuard + NAT sur noisy + négociation protocole Solarman réussie (poignée de main confirmée,
+    numéro de série vérifié dans la trame retour) jusqu'au logger 2 (serial `2618005808`, adresse
+    fantôme `10.10.10.7`, MAC `D4:27:87:7D:F2:3E`, retrouvé par découverte UDP broadcast
+    `WIFIKIT-214028-READ` sur le port 48899).
+  - **Pas encore trouvé** : la bonne carte de registres Modbus pour ce modèle Deye précis — essais
+    à l'aveugle (holding + input registers, adresses 0/0x3C/0x96/0x150) tous rejetés en
+    `AcknowledgeError` (négociation transport OK, mauvaise adresse/mauvais slave ID côté Modbus).
+    **Prochaine étape** : demander/trouver le modèle exact de l'onduleur/logger (étiquette) pour
+    chercher la carte de registres officielle, plutôt que deviner.
+  - **Loggers 1 (`.157`) et 3 (`.119`) injoignables ce soir** (ping échoue même en LAN direct depuis
+    noisy, hors tunnel) — probablement en veille nocturne (pas de soleil), à revérifier de jour.
+  - Outillage prêt pour repartir dessus : venv Python `scratchpad/solarman-venv` (`pysolarmanv5`
+    installé), script `scratchpad/test-solarman-tunnel.py` (non conservé — dans le scratchpad de
+    session, à recréer si besoin).
+
 ## Problèmes prioritaires
+
+### 🟡 stfort : deux brokers MQTT différents pour GPIO (`gpiobridge.js` → ha2, `mqtt-io` → local) — cause racine du silence total constaté en testant depuis l'ancienne domotique, corrigé, test bout en bout restant
+- **Contexte (13/09/2026)**, trouvé en essayant de valider le correctif de double-inversion (voir
+  entrée dédiée) sur stfort : **aucune commande GPIO de l'ancienne interface n'atteignait
+  `mqtt-io`**, silence total (contrairement à noisy où la commande arrivait, juste inversée).
+- **Cause** : `domo.properties` (`mqtt.server.addressport=192.168.1.51:1883`, **ha2**, pas le
+  broker local de stfort) — confirmé par les connexions TCP réelles de `vgpio`/`vrfx`
+  (`ss -tnp`, toutes vers `192.168.1.51:1883`). `gpiobridge.js` lit cette même propriété
+  (`resolveMqttUrl()`) → publie donc aussi vers **ha2**. Mais `mqtt-io-rpigpio` (conteneur séparé,
+  pas dimotic-ha) était configuré avec `mqtt.host: 127.0.0.1` (**broker local**) — deux brokers
+  différents, et **aucun pont mosquitto pour `mqttio/rpigpio/#`** (seuls `rfxcom/#` et
+  `zigbee2mqtt/#` sont pontés vers ha2 via `/etc/mosquitto/conf.d/bridge-ha2-*.conf`) — donc les
+  deux bouts ne se rencontraient jamais. Pour RFXCOM, ce n'était pas un problème : le driver
+  dimotic-ha (`ha.mqtt.host: 192.168.1.51`) et le pont mosquitto compensaient déjà le décalage.
+- **Décision utilisateur (13/09/2026)** : architecture cible = **un seul broker central, celui de
+  ha2** — pas de broker local sur stfort à terme. Donc PAS reconfigurer `domo.properties` vers le
+  local (déjà tenté puis annulé dans la session), mais reconfigurer **`mqtt-io-rpigpio`** pour
+  parler à ha2 lui aussi.
+- **✅ Fait** : `data/rpigpio/config.yaml` de stfort (`mqtt.host`) changé de `127.0.0.1` →
+  `192.168.1.51` (backup `.bak-pre-broker-ha2-20260913`), `dimotic-ha` redémarré pour recharger,
+  redéployé via l'UI — `mqtt-io-rpigpio` confirmé connecté à ha2 (logs).
+- **✅ Fait (13/09/2026)** : reliquat "on" sur `id=15`/`id=7` nettoyé — republié `OFF` avec
+  `retain:true` **directement sur ha2** (192.168.1.51, pas le mosquitto local de stfort — les deux
+  brokers ne sont pas pontés pour `mqttio/rpigpio/#`, piège tombé dedans une première fois avant de
+  corriger). Vérifié par `raspi-gpio get 22`/`get 4` (level=0) et par les logs `mqtt-io-rpigpio`
+  (`Digital output '15' set to False (off)`, idem `'7'`).
+- **✅ Fait (13/09/2026)** : mosquitto natif local de stfort désactivé (`systemctl stop mosquitto
+  && systemctl disable mosquitto`, confirmé `inactive`/`disabled`) — demande explicite utilisateur.
+  Vérifié avant coupure qu'aucun service local (zigbee2mqtt, stick RFXCOM) ne dépendait du broker
+  local (`systemctl list-units` : rien, seul mosquitto écoutait sur 1883) ; après coupure,
+  `mqtt-io-rpigpio` et `dimotic-ha` tournent sans erreur (déjà connectés à ha2, non affectés).
+- **⚠️ Reste à faire** :
+  1. Tester bout en bout depuis l'ancienne interface (utilisateur indisponible en fin de session
+     précédente) — à refaire dès que possible pour valider tout le chemin (double-inversion +
+     BRIDGE_INSTANCE + broker ha2 + retain, ensemble).
+  2. **✅ Fait (13/09/2026)** : `bridge-ha2-rfxcom.conf`/`bridge-ha2-zigbee.conf` supprimés de
+     stfort (`/etc/mosquitto/conf.d/`, sauvegardés dans
+     `backups/stfort-mosquitto-conf.d/*_backup_2026-09-13.conf`) — confirmés inertes (rien ne
+     publiait plus localement sur `rfxcom/#`/`zigbee2mqtt/#`, mosquitto local déjà désactivé).
+  3. Nettoyer aussi les résidus de découverte HA doublée trouvés plus tôt sous l'ancien nom
+     `rpigpio_bridge_stfort` (sans suffixe machineId) sur `mqttio/rpigpio/#` et `homeassist/#` —
+     namespace séparé de ce qui précède, nettoyage à faire sur ha2 directement.
+  4. Vérifier si **noisy** a une configuration MQTT cohérente (à ce jour, tout pointe vers
+     `127.0.0.1` sur noisy — noisy n'a pas de ha2/machine centrale équivalente à ce jour, donc ce
+     problème spécifique ne devrait pas s'y poser, mais à confirmer si l'architecture évolue).
+
+### 🟢 stfort : conflit cosmétique "conflicts with existing device trigger" sur les scènes RFXCOM — cause identifiée, pas de correctif codé (décision explicite)
+- **Contexte (13/09/2026)**, trouvé en vérifiant la conformité des noms de bridge MQTT discovery
+  sur ha2 suite à l'arrêt/redémarrage complet de la chaîne (HA + dimotic-ha toutes machines +
+  dimotic stfort + zigbee2mqtt + mqtt-io-rpigpio + mosquitto, dans cet ordre, relancé en
+  commençant par mosquitto sur ha2) : logs HA truffés de
+  `[homeassistant.components.mqtt.device_trigger] Config for device trigger
+  rfx_bridge_stfort_stfort_578666 rfxcom_scene_scene_100085{1,2,3} conflicts with existing device
+  trigger`.
+- **Vérifié : PAS un problème de nommage** — `homeassistant/device_automation/#` sur ha2 ne contient
+  que 3 topics, tous sous le nom actuel correct `rfx_bridge_stfort_stfort_578666`, aucun résidu
+  d'ancien nom (`rfx_bridge_local_test`, `rfx_bridge_stfort` sans suffixe...).
+- **Cause réelle** : HA a publié son "birth message" (`homeassistant/status`=`online`) **deux fois
+  en 26 secondes** (21:01:41 puis 21:02:07, logs `dimotic-ha` stfort, `grep 'birth message'`) —
+  avant même l'opération d'arrêt/redémarrage de ce soir, donc un comportement pré-existant. Chaque
+  birth message déclenche correctement (comportement standard attendu d'une intégration MQTT
+  discovery) une republication complète de la découverte RFXCOM par `RfxComService.
+  publishSceneDiscovery()` (`applications/rfxcom/src/domain/RfxComService.ts`). Deux republications
+  quasi simultanées du même topic retenu → HA traite la 2e vague avant d'avoir fini d'enregistrer
+  la 1ère → conflit interne.
+- **Donc** : ni un bug de nommage, ni un bug dimotic-ha à proprement parler (il réagit correctement
+  à chaque birth message reçu) — la vraie anomalie est que HA a émis 2 birth messages coup sur coup
+  (cause côté HA non investiguée, ex. reconnexion MQTT qui flappe). Purement cosmétique : le trigger
+  de la 1ère publication reste enregistré et fonctionnel, seule la 2e (identique) échoue à
+  s'enregistrer en doublon.
+- **Zéro occurrence** depuis le redémarrage propre de ce soir (21:39) au moment de l'investigation.
+- **Décision utilisateur (13/09/2026)** : laisser tel quel pour l'instant, pas de correctif codé
+  (anti-rebond sur le birth message envisagé mais pas implémenté), juste consigné ici pour
+  référence si ça redevient gênant ou plus fréquent.
+
+### 🔴 rpigpio : `data/rpigpio/config.yaml` en ancien format `target:` (singulier) — cassé en prod sur stfort
+- **Contexte (13/09/2026)**, trouvé en déployant `rpigpio` pour de vrai sur noisy (premier vrai
+  déploiement dimotic-ha sur cette machine) : le schéma `rpigpioConfigSchema`
+  (`applications/rpigpio/src/domain/config-schema.ts`) attend `targets: [{id, host, hostDir,
+  containerName, image}]` (tableau, max 1 élément) depuis le 23/08/2026 — `target:` (objet
+  singulier, ancienne forme) n'existe plus dans le schéma et est simplement strippé par Zod, laissant
+  `targets` vide.
+- **Corrigé sur noisy** (`data/rpigpio/config.yaml`, forme tableau avec `id: noisy`) — sans ce
+  correctif, `rpigpio:remote-op` échoue avec "Cible introuvable", aucun déploiement possible.
+- **⚠️ Vérifié le même jour : stfort a EXACTEMENT le même problème en production**
+  (`/docker/dimotic-ha/data/rpigpio/config.yaml` sur stfort, toujours `target:` singulier). Le
+  conteneur `mqtt-io-rpigpio` déjà déployé là-bas continue de tourner (c'est juste un conteneur
+  Docker existant, indépendant de la validité de la config dimotic-ha), mais **toute tentative de
+  redéploiement/modification des pins depuis l'UI échouerait** tant que ce n'est pas corrigé. Pas
+  touché — à corriger avec l'utilisateur avant la prochaine intervention sur les pins GPIO de
+  stfort.
+
+### 🔴 zdidnodedomoutil/appli.js : version PARTAGÉE noisy jamais alignée sur celle de stfort — appel objet vs positionnel
+- **Contexte (13/09/2026)**, trouvé en déployant `zdidnodegpio` (bridge) pour de vrai sur noisy :
+  `app.js` copié de stfort appelle `appli(appliname, {withreplication, withsensorstypes, loglevel,
+  isloggermqtt, isonlyloggermqtt})` (forme objet) — mais `zdidnodedomoutil/appli.js`, un module
+  **partagé** entre toutes les apps legacy de noisy, n'a jamais été mis à jour pour accepter cette
+  forme : il attend toujours l'appel positionnel d'origine (`appli(appliname, logLevel,
+  isloggermqtt, isonlyloggermqtt)`). Résultat : `TypeError: leveltype.toLowerCase is not a
+  function`, plantage en boucle du module au démarrage.
+- **Corrigé** pour `zdidnodegpio/app.js` (appel positionnel restauré) + préventivement pour le futur
+  `zdidnoderfxcom433e-ha/app.js` (pas encore déployé sur noisy, même piège évité par anticipation).
+- **Risque plus large non exploré** : d'autres divergences entre le `zdidnodedomoutil`/
+  `zdidnodeutil` partagé de noisy et celui de stfort sont possibles (ce n'était qu'un symptôme
+  trouvé par hasard) — à garder à l'esprit avant de recopier tout autre fichier "générique" de
+  stfort vers noisy sans le tester en conditions réelles d'abord.
+
+### 🔴 gpiobridge.js/rfxcombridge.js (legacy) : `BRIDGE_INSTANCE` en dur ne suit plus `computeBridgeInstance()` — risque réel sur stfort en prod
+- **Contexte (13/09/2026)**, trouvé en préparant un test Docker pour noisy, AVANT tout déploiement :
+  depuis le 06/09/2026, `computeBridgeInstance()` (`applications/core/src/ha/integration/types/
+  ha-mqtt.ts`) suffixe `_<machineId>` au `bridgeInstance` configuré pour TOUTE app dimotic-ha
+  (`arexx`/`evoo7`/`rfxcom`/`rpigpio`) — `config.bridgeInstance` n'est plus qu'un préfixe, l'identifiant
+  final inclut le `machineId` de la machine (`RpigpioService.effectiveBridgeInstance`,
+  `RfxComService.effectiveBridgeInstance`).
+- Les ponts legacy `gpiobridge.js`/`rfxcombridge.js` (stfort ET la copie adaptée pour noisy) codent
+  `BRIDGE_INSTANCE` en dur, **sans** le suffixe `_<machineId>` — ils datent du 17-28/08/2026, avant
+  ce changement. **Corrigé pour noisy le 13/09/2026** (`rpigpio_bridge_noisy_noisy` /
+  `rfx_bridge_noisy_noisy`, cohérent avec `machineId: noisy` fixé en dur dans son
+  `data/core/config.yaml`).
+- **✅✅ Volet gpio corrigé ET vérifié sur stfort le 13/09/2026**, en réactivant `rpigpio` sur
+  stfort (désactivé jusque-là dans `disabledApps`, `target:`/`targets:` corrigé — voir plus bas) :
+  `machineId` réel confirmé `stfort_578666` (auto-généré, pas fixé en dur comme noisy).
+  - **Un premier essai a cassé la prod pendant quelques minutes** (leçon à retenir) : corriger
+    `BRIDGE_INSTANCE` dans `gpiobridge.js` SEUL, sans redéployer `mqtt-io` en même temps, désynchronise
+    immédiatement le pont du conteneur déjà tournant (qui utilisait encore l'ancien nom) — repéré et
+    annulé (revert) en quelques minutes, avant tout impact durable.
+  - **Refait correctement en séquence coordonnée**, sur demande explicite de l'utilisateur :
+    0) `vgpio` arrêté (par l'utilisateur), 1) `mqtt-io-rpigpio` arrêté aussi (rien ne pilotait plus le
+    GPIO), 2) `initial:off` réglé sur les 3 pins via l'UI, 3) `mqtt-io-rpigpio` redéployé avec le bon
+    nom effectif (`rpigpio_bridge_stfort_stfort_578666` — au passage, clé SSH auto-générée manquante
+    détectée et ajoutée à `authorized_keys`), 4) `gpiobridge.js` corrigé d'abord sur la référence
+    locale `stfort-templates/` ("dev"), PAS juste le fichier live (même `BRIDGE_INSTANCE` que le
+    conteneur + `retain:true` ajouté au passage, jamais fait sur cette référence), puis déployé sur
+    stfort, 5) `vgpio` relancé. Vérifié stable + toujours en mode pont (`/proc/<pid>/maps`, aucun
+    `/dev/mem`) + état électrique des 3 pins cohérent avec `initial:off` (`raspi-gpio`).
+- **✅✅ Volet rfxcom vérifié ET corrigé sur stfort le 13/09/2026 — panne active confirmée, pas
+  juste un risque théorique.** `rfxcombridge.js` utilisait `rfx_bridge_local_test`, qui ne
+  correspondait déjà PAS au préfixe configuré (`data/rfxcom/config.yaml: bridgeInstance:
+  rfx_bridge_stfort`), avant même le suffixe `_<machineId>`. Le vrai driver (confirmé dans les logs
+  du conteneur dimotic-ha : `"Bridge connecté: rfxcom:rfx_bridge_stfort_stfort_578666"`) écoute sur
+  `rfx_bridge_stfort_stfort_578666` — total désalignement, **aucune commande RFXCOM de l'ancienne
+  interface n'atteignait le matériel physique** (câblé sur stfort, `/dev/ttyUSBRFXCOM` confirmé
+  présent) depuis un moment. Contrairement à gpio, pas de conteneur séparé à redéployer ici (le
+  driver rfxcom tourne en process interne du conteneur dimotic-ha, déjà avec le bon nom depuis le
+  passage à 2.5.2) — une seule correction a suffi : `rfxcombridge.js` corrigé sur la référence dev
+  `stfort-templates/` (repartant du VRAI fichier live, pas de la copie figée du 17/08 qui aurait
+  fait régresser le correctif `resolveMqttUrl()` du 28/08 — backup
+  `.bak-pre-bridgeinstance-fix-20260913`), déployé, `vrfx` relancé (`supervisor restart rfx`).
+  Vérifié stable, toujours en mode pont (aucun fd tty ouvert sur le port série réel).
+
+### 🔴 rpigpio : pas d'état initial au démarrage — **confirmé en conditions réelles, les 12 relais de noisy basculent à CHAQUE redémarrage du conteneur**
+- **Contexte (13/09/2026)**, en croisant `equipements.json` (legacy, site "noisy") avec le
+  `rpigpio-pins-v1.0.yaml` généré (voir `MIGRATION_noisy_2026-09-10.md` §5bis) : `equipements.json`
+  encode un état initial au démarrage dans le champ `num` (`phys<N>:o:[inv:]<on|off>`) — sur les 12
+  relais de noisy, seuls `phys7` (`ballon` garage, non inversé) et `phys16` (`journuit` garage,
+  inversé) y sont explicitement marqués "démarrer allumés".
+- `pinDefinitionSchema` (`applications/rpigpio/src/domain/storage-schema.ts`) et
+  `generateMqttIoConfig`/`buildPinEntry` (`generator.ts`) n'ont **aucun champ** pour porter cette
+  sémantique.
+- **⚠️ Vérifié en conditions réelles le 13/09/2026, lors du reboot de noisy après le premier vrai
+  déploiement `dimotic-ha`** : au redémarrage du conteneur `mqtt-io-rpigpio`, les **12** pins
+  (pas seulement `phys7`/`phys16`) sont repartis à un niveau électrique LOW par défaut — une fois
+  traduit par le flag `inverted` de chacun, ça donne un mélange ON/OFF qui ne correspond ABSOLUMENT
+  PAS à l'état réel voulu (10 radiateurs qui étaient éteints se sont retrouvés "allumés" côté
+  logique, ballon/journuit/chauffage garage qui devaient être allumés se sont éteints). Constaté et
+  corrigé à la main via `mosquitto_pub` (état restauré à l'identique, vérifié par lecture
+  `raspi-gpio`) — **mais ça se reproduira à chaque redémarrage du conteneur** (reboot machine,
+  `docker restart`, mise à jour de l'image...) tant que ce n'est pas corrigé. Plus large que prévu
+  au départ : même `phys33` (chauffage garage), qui n'a pourtant aucun "init:on" explicite dans
+  `equipements.json`, était concerné — ce n'est pas qu'une question des 2 pins à "init on" du
+  fichier statique, c'est TOUT état réel accumulé qui se perd au redémarrage.
+- **✅ Corrigé le 13/09/2026** — vérifié dans le vrai code source `mqtt-io` installé (pas juste sa
+  doc) : `digital_outputs` supporte nativement `initial: high|low` + `publish_initial: true/false`
+  (`mqtt_io/config/config.schema.yml:791+`). Deux correctifs complémentaires appliqués :
+  1. `pinDefinitionSchema.initial` (`'on'|'off'`, optionnel) + `generator.ts::buildInitialFields`
+     (traduit en `high`/`low` selon `inverted`) + champ dans l'UI (`index.html`+`app.ts`, badge
+     d'affichage inclus) — couvre le TOUT PREMIER démarrage. Build TypeScript OK, zéro erreur.
+     **Committé dans le repo mais PAS ENCORE actif sur noisy** : `dimotic-ha` y tourne depuis
+     l'image `zdid2/dimotic-ha` publiée sur Docker Hub, pas depuis ce code source local — il faudra
+     une reconstruction+publication de l'image pour que ça prenne effet en réel.
+  2. `gpiobridge.js` publie désormais ses commandes avec `retain: true` (au lieu de sans retain) —
+     couvre TOUS les redémarrages suivants en restaurant le **dernier état réel commandé** (pas
+     juste un défaut figé), y compris pour des pins sans valeur `initial` explicite dont l'état
+     change dynamiquement (cron/thermostat, ex: `phys33` chauffage garage). **Déployé et vérifié en
+     conditions réelles sur noisy** (`vgpio` rechargé via `supervisor restart gpio` — `stop` seul
+     ne relance PAS automatiquement dans ce cas, contrairement à ce qu'on avait cru plus tôt ;
+     confirmation empirique par souscription MQTT immédiate + lecture `raspi-gpio`, état électrique
+     final identique à l'état réel voulu sur les 12 pins).
+  - **✅ Reporté sur stfort le 13/09/2026** : `gpiobridge.js` (backup
+    `.bak-pre-retain-20260913`) même correctif `retain:true`, `vgpio` rechargé
+    (`supervisor restart gpio`, nouveau PID confirmé stable, toujours en mode pont — aucun accès
+    `/dev/mem`). Pas de test d'écriture sur les vrais relais de stfort (pins/états voulus non
+    documentés dans cette session, contrairement à noisy) — le `retain` se mettra en place
+    naturellement à la première vraie commande envoyée par le système. Le champ `initial` (v2.5.2)
+    n'a en revanche PAS été renseigné pour les pins de stfort (pas dans le périmètre de cette
+    demande) — à faire séparément si souhaité.
+- **✅✅ Les deux volets déployés ET validés en conditions réelles le 13/09/2026** : commit
+  `a29e973` (branche `fix/rpigpio-initial-state`, fusionnée sur `main`), tag `v2.5.2`, build
+  multi-arch + push Docker Hub via `docker/rebuild-and-deploy.sh 2.5.2 --skip-ha2 --skip-orangepi`
+  (ha2/orangepi non touchés, contrainte de session respectée), déployé sur noisy (`docker compose
+  pull && up -d`, "2.5.2 - noisy" confirmé dans l'UI). `phys7`/`phys16`/`phys33` réglés sur
+  `initial: allumé` via le vrai formulaire de l'UI (pas en éditant le YAML à la main), puis
+  "Déployer" cliqué pour régénérer `mqtt-io`. **Le conteneur `mqtt-io-rpigpio` a été recréé en
+  vrai** pendant ce test (pas juste redémarré) : état électrique final vérifié identique à l'état
+  réel voulu sur les 12 pins (`raspi-gpio`) — les deux mécanismes (`initial` pour les 3 pins
+  configurés + `retain` en filet de sécurité pour tous) fonctionnent ensemble, testés bout en bout
+  sur le vrai matériel, pas juste en théorie.
+- Croisement complet vérifié par ailleurs (script Python, 12/12 pins) : `quoi`/`lieu`/`inverted`
+  identiques entre `equipements.json` et le yaml généré, correspondance phys→BCM correcte — aucune
+  autre divergence trouvée.
+
+### 🟡 RFXCOM : cover piloté en Lighting2/AC — `coverType` sans valeur adaptée, à vérifier de près avant les volets de noisy
+- **Contexte (11/09/2026)**, en préparant la config RFXCOM du site distant "noisy" (5 volets réels
+  pilotés en Lighting2/AC, voir `MIGRATION_noisy_2026-09-10.md` §5bis) : le driver `ReceiverCover.ts`
+  gère bien ce cas — `ReceiverManager.ts:51` résout le protocole du `primaryEmitter`, et si c'est
+  `lighting2`, `open`→envoie `on`, `close`→envoie `off`, `stop`→fige juste la position calculée
+  (Lighting2 n'a pas de STOP natif), position suivie par le temps écoulé (`openTimeSec`/
+  `closeTimeSec`). Donc **pas bloquant**, mais deux points à examiner de près avant de compter
+  dessus pour de vrais volets :
+  1. **`coverType`** (`z.enum(['Curtain1','Curtain2','Curtain3','Blind1','Blind2','Blind3','RFY','RFYEXT','ASA'])`,
+     `devices-config-schema.ts`) n'a **aucune valeur** représentant "piloté en AC" — utilisé
+     uniquement dans le libellé de découverte HA (`model: ReceiverCover (${coverType})`,
+     `ReceiverCover.ts:142`, cosmétique, n'affecte pas la trame RF émise) mais un libellé trompeur
+     (`Blind1` mis en pratique alors que ce n'est pas un vrai Blinds1) reste un vrai défaut de
+     clarté. Ajouter une valeur `AC`/`Lighting2` à l'enum (ou rendre `coverType` optionnel quand le
+     primaryEmitter est lighting2).
+  2. **Limitation déjà documentée dans le code** (`ReceiverCover.ts`, tête de fichier) : `set_position`
+     démarre un mouvement calculé vers la position cible mais **n'envoie pas de commande STOP
+     automatique** à l'atteinte de cette position — jamais vérifié en conditions réelles avec un
+     vrai volet Lighting2/AC (aucun test connu sur stfort/ailleurs). À tester en réel avant de
+     s'appuyer dessus pour les 5 volets de noisy.
+- **Priorité** : Moyenne (rien de cassé, mais à vérifier avant mise en prod des volets de noisy —
+  premier vrai test réel de ce chemin de code).
 
 ### 🟡 Nouvelle application "provisioning" (support bootable) — Conception, rien implémenté
 - **Contexte (08/09/2026)** : en marge de la validation du correctif UART teleinfo (entrée
@@ -739,6 +1080,38 @@
 ---
 
 ## Problèmes secondaires
+
+### 🟡 rpigpio : `generateComposeFile()` ne configure aucune rotation de log pour le conteneur mqtt-io (dimotic-ha lui-même : corrigé le 14/09/2026)
+- **Contexte (13/09/2026)**, trouvé sur stfort en essayant de lire `docker logs mqtt-io-rpigpio` :
+  le fichier de log JSON du conteneur (`/var/lib/docker/containers/<id>/<id>-json.log`) avait atteint
+  **125 Mo**, jamais nettoyé depuis son premier déploiement (option `logging` absente du
+  `compose.yaml` généré, donc Docker retombe sur son défaut = pas de rotation). Ce volume a
+  provoqué une corruption du fichier (`docker logs -f` plantait en cours de lecture avec
+  `invalid character '\x00' looking for beginning of value`).
+- **Contourné dans l'urgence** (vider le fichier à chaud avec `truncate -s 0`) — **a cassé `docker
+  logs` pour ce conteneur** (le daemon Docker garde un pointeur interne vers le fichier, devenu
+  incohérent après un vidage à chaud) ; réparé en redémarrant le conteneur (`docker restart`,
+  aucun impact sur le GPIO réel — état électrique identique avant/après grâce à `retain`/`initial`).
+  **Leçon retenue : ne plus jamais `truncate` un fichier de log Docker à chaud, toujours redémarrer
+  le conteneur pour vider proprement.**
+- **Vrai correctif à faire** : ajouter une option `logging` (driver `json-file`, `max-size`/
+  `max-file`, ex. `10m`/`3`) dans `generateComposeFile()` (`applications/rpigpio/src/domain/
+  generator.ts`) — même genre de réglage que `logging.rotate` déjà présent dans `data/core/
+  config.yaml` du socle lui-même, mais absent du conteneur `mqtt-io` qu'il déploie. Concerne tous
+  les sites (stfort ET noisy tourneront dans le même problème avec le temps, pas propre à stfort).
+- **Priorité** : moyenne, pas bloquant — reporté volontairement ("on corrigera plus tard").
+- **✅ Le même gap trouvé sur `dimotic-ha` lui-même, corrigé le 14/09/2026** : sur `noisy2`, le log
+  Docker de `dimotic-ha` (pas mqtt-io cette fois) avait atteint **6 Go en une seule journée**
+  (niveau debug + redémarrages fréquents pendant cette session), rendant `docker logs`/
+  `docker compose` extrêmement lents (timeouts SSH à répétition). Même trouvé sur `ha2` (537 Mo,
+  accumulé plus progressivement). **Corrigé dans le dépôt** : `logging: {driver: json-file,
+  options: {max-size: 10m, max-file: 5}}` ajouté à `compose.yaml` ET `compose.deploy.yaml` —
+  s'appliquera à tout futur déploiement. **Appliqué en direct** sur `noisy2` (backup implicite via
+  `docker compose up -d --force-recreate`, log retombé à 6,7 Ko) et `ha2` (backup
+  `compose.yaml.bak-pre-logrotate-20260914`, log retombé à 62 Ko) — aucun autre conteneur affecté
+  par le recreate (HA/mosquitto/zigbee2mqtt sur ha2 non touchés, 9h d'uptime préservées).
+  **Reste à faire** : appliquer aussi sur `stfort`/`orangepi` (pas fait aujourd'hui, pas demandé) ;
+  le correctif `generateComposeFile()` pour `mqtt-io` (ci-dessus) reste, lui, non fait.
 
 ### 🟢 Désactiver une application (déplacement vers applications_désactivées/) n'arrête pas son service en cours d'exécution — Corrigé (option 2 retenue)
 - **Problème d'origine**, trouvé en discutant (2026-07-23) d'un essai de désactivation de Nommage : `ApplicationManager.disable()` se contentait d'un `renameSync()` — déplaçait le dossier sur disque, rien de plus. Le service déjà chargé en mémoire (connexions MQTT, serveurs HTTP, timers) continuait de tourner sans interruption jusqu'au prochain redémarrage complet du serveur.

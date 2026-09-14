@@ -63,6 +63,19 @@ services:
     environment:
       - TZ=Europe/Paris
 
+    # ⭐ 14/09/2026, trouvé en conditions réelles (noisy2) : sans limite explicite, le driver
+    # json-file de Docker n'a AUCUNE rotation par défaut — un log applicatif verbeux (niveau
+    # debug + redémarrages fréquents) peut grossir sans borne (6 Go constatés en une seule
+    # journée) au point de rendre `docker logs`/`docker compose up` extrêmement lents voire de
+    # provoquer des timeouts. Même limite que la rotation interne de l'appli
+    # (data/core/config.yaml: logging.rotate), pour rester cohérent — mais celle-ci ne couvre que
+    # les fichiers sous /app/logs, pas les logs capturés par le daemon Docker lui-même.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
     volumes:
       # Données/config persistantes et logs — à créer vides avant le premier
       # démarrage (voir étape 2/3 ci-dessus), directement éditables depuis l'hôte.

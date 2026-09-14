@@ -54,12 +54,22 @@ const sourceMqttConfigSchema = z.object({
   const prefix = data.topicPrefix.replace(/\/+$/, '');
 
   // Format officiel de découverte MQTT HA : <prefix>/<component>/[<node_id>/]<object_id>/config
-  // — node_id est OPTIONNEL, donc exactement deux formes valides, pas un nombre arbitraire de
-  // termes. Un catch-all (`prefix/#`) couvrirait les deux mais réintroduirait le risque déjà
-  // rencontré (afflux de messages non pertinents, heap overflow) — deux patterns bornés au lieu.
+  // — node_id est OPTIONNEL, donc deux formes valides côté HA. Un catch-all (`prefix/#`)
+  // couvrirait toutes les formes mais réintroduirait le risque déjà rencontré (afflux de messages
+  // non pertinents, heap overflow) — des patterns bornés au lieu.
+  //
+  // ⭐ 14/09/2026 (trouvé en conditions réelles, noisy2) : troisième pattern à 4 niveaux ajouté
+  // pour `rpigpio`/mqtt-io — `generator.ts::generateMqttIoConfig()` insère le `bridgeInstance`
+  // comme segment SUPPLÉMENTAIRE dans le préfixe de découverte (`${discoveryPrefix}/
+  // ${effectiveBridgeInstance}`, pour distinguer plusieurs machines rpigpio — voir
+  // fonctionnelles-supervisor_specs v2.3 §9.2), ce qui décale le format natif mqtt-io
+  // (`prefix/component/node_id/object_id/config`, déjà couvert ci-dessus) d'un cran :
+  // `prefix/bridgeInstance/component/node_id/object_id/config`. Reste un pattern BORNÉ (4 niveaux
+  // fixes + littéral "config"), pas un joker `#` — même nature de risque que les deux patterns
+  // existants, pas la classe de risque de l'incident historique ci-dessus.
   return {
     ...data,
-    discoveryTopics: [`${prefix}/+/+/config`, `${prefix}/+/+/+/config`]
+    discoveryTopics: [`${prefix}/+/+/config`, `${prefix}/+/+/+/config`, `${prefix}/+/+/+/+/config`]
   };
 });
 
