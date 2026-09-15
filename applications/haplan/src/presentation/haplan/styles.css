@@ -361,18 +361,22 @@ body {
 .floorplan-container.edit-mode .floorplan-drag-container {
     border: 2px dashed #ffeb3b;
     /* ⭐ 30/08/2026, demande explicite : grille visible en mode édition pour aligner les icônes —
-       2% doit rester synchronisé avec le gridPercent passé à DragAndDropConstrained dans
-       HAObject.ts (même valeur utilisée pour le collage au relâchement, sinon la grille affichée
-       ne correspondrait pas à celle utilisée pour l'alignement réel — 4% au premier essai, réduit
-       à 2% ensuite). EN POURCENTAGE (pas en px) : retour utilisateur — un pas en px ne représente
-       pas le même pourcentage du plan selon la taille de rendu, ce qui décale l'alignement obtenu
-       après un redimensionnement/changement de `--plan-scale`. `background-size` accepte les
-       pourcentages nativement (relatifs à la boîte de l'élément), donc la grille reste à 2%/2%
-       quelle que soit la taille réelle du conteneur. */
+       1% doit rester synchronisé avec le gridPercent passé à DragAndDropConstrained dans
+       HAObject.ts/HAText.ts (même valeur utilisée pour le collage au relâchement, sinon la grille
+       affichée ne correspondrait pas à celle utilisée pour l'alignement réel — 4% au premier
+       essai, réduit à 2% ensuite, puis 1% le 15/09/2026 : les objets sont positionnés par leur
+       centre, pas par un bord — deux objets de largeurs visuelles différentes "sur la grille" en
+       centre n'ont donc pas forcément leurs bords alignés entre eux ; une maille deux fois plus
+       fine limite l'écart visuel résiduel sans devoir changer le système de positionnement par
+       centre lui-même). EN POURCENTAGE (pas en px) : retour utilisateur — un pas en px ne
+       représente pas le même pourcentage du plan selon la taille de rendu, ce qui décale
+       l'alignement obtenu après un redimensionnement/changement de `--plan-scale`.
+       `background-size` accepte les pourcentages nativement (relatifs à la boîte de l'élément),
+       donc la grille reste à 1%/1% quelle que soit la taille réelle du conteneur. */
     background-image:
         linear-gradient(to right, rgba(255, 255, 255, 0.18) 1px, transparent 1px),
         linear-gradient(to bottom, rgba(255, 255, 255, 0.18) 1px, transparent 1px);
-    background-size: 2% 2%;
+    background-size: 1% 1%;
 }
 
 /* Style pour les objets draggables */

@@ -165,7 +165,8 @@ export class HAText {
       }
     };
 
-    this.dragHandler = new DragAndDropConstrained(`#${this.element.id}`, onDragEndCallback, 'center', 2);
+    // 1% : synchronisé avec HAObject.ts/styles.css — voir leurs commentaires (15/09/2026).
+    this.dragHandler = new DragAndDropConstrained(`#${this.element.id}`, onDragEndCallback, 'center', 1);
     this.element.classList.add('ha-object-draggable');
   }
 

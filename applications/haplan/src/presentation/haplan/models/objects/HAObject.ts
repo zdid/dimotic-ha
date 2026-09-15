@@ -177,8 +177,9 @@ export abstract class HAObject {
           // ⭐ 30/08/2026, demande explicite : collage sur la grille au relâchement, EN POURCENTAGE
           // (pas en pixels) — MÊME valeur que la grille visuelle en mode édition (styles.css,
           // .floorplan-container.edit-mode .floorplan-drag-container), à garder synchronisée
-          // (4% au premier essai, réduit à 2% ensuite).
-          2
+          // (4% au premier essai, réduit à 2%, puis 1% le 15/09/2026 — voir styles.css pour le
+          // pourquoi de ce dernier changement).
+          1
         );
         console.log(`[TRACE] DragAndDropConstrained créé avec succès avec callback et mode center`);
         
