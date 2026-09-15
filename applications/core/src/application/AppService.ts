@@ -166,7 +166,7 @@ export class AppService {
     // DIMOTIC_MACHINE_ID, voir ProcessSupervisor.spawnChild()) : leur bridgeInstance devient
     // `<préfixe configurable>_<machineId>` calculé à la volée au lieu d'un suffixe aléatoire généré
     // et persisté par app (voir arexx/evoo7/rfxcom/rpigpio ConfigSchema/Service.ts).
-    this.processSupervisor = new ProcessSupervisor(logger, coreDir, machineId, this.supervisorBridge);
+    this.processSupervisor = new ProcessSupervisor(logger, coreDir, machineId, this.supervisorBridge, bootConfig.logging?.level);
 
     const mqttConfig = bootConfig.ha?.mqtt;
     if (mqttConfig) {

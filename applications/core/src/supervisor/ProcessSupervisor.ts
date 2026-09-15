@@ -71,7 +71,13 @@ export class ProcessSupervisor {
     /** Pont EventBus local ↔ IPC (16/08/2026) — attaché/détaché à chaque (re)spawn/sortie
      *  d'enfant, voir spawnChild()/handleExit(). Optionnel pour ne pas casser un usage minimal
      *  (tests) sans pont réel. */
-    private readonly eventBridge?: SupervisorEventBridge
+    private readonly eventBridge?: SupervisorEventBridge,
+    /** ⭐ 15/09/2026 — `logging.level` (config.yaml du socle), transmis à chaque enfant via
+     *  LOG_LEVEL (voir spawnChild()) : sans ça, une app en process séparé (arexx/rfxcom/rpigpio)
+     *  reste au niveau par défaut de son propre Logger ('info', voir <app>/standalone.ts) quoi que
+     *  dise la config du socle — constaté en direct sur noisy, aucun log debug ajouté côté rfxcom
+     *  ne sortait jamais malgré `logging.level: debug`. */
+    private readonly logLevel?: string
   ) {
     // ⭐ Filet de sécurité, en plus de l'arrêt propre (AppService.stopAllSeparateProcesses(), appelé
     // par ApplicationBootstrap.stop() sur SIGTERM/SIGINT) — si ce process core se termine par un
@@ -250,10 +256,13 @@ export class ProcessSupervisor {
     // 4e canal 'ipc' (16/08/2026) : stdin/stdout/stderr toujours hérités (logs visibles dans ceux
     // de core), plus un tuyau IPC dédié — voir SupervisorEventBridge, qui remplace MQTT pour la
     // communication EventBus avec cet enfant.
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (this.machineId) env.DIMOTIC_MACHINE_ID = this.machineId;
+    if (this.logLevel) env.LOG_LEVEL = this.logLevel;
     const child = spawn(entry.command, entry.args, {
       stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
       cwd: app.appDir,
-      env: this.machineId ? { ...process.env, DIMOTIC_MACHINE_ID: this.machineId } : process.env
+      env
     });
     app.child = child;
     this.eventBridge?.attachChild(app.appId, child);
