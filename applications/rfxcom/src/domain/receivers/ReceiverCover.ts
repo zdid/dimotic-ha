@@ -110,13 +110,18 @@ export class ReceiverCover implements IReceiverModule {
       // lui-même l'interverrouillage électrique entre les deux sens).
       if (command === 'open') {
         if (this.direction === 'opening') return null; // déjà en train de monter, ignoré
-        if (this.direction === null && this.runtimeState() === 'up') return null; // déjà ouvert
+        // ⭐ 15/09/2026, demande utilisateur : PAS de refus "déjà ouvert" (position calculée ===
+        // 100) — après une coupure de courant ou un redémarrage de la domotique, ce calcul repart
+        // à zéro (voir ReceiverCover constructeur, position jamais persistée) et peut être
+        // complètement faux par rapport à la réalité physique. Mieux vaut une commande RF inutile
+        // (sans effet si le volet est réellement déjà ouvert) qu'un ordre utilisateur silencieusement
+        // avalé alors que le volet ne l'est peut-être pas.
         this.startMoving('opening');
         return { action: 'on' };
       }
       if (command === 'close') {
         if (this.direction === 'closing') return null;
-        if (this.direction === null && this.runtimeState() === 'down') return null;
+        // Voir commentaire équivalent ci-dessus (branche 'open') — même raisonnement.
         this.startMoving('closing');
         return { action: 'off' };
       }
