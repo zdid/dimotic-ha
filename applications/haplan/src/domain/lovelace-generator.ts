@@ -51,6 +51,12 @@ interface PictureElement {
   title?: string;
   action?: string;
   icon?: string;
+  /** `type: 'state-label'` uniquement — affiche cet attribut au lieu de `state` (ex:
+   *  'current_temperature', 'temperature' pour un climate — voir buildElementsForPosition). */
+  attribute?: string;
+  /** `type: 'state-label'` uniquement — texte fixe ajouté avant/après la valeur (ex: "act: "). */
+  prefix?: string;
+  suffix?: string;
   style: Record<string, string>;
   card_mod?: { style: CardModStyleValue };
 }
@@ -179,17 +185,27 @@ function buildIconColorCardMod(cssRule: string): CardModStyleValue {
  * Construit le(s) élément(s) `picture-elements` pour UNE position. `sensor.*` (température,
  * humidité, pression...) n'a pas d'action (ni toggle, ni ouverture) et doit montrer sa valeur —
  * icône (`state-icon`) + valeur juste à côté (`state-label`, seul élément HA affichant l'état en
- * texte). Tous les autres domaines (light/switch/climate/cover/binary_sensor...) gardent une seule
- * icône (`state-icon`, avec action au clic).
+ * texte). `climate.*` (thermostat) affiche en plus ses deux températures — ⭐ 15/09/2026, retour
+ * utilisateur : sur HA le thermostat n'affichait que l'icône (`state` = mode HVAC, ex. "off", pas
+ * une température), contrairement à HAPLAN (web) qui affiche déjà consigne + température actuelle
+ * (`EnhancedThermostatObject.ts`, "act: X°C") — mêmes deux `state-label` ici, avec `attribute`
+ * (`state-label` peut afficher un attribut au lieu de `state`) plutôt que le `state` brut. Tous les
+ * autres domaines (light/switch/cover/binary_sensor...) gardent une seule icône (`state-icon`, avec
+ * action au clic).
  */
-function buildElementsForPosition(entityId: string, leftPercent: number, topPercent: number): PictureElement[] {
+function buildElementsForPosition(
+  entityId: string,
+  leftPercent: number,
+  topPercent: number,
+  taxonomyQuoi?: string | null
+): PictureElement[] {
   const icon: PictureElement = {
     type: 'state-icon',
     entity: entityId,
     style: { left: `${leftPercent.toFixed(2)}%`, top: `${topPercent.toFixed(2)}%` }
   };
   if (entityId.startsWith('switch.')) {
-    const switchIconStyle = detectSwitchIconStyle(entityId);
+    const switchIconStyle = detectSwitchIconStyle(entityId, taxonomyQuoi);
     if (switchIconStyle) {
       icon.icon = switchIconStyle.icon;
       // Pas d'état "on/off" à refléter pour un capteur (voir plus bas), mais un switch en a un —
@@ -213,6 +229,31 @@ function buildElementsForPosition(entityId: string, leftPercent: number, topPerc
       icon.card_mod = { style: buildIconColorCardMod(`:host { color: ${sensorColor} !important; }`) };
     }
   }
+  if (entityId.startsWith('climate.')) {
+    const targetLabel: PictureElement = {
+      type: 'state-label',
+      entity: entityId,
+      attribute: 'temperature',
+      suffix: '°C',
+      style: { left: `calc(${leftPercent.toFixed(2)}% + ${SENSOR_LABEL_OFFSET_PX}px)`, top: `${topPercent.toFixed(2)}%` },
+      card_mod: { style: buildSensorLabelCardMod(entityId) }
+    };
+    const currentLabel: PictureElement = {
+      type: 'state-label',
+      entity: entityId,
+      attribute: 'current_temperature',
+      prefix: 'act: ',
+      suffix: '°C',
+      // Deuxième ligne, sous la consigne — même écart horizontal, décalage vertical fixe (même
+      // patron que la pile verticale de EnhancedThermostatObject.ts, taille moindre/opacité
+      // réduite côté HAPLAN web ; ici un simple décalage en pixels, card_mod n'a pas accès à la
+      // taille de police déjà appliquée par le thème HA pour calculer un pourcentage fiable).
+      style: { left: `calc(${leftPercent.toFixed(2)}% + ${SENSOR_LABEL_OFFSET_PX}px)`, top: `calc(${topPercent.toFixed(2)}% + 14px)` },
+      card_mod: { style: buildSensorLabelCardMod(entityId) }
+    };
+    return [icon, targetLabel, currentLabel];
+  }
+
   if (!entityId.startsWith('sensor.')) return [icon];
 
   const label: PictureElement = {
@@ -373,11 +414,17 @@ function buildCardModStyle(imageWidth: number, imageHeight: number): Record<stri
   };
 }
 
-function buildView(floorplanId: string, floorplan: HaplanFloorplanEntry, dimensions: ImageDimensions, cacheBust?: string | number) {
+function buildView(
+  floorplanId: string,
+  floorplan: HaplanFloorplanEntry,
+  dimensions: ImageDimensions,
+  cacheBust: number | undefined,
+  getTaxonomyQuoi: (entityId: string) => string | null | undefined
+) {
   const elements: PictureElement[] = [
     ...floorplan.positions
       .filter((p) => p.x !== null && p.y !== null)
-      .flatMap((p) => buildElementsForPosition(p.entity_id, p.x! * 100, p.y! * 100)),
+      .flatMap((p) => buildElementsForPosition(p.entity_id, p.x! * 100, p.y! * 100, getTaxonomyQuoi(p.entity_id))),
     ...floorplan.texts.map(buildTextElement)
   ];
 
@@ -415,12 +462,15 @@ function buildView(floorplanId: string, floorplan: HaplanFloorplanEntry, dimensi
 export function buildLovelaceDashboardYaml(
   floorplans: Record<string, HaplanFloorplanEntry>,
   dimensions: Record<string, ImageDimensions>,
-  cacheBust?: string | number
+  cacheBust?: number,
+  // ⭐ 15/09/2026 : repli utilisé par detectSwitchIconStyle quand l'entity_id seul ne suffit pas
+  // (voir switch-icon.ts) — optionnel, par défaut aucun repli (comportement inchangé si omis).
+  getTaxonomyQuoi: (entityId: string) => string | null | undefined = () => null
 ): string {
   const doc = {
     title: 'HAPLAN',
     views: Object.entries(floorplans).map(([floorplanId, floorplan]) =>
-      buildView(floorplanId, floorplan, dimensions[floorplanId] ?? { width: 1, height: 1 }, cacheBust)
+      buildView(floorplanId, floorplan, dimensions[floorplanId] ?? { width: 1, height: 1 }, cacheBust, getTaxonomyQuoi)
     )
   };
 

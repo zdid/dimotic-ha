@@ -562,7 +562,12 @@ export class HaplanService implements IHaplanService {
       images.push({ localPath, filename: floorplan.filename });
     }
 
-    const yamlContent = buildLovelaceDashboardYaml(this.floorplansConfig.floorplans, dimensions, cacheBust);
+    const yamlContent = buildLovelaceDashboardYaml(
+      this.floorplansConfig.floorplans,
+      dimensions,
+      cacheBust,
+      (entityId) => (this.haBridgeClient.getEntity(entityId)?.attributes?.attributs_taxonomie as { quoi?: string } | undefined)?.quoi
+    );
 
     this.eventBus.emitGeneric('core:haplan-lovelace:deploy', { yaml: yamlContent, images });
   }

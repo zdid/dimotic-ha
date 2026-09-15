@@ -9,13 +9,18 @@
  * `EnhancedVMCObject.ts` (HAPLAN) — 29/08/2026, second retour : "les ballons c'est orange, pas
  * jaune" (confirmé dans le code HAPLAN d'origine : orange allumé / bleu éteint).
  *
- * Port de `SwitchTypeDetector.detectByEntityId()` (HAPLAN, presentation/haplan/utils/
- * SwitchTypeDetector.ts) — SEULE la méthode par entity_id est portée ici (pure, aucun état HA
- * nécessaire, donc utilisable au moment du dépôt sans requête à HA). Le fallback par attributs de
- * cette même classe (`detectByAttributes`, ex: `water_temperature`, `fan_mode`) n'est PAS porté —
- * demanderait l'état live de l'entité au moment de la génération du YAML, hors de portée pour un
- * tableau de bord statique. Cas résiduel accepté (entity_id mal nommé ne matchant aucun mot-clé) :
- * icône switch générique de HA, comme aujourd'hui — pas un blocage, juste pas d'amélioration.
+ * Port de `SwitchTypeDetector` (HAPLAN, presentation/haplan/utils/SwitchTypeDetector.ts) — deux de
+ * ses trois méthodes sont portées ici : par entity_id, ET par `attributs_taxonomie.quoi` (⭐
+ * 15/09/2026 — un entity_id figé avant que son "quoi" ne soit précisé/corrigé, ex.
+ * `switch.entree_salle` sur noisy2, ne matchait aucun mot-clé côté entity_id mais son
+ * attributs_taxonomie.quoi vaut bien "Radiateur" ; il s'affichait donc en switch générique sur la
+ * carte Lovelace alors que HAPLAN web l'affiche déjà correctement en radiateur depuis ce même
+ * correctif côté SwitchTypeDetector). `attributs_taxonomie` est un attribut STATIQUE de l'entité
+ * (déjà publié par RFXCOM/EVOO7/nommage, comme entity_id), pas un état live — utilisable au moment
+ * du dépôt, contrairement au troisième fallback de cette classe (`detectByAttributes`, ex:
+ * `water_temperature`/`fan_mode`) qui LUI reste hors de portée pour un tableau de bord statique.
+ * Cas résiduel accepté (ni entity_id ni taxonomie ne matchent) : icône switch générique de HA,
+ * comme aujourd'hui — pas un blocage, juste pas d'amélioration.
  *
  * Volontairement limité à ces trois sous-types de `switch.*` : les autres domaines
  * (light/climate/cover, et les capteurs avec `device_class`) ont déjà une icône HA native
@@ -29,26 +34,30 @@ export interface SwitchIconStyle {
   colorOff: string;
 }
 
-export function detectSwitchIconStyle(entityId: string): SwitchIconStyle | null {
-  const lowerId = entityId.toLowerCase();
+/** Recherche des mots-clés de type dans un texte donné — même liste que SwitchTypeDetector.
+ *  matchKeywords(), partagée ici entre le texte de l'entity_id et celui du "quoi" taxonomie. */
+function matchKeywords(text: string): SwitchIconStyle | null {
+  const lower = text.toLowerCase();
 
-  if (lowerId.includes('ventilation') || lowerId.includes('vmc') || lowerId.includes('fan')) {
+  if (lower.includes('ventilation') || lower.includes('vmc') || lower.includes('fan')) {
     return { icon: 'mdi:fan', colorOn: '#FFEB3B', colorOff: '#FFFFFF' }; // Jaune allumé / blanc éteint
   }
-  if (lowerId.includes('water_heater') || lowerId.includes('chauffe_eau') || lowerId.includes('ballon')) {
+  if (lower.includes('water_heater') || lower.includes('chauffe_eau') || lower.includes('ballon')) {
     return { icon: 'mdi:water-boiler', colorOn: '#FF9800', colorOff: '#2196F3' }; // Orange allumé / bleu éteint
   }
   if (
-    lowerId.includes('radiateur') ||
-    lowerId.includes('radiator') ||
-    lowerId.includes('heating') ||
-    lowerId.includes('chauffage')
+    lower.includes('radiateur') ||
+    lower.includes('radiator') ||
+    lower.includes('heating') ||
+    lower.includes('chauffage')
   ) {
-    // ⭐ 15/09/2026 : "radiateur" ajouté — cette fonction est un port figé de
-    // SwitchTypeDetector.detectByEntityId (HAPLAN), qui avait le même bug jusqu'au 14/09/2026
-    // (switch.salle_radiateur_18 et les 7 autres radiateurs de noisy2 n'étaient détectés par
-    // aucun des deux). Garder les deux copies synchronisées si l'une est de nouveau corrigée.
     return { icon: 'mdi:radiator', colorOn: '#F44336', colorOff: '#2196F3' }; // Rouge allumé / bleu éteint
   }
   return null;
+}
+
+/** `taxonomyQuoi` : `attributs_taxonomie.quoi` de l'entité si connu (voir en-tête de fichier) —
+ *  repli utilisé seulement si l'entity_id seul ne matche aucun mot-clé. */
+export function detectSwitchIconStyle(entityId: string, taxonomyQuoi?: string | null): SwitchIconStyle | null {
+  return matchKeywords(entityId) ?? (taxonomyQuoi ? matchKeywords(taxonomyQuoi) : null);
 }
