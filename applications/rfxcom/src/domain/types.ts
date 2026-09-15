@@ -150,6 +150,11 @@ export interface ReceiverCoverConfig extends BaseReceiverConfig {
   coverType: CoverType;
   openTimeSec: number;            // ⭐ obligatoire
   closeTimeSec: number;           // ⭐ obligatoire
+  /** ⭐ 15/09/2026 — dernière position connue (persistée), rejouée au démarrage (voir
+   *  ReceiverCover constructeur) — sans ça, chaque redémarrage repartait de 100 (entièrement
+   *  ouvert) par défaut, quelle que soit la position réelle (constaté en direct sur noisy : un
+   *  redémarrage pendant un test a fait refuser à tort une commande "open" comme "déjà ouvert"). */
+  lastPosition?: number;
 }
 
 /**

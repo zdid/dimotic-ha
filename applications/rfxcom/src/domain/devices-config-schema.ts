@@ -100,7 +100,8 @@ export const receiverCoverSchema = z.object({
   ...baseReceiverFields,
   coverType: z.enum(['Curtain1', 'Curtain2', 'Curtain3', 'Blind1', 'Blind2', 'Blind3', 'RFY', 'RFYEXT', 'ASA']),
   openTimeSec: z.number().positive(),
-  closeTimeSec: z.number().positive()
+  closeTimeSec: z.number().positive(),
+  lastPosition: z.number().min(0).max(100).optional()
 });
 
 export const receiverSceneSchema = z.object({

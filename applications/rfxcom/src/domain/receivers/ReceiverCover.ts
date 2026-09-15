@@ -20,7 +20,11 @@ import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName } from '../t
 type CoverDirection = 'opening' | 'closing' | null;
 
 export class ReceiverCover implements IReceiverModule {
-  private position = 100; // 0-100, 100 = totalement ouvert (up)
+  // ⭐ 15/09/2026 — position rejouée depuis la config persistée (voir ReceiverCoverConfig.lastPosition)
+  // plutôt qu'un 100 (entièrement ouvert) figé : sans ça, chaque redémarrage du module repartait
+  // d'une position fausse quelle que soit la réalité physique (constaté en direct sur noisy).
+  // 100 reste le repli si jamais aucune valeur connue (ex: récepteur tout juste créé).
+  private position: number;
   private direction: CoverDirection = null;
   private movingSince: number | null = null; // epoch ms
 
@@ -28,7 +32,9 @@ export class ReceiverCover implements IReceiverModule {
     public readonly config: ReceiverCoverConfig,
     /** Protocole RFXCOM du primaryEmitter (ex: "lighting2", "blinds1") — détermine la logique de traduction. */
     private readonly primaryEmitterProtocol: string
-  ) {}
+  ) {
+    this.position = config.lastPosition ?? 100;
+  }
 
   private computePosition(): number {
     if (this.movingSince === null || this.direction === null) return this.position;
@@ -39,10 +45,14 @@ export class ReceiverCover implements IReceiverModule {
     return Math.max(0, Math.min(100, raw));
   }
 
+  /** Reflète `position` dans la config persistée (voir RfxComService.persistDevicesConfig, appelé
+   *  par l'appelant après chaque commande/appariement traité) — même pattern que
+   *  ReceiverSwitch/ReceiverLight pour lastOn/lastLevel. */
   private freeze(): void {
     this.position = this.computePosition();
     this.movingSince = null;
     this.direction = null;
+    this.config.lastPosition = this.position;
   }
 
   private startMoving(direction: CoverDirection): void {
@@ -81,6 +91,7 @@ export class ReceiverCover implements IReceiverModule {
     this.position = this.direction === 'opening' ? 100 : 0;
     this.direction = null;
     this.movingSince = null;
+    this.config.lastPosition = this.position;
   }
 
   translateHaCommand(command: string, value?: number): ReceiverCommandResult | null {
