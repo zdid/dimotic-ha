@@ -212,6 +212,10 @@ export class ReceiverCover implements IReceiverModule {
         // null — voir ReceiverLight.ts::getDiscoveryEssential (corrigé le 08/08/2026).
         name: null,
         commandEnabled: true,
+        // ⭐ 15/09/2026, constaté en direct : sans device_class, HA range ce cover sous un intitulé
+        // "Climatisation" dans son tableau de bord auto-généré (zones) — tous nos volets sont des
+        // volets roulants motorisés.
+        deviceClass: 'shutter',
         // Voir ReceiverLight.ts : sans ça, state_topic (JSON) n'est jamais reconnu par HA.
         valueTemplate: '{{ value_json.state }}',
         // ⭐ 15/09/2026, bug réel constaté en direct (statut "inconnu" permanent, carte HA ET plan
