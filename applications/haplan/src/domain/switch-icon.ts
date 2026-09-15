@@ -38,7 +38,16 @@ export function detectSwitchIconStyle(entityId: string): SwitchIconStyle | null 
   if (lowerId.includes('water_heater') || lowerId.includes('chauffe_eau') || lowerId.includes('ballon')) {
     return { icon: 'mdi:water-boiler', colorOn: '#FF9800', colorOff: '#2196F3' }; // Orange allumé / bleu éteint
   }
-  if (lowerId.includes('radiator') || lowerId.includes('heating') || lowerId.includes('chauffage')) {
+  if (
+    lowerId.includes('radiateur') ||
+    lowerId.includes('radiator') ||
+    lowerId.includes('heating') ||
+    lowerId.includes('chauffage')
+  ) {
+    // ⭐ 15/09/2026 : "radiateur" ajouté — cette fonction est un port figé de
+    // SwitchTypeDetector.detectByEntityId (HAPLAN), qui avait le même bug jusqu'au 14/09/2026
+    // (switch.salle_radiateur_18 et les 7 autres radiateurs de noisy2 n'étaient détectés par
+    // aucun des deux). Garder les deux copies synchronisées si l'une est de nouveau corrigée.
     return { icon: 'mdi:radiator', colorOn: '#F44336', colorOff: '#2196F3' }; // Rouge allumé / bleu éteint
   }
   return null;
