@@ -95,15 +95,20 @@ export class ReceiverManager {
    * Traite un message RF433 issu d'un émetteur : applique l'action configurée sur chaque
    * récepteur associé (recepteurs-emetteurs-rfxcom_specs §8.2). Retourne les récepteurs affectés
    * (pour publication d'état par l'appelant).
+   *
+   * `receivedAction` : vraie valeur on/off portée par la trame RF reçue (RfxComRawMessage.data.command
+   * normalisé), quand elle a pu être résolue sans ambiguïté — voir AssociatedEmitter.followReceivedSignal
+   * (⭐ 15/09/2026). Prime sur `associated.action` uniquement pour les appairages qui l'ont demandé
+   * explicitement ; sinon comportement historique inchangé (valeur figée de la config).
    */
-  handleEmitterMessage(emitterId: string): AffectedReceiver[] {
+  handleEmitterMessage(emitterId: string, receivedAction?: 'on' | 'off'): AffectedReceiver[] {
     const matches = this.findReceiversForEmitter(emitterId);
     if (matches.length === 0) {
       this.logger.debug('ReceiverManager', `Émetteur ${emitterId} non associé à un récepteur`);
     }
-    return matches.map(({ receiver, associated }) => ({
-      receiver,
-      toTransmit: receiver.applyEmitterCommand(associated.action, associated.value)
-    }));
+    return matches.map(({ receiver, associated }) => {
+      const action = associated.followReceivedSignal && receivedAction ? receivedAction : associated.action;
+      return { receiver, toTransmit: receiver.applyEmitterCommand(action, associated.value) };
+    });
   }
 }

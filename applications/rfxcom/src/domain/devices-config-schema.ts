@@ -51,7 +51,8 @@ export const rfxComDeviceSchema = z.object({
 export const associatedEmitterSchema = z.object({
   emitterId: z.string().min(1),
   action: z.enum(['toggle', 'on', 'off', 'set_level', 'open', 'close', 'stop']),
-  value: z.number().min(0).max(100).optional()
+  value: z.number().min(0).max(100).optional(),
+  followReceivedSignal: z.boolean().optional()
 });
 
 export const sceneActionSchema = z.object({

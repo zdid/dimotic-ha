@@ -102,6 +102,16 @@ export interface AssociatedEmitter {
   emitterId: string;            // <protocole>_<sensorId>
   action: EmitterAction;
   value?: number;                // 0-100%, pour set_level
+  /**
+   * ⭐ 15/09/2026 — appairage avec un vrai bouton bipolaire (ex: interrupteur mural volet, deux
+   * faces montées tête en bas pour "bas=monter/on, haut=descendre/off") : ce bouton envoie
+   * réellement on OU off selon la face pressée (Lighting2 ne connaît pas de code "toggle" — voir
+   * table de commandes de la lib rfxcom, index.js), contrairement à un bouton mono-signal où
+   * `action` figé (y compris `'toggle'`, suivi d'état interne côté récepteur) reste pertinent.
+   * Si true, la vraie valeur on/off REÇUE (RfxComService.handleRfxMessage) prime sur `action`
+   * ci-dessus, qui n'est alors qu'un repli si jamais aucune valeur exploitable n'est reçue.
+   */
+  followReceivedSignal?: boolean;
 }
 
 export interface SceneAction {

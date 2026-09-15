@@ -447,7 +447,7 @@ export class RfxComService implements IRfxComService {
 
     const isEmitter = message.type.startsWith('Lighting');
     if (isEmitter) {
-      const affectedReceivers = this.receiverManager.handleEmitterMessage(uniqueId);
+      const affectedReceivers = this.receiverManager.handleEmitterMessage(uniqueId, this.resolveReceivedOnOff(message));
       // ⭐ 14/09/2026, pont protocole (ex: bouton Lighting2 associé à un volet Somfy) : le device
       // réellement commandé n'a rien reçu du bouton (protocoles/adresses différents) —
       // ReceiverCover.applyEmitterCommand a détecté le cas et retourné la commande native à
@@ -478,6 +478,23 @@ export class RfxComService implements IRfxComService {
     if (device?.transmitToHa) {
       this.publishDeviceState(device, message);
     }
+  }
+
+  /**
+   * ⭐ 15/09/2026 — résout la vraie valeur on/off portée par une trame émetteur (ex: bouton mural
+   * bipolaire Lighting2), pour AssociatedEmitter.followReceivedSignal (voir ReceiverManager). Table
+   * de commandes Lighting2 de la lib `rfxcom` : "Off"/"On"/"Group off"/"Group On"/"Set Level"/
+   * "Set Group Level" — jamais de code "Toggle" (contrairement à Lighting5/Edisio), donc ce mapping
+   * couvre le cas normal sans ambiguïté ; `undefined` pour tout le reste (set_level, autres
+   * protocoles) — l'appelant retombe alors sur `action` figé de la config.
+   */
+  private resolveReceivedOnOff(message: RfxComRawMessage): 'on' | 'off' | undefined {
+    const raw = message.data.command;
+    if (typeof raw !== 'string') return undefined;
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'on' || normalized === 'group on') return 'on';
+    if (normalized === 'off' || normalized === 'group off') return 'off';
+    return undefined;
   }
 
   // ==========================================================================
@@ -665,7 +682,7 @@ export class RfxComService implements IRfxComService {
     }
 
     if (message.type.startsWith('Lighting')) {
-      const affectedReceivers = this.receiverManager.handleEmitterMessage(objectId);
+      const affectedReceivers = this.receiverManager.handleEmitterMessage(objectId, this.resolveReceivedOnOff(message));
       for (const { receiver, toTransmit } of affectedReceivers) {
         if (toTransmit) this.transmitReceiverCommand(receiver, toTransmit);
       }
