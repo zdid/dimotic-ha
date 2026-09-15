@@ -108,7 +108,11 @@ export class ReceiverManager {
     }
     return matches.map(({ receiver, associated }) => {
       const action = associated.followReceivedSignal && receivedAction ? receivedAction : associated.action;
-      return { receiver, toTransmit: receiver.applyEmitterCommand(action, associated.value) };
+      // ⭐ 15/09/2026, demande utilisateur (surveillance volets) : jusqu'ici seul le cas SANS
+      // appariement était loggé — un appariement réussi restait silencieux, y compris en debug.
+      this.logger.debug('ReceiverManager', `Émetteur ${emitterId} → ${receiver.config.receiverId} (${receiver.config.name}) : action=${action}${associated.followReceivedSignal ? ` (signal reçu, config=${associated.action})` : ' (figée en config)'}`);
+      const toTransmit = receiver.applyEmitterCommand(action, associated.value);
+      return { receiver, toTransmit };
     });
   }
 }

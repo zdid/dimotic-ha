@@ -431,6 +431,13 @@ export class RfxComService implements IRfxComService {
 
   private handleRfxMessage(message: RfxComRawMessage): void {
     const { uniqueId, isNew } = this.deviceManager.handleRawMessage(message);
+    // ⭐ 15/09/2026, demande utilisateur (surveillance volets) : jusqu'ici seul un device JAMAIS VU
+    // était loggé (DeviceManager "Nouveau device détecté") — un signal RF pour un device déjà connu
+    // (ex: bouton mural pressé) restait totalement silencieux, même en debug. Trace minimale ici,
+    // avant tout traitement, pour voir CHAQUE trame Lighting reçue quel que soit son sort ensuite.
+    if (message.type.startsWith('Lighting')) {
+      this.logger.debug('RfxComService', `RF reçu: ${uniqueId} — commande=${message.data.command ?? '?'}${message.unitCode !== undefined ? `, unitCode=${message.unitCode}` : ''}`);
+    }
 
     // ⭐ Relais de valeur (16/08/2026) : ce device est à nous de le voir, mais pas de le publier —
     // une AUTRE instance le revendique déjà. On transmet la trame brute plutôt que de la garder
