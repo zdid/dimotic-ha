@@ -58,7 +58,33 @@ export class ReceiverCover implements IReceiverModule {
     return 'intermediate';
   }
 
+  /** Marge (%) sous laquelle un mouvement est considéré arrivé en butée — voir checkArrival(). */
+  private static readonly ARRIVAL_MARGIN_PERCENT = 3;
+
+  /**
+   * ⭐ 15/09/2026, demande utilisateur : jusqu'ici `direction` ne redevenait `null` que sur un stop
+   * EXPLICITE ou au tout début d'un nouveau mouvement (freeze() dans startMoving()) — jamais tout
+   * seul avec le temps qui passe. Un volet arrivé en butée sans commande derrière (cas normal :
+   * aucun stop natif n'est envoyé automatiquement à la fin d'un open/close) restait donc
+   * indéfiniment "en mouvement" côté logiciel, désynchronisé de la réalité physique. Détection par
+   * pourcentage AVEC MARGE (pas pile 0/100) pour absorber l'imprécision du calcul temps
+   * écoulé/openTimeSec-closeTimeSec — appelée au début de chaque méthode publique qui lit ou utilise
+   * `direction`/`position`.
+   */
+  private checkArrival(): void {
+    if (this.direction === null) return;
+    const pos = this.computePosition();
+    const arrived =
+      (this.direction === 'opening' && pos >= 100 - ReceiverCover.ARRIVAL_MARGIN_PERCENT) ||
+      (this.direction === 'closing' && pos <= ReceiverCover.ARRIVAL_MARGIN_PERCENT);
+    if (!arrived) return;
+    this.position = this.direction === 'opening' ? 100 : 0;
+    this.direction = null;
+    this.movingSince = null;
+  }
+
   translateHaCommand(command: string, value?: number): ReceiverCommandResult | null {
+    this.checkArrival();
     const usesLighting2 = this.primaryEmitterProtocol === 'lighting2';
 
     if (command === 'set_position' && value !== undefined) {
@@ -121,6 +147,7 @@ export class ReceiverCover implements IReceiverModule {
   }
 
   applyEmitterCommand(action: EmitterAction): ReceiverCommandResult | null {
+    this.checkArrival();
     // 'on'/'off' : seul Lighting2 parle ce vocabulaire — le bouton associé est donc forcément un
     // bouton Lighting2 (ex: interrupteur mural), quel que soit le protocole du primaryEmitter
     // réellement commandé.
@@ -154,6 +181,7 @@ export class ReceiverCover implements IReceiverModule {
   }
 
   getState(): HaMqttStateMessage {
+    this.checkArrival();
     return {
       state: this.runtimeState(),
       attributes: { position: Math.round(this.computePosition()) }
