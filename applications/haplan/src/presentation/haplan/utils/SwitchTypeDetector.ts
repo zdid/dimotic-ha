@@ -17,7 +17,17 @@ export class SwitchTypeDetector {
       return typeById;
     }
 
-    // Deuxième méthode : par les attributs
+    // Deuxième méthode : par le "quoi" de la taxonomie (attributs_taxonomie, cf. taxonomy.ts côté
+    // RFXCOM/nommage) — ⭐ 15/09/2026 : nécessaire pour les entités dont l'entity_id HA a été figé
+    // AVANT que le "quoi" ne soit précisé/corrigé (ex: switch.entree_salle sur noisy2, dont
+    // l'entity_id ne contient pas "radiateur" mais dont attributs_taxonomie.quoi vaut bien
+    // "Radiateur" — HA ne renomme jamais un entity_id existant quand le nom source change).
+    const typeByTaxonomy = this.detectByTaxonomyQuoi(attributes);
+    if (typeByTaxonomy !== 'switch') {
+      return typeByTaxonomy;
+    }
+
+    // Troisième méthode : par la forme des attributs (repli le moins fiable)
     return this.detectByAttributes(attributes);
   }
 
@@ -25,38 +35,58 @@ export class SwitchTypeDetector {
    * Détection par l'entity_id (première méthode)
    */
   private static detectByEntityId(entity_id: string): string {
-    const lowerId = entity_id.toLowerCase();
-    
+    return this.matchKeywords(entity_id);
+  }
+
+  /**
+   * Détection par le "quoi" de la taxonomie publiée par RFXCOM/nommage
+   * (attributes.attributs_taxonomie.quoi, ex: "Radiateur") — même liste de mots-clés que
+   * detectByEntityId, sur un texte différent (le nom source, pas l'entity_id dérivé).
+   */
+  private static detectByTaxonomyQuoi(attributes: any): string {
+    const quoi = attributes?.attributs_taxonomie?.quoi;
+    if (!quoi || typeof quoi !== 'string') return 'switch';
+    return this.matchKeywords(quoi);
+  }
+
+  /**
+   * Recherche des mots-clés de type (vmc/water_heater/radiator) dans un texte donné — partagé
+   * entre detectByEntityId (entity_id HA) et detectByTaxonomyQuoi (nom taxonomie RFXCOM/nommage),
+   * pour ne maintenir la liste de mots-clés qu'à un seul endroit.
+   */
+  private static matchKeywords(text: string): string {
+    const lower = text.toLowerCase();
+
     // VMC : contient souvent "ventilation", "vmc", "fan"
-    if (lowerId.includes('ventilation') || lowerId.includes('vmc') || lowerId.includes('fan')) {
+    if (lower.includes('ventilation') || lower.includes('vmc') || lower.includes('fan')) {
       return 'vmc';
     }
-    
+
     // Ballon d'eau chaude : contient souvent "water_heater", "chauffe_eau", "ballon"
-    if (lowerId.includes('water_heater') || lowerId.includes('chauffe_eau') || lowerId.includes('ballon')) {
+    if (lower.includes('water_heater') || lower.includes('chauffe_eau') || lower.includes('ballon')) {
       return 'water_heater';
     }
-    
+
     // Radiateur/élément chauffant : contient souvent "radiateur" (FR), "radiator" (EN), "heating",
     // "chauffage" — ⭐ 14/09/2026 : "radiateur" ajouté, absent jusqu'ici alors que c'est le nom
     // français réellement utilisé (ex. switch.salle_radiateur_18 sur noisy2) ; "radiator" ne le
     // matchait pas ("radiateur" n'est pas un sur-mot de "radiator", lettres différentes après
     // "radiat").
     if (
-      lowerId.includes('radiateur') ||
-      lowerId.includes('radiator') ||
-      lowerId.includes('heating') ||
-      lowerId.includes('chauffage')
+      lower.includes('radiateur') ||
+      lower.includes('radiator') ||
+      lower.includes('heating') ||
+      lower.includes('chauffage')
     ) {
       return 'radiator';
     }
-    
+
     // Switch générique par défaut
     return 'switch';
   }
 
   /**
-   * Détection par les attributs (deuxième méthode)
+   * Détection par la forme des attributs (dernier repli)
    */
   private static detectByAttributes(attributes: any): string {
     // VMC pourrait avoir des attributs comme "fan_mode", "air_quality"
