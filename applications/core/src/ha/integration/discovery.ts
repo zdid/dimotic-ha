@@ -43,6 +43,15 @@ export interface EssentialEntityData {
    * n'ont pas d'équivalent HA pour ce mécanisme).
    */
   attributsTaxonomie?: Record<string, unknown>;
+  /**
+   * ⭐ 15/09/2026 — template d'extraction de la position (0-100) depuis le MÊME state_topic que
+   * l'état principal (payload déjà JSON, ex: `{"state":"intermediate","attributes":{"position":57}}`)
+   * — évite d'ajouter un topic dédié. Si fourni, `position_topic` est posé sur le state_topic déjà
+   * calculé. Cas d'usage : cover (ReceiverCover) — sans ça, HA affichait "inconnu" en permanence,
+   * `state` ('up'/'down'/'intermediate') ne faisant partie d'aucun vocabulaire HA reconnu, même
+   * combiné à state_open/state_closed pour le cas 'intermediate' (position réelle en mouvement).
+   */
+  positionTemplate?: string;
 }
 
 /**
@@ -95,6 +104,11 @@ export function buildDiscoveryPayload(
 
   if (essential.commandEnabled) {
     entity.command_topic = getCommandTopic(context.moduleName, context.bridgeInstance, context.deviceId);
+  }
+
+  if (essential.positionTemplate) {
+    entity.position_topic = stateTopic;
+    entity.position_template = essential.positionTemplate;
   }
 
   return essential.extra ? ({ ...entity, ...essential.extra } as HaMqttDiscoveryEntity) : entity;

@@ -214,6 +214,15 @@ export class ReceiverCover implements IReceiverModule {
         commandEnabled: true,
         // Voir ReceiverLight.ts : sans ça, state_topic (JSON) n'est jamais reconnu par HA.
         valueTemplate: '{{ value_json.state }}',
+        // ⭐ 15/09/2026, bug réel constaté en direct (statut "inconnu" permanent, carte HA ET plan
+        // HAPLAN) : `state` ('up'/'down'/'intermediate') ne fait partie d'aucun vocabulaire HA —
+        // position_topic (percentage réel, déjà dans le même state_topic) laisse HA dériver
+        // ouvert/fermé/pourcentage de façon fiable. state_open/state_closed en complément pour que
+        // le texte d'état lui-même résolve aux deux extrêmes (mappage direct sur 'up'/'down') —
+        // 'intermediate' reste non mappé (HA garde le dernier état résolu valide, mieux qu'un
+        // "inconnu" permanent).
+        positionTemplate: '{{ value_json.attributes.position }}',
+        extra: { state_open: 'up', state_closed: 'down' },
         attributsTaxonomie: buildAttributsTaxonomie(taxonomy),
         device: {
           identifiers: [this.config.receiverId],

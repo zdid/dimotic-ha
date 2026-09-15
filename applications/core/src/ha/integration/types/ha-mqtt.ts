@@ -93,6 +93,11 @@ export interface HaMqttDiscoveryEntity {
   value_template?: string;      // Template pour extraire la valeur
   payload_on?: string;           // Payload pour état "on" (binary sensors)
   payload_off?: string;          // Payload pour état "off" (binary sensors)
+
+  // ⭐ 15/09/2026 — cover uniquement (voir discovery.ts::EssentialEntityData.positionTemplate) :
+  // position numérique (0-100) extraite du state_topic, en complément de value_template.
+  position_topic?: string;
+  position_template?: string;
   
   // Métadonnées
   unit_of_measurement?: string;  // Ex: "°C", "%"
