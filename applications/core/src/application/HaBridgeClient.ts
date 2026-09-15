@@ -78,6 +78,15 @@ export class HaBridgeClient {
     return this.available;
   }
 
+  /** Force un rechargement complet du cache et attend sa fin — pour un consommateur qui doit
+   *  republier une donnée dérivée après une reconnexion HA (ex: HaplanService::emitTaxonomyTree
+   *  sur `ha:ready`) sans dépendre de l'ordre d'exécution entre écouteurs du même événement (le
+   *  rechargement interne déclenché par start() sur ce même événement est asynchrone, non
+   *  attendu par son propre écouteur). */
+  async refresh(): Promise<void> {
+    await this.refreshCache();
+  }
+
   private async refreshCache(): Promise<void> {
     try {
       const [entitiesReply, quoiReply] = await Promise.all([

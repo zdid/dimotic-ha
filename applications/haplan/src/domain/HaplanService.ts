@@ -175,6 +175,20 @@ export class HaplanService implements IHaplanService {
         'Référentiel HA indisponible (ha.ws_enable=false ?) — aucun état/commande en direct possible.');
     }
 
+    // ⭐ 15/09/2026 : emitTaxonomyTree() au démarrage (ci-dessous) peut s'exécuter avant que le
+    // cache de HaBridgeClient soit peuplé (sa propre connexion à HA n'est pas encore prête à cet
+    // instant) — l'arbre envoyé au client est alors vide, et comme rien ne le redemande jamais
+    // ensuite côté client, la liste "Ajouter une entité" reste vide pour toute la durée de vie du
+    // conteneur. `ha:ready` (émis par core à chaque connexion ET reconnexion HA) signale que
+    // HaBridgeClient va se resynchroniser — on attend explicitement cette resynchronisation
+    // (refresh(), pas juste l'événement) avant de réémettre, pour ne pas dépendre de l'ordre
+    // d'exécution entre écouteurs du même événement.
+    this.eventBus.onGeneric('ha:ready', () => {
+      this.haBridgeClient.refresh()
+        .then(() => this.emitTaxonomyTree())
+        .catch((error) => this.logger.warn('HaplanService', `Resynchronisation de l'arbre de taxonomie après ha:ready échouée: ${error}`));
+    });
+
     this.emitStatus();
     this.emitTaxonomyTree();
     this.logger.info('HaplanService', 'Service HAPLAN démarré');
