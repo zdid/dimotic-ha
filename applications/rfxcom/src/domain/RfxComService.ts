@@ -1182,6 +1182,12 @@ export class RfxComService implements IRfxComService {
     }
 
     try {
+      // ⭐ 15/09/2026, demande utilisateur : trace explicite AU MOMENT de la demande à la librairie
+      // rfxcom — indépendante du callback ACK de celle-ci (buildAckLogger), qui ne se déclenche
+      // jamais de façon fiable dans cet environnement (constaté en direct : aucune ligne ACK en 20
+      // minutes de test malgré plusieurs commandes bien exécutées). Cette ligne, elle, est garantie
+      // d'apparaître dès qu'on demande réellement une transmission, réussie ou pas.
+      this.logger.debug('RfxComService', `→ RFXCOM: ${primaryDevice.protocole}/${primaryDevice.subType} ${commandDeviceId} action=${result.action}${result.value !== undefined ? ` value=${result.value}` : ''}`);
       this.transceiver.sendCommand(
         primaryDevice.protocole,
         primaryDevice.subType,
