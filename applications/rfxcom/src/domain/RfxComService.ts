@@ -888,6 +888,9 @@ export class RfxComService implements IRfxComService {
 
   private publishReceiverState(receiver: ReturnType<ReceiverManager['getReceiver']>): void {
     if (!receiver) return;
+    // ⭐ 15/09/2026, demande utilisateur (traçabilité complète HA→RFXCOM→HA) : dernier maillon —
+    // l'état effectivement republié vers HA suite au traitement de la commande (ou d'un signal reçu).
+    this.logger.debug('RfxComService', `→ HA: ${receiver.config.receiverId} (${receiver.config.name}) état=${JSON.stringify(receiver.getState())}`);
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.effectiveBridgeInstance,
       deviceId: receiver.config.receiverId,
@@ -1032,6 +1035,10 @@ export class RfxComService implements IRfxComService {
   // ==========================================================================
 
   private handleHaCommand(rawTargetId: string, payload: Record<string, unknown>): void {
+    // ⭐ 15/09/2026, demande utilisateur (traçabilité complète HA→RFXCOM→HA) : premier maillon de
+    // la chaîne, avant toute résolution/traduction — permet de voir CE QUE HA a réellement envoyé,
+    // brut, indépendamment de ce qui en sera fait ensuite.
+    this.logger.debug('RfxComService', `← HA: ${rawTargetId} payload=${JSON.stringify(payload)}`);
     // ⭐ Corrigé (18/08/2026, bug réel — commande jamais reçue) : le topic de commande MQTT est
     // TOUJOURS construit par le socle au format buildStateDeviceId (double underscore avant le
     // sensorId, ex: lighting2_ac__0x01570892_11), jamais au format uniqueId (underscore simple,
@@ -1140,6 +1147,9 @@ export class RfxComService implements IRfxComService {
     }
 
     const result = receiver.translateHaCommand(command, value);
+    // ⭐ 15/09/2026, demande utilisateur (traçabilité complète HA→RFXCOM→HA) : deuxième maillon —
+    // ce que le récepteur a DÉCIDÉ de faire de la commande HA (action RFXCOM résultante, ou refus).
+    this.logger.debug('RfxComService', `Interprétation ${receiverId} (${receiver.config.name}) : commande HA "${command}"${value !== undefined ? ` value=${value}` : ''} → ${result ? `action=${result.action}${result.value !== undefined ? ` value=${result.value}` : ''}` : 'REFUSÉE (état inchangé ou non supportée)'}`);
     if (!result) {
       return { success: false, error: `Commande ${command} non applicable à ${receiverId} (état inchangé ou non supportée)` };
     }
