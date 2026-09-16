@@ -21,6 +21,8 @@
  *      pas sur le Pi cible (voir TODO.md : jusqu'à plusieurs minutes et un risque de process
  *      orphelin sur un vrai RPi1 pour ce même npm install). Le vrai déploiement en ligne détecte
  *      alors que node_modules existe déjà et saute directement à l'écriture/démarrage du service.
+ *      ⭐ 16/09/2026 — `profile.wifi.{ssid,password,country}` (optionnel) configure aussi le WiFi
+ *      de la cible via ce même enchaînement (voir prepare-sd-card.sh, imager_custom set_wlan).
  *
  * Usage : sudo node scripts/flash-sd-card.js scripts/sd-card-profiles/teleinfo-rpi1.yaml
  *
@@ -116,6 +118,11 @@ function loadProfile(profilePath) {
   profile.personalSshKeys = (profile.personalSshKeys || []).map((p) => p.replace(/^~/, home));
   profile.packages = profile.packages || [];
   profile.apps = profile.apps || [];
+  // ⭐ 16/09/2026 — WiFi optionnel (voir prepare-sd-card.sh --wifi-ssid/--wifi-pass/--wifi-country) :
+  // wifi.ssid seul suffit (réseau ouvert) ; country recommandé (régulateur radio, sinon le WiFi peut
+  // rester bloqué tant qu'aucun pays n'a été défini) — pas déduit automatiquement du profil, à
+  // renseigner explicitement.
+  if (profile.wifi && !profile.wifi.ssid) fail('profile.wifi présent mais profile.wifi.ssid manquant.');
   return profile;
 }
 
@@ -395,6 +402,14 @@ async function main() {
   // ⭐ 05/09/2026 (demande utilisateur) — pré-installe device-agent + node_modules dans l'image pour
   // les apps listées, voir le commentaire détaillé dans prepare-sd-card.sh.
   if (profile.apps.length > 0) prepareArgs.push('--apps', profile.apps.join(','));
+  // ⭐ 16/09/2026 (demande utilisateur) — WiFi de la machine cible réelle, voir le commentaire
+  // détaillé dans prepare-sd-card.sh (réutilise imager_custom, mécanisme officiel Raspberry Pi
+  // Imager — NetworkManager, pas wpa_supplicant.conf sur cette génération d'image).
+  if (profile.wifi && profile.wifi.ssid) {
+    prepareArgs.push('--wifi-ssid', profile.wifi.ssid);
+    if (profile.wifi.password) prepareArgs.push('--wifi-pass', profile.wifi.password);
+    if (profile.wifi.country) prepareArgs.push('--wifi-country', profile.wifi.country);
+  }
   const { elapsed: ePrepare } = await timedStep('prepare-sd-card.sh (agrandissement + SSH root + paquets apt)', () => { run('bash', prepareArgs); });
   record('prepare-sd-card.sh (resize + SSH root + paquets)', ePrepare);
 

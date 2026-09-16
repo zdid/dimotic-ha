@@ -3,14 +3,24 @@
 # prepare-sd-card.sh — pré-provisionne une carte SD Raspberry Pi OS fraîchement flashée, AVANT le
 # premier boot, quel que soit le modèle de Pi (1/2/3/4/5) et son architecture (armhf ARMv6/v7 ou
 # arm64) : agrandissement de rootfs à la taille réelle de la carte, accès SSH root (clé dimotic-ha +
-# clé(s) personnelle(s)), et optionnellement apt-get update + une liste de paquets — via chroot +
-# émulation QEMU (qemu-user-static), même technique que pi-gen (l'outil officiel de fabrication
-# d'images Raspberry Pi OS). Voir aussi PROCEDURE_preprovisioning-ssh-root-carte-sd_2026-09-05.md
-# (version manuelle, pas-à-pas, non-git, écrite le même jour) pour le détail de chaque étape.
+# clé(s) personnelle(s)), optionnellement apt-get update + une liste de paquets, et optionnellement le
+# WiFi de la machine cible — via chroot + émulation QEMU (qemu-user-static), même technique que pi-gen
+# (l'outil officiel de fabrication d'images Raspberry Pi OS). Voir aussi
+# PROCEDURE_preprovisioning-ssh-root-carte-sd_2026-09-05.md (version manuelle, pas-à-pas, non-git,
+# écrite le même jour) pour le détail de chaque étape.
+#
+# ⭐ 16/09/2026 — WiFi : réutilise `/usr/lib/raspberrypi-sys-mods/imager_custom set_wlan` (déjà
+# présent dans l'image, c'est lui qu'utilise Raspberry Pi Imager pour son option "Configurer le
+# WiFi") — écrit un fichier NetworkManager (`/etc/NetworkManager/system-connections/
+# preconfigured.nmconnection`) et configure le pays régulateur. Vérifié en inspectant l'image réelle
+# (bookworm-lite) : NetworkManager est le stack actif sur cette génération, pas dhcpcd/wpa_supplicant
+# autonome — un simple wpa_supplicant.conf déposé sur bootfs (mécanisme des générations précédentes
+# de Raspberry Pi OS) n'aurait pas été repris.
 #
 # Usage :
 #   sudo ./scripts/prepare-sd-card.sh <device ex: /dev/sda> [--key <clé_publique.pub>]... \
-#     [--packages pkg1,pkg2,...] [--hostname <nom>] [--apps app1,app2,...]
+#     [--packages pkg1,pkg2,...] [--hostname <nom>] [--apps app1,app2,...] \
+#     [--wifi-ssid <ssid> --wifi-pass <mot_de_passe> [--wifi-country <FR>]]
 #
 # Exemple (RPi1 teleinfo, avec Node.js + device-agent + node_modules pré-installés) :
 #   sudo ./scripts/prepare-sd-card.sh /dev/sda --key ~/.ssh/id_rsa.pub --packages nodejs --apps teleinfo
@@ -47,7 +57,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 usage() {
-  echo "Usage: $0 <device ex: /dev/sda> [--key <clé_publique.pub>]... [--packages pkg1,pkg2,...] [--hostname <nom>] [--apps app1,app2,...]" >&2
+  echo "Usage: $0 <device ex: /dev/sda> [--key <clé_publique.pub>]... [--packages pkg1,pkg2,...] [--hostname <nom>] [--apps app1,app2,...] [--wifi-ssid <ssid> --wifi-pass <mot_de_passe> [--wifi-country <FR>]]" >&2
   exit 1
 }
 
@@ -59,6 +69,9 @@ PERSONAL_KEYS=()
 PACKAGES=""
 HOSTNAME_ARG=""
 APPS=""
+WIFI_SSID=""
+WIFI_PASS=""
+WIFI_COUNTRY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --key)
@@ -77,12 +90,26 @@ while [ $# -gt 0 ]; do
       APPS="$2"
       shift 2
       ;;
+    --wifi-ssid)
+      WIFI_SSID="$2"
+      shift 2
+      ;;
+    --wifi-pass)
+      WIFI_PASS="$2"
+      shift 2
+      ;;
+    --wifi-country)
+      WIFI_COUNTRY="$2"
+      shift 2
+      ;;
     *)
       echo "Argument inconnu: $1" >&2
       usage
       ;;
   esac
 done
+
+[ -z "$WIFI_PASS" ] || [ -n "$WIFI_SSID" ] || { echo "--wifi-pass fourni sans --wifi-ssid." >&2; usage; }
 
 # --- Table app -> (répertoire local device-agent, répertoire distant) — voir --apps ci-dessus.
 # ⭐ Seul `teleinfo` est câblé pour l'instant : seule app vérifiée avec ce patron exact (agent copié
@@ -259,13 +286,27 @@ fi
 # lents — jusqu'à laisser un process orphelin sur la cible si le timeout d'inactivité du vrai
 # déploiement en ligne est dépassé, constaté en conditions réelles le 05/09/2026). Montages
 # communs aux deux, faits une seule fois. ---
-if [ -n "$PACKAGES" ] || [ -n "$APPS" ]; then
+if [ -n "$PACKAGES" ] || [ -n "$APPS" ] || [ -n "$WIFI_SSID" ]; then
   echo "Préparation de l'environnement d'émulation ($QEMU_BIN) — copie dans rootfs et montage de /dev, /proc, /sys..."
   cp "$QEMU_SRC" "$ROOTFS/usr/bin/$QEMU_BIN"
   for d in dev proc sys; do
     mountpoint -q "$ROOTFS/$d" || mount --bind "/$d" "$ROOTFS/$d"
   done
   echo "Environnement d'émulation prêt — entrée dans le chroot pour les étapes suivantes."
+fi
+
+# --- WiFi : réutilise le script OFFICIEL Raspberry Pi imager_custom (déjà présent dans l'image,
+# c'est lui qu'utilise Raspberry Pi Imager pour son option "Configurer le WiFi") plutôt que de
+# reconstruire le format NetworkManager nous-mêmes — écrit /etc/NetworkManager/system-connections/
+# preconfigured.nmconnection (chmod 600) + configure le pays régulateur via raspi-config. ⭐
+# 16/09/2026, vérifié en inspectant l'image réelle (bookworm-lite) : cette image utilise déjà
+# NetworkManager (pas dhcpcd/wpa_supplicant autonome) — un simple wpa_supplicant.conf déposé sur
+# bootfs, envisagé initialement, n'aurait pas été repris. ---
+if [ -n "$WIFI_SSID" ]; then
+  echo "Configuration WiFi (SSID: $WIFI_SSID) via imager_custom (mécanisme officiel Raspberry Pi Imager)..."
+  chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c \
+    "/usr/lib/raspberrypi-sys-mods/imager_custom set_wlan $(printf '%q' "$WIFI_SSID") $(printf '%q' "$WIFI_PASS") $(printf '%q' "$WIFI_COUNTRY")"
+  echo "WiFi configuré."
 fi
 
 if [ -n "$PACKAGES" ]; then
@@ -310,4 +351,4 @@ if [ -n "$APPS" ]; then
 fi
 
 sync
-echo "Terminé — carte prête (rootfs agrandi, SSH root configuré$( [ -n "$PACKAGES" ] && echo ", paquets installés" )$( [ -n "$APPS" ] && echo ", apps pré-installées: $APPS" )). Démontage automatique en sortie de script, puis insérer la carte dans le Pi cible."
+echo "Terminé — carte prête (rootfs agrandi, SSH root configuré$( [ -n "$PACKAGES" ] && echo ", paquets installés" )$( [ -n "$APPS" ] && echo ", apps pré-installées: $APPS" )$( [ -n "$WIFI_SSID" ] && echo ", WiFi configuré ($WIFI_SSID)" )). Démontage automatique en sortie de script, puis insérer la carte dans le Pi cible."
