@@ -57,7 +57,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 usage() {
-  echo "Usage: $0 <device ex: /dev/sda> [--key <clé_publique.pub>]... [--packages pkg1,pkg2,...] [--hostname <nom>] [--apps app1,app2,...] [--wifi-ssid <ssid> --wifi-pass <mot_de_passe> [--wifi-country <FR>]]" >&2
+  echo "Usage: $0 <device ex: /dev/sda> [--key <clé_publique.pub>]... [--packages pkg1,pkg2,...] [--hostname <nom>] [--apps app1,app2,...] [--wifi-ssid <ssid> --wifi-pass <mot_de_passe> [--wifi-country <FR>]] [--user <nom_utilisateur>]" >&2
   exit 1
 }
 
@@ -72,6 +72,7 @@ APPS=""
 WIFI_SSID=""
 WIFI_PASS=""
 WIFI_COUNTRY=""
+USER_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --key)
@@ -102,6 +103,10 @@ while [ $# -gt 0 ]; do
       WIFI_COUNTRY="$2"
       shift 2
       ;;
+    --user)
+      USER_ARG="$2"
+      shift 2
+      ;;
     *)
       echo "Argument inconnu: $1" >&2
       usage
@@ -125,7 +130,9 @@ app_local_dir() {
 }
 app_remote_dir() {
   case "$1" in
-    teleinfo) echo "/opt/teleinfo" ;;
+    # ⭐ 16/09/2026 — synchronisé avec le nouveau défaut de teleinfo/src/domain/config-schema.ts
+    # (remoteDir), voir fonctionnelles-sauvegarde_specs_v1.0.md §4ter.
+    teleinfo) echo "/dimotic-ha-addons/teleinfo" ;;
     *) echo "" ;;
   esac
 }
@@ -267,6 +274,35 @@ chmod 600 "$ROOTFS/root/.ssh/authorized_keys"
 chown -R 0:0 "$ROOTFS/root/.ssh"
 echo "SSH root prêt. Clés dans authorized_keys :"
 cat "$ROOTFS/root/.ssh/authorized_keys"
+
+# --- SSH utilisateur (⭐ 16/09/2026, demande utilisateur — manquait jusqu'ici, seul root recevait
+# des clés) : clés PERSONNELLES uniquement, jamais la clé dimotic-ha (l'automatisation reste
+# exclusivement en root direct, voir les commentaires "Toujours en root direct" des config-schema.ts
+# de teleinfo/arexx/rpigpio — pas de raison de la donner aussi à l'utilisateur humain).
+#
+# Pas de user/groupe "$USER_ARG" dans /etc/passwd de ce rootfs à ce stade : le compte n'est créé
+# qu'au vrai premier boot du Pi (userconfig.service, à partir de userconf.txt déposé sur bootfs par
+# flash-sd-card.js::customizeBootfs — mécanisme séparé, pas encore appliqué ici). `chown` numérique
+# sur l'UID/GID 1000 plutôt que par nom : c'est la convention Raspberry Pi OS pour le premier
+# utilisateur créé via ce mécanisme (même hypothèse que imager_custom lui-même, qui résout
+# `getent passwd 1000` pour ce même premier utilisateur). ---
+if [ -n "$USER_ARG" ]; then
+  USER_HOME="$ROOTFS/home/$USER_ARG"
+  mkdir -p "$USER_HOME/.ssh"
+  : > "$USER_HOME/.ssh/authorized_keys"
+  for k in "${PERSONAL_KEYS[@]}"; do
+    if [ -f "$k" ]; then
+      cat "$k" >> "$USER_HOME/.ssh/authorized_keys"
+    else
+      echo "Clé personnelle introuvable, ignorée: $k" >&2
+    fi
+  done
+  chmod 700 "$USER_HOME/.ssh"
+  chmod 600 "$USER_HOME/.ssh/authorized_keys"
+  chown -R 1000:1000 "$USER_HOME/.ssh"
+  echo "SSH utilisateur ($USER_ARG) prêt. Clés dans authorized_keys :"
+  cat "$USER_HOME/.ssh/authorized_keys"
+fi
 
 # --- Désactivation du login série (getty) pour les apps qui ont besoin de l'UART en exclusivité
 # (voir app_needs_serial_console_disabled ci-dessus). ---

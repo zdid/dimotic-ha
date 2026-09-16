@@ -399,6 +399,10 @@ async function main() {
   // ⭐ 05/09/2026, bug réel corrigé — voir le commentaire dans prepare-sd-card.sh : userconf.txt
   // (customizeBootfs ci-dessus) ne configure jamais le nom d'hôte, seulement l'utilisateur/SSH.
   if (profile.hostname) prepareArgs.push('--hostname', profile.hostname);
+  // ⭐ 16/09/2026 (demande utilisateur) — jusqu'ici seul root recevait les clés personnelles
+  // (`--key` ci-dessus) ; userconf.txt crée l'utilisateur mais ne lui donne aucune clé, forçant un
+  // ssh-copy-id manuel après le premier boot. Voir le commentaire détaillé dans prepare-sd-card.sh.
+  if (profile.user) prepareArgs.push('--user', profile.user);
   // ⭐ 05/09/2026 (demande utilisateur) — pré-installe device-agent + node_modules dans l'image pour
   // les apps listées, voir le commentaire détaillé dans prepare-sd-card.sh.
   if (profile.apps.length > 0) prepareArgs.push('--apps', profile.apps.join(','));
