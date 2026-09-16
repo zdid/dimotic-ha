@@ -18,7 +18,11 @@ const targetConfigSchema = z.object({
   id: z.string().min(1),
   host: z.string().default(''),
   // Répertoire sur la machine cible où déployer l'agent (device-agent/ + config.yaml généré).
-  remoteDir: z.string().default('/opt/teleinfo'),
+  // ⭐ 16/09/2026 — /dimotic-ha-addons/<app>/ plutôt que /opt/ : nouveau parent dédié aux agents
+  // dimotic-ha non-Docker (voir fonctionnelles-sauvegarde_specs_v1.0.md §4ter), même principe que
+  // /docker/<app>/ pour ce qui est Docker. Nouveau défaut pour les futures cibles seulement — ne
+  // change pas rétroactivement une cible déjà configurée avec l'ancien chemin.
+  remoteDir: z.string().default('/dimotic-ha-addons/teleinfo'),
   // Chemin du binaire node sur la cible — RPi1 en ARMv6, Node officiel récent n'a plus de build
   // ARMv6 (vérifié 12/08/2026) : utiliser le node déjà installé et prouvé sur ce matériel, pas un
   // node générique du PATH qui pourrait être une version incompatible.

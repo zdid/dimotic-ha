@@ -21,7 +21,11 @@ const arexxTargetSchema = z.object({
   host: z.string().default(''),
   // Répertoire sur la machine cible où copier data/arexx/drivers/ (staging, avant exécution de
   // scripts/deploy-sender.sh — voir ArexxDeployService.ts).
-  remoteDir: z.string().default('/root/arexx-drivers')
+  // ⭐ 16/09/2026 — /dimotic-ha-addons/<app>/ plutôt que /root/ : nouveau parent dédié aux agents
+  // dimotic-ha non-Docker (voir fonctionnelles-sauvegarde_specs_v1.0.md §4ter), même principe que
+  // /docker/<app>/ pour ce qui est Docker. Nouveau défaut pour les futures cibles seulement — ne
+  // change pas rétroactivement une cible déjà configurée avec l'ancien chemin.
+  remoteDir: z.string().default('/dimotic-ha-addons/arexx-drivers')
 });
 
 export const arexxConfigSchema = z.object({

@@ -111,7 +111,7 @@ export const AREXX_UI_METADATA: ModuleUiMetadata = {
           itemFields: [
             { name: 'id', label: 'Identifiant', type: 'text', required: true, placeholder: 'bs510', hint: 'Identifiant libre, unique parmi les cibles de cette app' },
             { name: 'host', label: 'Hôte', type: 'text', placeholder: '192.168.1.10' },
-            { name: 'remoteDir', label: 'Répertoire distant de copie (data/arexx/drivers/)', type: 'text', default: '/root/arexx-drivers' }
+            { name: 'remoteDir', label: 'Répertoire distant de copie (data/arexx/drivers/)', type: 'text', default: '/dimotic-ha-addons/arexx-drivers' }
           ]
         }
       ]
