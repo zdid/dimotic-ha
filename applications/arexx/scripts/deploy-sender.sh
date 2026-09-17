@@ -34,7 +34,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RF_USB_SRC_DIR="$REPO_ROOT/rf_usb_http_rpi_0_6"
 TL500_SRC_DIR="$REPO_ROOT/tl-500"
 
-INSTALL_DIR="/opt/arexx-sender"
+# ⭐ 17/09/2026 — /dimotic-ha-addons/<app>/ plutôt que /opt/ : même convention que le répertoire
+# de staging (remoteDir, voir arexxTargetSchema dans config-schema.ts) — agents dimotic-ha
+# non-Docker, voir fonctionnelles-sauvegarde_specs_v1.0.md §4ter. Ne migre pas rétroactivement
+# une installation déjà faite sous /opt/arexx-sender.
+INSTALL_DIR="/dimotic-ha-addons/arexx-sender"
 
 log() { echo "[deploy-sender] $*"; }
 err() { echo "[deploy-sender] ERREUR: $*" >&2; }

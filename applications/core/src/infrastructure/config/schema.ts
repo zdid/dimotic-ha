@@ -55,7 +55,13 @@ export function generateRandomMachineId(hostname: string = os.hostname()): strin
 }
 
 const coreSchema = z.object({
-  machineId: z.string().min(1).default(() => generateRandomMachineId())
+  machineId: z.string().min(1).default(() => generateRandomMachineId()),
+  // ⭐ 17/09/2026 — demande explicite : label libre du site physique de cette machine (ex.
+  // "stfort", "noisy"), diffusé par TargetGossipService avec ses annonces de cibles pour que
+  // d'autres apps (sauvegarde notamment) puissent regrouper automatiquement les machines par site
+  // sans que l'utilisateur ait à le ressaisir à la main pour chaque cible importée. Vide par
+  // défaut — aucune valeur ne serait correcte à deviner.
+  site: z.string().default('')
 });
 
 const authSchema = z.object({

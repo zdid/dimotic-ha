@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sauvegarde/Restauration</title>
+
+  <link rel="stylesheet" href="/styles/main.css">
+
+  <style>
+    .sauvegarde-container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .sauvegarde-header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .sauvegarde-header h1 {
+      color: var(--color-accent);
+      font-size: 2em;
+    }
+
+    .status-card {
+      background: var(--color-surface);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+
+    .status-card h2 {
+      margin-top: 0;
+      color: var(--color-text);
+      border-bottom: 1px solid var(--color-primary);
+      padding-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.75em;
+    }
+
+    .status-badge.connected { background: var(--color-success); color: white; }
+    .status-badge.disconnected { background: var(--color-error); color: white; }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 15px;
+      margin-top: 15px;
+    }
+
+    .status-item .label {
+      font-size: 0.85em;
+      color: var(--color-text-muted);
+      margin-bottom: 5px;
+      display: block;
+    }
+
+    .status-item .value {
+      font-size: 1.3em;
+      color: var(--color-text);
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: var(--color-text-muted);
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border-radius: var(--radius);
+      border: none;
+      cursor: pointer;
+      font-size: 0.9em;
+    }
+
+    .btn-primary { background: var(--color-accent); color: white; }
+    .btn-secondary { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-primary); }
+
+    .secret-card { background: var(--color-surface); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
+    .secret-card h2 { margin-top: 0; }
+    .secret-card p { color: var(--color-text-muted); font-size: 0.9em; }
+    .secret-card h3 { font-size: 0.95em; margin: 16px 0 8px; }
+    .secret-card ol { padding-left: 22px; margin: 0 0 16px; }
+    .secret-card ol li { margin-bottom: 6px; font-size: 0.88em; color: var(--color-text-muted); }
+    .secret-card ol li strong { color: var(--color-text); }
+    .secret-card ol code { font-family: monospace; background: var(--color-background); padding: 1px 5px; border-radius: 3px; }
+    .form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin: 10px 0; }
+    .form-row label { display: block; font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 4px; }
+    .form-row select, .form-row input { padding: 8px; border-radius: var(--radius); border: 1px solid var(--color-primary); background: var(--color-background); color: var(--color-text); }
+    .form-row input#secret-password { width: 260px; }
+    .webdav-preview { margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--color-primary); }
+    .webdav-preview .label { font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 5px; display: block; }
+    .webdav-preview code { font-size: 0.9em; word-break: break-all; }
+    .alert { padding: 12px; border-radius: var(--radius); margin: 10px 0; display: none; }
+    .alert-success { background: rgba(76, 175, 80, 0.1); border: 1px solid var(--color-success); color: var(--color-success); }
+    .alert-error { background: rgba(244, 67, 54, 0.1); border: 1px solid var(--color-error); color: var(--color-error); }
+  </style>
+</head>
+<body>
+  <div class="sauvegarde-container">
+    <div class="sauvegarde-header">
+      <h1>💾 Sauvegarde/Restauration</h1>
+      <p class="description">Restauration de sauvegardes depuis le Nextcloud auto-hébergé, vers n'importe quelle machine du foyer.</p>
+    </div>
+
+    <div id="main-container">
+      <div class="status-card" id="status-card" style="display: none;">
+        <h2>
+          Statut
+          <span class="status-badge" id="nextcloud-badge">Non configuré</span>
+        </h2>
+        <div class="status-grid">
+          <div class="status-item">
+            <span class="label">Répertoires couverts</span>
+            <span class="value" id="targets-count">0</span>
+          </div>
+        </div>
+        <div class="webdav-preview" id="webdav-preview" style="display: none;">
+          <span class="label">URL WebDAV reconstruite</span>
+          <code id="webdav-url"></code>
+        </div>
+      </div>
+
+      <div class="secret-card" id="gossip-card" style="display: none;">
+        <h2>📡 Importer depuis le gossip</h2>
+        <p>
+          Propose automatiquement un répertoire pour chaque machine dimotic-ha et chaque stack HA
+          déjà connus par gossip (déploiements Docker) — à compléter ensuite (site, notamment,
+          jamais connu du gossip). N'écrase jamais une entrée déjà présente.
+        </p>
+        <div class="alert alert-success" id="gossip-success"></div>
+        <div class="alert alert-error" id="gossip-error"></div>
+        <button class="btn btn-primary" id="btn-gossip-import">📡 Importer depuis le gossip</button>
+      </div>
+
+      <div class="secret-card" id="secret-card" style="display: none;">
+        <h2>🔒 Pousser le mot de passe Nextcloud</h2>
+        <p>
+          Écrit le mot de passe d'application Nextcloud sur le fichier hôte de la machine choisie,
+          par SSH — jamais enregistré dans la configuration de cette application. Un mot de passe
+          différent par machine (voir §3bis de la spec).
+        </p>
+
+        <h3>Procédure côté Nextcloud (une fois par machine)</h3>
+        <ol>
+          <li>Se connecter à Nextcloud avec le compte utilisé pour les sauvegardes.</li>
+          <li>Aller dans <strong>Paramètres personnels → Sécurité</strong>.</li>
+          <li>
+            Dans « Mots de passe d'applications », donner un nom qui identifie <strong>cette
+            machine précise</strong> (ex. <code>sauvegarde-ha2</code>) — un nom différent à chaque
+            fois, jamais le même mot de passe réutilisé entre plusieurs machines.
+          </li>
+          <li>Cliquer « Créer un nouveau mot de passe d'application ».</li>
+          <li>
+            Nextcloud affiche le mot de passe généré <strong>une seule fois</strong> — le copier
+            immédiatement (impossible de le revoir plus tard).
+          </li>
+          <li>Choisir la machine correspondante ci-dessous, coller le mot de passe, puis « Pousser ».</li>
+        </ol>
+
+        <div class="alert alert-success" id="secret-success"></div>
+        <div class="alert alert-error" id="secret-error"></div>
+        <div class="form-row">
+          <div>
+            <label for="secret-target">Machine</label>
+            <select id="secret-target"></select>
+          </div>
+          <div>
+            <label for="secret-password">Mot de passe d'application</label>
+            <input type="password" id="secret-password" autocomplete="off">
+          </div>
+          <button class="btn btn-primary" id="btn-push-secret">📤 Pousser</button>
+        </div>
+      </div>
+
+      <div class="loading" id="loading">Chargement de l'application Sauvegarde/Restauration</div>
+    </div>
+
+    <div class="actions" id="actions" style="display: none;">
+      <button class="btn btn-primary" onclick="refreshStatus()">✅ Rafraîchir</button>
+      <a class="btn btn-secondary" href="/applications/sauvegarde/presentation/sauvegarde/restauration.html">♻️ Restauration</a>
+    </div>
+  </div>
+
+  <script type="module" src="/applications/sauvegarde/presentation/ts/app.js"></script>
+
+  <!-- Derniere modification: 2026-09-17 12:00:00 - Création de l'application Sauvegarde/Restauration -->
+</body>
+</html>

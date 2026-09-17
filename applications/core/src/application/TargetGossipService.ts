@@ -64,6 +64,11 @@ interface TargetsGossipPayload {
   core: DeploymentTargetConfig[];
   haStack: HaStackTargetConfig[];
   zigbee2mqtt: Zigbee2mqttTargetConfig[];
+  // ⭐ 17/09/2026 — site physique de la machine qui publie (core.site, voir schema.ts), diffusé au
+  // même endroit que ses cibles plutôt que sur un topic dédié : toujours republié en même temps,
+  // pas de risque de désynchronisation entre les deux. Optionnel : les pairs pas encore à jour
+  // n'en envoient pas, `peerSites` reste simplement vide pour eux (site inconnu, jamais deviné).
+  site?: string;
 }
 
 interface GossipableScript {
@@ -87,6 +92,9 @@ export class TargetGossipService {
    *  démarrage de CE service — un redémarrage local perd donc la mémoire du statut, mais le LWT
    *  retenu du pair la restaure dès l'abonnement, comme know-targets). */
   private readonly liveness: Map<string, boolean> = new Map();
+  /** sourceMachineId → dernier `site` annoncé par ce pair (voir TargetsGossipPayload.site) — pas
+   *  persisté, reconstruit au fil des messages retenus reçus après chaque redémarrage. */
+  private readonly peerSites: Map<string, string> = new Map();
 
   constructor(
     private readonly configService: ConfigService,
@@ -143,6 +151,19 @@ export class TargetGossipService {
       this.republishScripts();
     });
 
+    // ⭐ 17/09/2026 — demande/réponse pour l'app sauvegarde (import assisté des cibles déjà
+    // gossipées comme base de départ pour ses propres répertoires couverts) : réutilise
+    // CorrelatedRequester (même mécanisme que ia↔planificateur, voir StructuredRouter.ts), pas de
+    // nouveau sous-système. Renvoie les données BRUTES (id/host/remoteDir) — c'est à sauvegarde de
+    // les transformer en suggestions de répertoires, `core` ne connaît rien de son schéma.
+    this.eventBus.onGeneric<{ correlation_id: string }>('sauvegarde:gossip-targets:get', ({ correlation_id }) => {
+      this.eventBus.emitGeneric('sauvegarde:gossip-targets:reply', {
+        correlation_id,
+        targets: this.configService.getTargets().map((t) => ({ ...t, site: this.resolveSiteFor(t) })),
+        haStackTargets: this.configService.getHaStackTargets().map((t) => ({ ...t, site: this.resolveSiteFor(t) }))
+      });
+    });
+
     this.republish();
     this.logger.info('TargetGossip', `Synchronisation entre instances active (machineId: ${this.machineId})`);
   }
@@ -162,7 +183,8 @@ export class TargetGossipService {
     const payload: TargetsGossipPayload = {
       core: this.configService.getTargets().filter((t) => t.origin !== 'gossip'),
       haStack: this.configService.getHaStackTargets().filter((t) => t.origin !== 'gossip'),
-      zigbee2mqtt: this.configService.getZigbee2mqttTargets().filter((t) => t.origin !== 'gossip')
+      zigbee2mqtt: this.configService.getZigbee2mqttTargets().filter((t) => t.origin !== 'gossip'),
+      site: this.configService.getConfig().core.site || undefined
     };
     this.transport.publish(`${TOPIC_PREFIX}/${this.machineId}/known-targets`, JSON.stringify(payload), 1, true);
   }
@@ -282,9 +304,20 @@ export class TargetGossipService {
       return;
     }
 
+    if (data.site) this.peerSites.set(sourceMachineId, data.site);
+
     this.mergeTargets(sourceMachineId, data.core || [], 'core');
     this.mergeTargets(sourceMachineId, data.haStack || [], 'haStack');
     this.mergeTargets(sourceMachineId, data.zigbee2mqtt || [], 'zigbee2mqtt');
+  }
+
+  /** Site d'une cible connue (locale ou apprise par gossip) — voir TargetsGossipPayload.site.
+   *  Une cible `origin: 'gossip'` a un id `{sourceMachineId}::{original}` (voir mergeTargets) ;
+   *  une cible locale n'a pas ce préfixe, son site est simplement celui de CETTE machine. */
+  private resolveSiteFor(target: { id: string; origin: string }): string {
+    if (target.origin !== 'gossip') return this.configService.getConfig().core.site;
+    const sourceMachineId = target.id.split('::')[0] ?? target.id;
+    return this.peerSites.get(sourceMachineId) || '';
   }
 
   private handleScriptsMessage(sourceMachineId: string, message: MqttMessage): void {

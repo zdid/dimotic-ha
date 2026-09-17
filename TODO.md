@@ -644,6 +644,10 @@ dans `compose.yaml`/`compose.deploy.yaml` du dépôt depuis plus tôt le 14/09).
 - **Points ouverts** : second paquet Node "oublié" par l'utilisateur (deviné `mqtt`, pas confirmé),
   lib de gestion de queue Node (question posée, sans réponse), liste précise des applications
   Docker installables, authentification SSH mot de passe vs clé.
+- **⭐ 16/09/2026, lien établi avec la sauvegarde/restauration** (`fonctionnelles-sauvegarde_specs_v1.0.md`
+  §6bis) : l'installation de dimotic-ha doit explicitement faire partie des questions oui/non de ce
+  pipeline — une fois installé, dimotic-ha sert lui-même de mécanisme de reprise après sinistre
+  (restauration croisée depuis Nextcloud vers cette machine fraîchement provisionnée).
 - **Statut** : Conception en cours de discussion, rien codé
 - **Priorité** : Moyenne (pas bloquant, mais des points restent à clarifier avant de pouvoir coder)
 
@@ -1079,8 +1083,14 @@ dans `compose.yaml`/`compose.deploy.yaml` du dépôt depuis plus tôt le 14/09).
 - **Contexte (15/08/2026)**, issu de la discussion sur le point de défaillance unique du superviseur multi-machines (`fonctionnelles-supervisor_specs_v2.3.md` §6.4) : la piste initialement envisagée (un broker MQTT local par machine, ponté vers un broker partagé) a été écartée — MQTT est colocalisé avec HA, donc la panne du broker implique quasi systématiquement la panne de HA lui-même. Le vrai point de dépendance critique du système entier n'est pas MQTT, c'est **HA** : le perdre veut dire perdre le cerveau (toutes les discovery arrivent via ESPHome ou MQTT, dont HA est la destination), remonter une machine HA reste impératif dans tous les cas, quelle que soit l'architecture du superviseur.
 - **Décision utilisateur (15/08/2026)** : ne pas chercher à rendre MQTT résilient (broker unique partagé reste la bonne décision) — investir plutôt dans une vraie stratégie de sauvegarde/duplication de HA lui-même (l'instance complète, pas seulement sa config), en complément de ce qui existe déjà par application (`data/rfxcom`, `data/rpigpio`, `data/evoo7`...) mais pas encore systématisé pour HA ni généralisé à toutes les apps.
 - **À faire** : définir le périmètre (sauvegarde périodique de la configuration HA complète ? réplication d'une instance de secours prête à prendre le relais ? simple procédure de restauration documentée sur du matériel neuf ?), et vérifier que toutes les apps métier ont bien une stratégie de sauvegarde de leurs données locales (`data/{app}/`) équivalente à celle déjà en place pour rfxcom/rpigpio/evoo7 — liste exhaustive à établir, au moins une app mentionnée comme "oubliée" lors de la discussion, à identifier.
-- **Statut** : Non traité — discussion seulement, pas de conception
+- **⭐ 16/09/2026 : promu en spec dédiée** — `specs/current/fonctionnelles-sauvegarde_specs_v1.0.md`. Destination et mécanisme de transport tranchés (Nextcloud auto-hébergé déjà dupliqué offsite, push direct WebDAV/curl par machine via WireGuard). Reste ouvert : structure de dossiers définitive, portée exacte HA, liste exhaustive des `data/{app}/`, fréquence/rotation — voir la spec pour le détail, ne pas dupliquer ici.
+- **Statut** : Non traité pour l'implémentation — conception dans la spec dédiée
 - **Priorité** : Moyenne (pas d'incident vécu sur ce point précis, mais rejoint directement l'incident carte SD Pi4 déjà vécu cette session)
+
+### 🟡 Supervision multi-sites indépendante + alerte hors HA (conception, 16/09/2026)
+- **⭐ 16/09/2026 : promu en spec dédiée** — `specs/current/fonctionnelles-supervision-externe_specs_v1.0.md`. Conception complète : 2 RPi1 "sacrifiables" (un par site, redondance cross-site via `TargetGossipService`/WireGuard), pattern agent minimal `teleinfo` inversé, canal SMS/email de repli (legacy noisy confirmé actif), **surveillance des sauvegardes intégrée** (consomme le marqueur de statut de `fonctionnelles-sauvegarde_specs_v1.0.md` §5ter). Reste ouvert : sondage zigbee2mqtt/autres, accès exact au marqueur de sauvegarde, surveillance mutuelle des deux RPi — voir la spec pour le détail, ne pas dupliquer ici.
+- **Statut** : Non traité pour l'implémentation — conception dans la spec dédiée
+- **Priorité** : Moyenne (pas d'incident vécu, mais rejoint la même discussion de résilience que la sauvegarde HA ci-dessus)
 
 ### 🟢 Socle : bridgeInstance absent du topic de découverte MQTT (collision entre deux instances) — Corrigé
 - **Constat (10/08/2026)**, en manipulant deux instances RFXCOM en parallèle (locale de test `rfx_bridge_local_test`, orangepi production `rfx_bridge_0001`) pour le même appareil physique : le topic de découverte est `homeassistant/{component}/{objectId}/config` (`getDiscoveryTopic()`, `ha-mqtt.ts`) — **ne contient pas** le bridgeInstance, seulement `objectId` (ex: `recepteur_1000987`). Un seul message MQTT retenu existe donc par entité, quel que soit le nombre d'instances/bridges qui publient pour le même objectId — la dernière à publier écrase entièrement le message précédent (y compris ses champs `command_topic`/`state_topic`, qui eux embarquent bien le bridgeInstance). Résultat concret : impossible de savoir, sans interroger le broker, quelle instance "possède" actuellement une entité donnée dans HA — source de confusion réelle constatée cette session (tests locaux modifiant silencieusement la cible des commandes HA pour des entités de production).
