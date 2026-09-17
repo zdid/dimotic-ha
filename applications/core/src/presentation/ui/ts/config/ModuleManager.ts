@@ -314,6 +314,9 @@ export class ModuleManager {
     if (field.type === 'array') {
       return this.generateArrayFieldHtml(field, config, moduleId);
     }
+    if (field.type === 'button') {
+      return this.generateButtonFieldHtml(field, moduleId);
+    }
 
     const fieldName = field.name;
     const resolved = this.getNestedValue(config, fieldName);
@@ -411,6 +414,55 @@ export class ModuleManager {
     
     html += '</div>';
     return html;
+  }
+
+  /**
+   * Génère le HTML d'un champ de type 'button' (⭐ 17/09/2026) — envoie un événement générique au
+   * clic (`field.action`) au lieu d'éditer une valeur, pour les actions qui n'ont pas leur place
+   * dans le flux "Sauvegarder" habituel (import assisté, test de connexion...). Pas de wrapper
+   * `.form-group`/label générique ici (le libellé du bouton EST le label, pas une légende
+   * au-dessus d'un input) — même raison que `array` a son propre chemin de rendu séparé.
+   * Résultat attendu sur `${action}:result` : `{ success: boolean, error?: string }`, écouté par
+   * `triggerAction()` — convention déjà utilisée partout ailleurs dans le projet.
+   */
+  private generateButtonFieldHtml(field: ConfigField, moduleId: string): string {
+    const id = `field-${moduleId}-${field.name.replace(/\./g, '-')}`;
+    const confirmAttr = field.confirm ? ` onclick="return confirm(${JSON.stringify(field.confirm)})"` : '';
+    return `
+      <div class="form-group form-group-button" id="${id}">
+        <button type="button" class="btn btn-secondary" id="${id}-btn"${confirmAttr}
+          onclick="window.app.moduleManager.triggerAction('${field.action}', '${id}')">
+          ${field.label}
+        </button>
+        <span class="field-action-result" id="${id}-result"></span>
+        ${field.hint ? '<div class="field-hint">' + field.hint + '</div>' : ''}
+      </div>
+    `;
+  }
+
+  /**
+   * Handler générique du clic sur un champ 'button' — émet `action`, écoute UNE fois
+   * `${action}:result` (convention `{ success, error? }`), affiche le résultat à côté du bouton.
+   * Volontairement générique : ne connaît rien du contenu métier de l'action (gossip, test de
+   * connexion...), juste success/error — chaque app garde le détail (ex: `addedCount`) pour son
+   * propre tableau de bord si besoin.
+   */
+  triggerAction(action: string, fieldId: string): void {
+    const btn = document.getElementById(`${fieldId}-btn`) as HTMLButtonElement | null;
+    const resultEl = document.getElementById(`${fieldId}-result`);
+    if (btn) btn.disabled = true;
+    if (resultEl) { resultEl.textContent = ''; resultEl.className = 'field-action-result'; }
+
+    const resultEvent = `${action}:result`;
+    const onResult = (result: { success?: boolean; error?: string } = {}) => {
+      this.socket.off(resultEvent, onResult);
+      if (btn) btn.disabled = false;
+      if (!resultEl) return;
+      resultEl.textContent = result.success ? '✅ Fait' : `❌ ${result.error || 'Échec'}`;
+      resultEl.className = `field-action-result ${result.success ? 'success' : 'error'}`;
+    };
+    this.socket.on(resultEvent, onResult);
+    this.socket.emit(action);
   }
 
   /**

@@ -51,13 +51,17 @@ export interface ConfigFieldGroup {
 export interface ConfigField {
   name: string;
   label: string;
-  type: 'text' | 'string' | 'number' | 'boolean' | 'select' | 'password' | 'array';
+  type: 'text' | 'string' | 'number' | 'boolean' | 'select' | 'password' | 'array' | 'button';
   default?: any;
   placeholder?: string;
   required?: boolean;
   min?: number;
   max?: number;
   step?: number;
+  // Uniquement pour type: 'button' — voir types/config.ts (copie côté navigateur, même
+  // convention `${action}:result`).
+  action?: string;
+  confirm?: string;
   options?: { value: string; label: string }[] | string[];
   hint?: string;
   autocomplete?: string;

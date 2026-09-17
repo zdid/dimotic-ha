@@ -183,6 +183,12 @@ textarea.field-valid {
   margin-top: var(--spacing-xs);
 }
 
+/* Champ type 'button' (⭐ 17/09/2026) — voir ModuleManager.generateButtonFieldHtml/triggerAction */
+.form-group-button { display: flex; align-items: center; gap: var(--spacing-sm); flex-wrap: wrap; }
+.field-action-result { font-size: var(--font-size-sm); }
+.field-action-result.success { color: var(--color-success); }
+.field-action-result.error { color: var(--color-error); }
+
 /* ====================================================================== */
 /* SECTION HINTS */
 /* ====================================================================== */

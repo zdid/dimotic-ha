@@ -364,6 +364,12 @@ const createTemplate = (): HTMLTemplateElement => {
           <div class="nav-section-collapse" id="params-collapse" :class="{ visible: openSection === 'params' }">
             <ul class="nav-section-list">
               <li class="nav-item">
+                <a href="#machine" class="nav-link" data-section="machine">
+                  <span class="nav-icon">🏠</span>
+                  <span class="nav-label">Site</span>
+                </a>
+              </li>
+              <li class="nav-item">
                 <a href="#ha" class="nav-link" data-section="ha">
                   <span class="nav-icon">⚙️</span>
                   <span class="nav-label">Web-services</span>
@@ -660,6 +666,7 @@ export class Sidebar extends HTMLElement {
 
     // Mapper les sections du menu aux IDs des div de contenu
     const sectionMappings: Record<string, string> = {
+      'machine': 'section-machine',
       'ha': 'section-ha',
       'mqtt': 'section-mqtt',
       'web': 'section-web',

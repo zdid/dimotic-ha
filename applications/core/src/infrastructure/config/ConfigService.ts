@@ -171,7 +171,11 @@ export class ConfigService {
     // Home Assistant+Mosquitto) : même risque, même traitement préventif — jamais envoyés par ce
     // formulaire non plus.
     const socleConfig = {
-      core: this.config.core,
+      // ⭐ 17/09/2026 : `site` (seul champ éditable de `core`, voir ConfigForm.ts section
+      // 'machine') accepté depuis newConfig — `machineId`, lui, reste TOUJOURS repris de
+      // this.config, jamais du client, même principe de protection que disabledApps/targets
+      // ci-dessus (auto-généré, ne doit jamais pouvoir être corrompu/écrasé par un formulaire).
+      core: { ...this.config.core, site: newConfig.core?.site ?? this.config.core.site },
       ha: newConfig.ha,
       web: newConfig.web,
       logging: newConfig.logging,
@@ -185,6 +189,8 @@ export class ConfigService {
     } as AppConfig;
     const result = this.writer.save(socleConfig);
     console.log('[ConfigService SERVEUR] Résultat sauvegarde:', result);
+    // Pas de rafraîchissement de this.config ici — AppService.handleConfigSave() appelle déjà
+    // reload() juste après un succès (relit le fichier écrit ci-dessus), inutile de dupliquer.
     return result;
   }
 

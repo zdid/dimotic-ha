@@ -92,6 +92,16 @@ export const SAUVEGARDE_UI_METADATA: ModuleUiMetadata = {
       icon: '🗂️',
       fields: [
         {
+          // ⭐ 17/09/2026 — bouton générique (type 'button', ModuleManager.ts), directement dans
+          // ce formulaire plutôt que seulement sur le tableau de bord : demande explicite suite à
+          // l'ajout de ce type de champ au composant partagé.
+          name: 'gossipImport',
+          label: '📡 Importer depuis le gossip',
+          type: 'button',
+          action: 'sauvegarde:gossip:import',
+          hint: "Propose un répertoire pour chaque machine dimotic-ha/HA déjà connue par gossip — n'écrase jamais une entrée existante, ajoute seulement ce qui manque."
+        },
+        {
           name: 'targets',
           label: 'Répertoires',
           type: 'array',

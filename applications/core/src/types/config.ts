@@ -19,7 +19,7 @@ export type ModuleConfig = Record<string, unknown>;
 export interface ConfigField {
   name: string;                    // Nom du champ (ex: 'serialPort', 'mqtt.host')
   label: string;                   // Label à afficher
-  type: 'text' | 'string' | 'number' | 'boolean' | 'select' | 'password' | 'string-array' | 'array';
+  type: 'text' | 'string' | 'number' | 'boolean' | 'select' | 'password' | 'string-array' | 'array' | 'button';
   placeholder?: string;
   hint?: string;                   // Texte d'aide
   description?: string;            // Description détaillée
@@ -29,6 +29,14 @@ export interface ConfigField {
   min?: number;                   // Pour number
   max?: number;
   step?: number;
+  // ⭐ 17/09/2026, type 'button' uniquement — envoie un événement EventBus/Socket.io générique au
+  // clic (pas de sauvegarde de champ), rendu par ModuleManager.ts. Convention : le serveur répond
+  // sur `${action}:result` avec `{ success: boolean, error?: string, ... }` — même forme que
+  // partout ailleurs dans le projet (secret:push:result, gossip:import:result...), pas de nouveau
+  // protocole à apprendre par app. `confirm` : texte de confirmation navigateur avant l'envoi,
+  // pour une action destructive/irréversible (optionnel, aucune confirmation par défaut).
+  action?: string;
+  confirm?: string;
   // Uniquement pour type: 'array' — liste d'objets avec ajout/suppression dynamique, rendue par
   // Alpine côté navigateur (voir applications/core/src/presentation/ui/ts/config/ModuleManager.ts
   // generateArrayFieldHtml()). itemFields décrit la forme d'un élément (chemins pointés

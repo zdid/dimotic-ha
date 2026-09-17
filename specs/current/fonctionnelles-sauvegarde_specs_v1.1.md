@@ -1,11 +1,14 @@
 # Spécifications Fonctionnelles - Sauvegarde/Restauration (SAUVEGARDE)
 
-**Version 1.0 — 16/09/2026 — Claude**
+**Version 1.1 — 17/09/2026 — Claude**
 
-Statut : **conception, discussion seulement — aucun code écrit**. Première version de cette spec,
-extraite d'une discussion avec l'utilisateur ce jour, elle-même issue d'un point de résilience laissé
-ouvert dans `fonctionnelles-supervisor_specs_v2.8.md` §6.4 et suivi jusqu'ici uniquement dans
-`TODO.md` ("🟡 Sauvegarde/duplication multi-machines de HA lui-même").
+Statut : **conception figée pour §1-§5ter/§7 (inchangés depuis v1.0) ; chantier B (§6) en cours
+d'implémentation** (voir `applications/sauvegarde/`). Cette version amende uniquement §4 (structure
+de dossiers Nextcloud) suite à une remarque de l'utilisateur pendant l'implémentation — tout le reste
+reprend v1.0 à l'identique. Première version : extraite d'une discussion avec l'utilisateur le
+16/09/2026, elle-même issue d'un point de résilience laissé ouvert dans
+`fonctionnelles-supervisor_specs_v2.8.md` §6.4 et suivi jusqu'ici uniquement dans `TODO.md`
+("🟡 Sauvegarde/duplication multi-machines de HA lui-même").
 
 ---
 
@@ -98,7 +101,7 @@ de fragilité pour toutes les autres machines.
   retour-arrière fin existe donc déjà gratuitement pour la sauvegarde "courante" (§4), sans rotation
   applicative à construire pour ce niveau-là.
 
-## 4. Unité de sauvegarde et structure de dossiers — reconçu (16/09/2026)
+## 4. Unité de sauvegarde et structure de dossiers — reconçu (16/09/2026), amendé (17/09/2026)
 
 ⭐ **Reconception explicite, en remplacement de la version précédente de cette section** (qui
 distinguait HA / dimotic-ha / services externes comme trois catégories différentes). Point de départ :
@@ -140,9 +143,10 @@ sur les machines de production (`docker inspect`, stfort **et** noisy) :
 - **Docker, déjà cohérent** : dimotic-ha, rpigpio (via mqtt-io), HA, zigbee2mqtt, modbus2mqtt vivent
   tous sous `/docker/<nom>/` — confirmé en direct pour rpigpio (`/docker/mqttio-rpigpio/config.yml`
   sur les deux machines testées). Rien à changer ici.
-- **Hors Docker, dispersé** : teleinfo (`/opt/teleinfo`, défaut du schéma) et arexx
-  (`/root/arexx-drivers`, défaut du schéma) — deux emplacements différents, ni l'un ni l'autre
-  regroupé avec le reste.
+- **Hors Docker, dispersé** (au moment de la conception — corrigé depuis dans le code, voir
+  `[[project_teleinfo_app]]` : teleinfo et arexx migrés en production le 17/09/2026) : teleinfo
+  (`/opt/teleinfo`, ancien défaut du schéma) et arexx (`/root/arexx-drivers`, ancien défaut du
+  schéma) — deux emplacements différents, ni l'un ni l'autre regroupé avec le reste.
 
 **Décision** : un second parent dédié, **`/dimotic-ha-addons/`** (à la racine, comme `/docker/` —
 pas niché sous `/root/`), pour tout agent géré par dimotic-ha qui **n'est pas** Docker (teleinfo,
@@ -155,32 +159,57 @@ deux natures de déploiement sous un nom trompeur.
 ces deux parents plutôt que de connaître une liste de chemins en dur par application — cohérent avec
 le principe déjà posé "un seul script générique, réutilisé sans code spécifique par répertoire" (§5).
 
-**Portée du changement** : nouveau défaut pour les **futures** cibles teleinfo/arexx uniquement
-(`config-schema.ts`, `remoteDir`) — pas de migration rétroactive des instances déjà en production
-(même principe que le changement de défaut `bridgeInstance`, déjà appliqué ailleurs dans le projet).
-Implémentation (changement des défauts) non faite dans cette session — à faire séparément, hors
-périmètre de cette spec elle-même.
+**Portée du changement** : nouveau défaut pour les **futures** cibles teleinfo/arexx (`config-schema.ts`,
+`remoteDir`) — même principe que le changement de défaut `bridgeInstance`, déjà appliqué ailleurs dans
+le projet. ⭐ 17/09/2026 : les cibles réelles de production (teleinfo sur 192.168.1.183, arexx/bs510
+sur 192.168.1.10) ont depuis été migrées manuellement vers cette nouvelle convention — voir
+`[[project_teleinfo_app]]`.
+
+### 4quater. Arborescence Nextcloud — amendée (17/09/2026, remarque utilisateur)
+
+⭐ **Amendement à l'arborescence ci-dessous** (remplace la version v1.0 de ce diagramme) : un niveau
+intermédiaire reprenant **le nom réel du parent de déploiement** (`docker` ou `dimotic-ha-addons`,
+voir §4ter) s'intercale entre `<machine>/` et `<répertoire-de-déploiement>/`, plutôt que de mettre
+tous les répertoires à plat sous la machine. Raison donnée par l'utilisateur : garder la sauvegarde
+Nextcloud alignée sur la vraie convention disque facilite les évolutions futures — si un troisième
+type de parent de déploiement apparaît un jour, il suffit d'ajouter un nouveau nom de dossier ici,
+sans repenser la structure. Correspond exactement au champ `deploymentType` (`'docker' | 'raw'`) déjà
+présent dans `sauvegardeTargetSchema` (`applications/sauvegarde/src/domain/config-schema.ts`) —
+`'docker'` → dossier `docker`, `'raw'` → dossier `dimotic-ha-addons` — aucune nouvelle donnée à
+collecter, seulement construire le chemin WebDAV à partir de ce qu'on a déjà (à faire dans
+`NextcloudWebDavClient`, tranche 2, pas encore commencée au moment de cet amendement).
 
 ```
 <racine Nextcloud>/
   <site>/
     <machine>/
-      <répertoire-de-déploiement>/  (ex. dimotic-ha, homeassistant, zigbee2mqtt, modbus2mqtt,
-                                      mqttio-rpigpio [tous /docker/<nom>/ sur la machine],
-                                      teleinfo, arexx-drivers [/dimotic-ha-addons/<nom>/, non-Docker]...)
-        courant.tar.gz
-        mensuel/
-          2026-09.tar.gz
-          2026-08.tar.gz
+      docker/                    (répertoires /docker/<nom>/ sur la machine — deploymentType 'docker')
+        dimotic-ha/
+          courant.tar.gz
+          mensuel/
+            2026-09.tar.gz
+            2026-08.tar.gz
+            ...
+        homeassistant/
+          courant.tar.gz
+          mensuel/...
+        zigbee2mqtt/
+          ...
+      dimotic-ha-addons/         (répertoires /dimotic-ha-addons/<nom>/ — deploymentType 'raw', non-Docker)
+        teleinfo/
+          courant.tar.gz
+          mensuel/...
+        arexx-drivers/
           ...
 ```
 
 Un dossier par site (`stfort`, `noisy`), un sous-dossier par machine (`ha2`, `orangepi`, `stfort`,
-`noisy`, `noisy2`), puis **un sous-dossier par répertoire de déploiement réel** présent sur cette
-machine (Docker ou non, voir ci-dessus) — autant de sous-dossiers que d'instances à couvrir, chacun
-nommé d'après son répertoire d'origine.
+`noisy`, `noisy2`), un sous-dossier `docker/` ou `dimotic-ha-addons/` selon la nature du déploiement,
+puis **un sous-dossier par répertoire de déploiement réel** présent sur cette machine dans ce parent —
+autant de sous-dossiers que d'instances à couvrir, chacun nommé d'après son répertoire d'origine.
 
-**Deux cadences tranchées (16/09/2026), à l'intérieur de chaque dossier `<répertoire-docker>/`** :
+**Deux cadences tranchées (16/09/2026), à l'intérieur de chaque dossier `<répertoire-de-déploiement>/`**
+(inchangé depuis v1.0) :
 
 - **Courant** (`courant.tar.gz` ou nom équivalent fixe) : écrasé à chaque poussée régulière — pas de
   différentiel construit par nous (§3ter), historique fin disponible nativement via les versions
@@ -323,9 +352,9 @@ fichier de plus copié au passage, pas une étape de déploiement séparée à d
 
 ⭐ Décision architecturale (16/09/2026) : une **nouvelle application dimotic-ha**, nommée
 **« Sauvegarde/Restauration »** (⭐ nom tranché, 16/09/2026 — même intitulé que le titre de cette
-spec), suivant le pattern standard des applications existantes (`guide-nouvelle-application_specs`,
-même famille que `teleinfo`/`arexx`/`rpigpio` — config + `targets[]` propres à l'app, pas dans le
-core), responsable de :
+spec), suivant le pattern standard des applications existantes (même famille que `teleinfo`/`arexx`/
+`rpigpio` — config + `targets[]` propres à l'app, pas dans le core ; voir `applications/sauvegarde/`,
+squelette déjà livré le 17/09/2026), responsable de :
 
 - **Configuration** : connexion Nextcloud (URL, référence au mot de passe d'application — voir §3),
   liste des répertoires de déploiement couverts (par site/machine, voir §4).
@@ -371,33 +400,38 @@ tourner dimotic-ha. L'app lit ce qui existe déjà sur Nextcloud, elle ne le pro
 - HA Supervised / réplication d'une instance de secours prête à prendre le relais — écarté pour
   l'instant (voir §5).
 
-## 8. Plan de mise en œuvre (à faire)
+## 8. Plan de mise en œuvre
 
-Décisions de conception prises pour la destination/transport/cadences/portée (§2 à §5bis) et pour le
-rôle de l'application dédiée (§6). Deux chantiers désormais distincts :
+Décisions de conception prises pour la destination/transport/cadences/portée (§2 à §5ter) et pour le
+rôle de l'application dédiée (§6). Deux chantiers distincts :
 
-**A. Création/poussée des sauvegardes (indépendant de dimotic-ha, différé — voir §5)**
+**A. Création/poussée des sauvegardes (indépendant de dimotic-ha, différé — voir §5)** — non commencé.
 1. Confirmer l'accessibilité réseau du Nextcloud via WireGuard depuis chaque machine cible, et
    ajouter les IP/noms nécessaires à `trusted_domains`.
 2. Créer un mot de passe d'application Nextcloud par machine.
 3. Écrire le script générique unique (autonome, marche sans dimotic-ha — RPi1 inclus, tourne au
    niveau de l'hôte, voir §5bis) : détection de changement (§5) + création de l'archive (tar) + test
-   d'intégrité + push WebDAV courant + purge/push mensuel (§4) + vérification du résultat + marqueur
-   de statut local (§5ter) — un seul répertoire de déploiement par appel, réutilisé pour chacun présent
-   sur la machine (HA, dimotic-ha, rpigpio, teleinfo, tout service externe, §4).
+   d'intégrité + push WebDAV courant + purge/push mensuel (§4/§4quater) + vérification du résultat +
+   marqueur de statut local (§5ter) — un seul répertoire de déploiement par appel, réutilisé pour
+   chacun présent sur la machine (HA, dimotic-ha, rpigpio, teleinfo, tout service externe, §4).
 4. Brancher sa copie sur un mécanisme de poussée existant par machine (§5bis — pas de nouveau
    déploiement à construire) et poser le déclenchement (cron hôte) une fois présent.
 
-**B. Application dimotic-ha dédiée (configuration + restauration, §6)**
-5. Nouvelle application « Sauvegarde/Restauration », pattern standard (`guide-nouvelle-application_specs`) :
-   config Nextcloud + `targets[]`, lecture du contenu réel disponible sur Nextcloud (par
-   site/machine/répertoire/date), interface de choix source→cible→date, déclenchement de restauration
-   (téléchargement, arrêt du service concerné, sauvegarde de l'état actuel avant écrasement, extraction,
-   redémarrage, vérification).
+**B. Application dimotic-ha dédiée (configuration + restauration, §6)** — en cours (⭐ 17/09/2026).
+5. ✅ Squelette de l'application « Sauvegarde/Restauration » livré (`applications/sauvegarde/`) :
+   config Nextcloud (URL serveur + utilisateur, chemin WebDAV reconstruit automatiquement) +
+   `targets[]`, import assisté des répertoires depuis le gossip core (`core.targets`/
+   `core.haStackTargets`, voir `SauvegardeService.handleGossipImport`), poussée du mot de passe
+   d'application par SSH sans terminal (`SecretPushService`).
+6. ⬜ Reste à faire : `NextcloudWebDavClient` (lecture réelle du contenu Nextcloud selon
+   l'arborescence §4quater — PROPFIND + GET, construction du chemin à partir de `deploymentType`),
+   séquence de restauration réelle (téléchargement, arrêt du service concerné, sauvegarde de l'état
+   actuel avant écrasement, extraction, redémarrage, vérification), interface de l'assistant de
+   restauration (source→date→destination→confirmation→progression).
 
-**C. Validation**
-6. Documenter/vérifier les nuances par répertoire (base HA potentiellement incohérente §4bis —
+**C. Validation** — non commencée.
+7. Documenter/vérifier les nuances par répertoire (base HA potentiellement incohérente §4bis —
    `PRAGMA integrity_check` avant redémarrage ; `coordinator_backup.json` distinct de `database.db`
    pour zigbee2mqtt — identité réseau du dongle).
-7. Tester une sauvegarde réelle puis une restauration réelle (y compris croisée entre deux machines)
+8. Tester une sauvegarde réelle puis une restauration réelle (y compris croisée entre deux machines)
    sur du matériel de test avant de considérer le mécanisme fiable.

@@ -16,6 +16,19 @@ interface ConfigSection {
 // Sections de configuration techniques
 const configSections: ConfigSection[] = [
   {
+    // ⭐ 17/09/2026 — core.site (label libre du site physique de cette machine, ex. "stfort",
+    // "noisy"), diffusé par TargetGossipService avec les cibles pour que d'autres apps (sauvegarde
+    // notamment) regroupent automatiquement les machines par site sans ressaisie manuelle. Pas de
+    // champ pour machineId : auto-généré, jamais destiné à être édité à la main.
+    id: 'machine',
+    title: 'Site',
+    icon: '🏠',
+    description: 'Site physique où se trouve cette machine — diffusé aux autres machines dimotic-ha par gossip.',
+    fields: [
+      { name: 'core.site', label: 'Site', type: 'text', placeholder: 'stfort', hint: 'Nom libre du site physique (ex. "stfort", "noisy") — vide par défaut, jamais deviné.' }
+    ]
+  },
+  {
     id: 'ha',
     title: 'Web-Services',
     icon: '⚙️',
@@ -318,7 +331,7 @@ export class ConfigForm extends HTMLElement {
     if (name === 'data-section' && oldValue !== newValue) {
       console.log(`[ConfigForm] data-section changé de ${oldValue} à ${newValue}`);
       // Si on change de section statique, réinitialiser le mode module
-      const staticSections = ['ha', 'mqtt', 'web', 'logging', 'applications-manager'];
+      const staticSections = ['machine', 'ha', 'mqtt', 'web', 'logging', 'applications-manager'];
       if (staticSections.includes(newValue)) {
         console.log('[ConfigForm] Réinitialisation du mode module (section statique détectée)');
         this.moduleId = null;
