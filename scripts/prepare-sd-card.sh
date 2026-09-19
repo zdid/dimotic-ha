@@ -3,11 +3,24 @@
 # prepare-sd-card.sh — pré-provisionne une carte SD Raspberry Pi OS fraîchement flashée, AVANT le
 # premier boot, quel que soit le modèle de Pi (1/2/3/4/5) et son architecture (armhf ARMv6/v7 ou
 # arm64) : agrandissement de rootfs à la taille réelle de la carte, accès SSH root (clé dimotic-ha +
-# clé(s) personnelle(s)), optionnellement apt-get update + une liste de paquets, et optionnellement le
-# WiFi de la machine cible — via chroot + émulation QEMU (qemu-user-static), même technique que pi-gen
-# (l'outil officiel de fabrication d'images Raspberry Pi OS). Voir aussi
+# clé(s) personnelle(s)), optionnellement le WiFi de la machine cible et une liste de paquets/apps
+# additionnels — via chroot + émulation QEMU (qemu-user-static), même technique que pi-gen (l'outil
+# officiel de fabrication d'images Raspberry Pi OS). Voir aussi
 # PROCEDURE_preprovisioning-ssh-root-carte-sd_2026-09-05.md (version manuelle, pas-à-pas, non-git,
 # écrite le même jour) pour le détail de chaque étape.
+#
+# ⭐ 18/09/2026 (demande utilisateur) — SYSTÉMATIQUE sur CHAQUE carte, sans option ni case à cocher
+# (même traitement que "SSH root" ci-dessus) :
+#   - Docker CE officiel (script get.docker.com, PAS le paquet apt docker.io, trop ancien).
+#   - Répertoire /docker/dimotic-ha/ pré-rempli (compose.yaml + data/ + logs/ vides) — copié tel quel,
+#     mais SANS lancer `docker compose up` (juste le fichier en place, prêt pour le premier boot).
+#   - Node.js + npm + les paquets npm globaux `serialport`+`mqtt` (voir mémoire "conception app
+#     provisioning" du 08/09 — dépendances "minimum" confirmées par l'utilisateur pour tout script
+#     Node écrit à la main sur une carte, indépendamment des apps dimotic-ha listées via --apps).
+#   - Paquet apt `mosquitto-clients` (mosquitto_pub/mosquitto_sub, utile pour tout diagnostic MQTT
+#     manuel, ce projet tournant entièrement dessus).
+# Ces installs systématiques nécessitent TOUJOURS le chroot+QEMU (voir plus bas), qu'il y ait ou non
+# --packages/--apps/--wifi-ssid.
 #
 # ⭐ 16/09/2026 — WiFi : réutilise `/usr/lib/raspberrypi-sys-mods/imager_custom set_wlan` (déjà
 # présent dans l'image, c'est lui qu'utilise Raspberry Pi Imager pour son option "Configurer le
@@ -22,8 +35,9 @@
 #     [--packages pkg1,pkg2,...] [--hostname <nom>] [--apps app1,app2,...] \
 #     [--wifi-ssid <ssid> --wifi-pass <mot_de_passe> [--wifi-country <FR>]]
 #
-# Exemple (RPi1 teleinfo, avec Node.js + device-agent + node_modules pré-installés) :
-#   sudo ./scripts/prepare-sd-card.sh /dev/sda --key ~/.ssh/id_rsa.pub --packages nodejs --apps teleinfo
+# Exemple (RPi1 teleinfo, device-agent + node_modules pré-installés — Node.js lui-même est
+# systématique désormais, plus besoin de le lister dans --packages) :
+#   sudo ./scripts/prepare-sd-card.sh /dev/sda --key ~/.ssh/id_rsa.pub --apps teleinfo
 #
 # ⭐ 05/09/2026 (demande utilisateur, après avoir constaté en conditions réelles que `npm install`
 # (rpio/serialport, compilation native) pouvait dépasser plusieurs minutes ET le timeout d'inactivité
@@ -158,6 +172,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIMOTIC_KEY_PATH="$SCRIPT_DIR/../data/core/ssh/id_ed25519.pub"
 [ -f "$DIMOTIC_KEY_PATH" ] || { echo "Clé dimotic-ha introuvable: $DIMOTIC_KEY_PATH (l'app a-t-elle déjà démarré au moins une fois ?)" >&2; exit 1; }
 
+# Ajoute un paquet apt à $PACKAGES s'il n'y est pas déjà (dédoublonnage simple par nom exact).
+add_package_if_missing() {
+  case ",$PACKAGES," in
+    *",$1,"*) ;;
+    *) PACKAGES="${PACKAGES:+$PACKAGES,}$1" ;;
+  esac
+}
+
 if [ -n "$APPS" ]; then
   IFS=',' read -ra APPS_ARR <<< "$APPS"
   for app in "${APPS_ARR[@]}"; do
@@ -165,13 +187,14 @@ if [ -n "$APPS" ]; then
     [ -n "$local_dir" ] || { echo "App inconnue de --apps: $app (seule 'teleinfo' est câblée pour l'instant — voir app_local_dir/app_remote_dir en tête de script)" >&2; exit 1; }
     [ -d "$local_dir" ] || { echo "Répertoire device-agent introuvable pour $app: $local_dir" >&2; exit 1; }
   done
-  # node-gyp (rpio/serialport) a besoin d'un compilateur — absent d'une image Lite de base. Ajouté
-  # automatiquement plutôt que de compter sur l'utilisateur pour y penser dans son profil.
-  case ",$PACKAGES," in
-    *,build-essential,*) ;;
-    *) PACKAGES="${PACKAGES:+$PACKAGES,}build-essential" ;;
-  esac
 fi
+
+# ⭐ 18/09/2026 (demande utilisateur) — systématique sur CHAQUE carte, voir en-tête du script.
+# build-essential : node-gyp (rpio/serialport) a besoin d'un compilateur, absent d'une image Lite de
+# base — toujours nécessaire maintenant que serialport est installé globalement (voir plus bas).
+add_package_if_missing build-essential
+add_package_if_missing nodejs
+add_package_if_missing mosquitto-clients
 
 # --- Nom des 2 partitions (bootfs/rootfs) — gère les 2 conventions de nommage (/dev/sda1 vs
 # /dev/mmcblk0p1 pour un lecteur intégré). ---
@@ -317,19 +340,19 @@ if [ -n "$APPS" ]; then
   done
 fi
 
-# --- Paquets apt + apps (optionnels) — nécessitent le chroot+QEMU, exécutés sur CETTE machine
-# (rapide), pas sur le Pi cible (voir TODO.md : apt/npm sur un RPi1 ARMv6 peuvent être extrêmement
-# lents — jusqu'à laisser un process orphelin sur la cible si le timeout d'inactivité du vrai
-# déploiement en ligne est dépassé, constaté en conditions réelles le 05/09/2026). Montages
-# communs aux deux, faits une seule fois. ---
-if [ -n "$PACKAGES" ] || [ -n "$APPS" ] || [ -n "$WIFI_SSID" ]; then
-  echo "Préparation de l'environnement d'émulation ($QEMU_BIN) — copie dans rootfs et montage de /dev, /proc, /sys..."
-  cp "$QEMU_SRC" "$ROOTFS/usr/bin/$QEMU_BIN"
-  for d in dev proc sys; do
-    mountpoint -q "$ROOTFS/$d" || mount --bind "/$d" "$ROOTFS/$d"
-  done
-  echo "Environnement d'émulation prêt — entrée dans le chroot pour les étapes suivantes."
-fi
+# --- Paquets apt + apps + Docker CE + Node.js — nécessitent le chroot+QEMU, exécutés sur CETTE
+# machine (rapide), pas sur le Pi cible (voir TODO.md : apt/npm sur un RPi1 ARMv6 peuvent être
+# extrêmement lents — jusqu'à laisser un process orphelin sur la cible si le timeout d'inactivité du
+# vrai déploiement en ligne est dépassé, constaté en conditions réelles le 05/09/2026).
+# ⭐ 18/09/2026 — désormais TOUJOURS nécessaire (plus conditionné à --packages/--apps/--wifi-ssid) :
+# Docker CE + Node.js/serialport/mqtt sont systématiques (voir en-tête du script). Montages communs à
+# toutes les étapes suivantes, faits une seule fois. ---
+echo "Préparation de l'environnement d'émulation ($QEMU_BIN) — copie dans rootfs et montage de /dev, /proc, /sys..."
+cp "$QEMU_SRC" "$ROOTFS/usr/bin/$QEMU_BIN"
+for d in dev proc sys; do
+  mountpoint -q "$ROOTFS/$d" || mount --bind "/$d" "$ROOTFS/$d"
+done
+echo "Environnement d'émulation prêt — entrée dans le chroot pour les étapes suivantes."
 
 # --- WiFi : réutilise le script OFFICIEL Raspberry Pi imager_custom (déjà présent dans l'image,
 # c'est lui qu'utilise Raspberry Pi Imager pour son option "Configurer le WiFi") plutôt que de
@@ -352,29 +375,51 @@ if [ -n "$PACKAGES" ]; then
     "export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y $PACKAGES_SPACED"
 fi
 
-# ⭐ 05/09/2026 (demande utilisateur) — copie le device-agent de chaque app listée dans l'image ET
-# pré-compile node_modules dans le chroot, pour que le vrai déploiement en ligue (DeployService.ts::
-# ensureNodeModules, `test -d remoteDir/node_modules`) le trouve déjà prêt et saute directement à
-# l'écriture/démarrage du service. npm PAS installé via apt ici non plus — même tarball autonome que
-# DeployService.ts::ensureNode (voir son commentaire détaillé), pour ne pas gonfler l'image avec les
-# ~400 paquets Debian sans rapport (eslint/webpack/git/X11...). Version tenue synchronisée à la main
-# avec NPM_STANDALONE_VERSION dans applications/teleinfo/src/domain/DeployService.ts.
+# ⭐ 18/09/2026 — Node.js/npm désormais systématiques (nodejs ajouté d'office à $PACKAGES ci-dessus,
+# donc déjà installé par l'apt-get install juste au-dessus). npm PAS installé via apt — même tarball
+# autonome que DeployService.ts::ensureNode (voir son commentaire détaillé), pour ne pas gonfler
+# l'image avec les ~400 paquets Debian sans rapport (eslint/webpack/git/X11...). Version tenue
+# synchronisée à la main avec NPM_STANDALONE_VERSION dans
+# applications/teleinfo/src/domain/DeployService.ts.
 NPM_STANDALONE_VERSION="10.8.2"
-if [ -n "$APPS" ]; then
-  # ⭐ bug réel corrigé en conditions réelles (05/09/2026) : `chroot rootfs qemu-arm-static node -v`
-  # échouait ("node introuvable") même juste après un `apt-get install nodejs` réussi — QEMU en mode
-  # utilisateur n'exécute pas de shell, donc ne fait AUCUNE résolution de $PATH ; il attend un CHEMIN
-  # (relatif au chroot) vers l'exécutable. `node -v` sans /bin/bash -c cherchait donc littéralement
-  # "./node" depuis "/", pas "/usr/bin/node". Toutes les commandes chroot+QEMU de ce script DOIVENT
-  # passer par `/bin/bash -c "..."` (comme déjà fait pour apt-get et npm install ci-dessous) — cette
-  # vérification était la seule exception, oubliée.
-  chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "node -v" >/dev/null 2>&1 || { echo "node introuvable dans le chroot — ajouter 'nodejs' à --packages." >&2; exit 1; }
-  chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "npm -v" >/dev/null 2>&1 || {
-    echo "npm absent du chroot — installation autonome (tarball, pas le paquet Debian)..."
-    chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c \
-      "mkdir -p /usr/lib/node_modules/npm && curl -fsSL https://registry.npmjs.org/npm/-/npm-${NPM_STANDALONE_VERSION}.tgz | tar -xz -C /usr/lib/node_modules/npm --strip-components=1 && chmod +x /usr/lib/node_modules/npm/bin/npm-cli.js && ln -sf /usr/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm"
-  }
+# ⭐ bug réel corrigé en conditions réelles (05/09/2026) : `chroot rootfs qemu-arm-static node -v`
+# échouait ("node introuvable") même juste après un `apt-get install nodejs` réussi — QEMU en mode
+# utilisateur n'exécute pas de shell, donc ne fait AUCUNE résolution de $PATH ; il attend un CHEMIN
+# (relatif au chroot) vers l'exécutable. `node -v` sans /bin/bash -c cherchait donc littéralement
+# "./node" depuis "/", pas "/usr/bin/node". Toutes les commandes chroot+QEMU de ce script DOIVENT
+# passer par `/bin/bash -c "..."` (comme déjà fait pour apt-get et npm install ci-dessous) — cette
+# vérification était la seule exception, oubliée.
+chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "node -v" >/dev/null 2>&1 || { echo "node introuvable dans le chroot après apt-get install nodejs — image sans dépôt Node ?" >&2; exit 1; }
+chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "npm -v" >/dev/null 2>&1 || {
+  echo "npm absent du chroot — installation autonome (tarball, pas le paquet Debian)..."
+  chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c \
+    "mkdir -p /usr/lib/node_modules/npm && curl -fsSL https://registry.npmjs.org/npm/-/npm-${NPM_STANDALONE_VERSION}.tgz | tar -xz -C /usr/lib/node_modules/npm --strip-components=1 && chmod +x /usr/lib/node_modules/npm/bin/npm-cli.js && ln -sf /usr/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm"
+}
 
+# ⭐ 18/09/2026 (demande utilisateur) — dépendances npm "minimum" installées globalement, pour que
+# tout script Node écrit à la main sur la carte (pas forcément une app dimotic-ha listée via --apps)
+# puisse `require('serialport')`/`require('mqtt')` sans accès réseau depuis le Pi lui-même. Compilées
+# ici via QEMU sur CETTE machine (rapide), pas sur le Pi cible — même raison de fond que les
+# node_modules pré-installés des apps ci-dessous.
+echo "Installation globale npm : serialport, mqtt..."
+chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "npm install -g serialport mqtt"
+
+# ⭐ 18/09/2026 (demande utilisateur) — Docker CE officiel systématique, PAS le paquet apt docker.io
+# (trop ancien/incomplet). Script officiel get.docker.com, exécuté dans le chroot (donc à la vitesse
+# de CETTE machine).
+echo "Installation de Docker CE (script officiel get.docker.com)..."
+chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "curl -fsSL https://get.docker.com | sh"
+
+# ⭐ 18/09/2026 (demande utilisateur) — /docker/dimotic-ha/ pré-rempli systématiquement (compose.yaml
+# + data/+logs/ vides), copié tel quel depuis compose.deploy.yaml (fichier canonique du dépôt, déjà
+# vérifié identique à la copie en production sur ha2). Simple copie de fichiers sur rootfs, AUCUNE
+# exécution (pas de chroot nécessaire ici) — surtout PAS de `docker compose up` : l'utilisateur
+# démarre lui-même au premier boot, une fois la carte insérée dans le Pi cible.
+echo "Provisionnement de /docker/dimotic-ha/ (compose.yaml, non démarré)..."
+mkdir -p "$ROOTFS/docker/dimotic-ha/data" "$ROOTFS/docker/dimotic-ha/logs"
+cp "$SCRIPT_DIR/../compose.deploy.yaml" "$ROOTFS/docker/dimotic-ha/compose.yaml"
+
+if [ -n "$APPS" ]; then
   for app in "${APPS_ARR[@]}"; do
     local_dir="$(app_local_dir "$app")"
     remote_dir="$(app_remote_dir "$app")"
@@ -387,4 +432,4 @@ if [ -n "$APPS" ]; then
 fi
 
 sync
-echo "Terminé — carte prête (rootfs agrandi, SSH root configuré$( [ -n "$PACKAGES" ] && echo ", paquets installés" )$( [ -n "$APPS" ] && echo ", apps pré-installées: $APPS" )$( [ -n "$WIFI_SSID" ] && echo ", WiFi configuré ($WIFI_SSID)" )). Démontage automatique en sortie de script, puis insérer la carte dans le Pi cible."
+echo "Terminé — carte prête (rootfs agrandi, SSH root configuré, Docker CE installé, /docker/dimotic-ha/ provisionné (non démarré), Node.js+serialport+mqtt installés, paquets: $PACKAGES$( [ -n "$APPS" ] && echo ", apps pré-installées: $APPS" )$( [ -n "$WIFI_SSID" ] && echo ", WiFi configuré ($WIFI_SSID)" )). Démontage automatique en sortie de script, puis insérer la carte dans le Pi cible."
