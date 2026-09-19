@@ -331,7 +331,14 @@ export class DeployService {
       ''
     ].join('\n');
 
-    const writeUnit = await runSsh(target, `tee ${shellQuote(`/etc/systemd/system/${target.serviceName}.service`)} > /dev/null`, unit);
+    // ⭐ 18/09/2026 — écrit DANS le répertoire de déploiement (remoteDir), pas directement dans
+    // /etc/systemd/system/ : un lien symbolique l'y installe juste après. Convention actée en
+    // concevant la restauration de fonctionnelles-sauvegarde_specs (§6ter) — voir
+    // guide-nouvelle-application_specs_v1.11.md : une seule source de vérité par app, sauvegardée
+    // avec le reste (remoteDir est backed up en entier, §4 de la spec sauvegarde), la restauration
+    // n'a qu'à retrouver ce fichier et refaire le même lien, sans nom de service à connaître.
+    const unitPath = `${target.remoteDir}/${target.serviceName}.service`;
+    const writeUnit = await runSsh(target, `tee ${shellQuote(unitPath)} > /dev/null`, unit);
     if (!writeUnit.success) {
       this.logger.error('DeployService', `Échec d'écriture du service systemd sur ${target.host}: ${writeUnit.error}`);
       return { success: false, step: 'write-service', error: writeUnit.error };
@@ -339,7 +346,7 @@ export class DeployService {
 
     const restart = await runSsh(
       target,
-      `systemctl daemon-reload && systemctl enable ${shellQuote(target.serviceName)} && systemctl restart ${shellQuote(target.serviceName)} && sleep 2 && systemctl is-active ${shellQuote(target.serviceName)}`
+      `ln -sf ${shellQuote(unitPath)} ${shellQuote(`/etc/systemd/system/${target.serviceName}.service`)} && systemctl daemon-reload && systemctl enable ${shellQuote(target.serviceName)} && systemctl restart ${shellQuote(target.serviceName)} && sleep 2 && systemctl is-active ${shellQuote(target.serviceName)}`
     );
     if (!restart.success) {
       this.logger.error('DeployService', `Échec de redémarrage de ${target.serviceName} sur ${target.host}: ${restart.error}`);

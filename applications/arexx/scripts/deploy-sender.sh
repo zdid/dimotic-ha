@@ -132,7 +132,7 @@ E${TARGET}
 Ztype==\$q&&id==\$i&&time==\$S&&v==\$v&&rssi==\$r&&missing==\$w
 EOF
 
-  cat > /etc/systemd/system/arexx-sender.service <<EOF
+  cat > "$INSTALL_DIR/arexx-sender.service" <<EOF
 [Unit]
 Description=AREXX sender (rf_usb_http.elf)
 After=network.target
@@ -162,7 +162,7 @@ deploy_tl500() {
 
   echo "$TARGET" > "$INSTALL_DIR/url.txt"
 
-  cat > /etc/systemd/system/arexx-sender.service <<EOF
+  cat > "$INSTALL_DIR/arexx-sender.service" <<EOF
 [Unit]
 Description=AREXX sender (tl-500)
 After=network.target
@@ -182,6 +182,13 @@ if [ "$MODE" = "rf_usb" ]; then
 else
   deploy_tl500
 fi
+
+# ⭐ 18/09/2026 — l'unité vit DANS $INSTALL_DIR (écrite par deploy_rf_usb/deploy_tl500 ci-dessus),
+# pas directement dans /etc/systemd/system/ : un lien symbolique l'y installe. Convention actée en
+# concevant la restauration de fonctionnelles-sauvegarde_specs (§6ter) — voir
+# guide-nouvelle-application_specs_v1.11.md : une seule source de vérité, sauvegardée avec le reste
+# de $INSTALL_DIR, la restauration n'a qu'à retrouver ce fichier et refaire le même lien.
+ln -sf "$INSTALL_DIR/arexx-sender.service" /etc/systemd/system/arexx-sender.service
 
 systemctl daemon-reload
 systemctl enable --now arexx-sender.service
