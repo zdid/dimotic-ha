@@ -317,6 +317,9 @@ export class ModuleManager {
     if (field.type === 'button') {
       return this.generateButtonFieldHtml(field, moduleId);
     }
+    if (field.type === 'preview') {
+      return this.generatePreviewFieldHtml(field, moduleId);
+    }
 
     const fieldName = field.name;
     const resolved = this.getNestedValue(config, fieldName);
@@ -466,6 +469,27 @@ export class ModuleManager {
   }
 
   /**
+   * Génère le HTML d'un champ de type 'preview' (⭐ 17/09/2026) — lecture seule, recalculé en
+   * direct pendant la saisie des champs listés dans `field.previewOf` (voir ConfigForm.
+   * setupFormListeners(), qui pose les écouteurs `input` réels et appelle computePreview()). Pas
+   * de wrapper Alpine ici : les champs surveillés sont eux-mêmes de simples inputs data-field
+   * classiques, pas des champs d'un tableau 'array'.
+   */
+  private generatePreviewFieldHtml(field: ConfigField, moduleId: string): string {
+    const id = `field-${moduleId}-${field.name.replace(/\./g, '-')}`;
+    return `
+      <div class="form-group" id="${id}">
+        <label>${field.label}</label>
+        <code class="field-preview" id="${id}-value"
+              data-preview-module="${moduleId}"
+              data-preview-of="${this.escapeHtmlAttr((field.previewOf || []).join(','))}"
+              data-preview-formula="${this.escapeHtmlAttr(field.previewFormula || '')}"></code>
+        ${field.hint ? '<div class="field-hint">' + field.hint + '</div>' : ''}
+      </div>
+    `;
+  }
+
+  /**
    * Génère le HTML d'un champ de type 'array' — liste avec ajout/suppression dynamique, rendue
    * entièrement par Alpine (x-for/x-model), pas par le système data-field/addEventListener des
    * autres types. `items` est un état Alpine local (x-data), initialisé une fois avec la valeur
@@ -493,15 +517,113 @@ export class ModuleManager {
     const itemsJson = this.escapeHtmlAttr(JSON.stringify(items));
     const defaultItemJson = this.escapeHtmlAttr(JSON.stringify(this.buildDefaultArrayItem(itemFields)));
     const itemFieldsHtml = itemFields.map(f => this.generateArrayItemFieldHtml(f)).join('');
+    const secretPush = field.secretPush;
+
+    // ⭐ 17/09/2026 — `field.hiddenIdFrom` (ex: ['site','machine']) : pas de champ 'id' visible
+    // dans `itemFields`, dérivé automatiquement à la place. Le garde `if (!item.id)` est ce qui
+    // rend ce calcul "une seule fois" plutôt que continûment réactif : Alpine ne retrace les
+    // dépendances d'un x-effect qu'à partir de ce qui est réellement LU à la dernière exécution —
+    // une fois `item.id` non vide, seule la lecture de `item.id` (la condition) est enregistrée,
+    // donc un futur changement de site/machine ne redéclenche plus rien. Une ligne déjà persistée
+    // (chargée avec un id existant, même selon une ancienne convention) n'est donc jamais réécrite.
+    const hiddenIdFrom = field.hiddenIdFrom;
+    const hiddenIdEffectAttr = hiddenIdFrom && hiddenIdFrom.length > 0
+      ? ` x-effect="if (!item.id) { item.id = [${hiddenIdFrom.map(f => `item.${f}`).join(', ')}].map(v => String(v||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')).join('-') }"`
+      : '';
+
+    // ⭐ 17/09/2026 — état/méthode Alpine additionnels, uniquement si `field.secretPush` est
+    // déclaré (ex: SAUVEGARDE_UI_METADATA `targets`). `passwords`/`pushErrors`/`pushingIds` sont
+    // volontairement des clés SÉPARÉES de `items` (jamais posées sur un `item` lui-même) : le seul
+    // `x-effect` du composant republie tout changement d'`items` vers moduleConfigs (donc vers un
+    // éventuel envoi par le bouton "Sauvegarder" global) — un mot de passe posé sur `item` fuirait
+    // dans ce payload dès la frappe, avant même d'être poussé. `item.<statusField> = true` en
+    // revanche est un vrai champ persistant de l'élément (comme site/machine/host) : le mettre à
+    // jour ici donne un retour visuel immédiat sans attendre un rechargement — le serveur a de
+    // toute façon déjà persisté ce même champ de son côté (voir SauvegardeService.handleSecretPush).
+    const secretPushStateJs = secretPush ? `,
+      passwords: {},
+      pushErrors: {},
+      pushingIds: [],
+      async pushSecret(item) {
+        const targetId = item.id;
+        const appPassword = this.passwords[targetId] || '';
+        if (!appPassword) { this.pushErrors[targetId] = 'Mot de passe manquant.'; return; }
+        this.pushErrors[targetId] = '';
+        this.pushingIds.push(targetId);
+        const result = await window.app.moduleManager.pushArraySecret('${this.escapeJsString(secretPush.action)}', targetId, appPassword);
+        this.pushingIds = this.pushingIds.filter(id => id !== targetId);
+        if (result.success) {
+          item.${secretPush.statusField} = true;
+          this.passwords[targetId] = '';
+        } else {
+          this.pushErrors[targetId] = result.error || 'Échec de la poussée.';
+        }
+      }` : '';
+
+    const secretPushItemHtml = secretPush ? `
+      <div class="config-array-item-secret">
+        <input type="password" x-model="passwords[item.id]"
+               placeholder="${this.escapeHtmlAttr(secretPush.passwordPlaceholder || 'Mot de passe')}"
+               autocomplete="new-password" />
+        <button type="button" class="btn btn-secondary btn-small" :disabled="pushingIds.includes(item.id)" @click="pushSecret(item)">
+          <span x-text="pushingIds.includes(item.id) ? 'Envoi...' : '${this.escapeJsString(secretPush.pushButtonLabel || '📤 Pousser')}'"></span>
+        </button>
+        <span class="secret-tag" :class="item.${secretPush.statusField} ? 'secret-tag-deployed' : 'secret-tag-pending'"
+              x-text="item.${secretPush.statusField} ? '${this.escapeJsString(secretPush.deployedLabel || '✅ Déployé')}' : '${this.escapeJsString(secretPush.pendingLabel || '⏳ En attente')}'"></span>
+        <div class="field-feedback" x-show="pushErrors[item.id]" x-text="pushErrors[item.id]"></div>
+      </div>
+    ` : '';
+
+    // ⭐ 18/09/2026 — `field.rowActions` (ex: « Lancer une sauvegarde maintenant ») : mêmes
+    // conventions que `secretPush` (Promise via ModuleManager, état keyé par item.id) mais sans
+    // mot de passe — juste `{ targetId }` en payload. `runningKeys` est un TABLEAU (`.includes()`),
+    // pas un dictionnaire à clés dynamiques : un dictionnaire (`runningActions[action+':'+id]`)
+    // produisait un bouton bloqué "disabled" dès le tout premier rendu (avant même un clic) — reproduit
+    // en direct (Alpine 3.15.12), non résolu en profondeur, mais `pushingIds.includes(item.id)`
+    // ci-dessus n'a jamais eu ce problème avec exactement le même genre d'état initial vide ; reprendre
+    // ce même schéma (tableau + `.includes()`) plutôt que creuser plus loin la cause exacte côté Alpine.
+    // `actionErrors` reste un dictionnaire (lecture simple par clé, jamais dans une expression
+    // `:disabled`/`x-show` combinée à un `.includes()` sur tableau — jamais vu poser ce problème).
+    const rowActions = field.rowActions || [];
+    const rowActionsStateJs = rowActions.length > 0 ? `,
+      runningKeys: [],
+      actionErrors: {},
+      async runRowAction(item, action) {
+        const targetId = item.id;
+        const key = action + ':' + targetId;
+        this.actionErrors[key] = '';
+        this.runningKeys.push(key);
+        const result = await window.app.moduleManager.triggerArrayRowAction(action, targetId);
+        this.runningKeys = this.runningKeys.filter(k => k !== key);
+        if (!result.success) {
+          this.actionErrors[key] = result.error || 'Échec.';
+        }
+      }` : '';
+
+    const rowActionsHtml = rowActions.length > 0 ? `
+      <div class="config-array-item-row-actions">
+        ${rowActions.map(a => `
+        <div class="config-array-item-row-action">
+          <button type="button" class="btn btn-secondary btn-small"
+                  :disabled="runningKeys.includes(${this.jsStringLiteral(a.action)} + ':' + item.id)"
+                  ${a.confirm ? `onclick="return confirm(${this.jsStringLiteral(a.confirm)})"` : ''}
+                  @click="runRowAction(item, ${this.jsStringLiteral(a.action)})">
+            <span x-text="runningKeys.includes(${this.jsStringLiteral(a.action)} + ':' + item.id) ? 'En cours...' : ${this.jsStringLiteral(a.label)}"></span>
+          </button>
+          <div class="field-feedback" x-show="actionErrors[${this.jsStringLiteral(a.action)} + ':' + item.id]"
+               x-text="actionErrors[${this.jsStringLiteral(a.action)} + ':' + item.id]"></div>
+        </div>`).join('')}
+      </div>
+    ` : '';
 
     return `
       <div class="form-group config-array" id="${id}"
-           x-data="{ items: ${itemsJson} }"
+           x-data="{ items: ${itemsJson}${secretPushStateJs}${rowActionsStateJs} }"
            x-effect="window.app.moduleManager.setModuleFieldRaw('${moduleId}', '${fieldName}', JSON.parse(JSON.stringify(items)))">
         <label>${field.label}</label>
         ${field.hint ? `<div class="field-hint">${field.hint}</div>` : ''}
         <template x-for="(item, index) in items" :key="index">
-          <div class="config-array-item">
+          <div class="config-array-item"${hiddenIdEffectAttr}>
             <div class="config-array-item-header">
               <span x-text="'${itemLabel} ' + (index + 1)"></span>
               <button type="button" class="btn btn-secondary btn-small"
@@ -510,6 +632,8 @@ export class ModuleManager {
               </button>
             </div>
             <div class="config-grid">${itemFieldsHtml}</div>
+            ${secretPushItemHtml}
+            ${rowActionsHtml}
           </div>
         </template>
         <button type="button" class="btn btn-secondary" @click="items.push(${defaultItemJson})">
@@ -517,6 +641,46 @@ export class ModuleManager {
         </button>
       </div>
     `;
+  }
+
+  /**
+   * Pousse un secret pour UN élément d'un champ 'array' (ex: mot de passe Nextcloud par machine,
+   * voir `secretPush` sur `ConfigField`) — Promise-based, pas de callback comme triggerAction(),
+   * car appelé via `await` depuis la méthode Alpine `pushSecret()` générée par
+   * generateArrayFieldHtml(), qui a besoin du résultat pour mettre à jour son propre état réactif
+   * (item.<statusField>, pushingIds, pushErrors) sans dupliquer cette logique ici. `targetId` dans
+   * le résultat (plutôt qu'un simple success/error comme triggerAction()) : plusieurs lignes
+   * peuvent pousser en parallèle, chacune doit reconnaître SA propre réponse.
+   */
+  pushArraySecret(action: string, targetId: string, appPassword: string): Promise<{ success: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      const resultEvent = `${action}:result`;
+      const onResult = (result: { targetId?: string; success?: boolean; error?: string } = {}) => {
+        if (result.targetId !== targetId) return;
+        this.socket.off(resultEvent, onResult);
+        resolve({ success: !!result.success, error: result.error });
+      };
+      this.socket.on(resultEvent, onResult);
+      this.socket.emit(action, { targetId, appPassword });
+    });
+  }
+
+  /**
+   * Déclenche une action générique pour UN élément d'un champ 'array' (ex: « Lancer une sauvegarde
+   * maintenant », voir `rowActions` sur `ConfigField`) — même principe que pushArraySecret() mais
+   * sans mot de passe : le payload émis est juste `{ targetId }`.
+   */
+  triggerArrayRowAction(action: string, targetId: string): Promise<{ success: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      const resultEvent = `${action}:result`;
+      const onResult = (result: { targetId?: string; success?: boolean; error?: string } = {}) => {
+        if (result.targetId !== targetId) return;
+        this.socket.off(resultEvent, onResult);
+        resolve({ success: !!result.success, error: result.error });
+      };
+      this.socket.on(resultEvent, onResult);
+      this.socket.emit(action, { targetId });
+    });
   }
 
   /**
@@ -592,6 +756,19 @@ export class ModuleManager {
   /** Échappe une chaîne pour un usage sûr comme valeur d'attribut HTML entre guillemets doubles. */
   private escapeHtmlAttr(text: string): string {
     return text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  }
+
+  /** Échappe une chaîne pour un usage sûr comme littéral JS entre guillemets simples, dans une
+   *  expression Alpine inline (ex: x-text="'...'") — labels statiques fournis par l'app, pas une
+   *  frontière de confiance réelle, juste une garde contre une apostrophe qui casserait la syntaxe. */
+  private escapeJsString(text: string): string {
+    return text.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  }
+
+  /** Comme escapeJsString(), mais renvoie un littéral JS complet (guillemets simples inclus) — pour
+   *  embarquer une valeur directement dans une expression Alpine (x-text, :disabled...). */
+  private jsStringLiteral(text: string): string {
+    return `'${this.escapeJsString(text)}'`;
   }
 
   /**

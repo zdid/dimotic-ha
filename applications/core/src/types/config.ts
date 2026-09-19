@@ -19,7 +19,7 @@ export type ModuleConfig = Record<string, unknown>;
 export interface ConfigField {
   name: string;                    // Nom du champ (ex: 'serialPort', 'mqtt.host')
   label: string;                   // Label à afficher
-  type: 'text' | 'string' | 'number' | 'boolean' | 'select' | 'password' | 'string-array' | 'array' | 'button';
+  type: 'text' | 'string' | 'number' | 'boolean' | 'select' | 'password' | 'string-array' | 'array' | 'button' | 'preview';
   placeholder?: string;
   hint?: string;                   // Texte d'aide
   description?: string;            // Description détaillée
@@ -44,6 +44,44 @@ export interface ConfigField {
   itemFields?: ConfigField[];
   itemLabel?: string;
   minItems?: number;
+  // ⭐ 17/09/2026, uniquement pour type: 'array' — active un contrôle de poussée de secret par SSH
+  // par élément (mot de passe + bouton + tag persistant), affiché à côté des champs de l'élément
+  // dans chaque ligne (voir ModuleManager.generateArrayFieldHtml()). Même convention que 'button' :
+  // le serveur répond sur `${secretPush.action}:result` avec `{ targetId, success, error? }` —
+  // `targetId` doit correspondre à `item.id`. `statusField` est un booléen déjà présent dans
+  // chaque élément (ex: 'secretDeployed'), mis à jour côté client dès un push réussi pour un retour
+  // visuel immédiat — le serveur a de toute façon déjà persisté ce champ lui-même de son côté.
+  secretPush?: {
+    action: string;
+    statusField: string;
+    passwordPlaceholder?: string;
+    pushButtonLabel?: string;
+    deployedLabel?: string;
+    pendingLabel?: string;
+  };
+  // ⭐ 17/09/2026, uniquement pour type: 'array' — quand présent, aucun champ 'id' n'est rendu (pas
+  // d'entrée correspondante dans `itemFields`) : l'id de chaque élément est dérivé de la liste de
+  // sous-champs listés ici (ex: ['site', 'machine']), UNE SEULE FOIS, tant que `item.id` est vide —
+  // ne réécrase jamais un id déjà présent (chargé depuis la config existante), pour ne jamais faire
+  // diverger une ligne déjà persistée. Voir ModuleManager.generateArrayFieldHtml().
+  hiddenIdFrom?: string[];
+  // ⭐ 18/09/2026, uniquement pour type: 'array' — un ou plusieurs boutons d'action génériques par
+  // ligne (ex: « Lancer une sauvegarde maintenant »), indépendants de `secretPush` (pas de mot de
+  // passe à saisir, juste un déclenchement). Émet `action` avec `{ targetId: item.id }`, écoute
+  // `${action}:result` avec `{ targetId, success, error? }` — même convention que `secretPush`.
+  rowActions?: {
+    action: string;
+    label: string;
+    confirm?: string;
+  }[];
+  // ⭐ 17/09/2026, uniquement pour type: 'preview' — champ en lecture seule recalculé en direct
+  // pendant la saisie d'autres champs du même module (voir ConfigForm.setupFormListeners()).
+  // `previewOf` liste les noms de champs source (mêmes noms que leurs propres `name`) ;
+  // `previewFormula` désigne une formule nommée dans le petit registre de ConfigForm
+  // (`computePreview()`) — volontairement pas un moteur de template générique, juste un nom de
+  // formule connue par le composant partagé, à étendre au cas par cas si un futur besoin apparaît.
+  previewOf?: string[];
+  previewFormula?: string;
 }
 
 /**

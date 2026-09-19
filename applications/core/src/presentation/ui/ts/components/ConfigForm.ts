@@ -121,7 +121,16 @@ const createTemplate = (): HTMLTemplateElement => {
         gap: 20px;
         max-width: 1200px;
       }
-      
+
+      /* Un champ 'array' (ex: liste de machines) occupe toute la largeur de la grille plutôt que
+       * de partager une ligne avec le champ voisin (ex: le bouton d'import gossip) — sans ça, les
+       * deux se retrouvaient côte à côte au hasard du flux de la grille au lieu du bouton
+       * au-dessus de la liste (⭐ 17/09/2026, demande explicite : "il faut que le bouton soit
+       * au-dessus de la liste des machines"). */
+      .config-array {
+        grid-column: 1 / -1;
+      }
+
       .form-group {
         margin-bottom: 15px;
       }
@@ -200,7 +209,21 @@ const createTemplate = (): HTMLTemplateElement => {
         color: #bdc3c7;
         margin-top: 5px;
       }
-      
+
+      /* Champ type 'preview' (⭐ 17/09/2026) — voir ModuleManager.generatePreviewFieldHtml/
+       * ConfigForm.computePreview */
+      .field-preview {
+        display: block;
+        font-family: monospace;
+        font-size: 0.85rem;
+        word-break: break-all;
+        color: #ecf0f1;
+        background: #34495e;
+        padding: 8px 12px;
+        border-radius: 4px;
+        min-height: 1.2em;
+      }
+
       .field-feedback {
         font-size: 0.8rem;
         color: #e74c3c;
@@ -252,6 +275,106 @@ const createTemplate = (): HTMLTemplateElement => {
       .btn-secondary:disabled {
         background-color: #bdc3c7;
         cursor: not-allowed;
+      }
+
+      .btn-small {
+        padding: 4px 10px;
+        font-size: 0.8rem;
+      }
+
+      /* Champ type 'array' (config-array-item*) et type 'button' (form-group-button/
+       * field-action-result) — générés par ModuleManager dans ce même Shadow DOM, mais ces règles
+       * vivaient jusqu'ici uniquement dans styles/config-form.css, chargé par index.html : un
+       * <link> de la page hôte ne pénètre jamais un Shadow DOM (pas de <link>/adoptedStyleSheets
+       * partagé ici), donc ces classes s'affichaient sans style depuis leur introduction — bug
+       * constaté en reprenant ce fichier le 17/09/2026 pour y ajouter .config-array-item-secret/
+       * .secret-tag* ci-dessous (mêmes symptômes attendus si postées au mauvais endroit). Copie
+       * fonctionnelle ici ; la version dans styles/config-form.css n'est pas retirée (portée hors
+       * Shadow DOM non auditée, pas de risque à la laisser). */
+      .config-array-item {
+        border: 1px solid #444;
+        border-radius: 4px;
+        padding: 12px;
+        margin: 8px 0;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .config-array-item-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+        font-weight: 500;
+        color: #bdc3c7;
+      }
+
+      .form-group-button {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .field-action-result {
+        font-size: 0.85rem;
+      }
+
+      .field-action-result.success {
+        color: #2ecc71;
+      }
+
+      .field-action-result.error {
+        color: #e74c3c;
+      }
+
+      /* Liste des machines avec poussée du mot de passe Nextcloud (⭐ 17/09/2026, ConfigField
+       * secretPush — voir ModuleManager.generateArrayFieldHtml) */
+      .config-array-item-secret {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid #444;
+      }
+
+      .config-array-item-secret input[type="password"] {
+        flex: 1;
+        min-width: 160px;
+      }
+
+      .secret-tag {
+        padding: 3px 9px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        white-space: nowrap;
+      }
+
+      .secret-tag-deployed {
+        background: #2ecc71;
+        color: white;
+      }
+
+      .secret-tag-pending {
+        background: #34495e;
+        color: #bdc3c7;
+        border: 1px solid #444;
+      }
+
+      /* Boutons d'action génériques par ligne d'un champ 'array' (⭐ 18/09/2026, ConfigField
+       * rowActions — ex: « Lancer une sauvegarde maintenant ») */
+      .config-array-item-row-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+
+      .config-array-item-row-action {
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
 
       .section-actions-danger {
@@ -723,8 +846,43 @@ export class ConfigForm extends HTMLElement {
         });
       }
     });
+
+    // Champs type 'preview' (⭐ 17/09/2026, ModuleManager.generatePreviewFieldHtml) — recalculés en
+    // direct à partir des champs listés dans data-preview-of, tous du même module (data-preview-
+    // module). Posé APRÈS la boucle ci-dessus : les inputs surveillés existent déjà à ce point,
+    // wiring purement additif (n'interfère pas avec les écouteurs déjà posés sur ces mêmes inputs).
+    this.shadowRoot!.querySelectorAll<HTMLElement>('[data-preview-of]').forEach(previewEl => {
+      const module = previewEl.getAttribute('data-preview-module') || '';
+      const sourceFields = (previewEl.getAttribute('data-preview-of') || '').split(',').filter(Boolean);
+      const formula = previewEl.getAttribute('data-preview-formula') || '';
+      const sourceInputs = sourceFields.map(f =>
+        this.shadowRoot!.querySelector<HTMLInputElement>(`[data-module="${module}"][data-field="${f}"]`)
+      );
+
+      const recompute = () => {
+        const values = sourceInputs.map(input => input?.value ?? '');
+        previewEl.textContent = this.computePreview(formula, values);
+      };
+      sourceInputs.forEach(input => input?.addEventListener('input', recompute));
+      recompute();
+    });
   }
-  
+
+  /**
+   * Petit registre de formules nommées pour les champs type 'preview' (⭐ 17/09/2026) —
+   * volontairement pas un moteur de template générique, juste ce qu'il faut pour ce cas et les
+   * suivants du même genre : ajouter une entrée ici plutôt que construire un DSL pour un besoin
+   * qui n'existe encore qu'une fois.
+   */
+  private computePreview(formula: string, values: string[]): string {
+    if (formula === 'nextcloudWebdavUrl') {
+      const [serverUrl, user] = values;
+      if (!serverUrl || !user) return '';
+      return `${serverUrl.replace(/\/+$/, '')}/remote.php/dav/files/${encodeURIComponent(user)}`;
+    }
+    return '';
+  }
+
   private handleFieldChange(event: Event, field: string): void {
     const target = event.target as HTMLInputElement | HTMLSelectElement;
     let value: any;

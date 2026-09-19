@@ -51,7 +51,7 @@ export interface ConfigFieldGroup {
 export interface ConfigField {
   name: string;
   label: string;
-  type: 'text' | 'string' | 'number' | 'boolean' | 'select' | 'password' | 'array' | 'button';
+  type: 'text' | 'string' | 'number' | 'boolean' | 'select' | 'password' | 'array' | 'button' | 'preview';
   default?: any;
   placeholder?: string;
   required?: boolean;
@@ -73,6 +73,28 @@ export interface ConfigField {
   itemFields?: ConfigField[];
   itemLabel?: string;
   minItems?: number;
+  // Uniquement pour type: 'array' — voir types/config.ts (copie côté navigateur, même convention
+  // `${secretPush.action}:result` que 'button').
+  secretPush?: {
+    action: string;
+    statusField: string;
+    passwordPlaceholder?: string;
+    pushButtonLabel?: string;
+    deployedLabel?: string;
+    pendingLabel?: string;
+  };
+  // Uniquement pour type: 'array' — voir types/config.ts (dérivation d'id une seule fois, jamais
+  // réécrasée).
+  hiddenIdFrom?: string[];
+  // Uniquement pour type: 'array' — voir types/config.ts (boutons d'action génériques par ligne).
+  rowActions?: {
+    action: string;
+    label: string;
+    confirm?: string;
+  }[];
+  // Uniquement pour type: 'preview' — voir types/config.ts (ConfigForm.computePreview()).
+  previewOf?: string[];
+  previewFormula?: string;
 }
 
 /** Vrai si l'élément est un groupe de champs plutôt qu'un champ isolé. */
