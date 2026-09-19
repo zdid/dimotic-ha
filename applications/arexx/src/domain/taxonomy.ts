@@ -53,6 +53,26 @@ export function extractTaxonomy(fullName: string): ExtractedTaxonomy {
   };
 }
 
+export function capitalize(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
+/**
+ * Nom de device HA : quoi + lieu précis + lieu, en toutes lettres. Contrairement à RFXCOM (un seul
+ * device par capteur physique), température et humidité du même capteur AREXX deviennent deux
+ * devices HA distincts (`SensorRegistry.handleReading` suffixe `_rh` sur l'uniqueId côté humidité) —
+ * sans le quoi en préfixe, les deux se retrouveraient affichés à l'identique (ex: "Chambre" pour les
+ * deux). Même patron que `rfxcom/domain/taxonomy.ts::buildBoutonDisplayName`.
+ */
+export function buildDisplayName(t: ExtractedTaxonomy): string {
+  const parts = [t.rawQuoi];
+  if (t.nomPrecis) parts.push(t.nomPrecis);
+  if (t.nomLieu && t.nomLieu !== t.nomPrecis) parts.push(t.nomLieu);
+  return parts.map(capitalize).join(' ');
+}
+
 /** Construit le bloc `attributs_taxonomie` porté par l'état MQTT (json_attributes_topic). */
 export function buildAttributsTaxonomie(t: ExtractedTaxonomy): Record<string, string | null> {
   return {

@@ -18,7 +18,7 @@ import type { ArexxSensorsConfigFile } from './devices-config-schema';
 import type { ArexxRawReading, ArexxSensorInfo, ArexxStatus } from './types';
 import { SensorRegistry } from './SensorRegistry';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
-import { extractTaxonomy, buildAttributsTaxonomie } from './taxonomy';
+import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName } from './taxonomy';
 import { PushReceiver } from './acquisition/PushReceiver';
 import { PollClient } from './acquisition/PollClient';
 import { UsbBridge } from './acquisition/UsbBridge';
@@ -202,7 +202,11 @@ export class ArexxService implements IArexxService {
     const { deviceClass, unit } = this.getComponentForKind(sensor.kind);
 
     const essential: EssentialEntityData = {
-      name: taxonomy.rawQuoi,
+      // null — le device.name ci-dessous (buildDisplayName) inclut déjà le quoi, comme pour les
+      // "boutons" RFXCOM (voir RfxComService.ts::publishDeviceDiscovery) : sans ça, HA concatène
+      // device.name + entity.name (has_entity_name) et produit un doublon ("Température Chambre
+      // Température").
+      name: null,
       deviceClass,
       unitOfMeasurement: unit,
       // Sans ça, HA compare l'état au JSON complet du topic d'état au lieu d'en extraire `state`
@@ -212,7 +216,9 @@ export class ArexxService implements IArexxService {
       attributsTaxonomie: buildAttributsTaxonomie(taxonomy),
       device: {
         identifiers: [sensor.uniqueId],
-        name: `AREXX ${sensor.kind}`,
+        // Nom dérivé du lieu (quoi + lieu précis + lieu), plutôt que "AREXX temperature/humidity"
+        // générique et identique pour tous les capteurs quel que soit leur emplacement.
+        name: buildDisplayName(taxonomy),
         manufacturer: 'AREXX',
         model: 'BS1000/BS500',
         suggested_area: taxonomy.nomLieu ?? undefined
