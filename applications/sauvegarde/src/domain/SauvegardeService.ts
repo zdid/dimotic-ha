@@ -2,15 +2,21 @@
  * SauvegardeService
  *
  * Orchestrateur de l'application Sauvegarde/Restauration. Pour l'instant (tranche 1 du plan
- * d'implémentation) : chargement/rechargement de la config, statut, rien de Nextcloud/restauration
- * encore — voir specs/current/fonctionnelles-sauvegarde_specs_v1.0.md §6/§6bis.
+ * d'implémentation) : chargement/rechargement de la config, statut, import gossip, poussée du secret
+ * par SSH — rien de Nextcloud/restauration encore, voir specs/current/fonctionnelles-sauvegarde_specs_v1.3.md §6/§6bis.
  */
 
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
-import { CorrelatedRequester } from '../../../core/dist/exports';
-import { sauvegardeConfigSchema, type SauvegardeConfig, type SauvegardeTargetConfig } from './config-schema';
+import { CorrelatedRequester, runSsh, ensureGlobalSshKey } from '../../../core/dist/exports';
+import { sauvegardeConfigSchema, SECRET_FILE_PATH, deriveTargetId, type SauvegardeConfig, type SauvegardeTargetConfig } from './config-schema';
 import type { SauvegardeStatus, GossipImportResult } from './types';
 import { SecretPushService } from './SecretPushService';
+import { ScriptPushService } from './ScriptPushService';
+import { BACKUP_SCRIPT_REMOTE_PATH } from './BackupScript';
+
+/** Une exécution manuelle (tar + push WebDAV) peut prendre largement plus que le timeout SSH par
+ *  défaut (30s) selon la taille de /docker sur la machine — 5 minutes de marge. */
+const BACKUP_RUN_TIMEOUT_MS = 300000;
 
 const MODULE_NAME = 'sauvegarde';
 
@@ -40,6 +46,7 @@ export interface ISauvegardeService {
 export class SauvegardeService implements ISauvegardeService {
   private config: SauvegardeConfig;
   private readonly secretPushService = new SecretPushService();
+  private readonly scriptPushService = new ScriptPushService();
   private readonly gossipRequester: CorrelatedRequester<{}, GossipTargetsReply>;
 
   constructor(
@@ -83,8 +90,7 @@ export class SauvegardeService implements ISauvegardeService {
     return {
       nextcloudConfigured: Boolean(serverUrl && user),
       webdavUrl: serverUrl && user ? `${serverUrl.replace(/\/+$/, '')}/remote.php/dav/files/${encodeURIComponent(user)}` : '',
-      targetsCount: this.config.targets.length,
-      targets: this.config.targets.map((t) => ({ id: t.id, site: t.site, machine: t.machine, host: t.host }))
+      targetsCount: this.config.targets.length
     };
   }
 
@@ -116,65 +122,38 @@ export class SauvegardeService implements ISauvegardeService {
         this.logger.error('SauvegardeService', `Échec de l'import gossip: ${error}`);
       });
     });
+
+    this.eventBus.onGeneric<{ targetId: string }>('sauvegarde:backup:run', (data) => {
+      this.handleBackupRunNow(data.targetId).catch((error) => {
+        this.logger.error('SauvegardeService', `Échec du déclenchement manuel (${data.targetId}): ${error}`);
+      });
+    });
   }
 
   /**
-   * Import assisté (pas automatique/silencieux) des répertoires « dimotic-ha » et « HA » déjà
-   * connus par gossip (core.targets/core.haStackTargets) — demande explicite de l'utilisateur du
-   * 17/09/2026, via CorrelatedRequester (même mécanisme que ia↔planificateur). N'écrase jamais une
-   * entrée déjà présente, n'ajoute que ce qui manque vraiment.
-   *
-   * ⭐ Déduplication par CONTENU (host + deploymentDir), pas par id généré — bug réel constaté en
-   * direct : l'utilisateur renomme systématiquement les id à l'import (identifiants lisibles
-   * plutôt que `gossip-dimotic-noisy2::noisy`), donc un id généré ne correspond plus jamais à ce
-   * qui est déjà là et tout se réimportait en double à chaque clic. Le couple host+deploymentDir,
-   * lui, reste stable même après renommage de l'id/machine/site par l'utilisateur.
+   * Import assisté (pas automatique/silencieux) des machines déjà connues par gossip
+   * (core.targets/core.haStackTargets) — demande explicite de l'utilisateur du 17/09/2026, via
+   * CorrelatedRequester (même mécanisme que ia↔planificateur). N'écrase jamais une entrée déjà
+   * présente (voir mergeAndSaveTargets). ⭐ Simplifié une TROISIÈME fois (17/09/2026) : une seule
+   * ligne par machine, point — plus de `deploymentType` du tout, voir le commentaire de
+   * `sauvegardeTargetSchema` (le futur script hôte sauvegarde les deux arborescences et saute
+   * celle qui n'existe pas).
    */
   private async handleGossipImport(): Promise<void> {
     try {
       const reply = await this.gossipRequester.request({}, 5000);
-      const existingKeys = new Set(this.config.targets.map((t) => `${t.host}::${t.deploymentDir}`));
-      const suggestions: SauvegardeTargetConfig[] = [];
-
-      const tryAdd = (host: string, deploymentDir: string, unitName: string, destinationPath: string, machine: string, site: string) => {
-        const key = `${host}::${deploymentDir}`;
-        if (!host || existingKeys.has(key)) return;
-        existingKeys.add(key); // évite aussi les doublons ENTRE eux si core.targets/haStackTargets se recoupent
-        suggestions.push({
-          id: `gossip-${deploymentDir}-${suggestions.length}-${Date.now().toString(36)}`,
-          site, machine, host, deploymentDir, deploymentType: 'docker', unitName, destinationPath
-        });
-      };
-
-      for (const t of reply.targets) {
-        const deploymentDir = t.remoteDir.split('/').filter(Boolean).pop() || t.remoteDir;
-        tryAdd(t.host, deploymentDir, deploymentDir, t.remoteDir, t.id, t.site || '');
+      const byHost = new Map<string, GossipRawTarget>();
+      for (const t of [...reply.targets, ...reply.haStackTargets]) {
+        if (t.host) byHost.set(t.host, t);
       }
 
-      for (const t of reply.haStackTargets) {
-        // remoteDir = dossier PARENT (/docker) — HA vit dans <remoteDir>/homeassistant, voir
-        // haStackTargetSchema côté core.
-        const destinationPath = `${t.remoteDir.replace(/\/+$/, '')}/homeassistant`;
-        tryAdd(t.host, 'homeassistant', 'homeassistant', destinationPath, t.id, t.site || '');
-      }
+      const suggestions: SauvegardeTargetConfig[] = Array.from(byHost.values()).map((t) => ({
+        id: deriveTargetId(t.site || '', t.id),
+        site: t.site || '', machine: t.id, host: t.host, secretDeployed: false
+      }));
 
-      if (suggestions.length > 0) {
-        this.config = { ...this.config, targets: [...this.config.targets, ...suggestions] };
-        const result = this.configProvider.savePartialConfig(this.config);
-        if (!result.success) {
-          this.eventBus.emitGeneric('sauvegarde:gossip:import:result', { success: false, addedCount: 0, error: result.error });
-          return;
-        }
-        // ⭐ savePartialConfig (ConfigService) écrit sur disque mais NE PRÉVIENT PAS le navigateur
-        // (contrairement au flux normal "Sauvegarder" du formulaire, qui émet cet événement lui-même)
-        // — sans ça, une page Paramètres Techniques déjà ouverte reste périmée jusqu'à rechargement.
-        // Bug réel constaté en direct : import fait, rien de visible côté formulaire tant qu'on ne
-        // rafraîchissait pas la page à la main.
-        this.eventBus.emitGeneric('app:module:config:saved', { moduleId: MODULE_NAME, success: true });
-      }
-
-      this.eventBus.emitGeneric('sauvegarde:gossip:import:result', { success: true, addedCount: suggestions.length });
-      this.emitStatus();
+      const result = this.mergeAndSaveTargets(suggestions);
+      this.eventBus.emitGeneric('sauvegarde:gossip:import:result', result);
     } catch (error) {
       this.eventBus.emitGeneric('sauvegarde:gossip:import:result', {
         success: false,
@@ -185,9 +164,55 @@ export class SauvegardeService implements ISauvegardeService {
   }
 
   /**
+   * Fusionne `newTargets` dans `config.targets` et sauvegarde — utilisé par l'import gossip
+   * (l'ajout manuel d'une machine se fait désormais directement via le champ 'array' natif de
+   * Paramètres Techniques, plus par cet événement — voir socket-events.ts).
+   *
+   * ⭐ Déduplication par CONTENU (host seul, depuis la 3e simplification), pas par id généré — bug
+   * réel constaté en direct sur l'import gossip : l'utilisateur renomme systématiquement les id
+   * après coup (identifiants lisibles plutôt que `gossip-dimotic-noisy2::noisy`), donc un id
+   * généré ne correspond plus jamais à ce qui est déjà là et tout se réimportait en double à
+   * chaque clic. `host` seul, lui, reste stable même après renommage de l'id/machine/site.
+   */
+  private mergeAndSaveTargets(newTargets: SauvegardeTargetConfig[]): { success: boolean; addedCount: number; error?: string } {
+    const existingKeys = new Set(this.config.targets.map((t) => t.host));
+    const toAdd: SauvegardeTargetConfig[] = [];
+    for (const t of newTargets) {
+      if (!t.host || existingKeys.has(t.host)) continue;
+      existingKeys.add(t.host); // évite aussi les doublons ENTRE eux dans le même lot
+      toAdd.push(t);
+    }
+
+    if (toAdd.length > 0) {
+      this.config = { ...this.config, targets: [...this.config.targets, ...toAdd] };
+      const result = this.configProvider.savePartialConfig(this.config);
+      if (!result.success) {
+        return { success: false, addedCount: 0, error: result.error };
+      }
+      // ⭐ savePartialConfig (ConfigService) écrit sur disque mais NE PRÉVIENT PAS le navigateur
+      // (contrairement au flux normal "Sauvegarder" du formulaire, qui émet cet événement lui-même)
+      // — sans ça, une page Paramètres Techniques déjà ouverte reste périmée jusqu'à rechargement.
+      // Bug réel constaté en direct : import fait, rien de visible côté formulaire tant qu'on ne
+      // rafraîchissait pas la page à la main.
+      this.eventBus.emitGeneric('app:module:config:saved', { moduleId: MODULE_NAME, success: true });
+    }
+
+    this.emitStatus();
+    return { success: true, addedCount: toAdd.length };
+  }
+
+  /**
    * Point d'entrée UI pour écrire le mot de passe d'application Nextcloud sur une machine déjà
    * connue, sans passer par un terminal — voir SecretPushService. `appPassword` ne transite par
-   * aucune écriture de config ici, seulement par SSH (stdin) vers le fichier hôte cible.
+   * aucune écriture de config ici, seulement par SSH (stdin) vers `SECRET_FILE_PATH` sur la cible.
+   *
+   * ⭐ 18/09/2026, demande explicite : « Pousser » ne se limite plus au mot de passe — il pousse
+   * aussi le script de sauvegarde (chantier A, BackupScript.ts) et pose son cron quotidien
+   * (ScriptPushService), dans la foulée. Le tag persistant `secretDeployed` ne passe à vrai que si
+   * les TROIS étapes réussissent (secret → script → cron) : un demi-déploiement (ex. secret écrit
+   * mais cron jamais posé) resterait sinon marqué « Déployé » à tort, alors que le script ne
+   * tournerait jamais tout seul. `result.step` (`'push'` pour le secret, `'script'`/`'cron'` pour la
+   * suite) distingue laquelle des trois a échoué, affiché tel quel côté UI.
    */
   private async handleSecretPush(targetId: string, appPassword: string): Promise<void> {
     const target = this.config.targets.find((t) => t.id === targetId);
@@ -201,10 +226,73 @@ export class SauvegardeService implements ISauvegardeService {
     }
 
     try {
-      const result = await this.secretPushService.push(target, this.config.nextcloud.appPasswordFile, appPassword);
-      this.eventBus.emitGeneric('sauvegarde:secret:push:result', { targetId, ...result });
+      const secretResult = await this.secretPushService.push(target, SECRET_FILE_PATH, appPassword);
+      if (!secretResult.success) {
+        this.eventBus.emitGeneric('sauvegarde:secret:push:result', { targetId, ...secretResult });
+        return;
+      }
+
+      const scriptResult = await this.scriptPushService.push(target, {
+        site: target.site,
+        machine: target.machine,
+        serverUrl: this.config.nextcloud.serverUrl,
+        user: this.config.nextcloud.user,
+        rootPath: this.config.nextcloud.rootPath,
+        secretFilePath: SECRET_FILE_PATH
+      });
+
+      if (scriptResult.success) {
+        this.config = {
+          ...this.config,
+          targets: this.config.targets.map((t) => t.id === targetId ? { ...t, secretDeployed: true } : t)
+        };
+        const saveResult = this.configProvider.savePartialConfig(this.config);
+        if (saveResult.success) {
+          this.eventBus.emitGeneric('app:module:config:saved', { moduleId: MODULE_NAME, success: true });
+          this.emitStatus();
+        } else {
+          this.logger.error('SauvegardeService', `Script poussé mais tag non sauvegardé (${targetId}): ${saveResult.error}`);
+        }
+      }
+      this.eventBus.emitGeneric('sauvegarde:secret:push:result', { targetId, ...scriptResult });
     } catch (error) {
       this.eventBus.emitGeneric('sauvegarde:secret:push:result', {
+        targetId,
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * Exécute par SSH le script déjà déployé sur `target.host`, tout de suite, sans attendre le cron
+   * — ⭐ 18/09/2026, demande explicite ("je dois pouvoir déclencher une sauvegarde à la demande").
+   * Ne pousse rien de nouveau (secret/script/cron inchangés) : suppose que « Pousser » a déjà été
+   * cliqué au moins une fois pour cette machine — sinon le script est simplement absent et la
+   * commande échoue avec un message clair ("No such file or directory"), pas besoin de vérifier
+   * `secretDeployed` avant de tenter.
+   */
+  private async handleBackupRunNow(targetId: string): Promise<void> {
+    const target = this.config.targets.find((t) => t.id === targetId);
+    if (!target || !target.host) {
+      this.eventBus.emitGeneric('sauvegarde:backup:run:result', {
+        targetId,
+        success: false,
+        error: `Cible introuvable: ${targetId}`
+      });
+      return;
+    }
+
+    try {
+      const sshKeyPath = ensureGlobalSshKey();
+      const result = await runSsh({ host: target.host, sshKeyPath }, BACKUP_SCRIPT_REMOTE_PATH, undefined, BACKUP_RUN_TIMEOUT_MS);
+      this.eventBus.emitGeneric('sauvegarde:backup:run:result', {
+        targetId,
+        success: result.success,
+        error: result.error
+      });
+    } catch (error) {
+      this.eventBus.emitGeneric('sauvegarde:backup:run:result', {
         targetId,
         success: false,
         error: error instanceof Error ? error.message : String(error)

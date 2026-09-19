@@ -36,6 +36,20 @@
 
 ## Idées de fonctionnalité (à concevoir/implémenter plus tard)
 
+### 💡 Système d'aide générique pour les applications dimotic-ha (18/09/2026)
+- **Demande utilisateur** : "l'aide de l'application à noter dans todo" — repéré en travaillant sur
+  Sauvegarde/Restauration, dont le tableau de bord avait initialement une procédure Nextcloud
+  détaillée (étapes pour créer un mot de passe d'application) écrite en dur dans sa propre page —
+  retirée depuis lors du nettoyage du tableau de bord (config déplacée vers Paramètres Techniques,
+  voir `fonctionnelles-sauvegarde_specs`). Confirmé explicitement : pas juste "remettre ce guide
+  quelque part", mais une **vraie capacité transverse**, utilisable par toute application
+  dimotic-ha, pas seulement sauvegarde.
+- **Rien conçu à ce jour** — aucune décision sur : bouton/panneau d'aide contextuelle générique
+  (à la manière du champ `button`/`secretPush`/`rowActions` déjà ajoutés à `ConfigField` cette
+  session pour d'autres besoins génériques), aide par section vs par application entière, contenu
+  Markdown vs HTML, où le contenu vit (dans `ModuleUiMetadata` ? fichier séparé par app ?).
+- **Pas bloquant** : différé, aucune application n'en dépend pour fonctionner.
+
 ### 💡 Procédure stop/start/restart généralisée pour TOUS les dockers de TOUTES les machines (14/09/2026)
 - **Demande utilisateur** : "c'est une procédure qu'il faudra rajouter à dimotic-ha pour l'arrêt de
   tous les dockers de toutes les machines et de les relancer 'start' 'stop' 'restart'" — évoqué en

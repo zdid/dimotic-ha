@@ -94,24 +94,9 @@
     .btn-primary { background: var(--color-accent); color: white; }
     .btn-secondary { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-primary); }
 
-    .secret-card { background: var(--color-surface); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
-    .secret-card h2 { margin-top: 0; }
-    .secret-card p { color: var(--color-text-muted); font-size: 0.9em; }
-    .secret-card h3 { font-size: 0.95em; margin: 16px 0 8px; }
-    .secret-card ol { padding-left: 22px; margin: 0 0 16px; }
-    .secret-card ol li { margin-bottom: 6px; font-size: 0.88em; color: var(--color-text-muted); }
-    .secret-card ol li strong { color: var(--color-text); }
-    .secret-card ol code { font-family: monospace; background: var(--color-background); padding: 1px 5px; border-radius: 3px; }
-    .form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin: 10px 0; }
-    .form-row label { display: block; font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 4px; }
-    .form-row select, .form-row input { padding: 8px; border-radius: var(--radius); border: 1px solid var(--color-primary); background: var(--color-background); color: var(--color-text); }
-    .form-row input#secret-password { width: 260px; }
     .webdav-preview { margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--color-primary); }
     .webdav-preview .label { font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 5px; display: block; }
     .webdav-preview code { font-size: 0.9em; word-break: break-all; }
-    .alert { padding: 12px; border-radius: var(--radius); margin: 10px 0; display: none; }
-    .alert-success { background: rgba(76, 175, 80, 0.1); border: 1px solid var(--color-success); color: var(--color-success); }
-    .alert-error { background: rgba(244, 67, 54, 0.1); border: 1px solid var(--color-error); color: var(--color-error); }
   </style>
 </head>
 <body>
@@ -137,58 +122,10 @@
           <span class="label">URL WebDAV reconstruite</span>
           <code id="webdav-url"></code>
         </div>
-      </div>
-
-      <div class="secret-card" id="gossip-card" style="display: none;">
-        <h2>📡 Importer depuis le gossip</h2>
-        <p>
-          Propose automatiquement un répertoire pour chaque machine dimotic-ha et chaque stack HA
-          déjà connus par gossip (déploiements Docker) — à compléter ensuite (site, notamment,
-          jamais connu du gossip). N'écrase jamais une entrée déjà présente.
+        <p class="description">
+          Connexion Nextcloud et machines couvertes se paramètrent dans
+          <strong>Paramètres Techniques → Sauvegarde/Restauration</strong>.
         </p>
-        <div class="alert alert-success" id="gossip-success"></div>
-        <div class="alert alert-error" id="gossip-error"></div>
-        <button class="btn btn-primary" id="btn-gossip-import">📡 Importer depuis le gossip</button>
-      </div>
-
-      <div class="secret-card" id="secret-card" style="display: none;">
-        <h2>🔒 Pousser le mot de passe Nextcloud</h2>
-        <p>
-          Écrit le mot de passe d'application Nextcloud sur le fichier hôte de la machine choisie,
-          par SSH — jamais enregistré dans la configuration de cette application. Un mot de passe
-          différent par machine (voir §3bis de la spec).
-        </p>
-
-        <h3>Procédure côté Nextcloud (une fois par machine)</h3>
-        <ol>
-          <li>Se connecter à Nextcloud avec le compte utilisé pour les sauvegardes.</li>
-          <li>Aller dans <strong>Paramètres personnels → Sécurité</strong>.</li>
-          <li>
-            Dans « Mots de passe d'applications », donner un nom qui identifie <strong>cette
-            machine précise</strong> (ex. <code>sauvegarde-ha2</code>) — un nom différent à chaque
-            fois, jamais le même mot de passe réutilisé entre plusieurs machines.
-          </li>
-          <li>Cliquer « Créer un nouveau mot de passe d'application ».</li>
-          <li>
-            Nextcloud affiche le mot de passe généré <strong>une seule fois</strong> — le copier
-            immédiatement (impossible de le revoir plus tard).
-          </li>
-          <li>Choisir la machine correspondante ci-dessous, coller le mot de passe, puis « Pousser ».</li>
-        </ol>
-
-        <div class="alert alert-success" id="secret-success"></div>
-        <div class="alert alert-error" id="secret-error"></div>
-        <div class="form-row">
-          <div>
-            <label for="secret-target">Machine</label>
-            <select id="secret-target"></select>
-          </div>
-          <div>
-            <label for="secret-password">Mot de passe d'application</label>
-            <input type="password" id="secret-password" autocomplete="off">
-          </div>
-          <button class="btn btn-primary" id="btn-push-secret">📤 Pousser</button>
-        </div>
       </div>
 
       <div class="loading" id="loading">Chargement de l'application Sauvegarde/Restauration</div>
@@ -202,6 +139,6 @@
 
   <script type="module" src="/applications/sauvegarde/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-09-17 12:00:00 - Création de l'application Sauvegarde/Restauration -->
+  <!-- Derniere modification: 2026-09-17 21:00:00 - Nettoyage du tableau de bord (config déplacée vers Paramètres Techniques) -->
 </body>
 </html>

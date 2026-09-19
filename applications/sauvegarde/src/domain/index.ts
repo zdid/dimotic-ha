@@ -2,7 +2,7 @@
  * Module principal de l'application Sauvegarde/Restauration
  *
  * Scanné par AppService pour la détection automatique. Exporte SAUVEGARDE_APP (métadonnées) et
- * createSauvegardeService (factory). Voir specs/current/fonctionnelles-sauvegarde_specs_v1.0.md.
+ * createSauvegardeService (factory). Voir specs/current/fonctionnelles-sauvegarde_specs_v1.3.md.
  */
 
 import {
@@ -39,7 +39,7 @@ export const SAUVEGARDE_UI_METADATA: ModuleUiMetadata = {
   fields: [
     {
       title: 'Connexion Nextcloud',
-      description: "URL WebDAV et référence au mot de passe d'application — jamais la valeur elle-même, voir §3bis de la spec (le fichier vit au niveau de l'hôte, hors de tout ce qui est sauvegardé).",
+      description: "URL WebDAV — le mot de passe d'application ne se saisit jamais ici, voir §3bis : il se pousse par machine ci-dessous, dans un fichier fixe (/dimotic-secrets/), hors de tout ce qui est sauvegardé.",
       icon: '☁️',
       fields: [
         {
@@ -67,63 +67,93 @@ export const SAUVEGARDE_UI_METADATA: ModuleUiMetadata = {
           default: 'utilisateur'
         },
         {
+          // ⭐ 17/09/2026, demande explicite : l'URL WebDAV reconstruite (déjà affichée sur le
+          // tableau de bord) doit AUSSI apparaître ici, en direct pendant la saisie des deux champs
+          // ci-dessus — pas seulement une fois sauvegardé. Nouveau type de champ générique
+          // 'preview' (ModuleManager.generateFieldHtml + ConfigForm.setupFormListeners) : recalcule
+          // et affiche un aperçu dès qu'un des champs de `previewOf` change, via une petite
+          // bibliothèque de formules nommées côté ConfigForm (`computePreview`) — pas un moteur de
+          // template générique, juste assez pour ce cas et les suivants du même genre.
+          name: 'nextcloud.webdavUrlPreview',
+          label: 'URL WebDAV reconstruite',
+          type: 'preview',
+          previewOf: ['nextcloud.serverUrl', 'nextcloud.user'],
+          previewFormula: 'nextcloudWebdavUrl'
+        },
+        {
           name: 'nextcloud.rootPath',
           label: 'Sous-dossier racine (optionnel)',
           type: 'text',
           default: 'dimotic-backups'
-        },
-        {
-          name: 'nextcloud.appPasswordFile',
-          label: "Chemin du fichier hôte contenant le mot de passe d'application",
-          type: 'text',
-          required: true,
-          // ⭐ 17/09/2026 : plus de valeur Docker par défaut (/docker/...) — dépend trop du type de
-          // machine (Docker vs dev local vs RPi1) pour être un bon défaut universel. Exemple
-          // volontairement générique, à remplacer par le vrai chemin de CETTE machine — jamais
-          // sous un dossier synchronisé (Nextcloud desktop, ownCloud/...) : voir §3bis.
-          default: '/chemin/vers/.secrets/nextcloud-backup',
-          hint: 'Jamais la valeur elle-même — un fichier au niveau de l\'hôte, hors de tout ce qui est sauvegardé (jamais sous un dossier synchronisé par le client Nextcloud).'
         }
       ]
     },
     {
-      title: 'Répertoires de déploiement couverts',
-      description: "Un répertoire par site/machine/app — sert à lister ce qui existe sur Nextcloud et à savoir comment arrêter/redémarrer le service lors d'une restauration. La machine de destination d'une restauration se choisit séparément, dans l'assistant de restauration.",
+      title: 'Machines couvertes',
+      // ⭐ 17/09/2026, simplifié trois fois sur demande explicite : une seule ligne par MACHINE,
+      // point — plus de type de parent à choisir non plus, voir le commentaire de
+      // sauvegardeTargetSchema (le futur script hôte sauvegarde /docker ET /dimotic-ha-addons,
+      // saute celle qui n'existe pas). Ce que Nextcloud contient réellement se découvre en
+      // listant, pas à pré-déclarer ici.
+      description: "Une ligne par machine à couvrir. « Pousser » dépose le mot de passe Nextcloud ET le script de sauvegarde + son cron quotidien (3h05) sur la machine — la machine devient alors autonome, plus besoin de dimotic-ha pour que ses sauvegardes continuent. La machine de destination d'une restauration se choisit séparément, dans l'assistant de restauration.",
       icon: '🗂️',
       fields: [
         {
-          // ⭐ 17/09/2026 — bouton générique (type 'button', ModuleManager.ts), directement dans
-          // ce formulaire plutôt que seulement sur le tableau de bord : demande explicite suite à
-          // l'ajout de ce type de champ au composant partagé.
+          // ⭐ 17/09/2026 — bouton générique (type 'button', ModuleManager.ts). Placé AVANT le
+          // champ 'targets' ci-dessous à la fois dans l'ordre du tableau ET visuellement (demande
+          // explicite : "il faut que le bouton soit au-dessus de la liste des machines") — un champ
+          // 'array' occupe désormais toute la largeur de la grille (ConfigForm.ts), ce qui pousse
+          // tout ce qui le précède sur sa propre ligne au-dessus plutôt que côte à côte.
           name: 'gossipImport',
           label: '📡 Importer depuis le gossip',
           type: 'button',
           action: 'sauvegarde:gossip:import',
-          hint: "Propose un répertoire pour chaque machine dimotic-ha/HA déjà connue par gossip — n'écrase jamais une entrée existante, ajoute seulement ce qui manque."
+          hint: "Propose une ligne pour chaque machine dimotic-ha déjà connue par gossip — n'écrase jamais une entrée existante, ajoute seulement ce qui manque."
         },
         {
+          // ⭐ 17/09/2026, demande explicite : la poussée du mot de passe Nextcloud par machine
+          // (SSH, §3bis de la spec) vit ICI, sur cette page de Paramètres Techniques — pas sur le
+          // tableau de bord (page application, revue beaucoup plus tard). `secretPush` (champ
+          // générique sur ConfigField, ModuleManager.generateArrayFieldHtml) ajoute, à côté des
+          // champs site/machine/host de chaque ligne, un mot de passe + bouton « Pousser » + tag
+          // persistant (secretDeployed).
+          //
+          // ⭐ 18/09/2026, demande explicite : « Pousser » ne dépose plus SEULEMENT le mot de passe
+          // — il dépose aussi le script de sauvegarde (chantier A, BackupScript.ts) et pose son cron
+          // quotidien sur la machine cible (ScriptPushService) dans la foulée. Le tag ne passe à
+          // « Déployé » que si les trois réussissent — voir SauvegardeService.handleSecretPush.
+          //
+          // Pas de champ "Identifiant" ici (⭐ 17/09/2026, "à quoi sert la zone identifiant ?") :
+          // `id` reste dans le schéma (clé unique, utilisée par la poussée) mais n'est plus saisi à
+          // la main — `hiddenIdFrom` le dérive automatiquement de site+machine, une seule fois, voir
+          // deriveTargetId (config-schema.ts) et le x-effect correspondant dans
+          // ModuleManager.generateArrayFieldHtml.
           name: 'targets',
-          label: 'Répertoires',
+          label: 'Machines',
           type: 'array',
-          itemLabel: 'Répertoire',
+          itemLabel: 'Machine',
+          hiddenIdFrom: ['site', 'machine'],
           itemFields: [
-            { name: 'id', label: 'Identifiant', type: 'text', required: true, placeholder: 'ha2-dimotic-ha' },
             { name: 'site', label: 'Site', type: 'text', required: true, placeholder: 'stfort' },
             { name: 'machine', label: 'Machine', type: 'text', required: true, placeholder: 'ha2' },
-            { name: 'host', label: 'Hôte (pour la poussée du secret Nextcloud)', type: 'text', placeholder: '192.168.1.51' },
-            { name: 'deploymentDir', label: 'Répertoire de déploiement', type: 'text', required: true, placeholder: 'dimotic-ha' },
-            {
-              name: 'deploymentType',
-              label: 'Type',
-              type: 'select',
-              options: [
-                { value: 'docker', label: 'Docker' },
-                { value: 'raw', label: 'Systemd (non-Docker)' }
-              ],
-              default: 'docker'
-            },
-            { name: 'unitName', label: 'Nom du conteneur/de l\'unité', type: 'text', required: true, placeholder: 'dimotic-ha' },
-            { name: 'destinationPath', label: 'Chemin réel sur la machine', type: 'text', required: true, placeholder: '/docker/dimotic-ha' }
+            { name: 'host', label: 'Hôte (pour la poussée du secret et du script de sauvegarde)', type: 'text', required: true, placeholder: '192.168.1.51' }
+          ],
+          secretPush: {
+            action: 'sauvegarde:secret:push',
+            statusField: 'secretDeployed',
+            passwordPlaceholder: "Mot de passe d'application Nextcloud",
+            pushButtonLabel: '📤 Pousser',
+            deployedLabel: '✅ Déployé',
+            pendingLabel: '⏳ En attente'
+          },
+          // ⭐ 18/09/2026, demande explicite : déclencher une sauvegarde à la demande (ex. après de
+          // grosses modifications), sans attendre le cron quotidien — exécute par SSH le script déjà
+          // déployé par « Pousser » (SauvegardeService.handleBackupRunNow). N'apparaît un sens que si
+          // le script a déjà été déployé (secretDeployed), mais reste affiché tout le temps — un
+          // essai sur une ligne pas encore déployée échoue juste avec une erreur explicite ("script
+          // absent"), pas besoin de le cacher conditionnellement.
+          rowActions: [
+            { action: 'sauvegarde:backup:run', label: '▶️ Lancer maintenant' }
           ]
         }
       ]
