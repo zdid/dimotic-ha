@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Outils</title>
+
+  <link rel="stylesheet" href="/styles/main.css">
+
+  <style>
+    .outils-container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .outils-header {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .outils-header h1 {
+      color: var(--color-accent);
+      font-size: 2em;
+    }
+
+    .card {
+      background: var(--color-surface);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+
+    .card h2 {
+      margin-top: 0;
+      color: var(--color-text);
+      border-bottom: 1px solid var(--color-primary);
+      padding-bottom: 10px;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border-radius: var(--radius);
+      border: none;
+      cursor: pointer;
+      font-size: 0.9em;
+    }
+
+    .btn-primary { background: var(--color-accent); color: white; }
+    .btn-secondary { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-primary); }
+    .btn-danger { background: var(--color-error); color: white; }
+    .btn-small { padding: 6px 12px; font-size: 0.82em; }
+
+    .alert { padding: 12px; border-radius: var(--radius); margin: 10px 0; display: none; }
+    .alert-success { background: rgba(76, 175, 80, 0.1); border: 1px solid var(--color-success); color: var(--color-success); }
+    .alert-error { background: rgba(244, 67, 54, 0.1); border: 1px solid var(--color-error); color: var(--color-error); }
+
+    .script-list { display: flex; flex-direction: column; gap: 12px; }
+    .script-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px;
+      border: 1px solid var(--color-primary);
+      border-radius: var(--radius);
+      background: var(--color-background);
+      flex-wrap: wrap;
+    }
+    .script-item .script-info { min-width: 200px; flex: 1; }
+    .script-item .script-info strong { display: block; font-size: 1.05em; }
+    .script-item .script-info span { font-size: 0.85em; color: var(--color-text-muted); display: block; margin-top: 3px; }
+    .script-item .script-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .sudo-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.72em; background: rgba(255, 152, 0, 0.15); color: #ff9800; border: 1px solid #ff9800; white-space: nowrap; }
+    .empty-hint { color: var(--color-text-muted); font-size: 0.9em; }
+
+    .form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin: 10px 0; }
+    .form-row > div { flex: 1; min-width: 160px; }
+    .form-row label { display: block; font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 4px; }
+    .form-row input[type="text"], .form-row textarea, .form-row input[type="file"] {
+      width: 100%; padding: 8px; border-radius: var(--radius); border: 1px solid var(--color-primary);
+      background: var(--color-background); color: var(--color-text); box-sizing: border-box;
+      font-family: inherit;
+    }
+    .form-row textarea { min-height: 60px; resize: vertical; }
+    .checkbox-row { display: flex; align-items: center; gap: 8px; }
+
+    .variable-form { display: flex; flex-direction: column; gap: 12px; margin: 15px 0; }
+    .variable-form .form-group label { display: block; font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 4px; }
+    .variable-form .form-group input[type="text"],
+    .variable-form .form-group select {
+      width: 100%; padding: 8px; border-radius: var(--radius); border: 1px solid var(--color-primary);
+      background: var(--color-background); color: var(--color-text); box-sizing: border-box;
+    }
+    .field-hint { font-size: 0.78em; color: var(--color-text-muted); margin-top: 4px; }
+    .checklist {
+      display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 10px; border-radius: var(--radius);
+      border: 1px solid var(--color-primary); background: var(--color-background);
+    }
+    .checklist-item { display: flex; align-items: center; gap: 6px; font-size: 0.9em; font-weight: normal; }
+    .no-variables { color: var(--color-text-muted); font-size: 0.9em; font-style: italic; }
+
+    .command-box {
+      display: flex; align-items: center; gap: 10px; margin-top: 15px; padding: 12px;
+      background: var(--color-background); border-radius: var(--radius); border: 1px solid var(--color-primary);
+    }
+    .command-box code { flex: 1; font-size: 0.92em; word-break: break-all; }
+    .copy-btn { background: none; border: none; cursor: pointer; font-size: 1.2em; padding: 4px 8px; color: var(--color-text); }
+    .copy-btn:hover { color: var(--color-accent); }
+    .copy-feedback { font-size: 0.8em; color: var(--color-success); margin-left: 6px; display: none; }
+
+    .loading { text-align: center; padding: 40px; color: var(--color-text-muted); }
+    .selected-title { font-size: 1.1em; margin-bottom: 4px; }
+    .selected-description { color: var(--color-text-muted); font-size: 0.9em; margin-bottom: 15px; }
+  </style>
+</head>
+<body>
+  <div class="outils-container">
+    <div class="outils-header">
+      <h1>🧰 Outils</h1>
+      <p class="description">Bibliothèque de scripts shell paramétrables — sélectionner, remplir les variables, télécharger.</p>
+    </div>
+
+    <div id="main-container">
+      <div class="card" id="list-card" style="display: none;">
+        <h2>Scripts disponibles</h2>
+        <div class="alert alert-error" id="list-error"></div>
+        <div class="script-list" id="script-list"></div>
+        <p class="empty-hint" id="empty-hint" style="display: none;">Aucun script pour l'instant — ajoutes-en un ci-dessous.</p>
+      </div>
+
+      <div class="card" id="add-card" style="display: none;">
+        <h2>➕ Ajouter un script</h2>
+        <div class="alert alert-success" id="add-success"></div>
+        <div class="alert alert-error" id="add-error"></div>
+        <div class="form-row">
+          <div>
+            <label for="add-title">Titre</label>
+            <input type="text" id="add-title" placeholder="Créer une carte SD Raspberry Pi">
+          </div>
+          <div>
+            <label for="add-filename">Nom de fichier proposé au téléchargement</label>
+            <input type="text" id="add-filename" placeholder="flash-sd-card.sh">
+          </div>
+        </div>
+        <div class="form-row">
+          <div style="flex: 1 1 100%;">
+            <label for="add-description">Description</label>
+            <textarea id="add-description" placeholder="Ce que fait ce script, quand l'utiliser..."></textarea>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label for="add-file">Fichier .sh</label>
+            <input type="file" id="add-file" accept=".sh,.bash,text/plain">
+          </div>
+          <div class="checkbox-row">
+            <input type="checkbox" id="add-sudo">
+            <label for="add-sudo" style="margin: 0;">Nécessite sudo</label>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="btn-add-script">➕ Ajouter</button>
+      </div>
+
+      <div class="card" id="detail-card" style="display: none;">
+        <h2>🔧 <span id="detail-title-header">Script sélectionné</span></h2>
+        <p class="selected-description" id="detail-description"></p>
+
+        <div id="variables-section">
+          <div class="variable-form" id="variable-form"></div>
+          <p class="no-variables" id="no-variables-hint" style="display: none;">Ce script n'a aucune variable à remplir.</p>
+        </div>
+
+        <button class="btn btn-primary" id="btn-generate">⬇️ Générer et télécharger</button>
+
+        <div class="command-box" id="command-box" style="display: none;">
+          <code id="command-text"></code>
+          <button class="copy-btn" id="btn-copy-command" title="Copier">📋</button>
+          <span class="copy-feedback" id="copy-feedback">Copié !</span>
+        </div>
+      </div>
+
+      <div class="loading" id="loading">Chargement de l'application Outils</div>
+    </div>
+  </div>
+
+  <script type="module" src="/applications/outils/presentation/ts/app.js"></script>
+
+  <!-- Derniere modification: 2026-09-18 - Création de l'application Outils -->
+</body>
+</html>

@@ -41,6 +41,16 @@ import type { HaAutomationBackupService } from '../../ha/automations/HaAutomatio
  *   attendu, il relaie tel quel via `<appId>:internal:upload`. Toute nouvelle app veut ce besoin
  *   utilise cette route plutôt que d'en ajouter une dédiée ; la route HAPLAN reste inchangée
  *   (précédent historique, pas de migration rétroactive).
+ * - **Route de téléchargement générique** (2026-09-18, demande explicite de l'utilisateur) :
+ *   `GET /api/apps/:appId/download/:token` — symétrique de l'upload générique ci-dessus, pour le cas
+ *   inverse : une app (process séparé) génère un fichier volumineux/binaire (ex: une archive
+ *   auto-extractible) qu'elle ne peut pas renvoyer directement en réponse HTTP (elle ne détient pas
+ *   la requête, seulement le core). L'app écrit le fichier fini dans
+ *   `data/<appId>/tmp/downloads/<token>` (+ un `<token>.meta.json` pour le nom de fichier proposé),
+ *   puis notifie le client via Socket.io avec ce token (mécanisme déjà existant, inchangé) ; le
+ *   navigateur récupère alors les octets ici en synchrone. Fichier + méta supprimés après un
+ *   téléchargement réussi. Toute nouvelle app avec ce besoin réutilise cette route plutôt que d'en
+ *   ajouter une dédiée.
  */
 export class PresentationServer {
   private app: Express;
@@ -348,6 +358,34 @@ export class PresentationServer {
           fields: req.body
         });
         res.status(200).json({ success: true });
+      });
+    });
+
+    // Téléchargement générique — voir le commentaire de tête de cette classe. Le token vient d'une
+    // notification Socket.io déjà émise par l'app elle-même (le core ne construit jamais ce nom de
+    // fichier). Motif restreint volontairement strict : sert aussi de garde anti path-traversal,
+    // en plus de la vérification `path.dirname` ci-dessous.
+    this.app.get('/api/apps/:appId/download/:token', (req: Request, res: Response) => {
+      const appId = req.params.appId || '';
+      const token = req.params.token || '';
+      if (!/^[a-zA-Z0-9_-]+$/.test(appId) || !/^[a-zA-Z0-9_-]+$/.test(token)) {
+        res.status(400).json({ error: 'Bad Request', message: 'appId/token invalide' });
+        return;
+      }
+      const dir = path.join(process.env.PROJECT_ROOT || this.projectRoot, 'data', appId, 'tmp', 'downloads');
+      const filePath = path.join(dir, token);
+      const metaPath = `${filePath}.meta.json`;
+      if (path.dirname(filePath) !== dir || !fs.existsSync(filePath) || !fs.existsSync(metaPath)) {
+        res.status(404).json({ error: 'Not Found', message: 'Fichier introuvable ou expiré' });
+        return;
+      }
+      let filename = token;
+      try {
+        filename = (JSON.parse(fs.readFileSync(metaPath, 'utf8')) as { filename?: string }).filename || token;
+      } catch { /* nom de repli déjà défini ci-dessus */ }
+      res.download(filePath, filename, () => {
+        fs.unlink(filePath, () => {});
+        fs.unlink(metaPath, () => {});
       });
     });
 

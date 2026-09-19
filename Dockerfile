@@ -65,6 +65,13 @@ WORKDIR /app
 COPY tsconfig.json ./
 COPY docker ./docker
 COPY applications ./applications
+# ⭐ 18/09/2026 (bug réel évité avant publication) — scripts/ et compose.deploy.yaml sont lus par
+# l'app outils (BundleBuilder.ts) pour construire une archive auto-extractible téléchargeable
+# (voir data/outils/scripts/*.sh, directives @outils:bundle) : absents jusqu'ici de l'image, la
+# fonctionnalité échouait silencieusement sur toute instance réellement déployée (ha2, noisy2...),
+# ne fonctionnant que sur une machine de dev avec le dépôt complet cloné à côté.
+COPY scripts ./scripts
+COPY compose.deploy.yaml ./compose.deploy.yaml
 
 RUN chmod +x docker/build-apps.sh && ./docker/build-apps.sh
 
@@ -96,6 +103,9 @@ WORKDIR /app
 
 COPY --from=builder --chown=node:node /app/tsconfig.json ./tsconfig.json
 COPY --from=builder --chown=node:node /app/applications ./applications
+# ⭐ 18/09/2026 — voir le commentaire identique dans l'étape builder ci-dessus.
+COPY --from=builder --chown=node:node /app/scripts ./scripts
+COPY --from=builder --chown=node:node /app/compose.deploy.yaml ./compose.deploy.yaml
 
 # ⭐ 25/08/2026, essai : élimine les sources .ts (et .d.ts, attrapés par le même motif — plus
 # nécessaires une fois la compilation croisée entre apps terminée dans le stage builder) — CMD
