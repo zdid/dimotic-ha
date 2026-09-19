@@ -1,6 +1,8 @@
 # Spécifications Fonctionnelles - Supervision Multi-Machines (SUPERVISOR)
 
-*Version 2.8 - 27 Août 2026*
+*Version 2.9 - 19 Septembre 2026 — §15.1 : références mortes corrigées (`inter-app-communication_specs`
+retirée de `specs/current/`, pointeurs vers `techniques-socle-ha-mqtt_specs`/`fonctionnelles-espdisplay_specs`
+mis à jour vers leurs versions courantes).*
 *⭐ Visibilité multi-machines intra-site (§14bis, nouveau) : registre d'applications par gossip MQTT
 (`AppGossipService`, même patron que `TargetGossipService`), nouvelle page d'accueil (lien HA local,
 sites externes personnels jamais gossipés, applications des autres machines en lecture seule).
@@ -1217,11 +1219,13 @@ correct, ajout/suppression d'un site externe, navigation retour depuis un module
 ## 15. Annexes
 
 ### 15.1 Références
-- [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.30.md) ⭐
-- [Spécifications Fonctionnelles ESPDISPLAY](fonctionnelles-espdisplay_specs_v1.1.md) (§6.3, cas
+- [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.33.md) ⭐ §9bis
+  pour le mécanisme réel de communication inter-app (Fire & Forget + `CorrelatedRequester` —
+  remplace la référence à `inter-app-communication_specs`, jamais implémentée, retirée de
+  `specs/current/`)
+- [Spécifications Fonctionnelles ESPDISPLAY](fonctionnelles-espdisplay_specs_v1.2.md) (§6.3, cas
   d'usage cible de la migration SSH → bus MQTT unifié, et précédent pour la commande forcée
   whitelisté reprise en §11.2)
-- [Communication Inter-Applications](inter-app-communication_specs_v1.0.md)
 - `fonctionnelles-supervisor_specs_v2.2.md` (archivée) — avant la conception détaillée des
   redondances, la décision de sécurité concrète et l'agent minimal
 - `fonctionnelles-supervisor_specs_v1.0.md` (archivée) — première mouture, cross-machine seulement

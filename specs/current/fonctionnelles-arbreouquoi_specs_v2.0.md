@@ -1,40 +1,543 @@
-# Spécifications d'Implémentation — Application ARBREOUQUOI
+# Spécifications — Application ARBREOUQUOI
 
-**Version :** 1.3  
-**Date :** 9 Août 2026  
-**Auteur :** Mistral Vibe / Claude  
-**Statut :** En développement  
-**Type :** Application standalone  
-**Dépend de :** techniques-socle-ha-mqtt_specs_v4.28.md, guide-nouvelle-application_specs_v1.9.md, nommage_specs_v1.0.md  
+**Version :** 2.0
+**Date :** 19 Septembre 2026
+**Auteur :** Mistral Vibe / Claude
+**Statut :** En développement
+**Type :** Application standalone
+**Dépend de :** `techniques-socle-ha-mqtt_specs_v4.33.md`, `guide-nouvelle-application_specs_v2.0.md`, `nommage_specs_v1.0.md`
 
-> **v1.3** : **`extractOuSegments()`** (§6.2bis, nouveau) — remplace le calcul de niveau OÙ par
-> position (`getOuLevel`), devenu ambigu depuis que `lieu_precis` peut être `null`. **Fix CSS
-> Shadow DOM `:root` → `:root, :host`** (§3.8) — cassait silencieusement toute la thématisation
-> par variable CSS de l'application, pas seulement les symptômes rapportés. Changement de forme de
-> `ArbreOuQuoiEntityDetailsPayload.ouPath` (§3.5).
+> **v2.0 (19/09/2026)** — **Fusion de `fonctionnelles-arbreouquoi_specs_v1.5.md` +
+> `implementation-arbreouquoi_specs_v1.4.md`** en un seul document (demande explicite utilisateur :
+> "il y a plusieurs specs qui traitent de... pareil pour arbreouquoi... il faudra bien les séparer"
+> — fonctionnel et technique restent clairement séparés en deux parties de CE document, plus deux
+> fichiers distincts à maintenir en cohérence). Les deux anciens documents avaient chacun, en
+> doublon, une section "Communication Inter-Applications" massive (~340 lignes chacune) décrivant
+> `InterAppClient`/`ApplicationCapabilities`/des capacités jamais implémentées pour cette
+> application — retirée, remplacée par un court pointeur unique en fin de document (voir
+> `techniques-socle-ha-mqtt_specs` §9bis pour le mécanisme réel). Anciennes versions archivées.
 
 ---
 
 ## 📚 Table des Matières
 
-1. [Architecture de l'Application](#1-architecture-de-lapplication)
-2. [Structure des Fichiers](#2-structure-des-fichiers)
-3. [Détails des Composants](#3-détails-des-composants)
-4. [Cycle de Vie](#4-cycle-de-vie)
-5. [Communication](#5-communication)
-6. [Gestion des Données](#6-gestion-des-données)
-7. [Gestion des Erreurs](#7-gestion-des-erreurs)
-8. [Configuration](#8-configuration)
-9. [Build et Déploiement](#9-build-et-déploiement)
-10. [Tests](#10-tests)
+**Partie 1 — Fonctionnel**
+1. [Contexte et Objectifs](#1-contexte-et-objectifs)
+2. [Fonctionnalités Principales](#2-fonctionnalités-principales)
+3. [Cas d'Usage](#3-cas-dusage)
+4. [Exigences Fonctionnelles](#4-exigences-fonctionnelles)
+5. [Flux de Données](#5-flux-de-données)
+6. [Interfaces Utilisateur](#6-interfaces-utilisateur)
+7. [Règles Métier](#7-règles-métier)
+8. [Contraintes](#8-contraintes)
+9. [Évolutions Futures](#9-évolutions-futures)
+
+**Partie 2 — Technique / Implémentation**
+- T1. [Architecture de l'Application](#t1-architecture-de-lapplication)
+- T2. [Structure des Fichiers](#t2-structure-des-fichiers)
+- T3. [Détails des Composants](#t3-détails-des-composants)
+- T4. [Cycle de Vie](#t4-cycle-de-vie)
+- T5. [Communication](#t5-communication)
+- T6. [Gestion des Données](#t6-gestion-des-données)
+- T7. [Gestion des Erreurs](#t7-gestion-des-erreurs)
+- T8. [Configuration](#t8-configuration)
+- T9. [Build et Déploiement](#t9-build-et-déploiement)
+- T10. [Tests](#t10-tests)
+
+**[Communication Inter-Applications](#communication-inter-applications)** (partagé, fin de document)
 
 ---
 
-## 1. Architecture de l'Application
+# Partie 1 — Fonctionnel
 
-### 1.1 Conformité à l'Architecture 5 Couches
+## 1. Contexte et Objectifs
 
-L'application **ARBREOUQUOI** respecte strictement l'architecture en 5 couches définie dans [techniques-socle-ha-mqtt_specs_v4.12.md](techniques-socle-ha-mqtt_specs_v4.12.md) :
+### 1.1 Contexte
+
+L'application **ARBREOUQUOI** (Arbre Ou Quoi) s'intègre dans l'écosystème **dimotic-ha** (anciennement `ws-ha`, renommé le 04/08/2026) qui fournit un socle technique pour les applications Home Assistant. Le socle maintient déjà un **référentiel structuré** des entités Home Assistant organisé selon la hiérarchie :
+
+```
+Area (Lieu/Pièce) → QUOI (Type fonctionnel) → Entités
+```
+
+Ce référentiel est alimenté par les webservices via MQTT Discovery et la synchronisation WebSocket avec Home Assistant.
+
+### 1.2 Objectifs
+
+L'objectif principal de **ARBREOUQUOI** est de fournir une **visualisation interactive et intuitive** de ce référentiel, permettant aux utilisateurs de :
+
+- **Comprendre** la structure hiérarchique de leurs entités Home Assistant
+- **Naviguer** facilement dans l'arborescence Area → QUOI → Entités
+- **Rechercher** des entités par divers critères
+- **Filtrer** l'affichage selon leurs besoins
+- **Explorer** les détails de chaque entité
+- **Identifier** les relations entre entités (même pièce, même type, même appareil)
+
+### 1.3 Public Cible
+
+- **Utilisateurs finaux** : Propriétaires de maisons intelligentes souhaitant comprendre leur installation
+- **Développeurs** : Créateurs d'applications ou d'automatisations ayant besoin de visualiser la structure
+- **Administrateurs** : Personnes gérant plusieurs instances Home Assistant
+
+---
+
+## 2. Fonctionnalités Principales
+
+### 2.1 Visualisation Hiérarchique
+
+| Fonctionnalité | Description | Priorité |
+|---------------|-------------|----------|
+| **Arbre Area** | Affichage de toutes les pièces (Areas) avec comptage des entités | ⭐⭐⭐ |
+| **Groupes QUOI** | Pour chaque Area, regroupement des entités par leur classification QUOI | ⭐⭐⭐ |
+| **Liste Entités** | Affichage des entités avec leur état, domaine, et informations | ⭐⭐⭐ |
+| **Entités Non Assignées** | Section dédiée aux entités sans Area assignée | ⭐⭐ |
+
+### 2.2 Navigation et Interaction
+
+| Fonctionnalité | Description | Priorité |
+|---------------|-------------|----------|
+| **Expand/Collapse** | Développement/réduction des sections et groupes | ⭐⭐⭐ |
+| **Expand All / Collapse All** | Actions globales pour tout développer/rétracter | ⭐⭐ |
+| **Clique sur Entité** | Affichage des détails de l'entité | ⭐⭐⭐ |
+| **Survol Entité** | Surbrillance visuelle | ⭐⭐ |
+
+### 2.3 Recherche et Filtrage
+
+| Fonctionnalité | Description | Priorité |
+|---------------|-------------|----------|
+| **Recherche globale** | Recherche dans noms, IDs, pièces, types QUOI | ⭐⭐⭐ |
+| **Filtre par Area** | Filtrer pour n'afficher qu'une pièce spécifique | ⭐⭐⭐ |
+| **Filtre par QUOI** | Filtrer pour n'afficher qu'un type d'entité | ⭐⭐⭐ |
+| **Filtre Entités Actives** | Masquer les entités non disponibles | ⭐⭐ |
+| **Réinitialisation** | Retirer tous les filtres | ⭐⭐ |
+
+### 2.4 Statistiques et Métriques
+
+| Fonctionnalité | Description | Priorité |
+|---------------|-------------|----------|
+| **Compteur Entités** | Nombre total d'entités | ⭐⭐⭐ |
+| **Compteur Pièces** | Nombre total de Areas | ⭐⭐⭐ |
+| **Compteur Appareils** | Nombre total de Devices | ⭐⭐ |
+| **Compteur Types QUOI** | Nombre de classifications QUOI uniques | ⭐⭐ |
+| **Compteur Non Assignés** | Nombre d'entités sans Area | ⭐⭐ |
+
+### 2.5 Détails des Entités
+
+| Fonctionnalité | Description | Priorité |
+|---------------|-------------|----------|
+| **Informations de base** | ID, nom, domaine, classe, état | ⭐⭐⭐ |
+| **Localisation** | Area et Device associés | ⭐⭐⭐ |
+| **Classification QUOI** | Tous les tags QUOI de l'entité | ⭐⭐⭐ |
+| **Entités Associées** | Entités du même QUOI ou de la même Area | ⭐⭐ |
+| **Attributs** | Tous les attributs de l'entité | ⭐ |
+
+### 2.6 Configuration
+
+| Fonctionnalité | Description | Priorité |
+|---------------|-------------|----------|
+| **Thème** | Choix entre clair, sombre, ou automatique | ⭐⭐ |
+| **Affichage Compact** | Mode compact pour les grands écrans | ⭐ |
+| **Afficher Masquer IDs** | Option pour afficher/masquer les IDs techniques | ⭐⭐ |
+| **Rafraîchissement Auto** | Rafraîchissement automatique de l'arbre | ⭐⭐ |
+| **Intervalle de Rafraîchissement** | Configuration de la période | ⭐⭐ |
+
+---
+
+## 3. Cas d'Usage
+
+### 3.1 Cas d'Usage Principal : Exploration de l'Installation
+
+**Acteur :** Utilisateur final
+**Scénario :** Un utilisateur veut comprendre comment ses entités Home Assistant sont organisées
+
+1. L'utilisateur accède à l'application ARBREOUQUOI
+2. L'arbre complet s'affiche avec toutes les Areas
+3. L'utilisateur voit les statistiques globales (nombre d'entités, pièces, etc.)
+4. L'utilisateur développe une pièce (ex: Salon)
+5. Les groupes QUOI s'affichent (ex: lumière, température, interrupteur)
+6. L'utilisateur développe un groupe QUOI (ex: lumière)
+7. La liste des entités de ce type dans le Salon s'affiche
+8. L'utilisateur clique sur une entité pour voir ses détails
+
+**Résultat :** L'utilisateur comprend la structure de son installation
+
+### 3.2 Cas d'Usage : Recherche d'une Entité Spécifique
+
+**Acteur :** Développeur
+**Scénario :** Un développeur cherche un capteur de température spécifique
+
+1. Le développeur utilise la barre de recherche
+2. Il tape "température salon"
+3. L'arbre se filtre pour afficher uniquement les résultats pertinents
+4. Le capteur de température du salon apparaît
+5. Le développeur clique dessus pour voir ses détails
+
+**Résultat :** Le développeur trouve rapidement l'entité recherchée
+
+### 3.3 Cas d'Usage : Audit de l'Installation
+
+**Acteur :** Administrateur
+**Scénario :** Un administrateur veut vérifier quelles pièces contiennent des entités non assignées
+
+1. L'administrateur accède à ARBREOUQUOI
+2. Il consulte la section "Non assignés"
+3. Il voit la liste des entités sans Area
+4. Il peut cliquer sur chaque entité pour voir ses détails
+5. Il peut filtrer par type QUOI pour identifier les types problématiques
+
+**Résultat :** L'administrateur identifie les entités à assigner
+
+### 3.4 Cas d'Usage : Vérification de la Classification QUOI
+
+**Acteur :** Intégrateur
+**Scénario :** Un intégrateur veut vérifier que toutes les entités sont correctement classées
+
+1. L'intégrateur accède à ARBREOUQUOI
+2. Il consulte le catalogue QUOI dans la navigation
+3. Il voit tous les types QUOI avec leur nombre d'entités
+4. Il peut cliquer sur un type QUOI pour filtrer l'arbre
+5. Il vérifie que les entités affichées correspondent bien au type
+
+**Résultat :** L'intégrateur valide la classification
+
+---
+
+## 4. Exigences Fonctionnelles
+
+### 4.1 Exigences de Données
+
+| ID | Exigence | Description |
+|----|----------|-------------|
+| EF-001 | **Accès au Référentiel** | L'application DOIT accéder au référentiel HaStructureRegistry fourni par le socle |
+| EF-002 | **Écoute des Mises à Jour** | L'application DOIT écouter les événements de mise à jour du référentiel |
+| EF-003 | **Rafraîchissement Automatique** | L'application DOIT rafraîchir l'affichage lors des mises à jour du référentiel (si configuré) |
+| EF-004 | **Persistance des Données** | L'application NE DOIT PAS stocker de données en base locale (tout vient du référentiel) |
+
+### 4.2 Exigences d'Affichage
+
+| ID | Exigence | Description |
+|----|----------|-------------|
+| EF-005 | **Hiérarchie Visuelle** | L'arbre DOIT afficher clairement la hiérarchie Area → QUOI → Entités |
+| EF-006 | **Icônes QUOI** | Chaque type QUOI DOIT avoir une icône visuelle |
+| EF-007 | **Couleurs par Domaine** | Les entités DOIVENT être colorées selon leur domaine HA |
+| EF-008 | **Compteurs** | Chaque section DOIT afficher le nombre d'éléments qu'elle contient |
+| EF-009 | **Statistiques Globales** | La barre de statistiques DOIT afficher les métriques principales |
+| EF-010 | **Indicateur de Connexion** | Un indicateur DOIT montrer l'état de la connexion Socket.io |
+
+### 4.3 Exigences d'Interaction
+
+| ID | Exigence | Description |
+|----|----------|-------------|
+| EF-011 | **Navigation Clic** | Cliquer sur une entité DOIT afficher ses détails |
+| EF-012 | **Expand/Collapse** | Cliquer sur un en-tête de section DOIT développer/rétracter son contenu |
+| EF-013 | **Survol** | Survoler une entité DOIT la mettre en évidence |
+| EF-014 | **Rafraîchissement Manuel** | Un bouton DOIT permettre de rafraîchir manuellement les données |
+
+### 4.4 Exigences de Recherche et Filtrage
+
+| ID | Exigence | Description |
+|----|----------|-------------|
+| EF-015 | **Recherche Globale** | La recherche DOIT s'appliquer sur tous les champs textuels |
+| EF-016 | **Filtrage par Area** | Le filtre par pièce DOIT afficher uniquement les entités de cette pièce |
+| EF-017 | **Filtrage par QUOI** | Le filtre par type DOIT afficher uniquement les entités de ce type |
+| EF-018 | **Filtrage Cumulatif** | Les filtres DOIVENT être cumulatifs (Area + QUOI) |
+| EF-019 | **Réinitialisation** | Un bouton DOIT permettre de réinitialiser tous les filtres |
+
+### 4.5 Exigences de Performance
+
+| ID | Exigence | Description |
+|----|----------|-------------|
+| EF-020 | **Temps de Chargement** | L'arbre DOIT s'afficher en moins de 1 seconde pour 1000 entités |
+| EF-021 | **Rafraîchissement Léger** | Le rafraîchissement automatique NE DOIT PAS bloquer l'UI |
+| EF-022 | **Pagination** | Pour plus de 50 entités par groupe, une pagination DOIT être disponible |
+
+---
+
+## 5. Flux de Données
+
+### 5.1 Diagramme Global
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        ARBREOUQUOI                               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐    │
+│  │   Service   │────▶│   EventBus  │────▶│  Socket.io  │    │
+│  │ Métier      │     │             │     │  (Bridge)    │    │
+│  └─────────────┘     └─────────────┘     └─────────────┘    │
+│          ▲                     │                    ▲           │
+│          │                     │                    │           │
+│  ┌───────┴───────┐     ┌───────┴───────┐     ┌──────┴─────┐ │
+│  │ HaStructure    │     │ Événements    │     │    UI    │ │
+│  │ Registry       │     │ Socket.io     │     │ (HTML/TS)│ │
+│  │ (Injected)     │     │             │     │         │ │
+│  └───────────────┘     └───────────────┘     └─────────┘ │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 5.2 Flux de Démarrage
+
+```mermaid
+graph TD
+    A[AppService détecte ARBREOUQUOI] --> B[Instancie ArbreouquoiService]
+    B --> C[Appel .start()]
+    C --> D[Charge configuration]
+    D --> E[Vérifie HaStructureRegistry]
+    E --> F[Écoute événements EventBus]
+    F --> G[Émet structure initiale via Socket.io]
+    G --> H[Enregistre événements persistants]
+    H --> I[Service prêt]
+```
+
+### 5.3 Flux de Rafraîchissement
+
+```mermaid
+graph TD
+    A[Référentiel HA mis à jour] --> B[EventBus émet ha:structure:rebuilt]
+    B --> C[ArbreouquoiService reçoit l'événement]
+    C --> D{Auto-refresh activé?}
+    D -->|Oui| E[Reconstruit l'arbre]
+    D -->|Non| F[Ignore]
+    E --> G[Émet nouvelle structure via Socket.io]
+    G --> H[UI met à jour l'affichage]
+```
+
+### 5.4 Flux de Recherche
+
+```mermaid
+graph TD
+    A[Utilisateur tape recherche] --> B[Socket.io émet arbreouquoi:search]
+    B --> C[Service reçoit l'événement]
+    C --> D[Filtre les entités]
+    D --> E[Reconstruit l'arbre filtré]
+    E --> F[Émet structure filtrée]
+    F --> G[UI affiche les résultats]
+```
+
+---
+
+## 6. Interfaces Utilisateur
+
+### 6.1 Page Principale
+
+**Structure :**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🌳 Arbre Ou Quoi                                     [⚙️][×] │
+│  Visualisation du référentiel HA organisé par Area → QUOI → Entités│
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  [🔄 Rafraîchir] [↕ Tout étendre] [↕ Tout réduire]      [🔍_____]  │
+│                                                                 │
+│  [Toutes les pièces ▼] [Tous les types ▼] [Appliquer] [Réinitialiser]│
+├─────────────────────────────────────────────────────────────────┤
+│  📊 150 Entités  │  12 Pièces  │  25 Appareils  │  15 Types  │  ✅  │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────────┐  ┌─────────────────────────────────────┐ │
+│  │ 📁 Arborescence  │  │                                             │ │
+│  │                 │  │  ▶ 📍 Salon (25)                             │ │
+│  │ 🏷️ Légende QUOI │  │     ▼                                                │ │
+│  │ 💡 8           │  │     ▶ 💡 lumière (5)                              │ │
+│  │ 🌡️ 12          │  │        ▼                                       │ │
+│  │ 🔘 3            │  │        light.salon_principal                   │ │
+│  │ ...            │  │        light.lampe_murale                     │ │
+│  │                 │  │        ...                                       │ │
+│  │                 │  │     ▶ 🌡️ température (3)                        │ │
+│  │                 │  │        ▼                                       │ │
+│  │                 │  │        sensor.temperature_salon                │ │
+│  │                 │  │        ...                                       │ │
+│  │                 │  │     ▶ 🔌 prise (2)                                │ │
+│  │                 │  │        ...                                       │ │
+│  │                 │  │  ▶ 🏠 Cuisine (18)                            │ │
+│  │                 │  │     ...                                       │ │
+│  │                 │  │  ▶ 📦 Non assignés (3)                         │ │
+│  │                 │  │     ...                                       │ │
+│  └─────────────────┘  └─────────────────────────────────────┘ │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│  Dernière mise à jour: 20/07/2026 10:00:00                          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 Panneau de Détails
+
+**Structure :**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  ×                                                               │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  Capteur Température Salon                                  ││
+│  │  [sensor] [temperature] [État: 21.5°C]                  ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                  │
+│  📋 Informations de base                                         │
+│  ┌─────────────────────┬─────────────────────┐               │
+│  │ ID Entité           │ sensor.temperature_   │               │
+│  │                     │ salon                │               │
+│  │ Nom                │ Capteur Température    │               │
+│  │ Domaine            │ sensor               │               │
+│  │ Classe Appareil    │ temperature          │               │
+│  │ État               │ 21.5                │               │
+│  └─────────────────────┴─────────────────────┘               │
+│                                                                  │
+│  📍 Localisation                                                 │
+│  ┌─────────────────────┬─────────────────────┐               │
+│  │ Pièce (Area)        │ Salon               │               │
+│  │ ID Area            │ area.salon          │               │
+│  └─────────────────────┴─────────────────────┘               │
+│                                                                  │
+│  📍 Hiérarchie OÙ                                                │
+│  🏠 maison [grand_pere] → 🏢 étage [pere] → 📍 chambre [lieu]    │
+│  → 🎯 chevet droit [lieu_precis]                                 │
+│                                                                  │
+│  🏷️ Classification QUOI                                         │
+│  [🌡️ température] [capteur]                                      │
+│                                                                  │
+│  🔗 Entités Associées (8)                                        │
+│  ▶ sensor.temperature_cuisine                                   │
+│  ▶ sensor.temperature_chambre                                    │
+│  + 6 autres...                                                  │
+│                                                                  │
+│  📊 Attributs                                                   │
+│  friendly_name: Capteur Température Salon                        │
+│  unit_of_measurement: °C                                        │
+│  ...                                                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+> **⭐ v1.3** : **Section "Hiérarchie OÙ" du panneau de détails** (ci-dessus), corrigée pour
+> afficher les niveaux dans le bon ordre (grand_père → père → lieu → lieu précis) et avec le bon
+> libellé de niveau à chaque segment — voir **Partie 2 §T6.2bis** pour le root cause (niveau
+> autrefois déduit de la position dans le tableau, devenu ambigu/faux dès qu'un segment optionnel
+> comme `lieu_precis` peut être absent). Panneau également corrigé pour s'afficher réellement dans
+> une boîte visible (fond, ombre) — voir **Partie 2 §T3.8** pour le bug CSS Shadow DOM sous-jacent.
+
+### 6.3 Légende QUOI
+
+**Affichage :**
+- Une barre latérale gauche affichant tous les types QUOI
+- Chaque type est représenté par son icône
+- Le nombre d'entités pour chaque type est affiché
+- Cliquer sur un type filtre l'arbre pour n'afficher que ce type
+
+> **⭐ v1.3** : **Légende OÙ affichée au-dessus de la Légende QUOI** (demande utilisateur, nombre de
+> niveaux OÙ fixe — 4 — contrairement au nombre de types QUOI qui varie). **ID technique de
+> l'entité** (ex: `binary_sensor.chambre_bouton_...`) retiré de l'affichage sous chaque entité dans
+> la liste (n'apportait rien d'utile en usage courant, `showEntityIds` supprimé).
+>
+> **⭐ v1.4 (15/08/2026)** : **libellé du QUOI toujours affiché à côté de l'icône**, y compris
+> quand l'icône est reconnue — la v1.3 ne l'affichait qu'en repli pour les types sans icône dédiée
+> (`❓` dans `getQuoiIcon()`), contrairement à la demande initiale du 08/08/2026 qui voulait le
+> libellé visible dans tous les cas, pas seulement en dépannage.
+
+---
+
+## 7. Règles Métier
+
+### 7.1 Règles de Tri
+
+| Entité | Tri par défaut | Ordre |
+|--------|---------------|-------|
+| Areas | Nombre d'entités | Décroissant |
+| Groupes QUOI | Nombre d'entités | Décroissant |
+| Entités | Nom | Alphabétique |
+
+### 7.2 Règles d'Affichage
+
+| Condition | Affichage |
+|-----------|----------|
+| Entité disponible | Afficher l'état normalement |
+| Entité unavailable | Afficher "N/A" en gris |
+| Entité sans nom friendly | Afficher l'entity_id |
+| Area sans entités | Masquer la section |
+| QUOI sans entités | Masquer le groupe |
+
+### 7.3 Règles de Filtrage
+
+| Condition | Comportement |
+|-----------|--------------|
+| Filtre Area + Filtre QUOI | Appliquer les deux (intersection) |
+| Filtre Area seul | Afficher toutes les entités de cette Area |
+| Filtre QUOI seul | Afficher toutes les entités de ce type |
+| Filtre Entités Actives | Masquer les entités unavailable |
+
+### 7.4 Règles de Rafraîchissement
+
+| Événement | Action |
+|-----------|--------|
+| ha:structure:rebuilt | Rafraîchir l'arbre si auto-refresh activé |
+| ha:entity:updated | Rafraîchir l'arbre si auto-refresh activé |
+| Manuel (bouton) | Toujours rafraîchir |
+| Intervalle configuré | Rafraîchir selon la période |
+
+---
+
+## 8. Contraintes
+
+### 8.1 Contraintes Techniques
+
+| ID | Contrainte | Description |
+|----|------------|-------------|
+| C-001 | **Dépendance Socle** | L'application DOIT utiliser HaStructureRegistry du socle |
+| C-002 | **Pas de Base de Données** | L'application NE DOIT PAS utiliser de base de données propre |
+| C-003 | **TypeScript Strict** | Le code DOIT être en TypeScript avec mode strict |
+| C-004 | **Architecture 5 Couches** | L'application DOIT respecter l'architecture en couches |
+| C-005 | **EventBus Uniquement** | Toute communication DOIT passer par EventBus |
+
+### 8.2 Contraintes d'Intégration
+
+| ID | Contrainte | Description |
+|----|------------|-------------|
+| C-006 | **Socket.io** | L'application DOIT utiliser Socket.io pour la communication client |
+| C-007 | **Événements Prefixés** | Tous les événements DOIVENT être prefixés par "arbreouquoi:" |
+| C-008 | **Démarrage Automatique** | L'application DOIT démarrer automatiquement avec le socle |
+| C-009 | **Configuration YAML** | La configuration DOIT être stockée dans data/arbreouquoi/config.yaml |
+
+### 8.3 Contraintes de Sécurité
+
+| ID | Contrainte | Description |
+|----|------------|-------------|
+| C-010 | **Pas d'Accès Direct MQTT** | L'application NE DOIT PAS accéder directement au client MQTT |
+| C-011 | **Validation des Entrées** | Toutes les entrées utilisateur DOIVENT être validées |
+| C-012 | **Échappement HTML** | Toutes les sorties HTML DOIVENT être échappées |
+
+---
+
+## 9. Évolutions Futures
+
+### 9.1 Version 1.1
+
+- **Export/Import** : Permettre d'exporter la structure en JSON ou CSV
+- **Impression** : Ajouter une fonction d'impression de l'arbre
+- **Graphique** : Visualisation sous forme de graphe (D3.js ou similar)
+- **Historique** : Voir l'historique des changements du référentiel
+
+### 9.2 Version 1.2
+
+- **Édition** : Permettre de modifier les attributs QUOI directement
+- **Création d'Areas** : Permettre de créer de nouvelles Areas depuis l'UI
+- **Synchronisation** : Synchroniser les Areas entre HA et le référentiel
+- **Multi-instances** : Supporter plusieurs instances HA
+
+### 9.3 Version 2.0
+
+- **Intégration MQTT** : Devenir une application d'intégration pour publier des entités
+- **Gestion des Devices** : Afficher et gérer les appareils
+- **Topologie Avancée** : Visualisation 3D ou géolocalisée
+- **Collaboration** : Mode multi-utilisateurs avec annotations
+
+---
+
+# Partie 2 — Technique / Implémentation
+
+## T1. Architecture de l'Application
+
+### T1.1 Conformité à l'Architecture 5 Couches
+
+L'application **ARBREOUQUOI** respecte strictement l'architecture en 5 couches définie dans `techniques-socle-ha-mqtt_specs` (voir dépendance en en-tête) :
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -63,7 +566,7 @@ L'application **ARBREOUQUOI** respecte strictement l'architecture en 5 couches d
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 Diagramme de Composants
+### T1.2 Diagramme de Composants
 
 ```mermaid
 graph TD
@@ -72,25 +575,25 @@ graph TD
         A --> C[socket-events.ts]
         A --> D[config-schema.ts]
         A --> E[types.ts]
-        
+
         B --> F[HaStructureRegistry]
         B --> G[IEventBus]
         B --> H[Logger]
         B --> I[IAppConfigProvider]
-        
+
         J[presentation/index.html] --> K[presentation/ts/app.ts]
         J --> L[presentation/styles/arbreouquoi.css]
         K --> M[SocketService]
         M --> N[Socket.io]
     end
-    
+
     F -->|Injected| O[Socle - HaStructureRegistry]
     G -->|Injected| P[Socle - EventBus]
     H -->|Injected| Q[Socle - Logger]
     I -->|Injected| R[Socle - AppConfigProvider]
 ```
 
-### 1.3 Injection de Dépendances
+### T1.3 Injection de Dépendances
 
 L'application utilise l'**injection de dépendances** via les factories :
 
@@ -115,9 +618,9 @@ export function createArbreouquoiService(
 
 ---
 
-## 2. Structure des Fichiers
+## T2. Structure des Fichiers
 
-### 2.1 Arborescence Complète
+### T2.1 Arborescence Complète
 
 ```bash
 applications/
@@ -147,7 +650,7 @@ applications/
                 └── app.js
 ```
 
-### 2.2 Fichiers et Rôles
+### T2.2 Fichiers et Rôles
 
 | Fichier | Rôle | Obligatoire | Modifiable |
 |---------|------|-------------|------------|
@@ -163,9 +666,9 @@ applications/
 
 ---
 
-## 3. Détails des Composants
+## T3. Détails des Composants
 
-### 3.1 domain/index.ts
+### T3.1 domain/index.ts
 
 **Rôle :** Point d'entrée du module, déclaration pour la détection automatique.
 
@@ -200,7 +703,7 @@ export * from './config-schema';
 export * from './types';
 ```
 
-### 3.2 domain/ArbreouquoiService.ts
+### T3.2 domain/ArbreouquoiService.ts
 
 **Rôle :** Service métier principal qui gère la logique de l'application.
 
@@ -234,7 +737,7 @@ export * from './types';
 - `IAppConfigProvider<ArbreouquoiConfig>` — Pour accéder à la configuration spécifique
 - `HaStructureRegistry` — **Injection principale** — Pour accéder au référentiel HA
 
-### 3.3 domain/socket-events.ts
+### T3.3 domain/socket-events.ts
 
 **Rôle :** Définition centralisée de tous les événements Socket.io de l'application.
 
@@ -269,7 +772,7 @@ export * from './types';
 - `arbreouquoi:config:get` — Demande la configuration
 - `arbreouquoi:config:save` — Sauvegarde la configuration
 
-### 3.4 domain/config-schema.ts
+### T3.4 domain/config-schema.ts
 
 **Rôle :** Définition du schema de configuration avec Zod.
 
@@ -308,7 +811,7 @@ export const arbreouquoiConfigSchema = z.object({
 export type ArbreouquoiConfig = z.infer<typeof arbreouquoiConfigSchema>;
 ```
 
-### 3.5 domain/types.ts
+### T3.5 domain/types.ts
 
 **Rôle :** Définition des types TypeScript spécifiques à l'application.
 
@@ -361,12 +864,12 @@ interface ArbreOuQuoiTreePayload {
 }
 ```
 
-> **⭐ v1.3** : Ce bloc reste daté (structure Area à un seul niveau — voir note §6.2bis) ; une
+> **⭐ v1.3** : Ce bloc reste daté (structure Area à un seul niveau — voir note §T6.2bis) ; une
 > interface bien réelle et actuelle, `ArbreOuQuoiEntityDetailsPayload.ouPath`, a changé cette
 > session : `string[]` → `Array<{ name: string; level: 'grand_pere' | 'pere' | 'lieu' |
-> 'lieu_precis' }>` (voir §6.2bis pour le pourquoi — `extractOuSegments()`).
+> 'lieu_precis' }>` (voir §T6.2bis pour le pourquoi — `extractOuSegments()`).
 
-### 3.6 presentation/index.html
+### T3.6 presentation/index.html
 
 **Rôle :** Interface utilisateur principale de l'application.
 
@@ -385,30 +888,30 @@ interface ArbreOuQuoiTreePayload {
   <div class="app-container">
     <!-- Header -->
     <header class="app-header">...</header>
-    
+
     <!-- Toolbar -->
     <div class="app-toolbar">...</div>
-    
+
     <!-- Stats Bar -->
     <div class="stats-bar">...</div>
-    
+
     <!-- Loading -->
     <div class="loading-indicator">...</div>
-    
+
     <!-- Error -->
     <div class="error-message">...</div>
-    
+
     <!-- Main Content -->
     <div class="main-content">
       <div class="tree-container">...
       </div>
       <div class="details-panel">...</div>
     </div>
-    
+
     <!-- Footer -->
     <div class="app-footer">...</div>
   </div>
-  
+
   <script src="/applications/arbreouquoi/ts/app.js"></script>
 </body>
 </html>
@@ -421,7 +924,7 @@ interface ArbreOuQuoiTreePayload {
 4. **Main Content** — Arborescence et panneaux
 5. **Footer** — Information de dernière mise à jour
 
-### 3.7 presentation/ts/app.ts
+### T3.7 presentation/ts/app.ts
 
 **Rôle :** Logique client Socket.io pour l'interface utilisateur.
 
@@ -473,7 +976,7 @@ let state = {
 };
 ```
 
-### 3.8 presentation/styles/arbreouquoi.css
+### T3.8 presentation/styles/arbreouquoi.css
 
 **Rôle :** Styles CSS spécifiques à l'application.
 
@@ -521,9 +1024,9 @@ let state = {
 
 ---
 
-## 4. Cycle de Vie
+## T4. Cycle de Vie
 
-### 4.1 Démarrage
+### T4.1 Démarrage
 
 **Séquence :**
 
@@ -534,7 +1037,7 @@ sequenceDiagram
     participant EventBus as EventBus
     participant SocketBridge as SocketBridge
     participant Client as Client UI
-    
+
     AppService->>AppService: Détecte applications/arbreouquoi/
     AppService->>AppService: Charge ARBREOUQUOI_APP
     AppService->>ArbreouquoiService: new ArbreouquoiService(eventBus, logger, configProvider, haStructureRegistry)
@@ -550,7 +1053,7 @@ sequenceDiagram
     Client->>Client: renderTree()
 ```
 
-### 4.2 Arrêt
+### T4.2 Arrêt
 
 **Séquence :**
 
@@ -558,12 +1061,12 @@ sequenceDiagram
 sequenceDiagram
     participant ArbreouquoiService as ArbreouquoiService
     participant EventBus as EventBus
-    
+
     ArbreouquoiService->>ArbreouquoiService: clearInterval(refreshInterval)
     ArbreouquoiService->>EventBus: emit('arbreouquoi:status', {status: 'stopped'})
 ```
 
-### 4.3 Rafraîchissement Automatique
+### T4.3 Rafraîchissement Automatique
 
 **Séquence :**
 
@@ -573,7 +1076,7 @@ sequenceDiagram
     participant ArbreouquoiService as ArbreouquoiService
     participant EventBus as EventBus
     participant HaStructureRegistry as HaStructureRegistry
-    
+
     Timer->>ArbreouquoiService: tick (toutes les N ms)
     ArbreouquoiService->>HaStructureRegistry: getAllEntities()
     ArbreouquoiService->>ArbreouquoiService: buildFullTree()
@@ -582,11 +1085,11 @@ sequenceDiagram
 
 ---
 
-## 5. Communication
+## T5. Communication
 
-### 5.1 Événements Socket.io
+### T5.1 Événements Socket.io
 
-Voir [socket-events.ts](../applications/arbreouquoi/domain/socket-events.ts) pour la liste complète.
+Voir `socket-events.ts` de l'application pour la liste complète (§T3.3 ci-dessus).
 
 **Événements Persistants :**
 Les événements suivants sont enregistrés comme persistants et envoyés automatiquement aux nouveaux clients :
@@ -598,7 +1101,7 @@ Les événements suivants sont enregistrés comme persistants et envoyés automa
 
 **Avantage :** Les nouveaux clients reçoivent immédiatement l'état actuel sans avoir à le demander.
 
-### 5.2 Événements EventBus
+### T5.2 Événements EventBus
 
 **Écoutés par ArbreouquoiService :**
 
@@ -631,7 +1134,7 @@ Les événements suivants sont enregistrés comme persistants et envoyés automa
 | `arbreouquoi:entity:details` | Client | Détails d'une entité |
 | `app:socket-events:registered` | SocketBridge | Enregistrement des événements persistants |
 
-### 5.3 Communication avec le Socle
+### T5.3 Communication avec le Socle
 
 L'application **n'accède pas directement** à :
 - `ConfigService` — Utilise `IAppConfigProvider` injecté
@@ -647,9 +1150,9 @@ Toute la communication avec le socle passe par :
 
 ---
 
-## 6. Gestion des Données
+## T6. Gestion des Données
 
-### 6.1 Source de Données
+### T6.1 Source de Données
 
 **Source unique :** `HaStructureRegistry` (injecté par le socle)
 
@@ -668,7 +1171,7 @@ Toute la communication avec le socle passe par :
 | `getEntitiesByQuoi(quoiId)` | `HaStructuredEntity[]` | Entités d'un type QUOI |
 | `getEntitiesByAreaAndQuoi(areaId, quoiId)` | `HaStructuredEntity[]` | Entités d'une Area ET d'un type QUOI |
 
-### 6.2 Transformation des Données
+### T6.2 Transformation des Données
 
 **De HaStructureRegistry → FullTreeStructure :**
 
@@ -681,7 +1184,7 @@ const catalog = haStructureRegistry.getQuoiCatalog();
 // 2. Construire les nœuds Area
 const areaNodes = Array.from(areasMap.values()).map(area => {
   const areaEntities = allEntities.filter(e => e.area?.area_id === area.area_id);
-  
+
   // 3. Grouper par QUOI
   const quoiGroupsMap = new Map<string, HaStructuredEntity[]>();
   for (const entity of areaEntities) {
@@ -692,7 +1195,7 @@ const areaNodes = Array.from(areasMap.values()).map(area => {
       quoiGroupsMap.get(quoiId)!.push(entity);
     }
   }
-  
+
   // 4. Convertir en QuiGroup[]
   const quoiGroups = Array.from(quoiGroupsMap.entries()).map(([quoiId, entities]) => {
     const quoiDef = catalog.find(q => q.id === quoiId);
@@ -702,7 +1205,7 @@ const areaNodes = Array.from(areasMap.values()).map(area => {
       count: entities.length
     };
   });
-  
+
   return { area, children: quoiGroups, entityCount: areaEntities.length };
 });
 
@@ -710,11 +1213,11 @@ const areaNodes = Array.from(areasMap.values()).map(area => {
 areaNodes.sort((a, b) => b.entityCount - a.entityCount);
 ```
 
-### 6.2bis ⭐ v1.3 — `extractOuSegments()` : niveau OÙ tagué, pas déduit de la position
+### T6.2bis ⭐ v1.3 — `extractOuSegments()` : niveau OÙ tagué, pas déduit de la position
 
-> Note : l'exemple §6.2 ci-dessus décrit une hiérarchie Area à un seul niveau, antérieure à la
+> Note : l'exemple §T6.2 ci-dessus décrit une hiérarchie Area à un seul niveau, antérieure à la
 > hiérarchie OÙ à 4 niveaux (grand_père/père/lieu/lieu_précis) réellement implémentée — non
-> réécrit ici (hors-scope de cette session), voir `fonctionnelles-arbreouquoi_specs` §6.1/§6.2.
+> réécrit ici (hors-scope au moment de l'écriture), voir **Partie 1 §6.1/§6.2**.
 
 **Root cause corrigée** : l'ancien calcul (`getOuLevel(index, totalLength)`, côté serveur ET
 dupliqué côté client dans `app.ts`) déduisait le niveau d'un segment **de sa position dans un
@@ -739,7 +1242,7 @@ le redéviner lui-même. `getLevelFromPathIndex()` côté client (`app.ts`), dou
 de position, supprimée. `EntityInfo.ouPath` (utilisé pour les entités **liées**, informatif
 seulement, jamais affiché avec un niveau) reste `string[]` — pas concerné.
 
-### 6.3 Cache
+### T6.3 Cache
 
 Aucun cache local n'est utilisé. Toutes les données sont :
 - **Lues** depuis HaStructureRegistry à chaque requête
@@ -750,9 +1253,9 @@ Le client conserve un cache local dans son état (`state.tree`, `state.catalog`,
 
 ---
 
-## 7. Gestion des Erreurs
+## T7. Gestion des Erreurs
 
-### 7.1 Stratégie Globale
+### T7.1 Stratégie Globale
 
 **Principe :** Ne jamais bloquer l'application, toujours fournir un feedback à l'utilisateur.
 
@@ -765,7 +1268,7 @@ Le client conserve un cache local dans son état (`state.tree`, `state.catalog`,
 | Warning | Problème non bloquant | `logger.warn()` | ⚠️ Optionnel |
 | Error | Erreur bloquante | `logger.error()` | ✅ Oui |
 
-### 7.2 Gestion des Erreurs dans ArbreouquoiService
+### T7.2 Gestion des Erreurs dans ArbreouquoiService
 
 ```typescript
 // Dans start()
@@ -790,7 +1293,7 @@ try {
 }
 ```
 
-### 7.3 Gestion des Erreurs côté Client
+### T7.3 Gestion des Erreurs côté Client
 
 ```typescript
 // Connexion Socket.io
@@ -810,7 +1313,7 @@ socket.on('arbreouquoi:error', (error) => {
 });
 ```
 
-### 7.4 Scénarios d'Erreur
+### T7.4 Scénarios d'Erreur
 
 | Scénario | Cause | Gestion |
 |----------|-------|---------|
@@ -822,9 +1325,9 @@ socket.on('arbreouquoi:error', (error) => {
 
 ---
 
-## 8. Configuration
+## T8. Configuration
 
-### 8.1 Structure de Configuration
+### T8.1 Structure de Configuration
 
 **Fichier :** `data/arbreouquoi/config.yaml` (objet nu, ex-section `arbreouquoi` de l'ancien
 fichier unique — voir `techniques-socle-ha-mqtt_specs` §7 ; le socle vit désormais dans
@@ -862,7 +1365,7 @@ advanced:
   enableSearch: true
 ```
 
-### 8.2 Chargement de la Configuration
+### T8.2 Chargement de la Configuration
 
 ```typescript
 // Dans ArbreouquoiService.start()
@@ -874,7 +1377,7 @@ config.refresh.autoRefreshInterval; // 30000
 config.filters.showOnlyActive;    // true
 ```
 
-### 8.3 Sauvegarde de la Configuration
+### T8.3 Sauvegarde de la Configuration
 
 ```typescript
 // Depuis le client
@@ -896,80 +1399,52 @@ this.configService.savePartialConfig({
 
 ---
 
-## 9. Build et Déploiement
+## T9. Build et Déploiement
 
-### 9.1 Prérequis
+### T9.1 Prérequis
 
 - Node.js 20+ (LTS)
 - TypeScript 5.x
 - pnpm (recommandé)
 - Docker (pour le déploiement)
 
-### 9.2 Installation
+### T9.2 Installation
 
 ```bash
 # Depuis la racine du projet
 cd /chemin/vers/dimotic-ha
 
-# Installer les dépendances (si nécessaire)
-pnpm install
-
-# Builder l'application
-npm run build
-
-# Le build générera :
-# - applications/arbreouquoi/dist/ (TypeScript compilé - à côté de src/)
-# - applications/arbreouquoi/dist/domain/*.js (fichiers métier compilés)
-# - applications/arbreouquoi/dist/presentation/ts/app.js (frontend compilé)
+# Builder l'application (chaque app a son propre build, voir CLAUDE.md — pas de build racine fiable)
+cd applications/arbreouquoi && npm run build
 ```
 
-### 9.3 Déploiement
+### T9.3 Déploiement
+
+Voir `techniques-socle-ha-mqtt_specs` §11 (Docker) pour le mécanisme réel de build/déploiement de
+l'image complète — le détail "docker-compose build/up" par app individuelle ci-dessous est un
+raccourci de développement local, pas le mécanisme de production (image unique multi-apps).
 
 **Mode 1 : Développement**
 ```bash
 npm run dev
-# Accès : http://localhost:3000/applications/arbreouquoi/src/presentation/index.html
 ```
 
-**Mode 2 : Production avec Docker**
+**Mode 2 : Production (Docker, image complète du projet)**
 ```bash
-# Construire l'image
-docker-compose build
-
-# Démarrer
-docker-compose up -d
-
-# Accès : http://<host>:3000/applications/arbreouquoi/src/presentation/index.html
+docker compose pull && docker compose up -d
 ```
 
-### 9.4 Activation/Désactivation
+### T9.4 Activation/Désactivation
 
-**Activation :**
-```bash
-# Manuel
-mv applications_desactivees/arbreouquoi applications/
-
-# Ou via l'UI
-# Paramètres Techniques > Gestion des applications > Activer ARBREOUQUOI
-
-# Puis redémarrer
-npm restart  # ou docker restart
-```
-
-**Désactivation :**
-```bash
-# Manuel
-mv applications/arbreouquoi applications_desactivees/
-
-# Puis redémarrer
-npm restart
-```
+Voir `guide-nouvelle-application_specs` §9 — liste `disabledApps` dans `data/core/config.yaml`,
+**seul** interrupteur réel (le déplacement de répertoire `applications/` ↔
+`applications_désactivées/` décrit historiquement ici n'est plus le mécanisme utilisé).
 
 ---
 
-## 10. Tests
+## T10. Tests
 
-### 10.1 Checklist de Validation
+### T10.1 Checklist de Validation
 
 **Avant déploiement :**
 
@@ -988,7 +1463,7 @@ npm restart
 - [ ] La déconnexion/reconnexion Socket.io est gérée correctement
 - [ ] Les erreurs sont affichées correctement
 
-### 10.2 Tests Unitaires
+### T10.2 Tests Unitaires
 
 **Fichier :** `applications/arbreouquoi/tests/ArbreouquoiService.test.ts`
 
@@ -1069,9 +1544,9 @@ describe('ArbreouquoiService', () => {
     it('should handle empty registry', () => {
       mockHaStructureRegistry.getAllEntities.mockReturnValue([]);
       mockHaStructureRegistry.getAreas.mockReturnValue(new Map());
-      
+
       const tree = service.buildFullTree();
-      
+
       expect(tree.areas).toHaveLength(0);
       expect(tree.unassigned).toHaveLength(0);
       expect(tree.totalEntities).toBe(0);
@@ -1080,7 +1555,7 @@ describe('ArbreouquoiService', () => {
 });
 ```
 
-### 10.3 Tests d'Intégration
+### T10.3 Tests d'Intégration
 
 **À tester :**
 1. Communication Socket.io entre client et serveur
@@ -1089,11 +1564,10 @@ describe('ArbreouquoiService', () => {
 4. Persistance de la configuration
 5. Détection automatique par AppService
 
-### 10.4 Outils de Test
+### T10.4 Outils de Test
 
 - **Vitest** — Tests unitaires TypeScript
 - **Socket.io Client** — Test de la communication Socket.io
-- **Postman** — Test manuel des événements (si API REST disponible)
 - **Navigateur** — Test manuel de l'UI
 
 ---
@@ -1102,7 +1576,7 @@ describe('ArbreouquoiService', () => {
 
 ### A.1 Conventions de Nommage
 
-Voir [nommage_specs_v1.0.md](nommage_specs_v1.0.md) pour les règles complètes.
+Voir `nommage_specs_v1.0.md` pour les règles complètes.
 
 **Rappel pour ARBREOUQUOI :**
 - **Répertoire :** `arbreouquoi` (minuscules, sans espaces, sans caractères spéciaux)
@@ -1119,361 +1593,19 @@ Voir [nommage_specs_v1.0.md](nommage_specs_v1.0.md) pour les règles complètes.
 4. **Valider les entrées** — Utiliser Zod pour la configuration
 5. **Échapper les sorties HTML** — Éviter XSS
 6. **Gérer les erreurs** — Ne jamais laisser une erreur non gérée
-7. **Documenter le code** — Commentaires JSDoc pour les fonctions publiques
-8. **Respecter les conventions** — Voir PROMPT.md et PROMPT_PROJET.md
-
-### A.3 Ressources
-
-- [PROMPT.md](../../PROMPT.md) — Instructions pour Vibe
-- [PROMPT_PROJET.md](../../PROMPT_PROJET.md) — Règles de développement
-- [techniques-socle-ha-mqtt_specs_v4.12.md](techniques-socle-ha-mqtt_specs_v4.12.md) — Spécifications techniques socle
-- [guide-nouvelle-application_specs_v1.6.md](guide-nouvelle-application_specs_v1.6.md) — Guide de création
-- [nommage_specs_v1.0.md](nommage_specs_v1.0.md) — Conventions de nommage
+7. **Respecter les conventions** — Voir `CLAUDE.md`
 
 ---
 
-*Document généré par Mistral Vibe*  
-*Co-Authored-By: Mistral Vibe <vibe@mistral.ai>*
+## Communication Inter-Applications
 
+Fire & Forget (`eventBus.emitGeneric()`/`onGeneric()`) et Request/Reply corrélé
+(`CorrelatedRequester`) — mécanisme générique du socle, voir `techniques-socle-ha-mqtt_specs` §9bis
+pour son fonctionnement et `guide-nouvelle-application_specs` §3.2bis pour un exemple de code des
+deux côtés (demandeur/répondeur). ARBREOUQUOI n'expose aujourd'hui aucune capacité Request/Reply
+propre ; les événements `arbreouquoi:*` listés en §T3.3/§T5 sont tous internes (service ↔ UI via
+Socket.io), pas destinés à d'autres applications.
 
 ---
 
-## 9. Communication Inter-Applications
-
-> **⚠️ IMPORTANT :** Cette section documente les événements et capacités que cette application **expose** aux autres applications.
-> 
-> **Pour utiliser ces capacités :**
-> - Import depuis le core : `import { InterAppClient } from '../../../core/src/exports'`
-> - Utiliser `interAppClient.request()` pour les Request/Reply
-> - Utiliser `interAppClient.on()` pour écouter les événements Fire & Forget
-> - Voir [inter-app-communication_specs_v1.0.md](../inter-app-communication_specs_v1.0.md) pour les détails
-
-### 9.1 Événements Fire & Forget (Écoute possible par d'autres applications)
-
-| Événement | Description | Payload Type | Fréquence | Émetteur |
-|-----------|-------------|--------------|-----------|----------|
-| `arbreouquoi:ha:sync:started` | Synchronisation HA démarrée | `ArbreOuQuoiSyncStartedPayload` | Au démarrage | arbreouquoi |
-| `arbreouquoi:ha:sync:completed` | Synchronisation HA terminée | `ArbreOuQuoiSyncCompletedPayload` | À la fin de la sync | arbreouquoi |
-| `arbreouquoi:ha:entity:updated` | Entité HA mise à jour dans le référentiel | `ArbreOuQuoiHaEntityUpdatedPayload` | Selon changements HA | arbreouquoi |
-| `arbreouquoi:ha:structure:rebuilt` | Structure HA reconstruite | `ArbreOuQuoiStructureRebuiltPayload` | Sur rebuild | arbreouquoi |
-| `arbreouquoi:ui:tree:expanded` | Noeud de l'arbre développé | `ArbreOuQuoiTreeExpandedPayload` | Sur interaction UI | arbreouquoi |
-| `arbreouquoi:ui:tree:collapsed` | Noeud de l'arbre réduit | `ArbreOuQuoiTreeCollapsedPayload` | Sur interaction UI | arbreouquoi |
-
-**Types des payloads :**
-```typescript
-// ArbreOuQuoiSyncStartedPayload
-export interface ArbreOuQuoiSyncStartedPayload {
-  timestamp: string;
-  haWsConnected: boolean;
-  mqttConnected: boolean;
-}
-
-// ArbreOuQuoiSyncCompletedPayload
-export interface ArbreOuQuoiSyncCompletedPayload {
-  timestamp: string;
-  durationMs: number;
-  areasLoaded: number;
-  entitiesLoaded: number;
-  errors: string[];
-}
-
-// ArbreOuQuoiHaEntityUpdatedPayload
-export interface ArbreOuQuoiHaEntityUpdatedPayload {
-  entityId: string;
-  oldState: string;
-  newState: string;
-  changedAttributes: string[];
-  timestamp: string;
-}
-
-// ArbreOuQuoiStructureRebuiltPayload
-export interface ArbreOuQuoiStructureRebuiltPayload {
-  timestamp: string;
-  trigger: 'mqtt-discovery' | 'websocket-full-sync' | 'manual';
-  areasCount: number;
-  entitiesCount: number;
-}
-
-// ArbreOuQuoiTreeExpandedPayload
-export interface ArbreOuQuoiTreeExpandedPayload {
-  nodeType: 'area' | 'quoi' | 'entity';
-  nodeId: string;
-  timestamp: string;
-}
-
-// ArbreOuQuoiTreeCollapsedPayload
-export interface ArbreOuQuoiTreeCollapsedPayload {
-  nodeType: 'area' | 'quoi' | 'entity';
-  nodeId: string;
-  timestamp: string;
-}
-```
-
-**Exemple d'écoute depuis une autre application :**
-```typescript
-import { InterAppClient } from '../../../core/src/exports';
-
-// Écouter la fin de synchronisation
-this.interAppClient.on('arbreouquoi:ha:sync:completed', (payload, fromApp) => {
-  console.log(`Sync HA terminée par ${fromApp}: ${payload.entitiesLoaded} entités chargées`);
-});
-
-// Écouter les mises à jour d'entités
-this.interAppClient.on('arbreouquoi:ha:entity:updated', (payload, fromApp) => {
-  console.log(`Entité ${payload.entityId} mise à jour: ${payload.oldState} → ${payload.newState}`);
-});
-
-// Écouter les rebuilds de structure
-this.interAppClient.on('arbreouquoi:ha:structure:rebuilt', (payload, fromApp) => {
-  console.log(`Structure reconstruite: ${payload.entitiesCount} entités dans ${payload.areasCount} areas`);
-});
-```
-
-### 9.2 Capacités Request/Reply (Appel possible depuis d'autres applications)
-
-| Capacité | Description | Request Type | Reply Type | Timeout conseillé |
-|----------|-------------|--------------|------------|-------------------|
-| `arbreouquoi:ha:refresh` | Forcer le rafraîchissement des données HA | `ArbreOuQuoiRefreshRequest` | `ArbreOuQuoiRefreshReply` | 10000ms |
-| `arbreouquoi:ha:entity:details` | Obtenir les détails complets d'une entité HA | `ArbreOuQuoiEntityDetailsRequest` | `ArbreOuQuoiEntityDetailsReply` | 2000ms |
-| `arbreouquoi:ha:area:entities` | Obtenir toutes les entités d'une Area | `ArbreOuQuoiAreaEntitiesRequest` | `ArbreOuQuoiAreaEntitiesReply` | 1000ms |
-| `arbreouquoi:ui:expand` | Développer un noeud dans l'UI | `ArbreOuQuoiUiExpandRequest` | `ArbreOuQuoiUiExpandReply` | 500ms |
-| `arbreouquoi:ui:collapse` | Réduire un noeud dans l'UI | `ArbreOuQuoiUiCollapseRequest` | `ArbreOuQuoiUiCollapseReply` | 500ms |
-| `arbreouquoi:config:get` | Obtenir la configuration UI actuelle | `ArbreOuQuoiConfigGetRequest` | `ArbreOuQuoiConfigGetReply` | 500ms |
-
-**Types :**
-```typescript
-// Request/Reply pour ha:refresh
-interface ArbreOuQuoiRefreshRequest {
-  forceFullSync?: boolean;
-}
-
-interface ArbreOuQuoiRefreshReply {
-  success: boolean;
-  areasLoaded: number;
-  entitiesLoaded: number;
-  durationMs: number;
-  errors: string[];
-}
-
-// Request/Reply pour ha:entity:details
-interface ArbreOuQuoiEntityDetailsRequest {
-  entityId: string;
-}
-
-interface ArbreOuQuoiEntityDetailsReply {
-  entityId: string;
-  name: string;
-  domain: string;
-  state: string;
-  attributes: Record<string, unknown>;
-  area: string;
-  quoi: string;
-  device?: {
-    id: string;
-    name: string;
-    manufacturer: string;
-    model: string;
-  };
-  relationships: {
-    sameArea: string[];
-    sameQuoi: string[];
-    sameDomain: string[];
-    sameDevice: string[];
-  };
-}
-
-// Request/Reply pour ha:area:entities
-interface ArbreOuQuoiAreaEntitiesRequest {
-  areaId: string;
-  includeNested?: boolean;
-}
-
-interface ArbreOuQuoiAreaEntitiesReply {
-  areaId: string;
-  areaName: string;
-  entities: ArbreOuQuoiEntityDetailsReply[];
-  total: number;
-}
-
-// Request/Reply pour ui:expand
-interface ArbreOuQuoiUiExpandRequest {
-  nodeType: 'area' | 'quoi' | 'entity';
-  nodeId: string;
-  recursive?: boolean;
-}
-
-interface ArbreOuQuoiUiExpandReply {
-  success: boolean;
-  nodeType: string;
-  nodeId: string;
-  childrenCount: number;
-}
-
-// Request/Reply pour ui:collapse
-interface ArbreOuQuoiUiCollapseRequest {
-  nodeType: 'area' | 'quoi' | 'entity';
-  nodeId: string;
-  recursive?: boolean;
-}
-
-interface ArbreOuQuoiUiCollapseReply {
-  success: boolean;
-  nodeType: string;
-  nodeId: string;
-}
-
-// Request/Reply pour config:get
-interface ArbreOuQuoiConfigGetRequest {}
-
-interface ArbreOuQuoiConfigGetReply {
-  showHiddenEntities: boolean;
-  showDisabledEntities: boolean;
-  defaultExpandLevel: number;
-  theme: 'light' | 'dark' | 'system';
-  language: string;
-}
-```
-
-**Exemple d'appel depuis une autre application :**
-```typescript
-import { InterAppClient } from '../../../core/src/exports';
-import type {
-  ArbreOuQuoiRefreshRequest,
-  ArbreOuQuoiRefreshReply,
-  ArbreOuQuoiEntityDetailsRequest,
-  ArbreOuQuoiEntityDetailsReply,
-  ArbreOuQuoiAreaEntitiesRequest,
-  ArbreOuQuoiAreaEntitiesReply
-} from '../arbreouquoi/specs';
-
-// Forcer le rafraîchissement des données HA
-const refreshReply = await interAppClient.request<
-  ArbreOuQuoiRefreshRequest,
-  ArbreOuQuoiRefreshReply
->(
-  'arbreouquoi:ha:refresh',
-  { forceFullSync: true },
-  10000
-);
-
-if (refreshReply.status === 'success') {
-  console.log(`Rafraîchi: ${refreshReply.result.entitiesLoaded} entités`);
-}
-
-// Obtenir les détails d'une entité
-const detailsReply = await interAppClient.request<
-  ArbreOuQuoiEntityDetailsRequest,
-  ArbreOuQuoiEntityDetailsReply
->(
-  'arbreouquoi:ha:entity:details',
-  { entityId: 'sensor.temperature_salon' },
-  2000
-);
-
-if (detailsReply.status === 'success') {
-  console.log('Détails entité:', detailsReply.result);
-}
-
-// Obtenir toutes les entités d'une Area
-const areaReply = await interAppClient.request<
-  ArbreOuQuoiAreaEntitiesRequest,
-  ArbreOuQuoiAreaEntitiesReply
->(
-  'arbreouquoi:ha:area:entities',
-  { areaId: 'salon', includeNested: true },
-  1000
-);
-
-if (areaReply.status === 'success') {
-  console.log(`Area "${areaReply.result.areaName}" a ${areaReply.result.total} entités`);
-}
-```
-
-**Handler côté récepteur (dans l'application ARBREOUQUOI) :**
-```typescript
-import { InterAppClient } from '../../../core/src/exports';
-
-// Exemple: handler pour arbreouquoi:ha:refresh
-this.interAppClient.onRequest('arbreouquoi:ha:refresh', async (request, reply) => {
-  try {
-    const result = await performHaRefresh(request.payload);
-    reply({
-      requestId: request.requestId,
-      inReplyTo: request.requestId,
-      fromApp: 'arbreouquoi',
-      status: 'success',
-      result,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    reply({
-      requestId: request.requestId,
-      inReplyTo: request.requestId,
-      fromApp: 'arbreouquoi',
-      status: 'error',
-      error: {
-        code: 'ARBREOUQUOI_REFRESH_ERROR',
-        message: error.message
-      },
-      timestamp: new Date().toISOString()
-    });
-  }
-});
-
-// Exemple: handler pour arbreouquoi:ha:entity:details
-this.interAppClient.onRequest('arbreouquoi:ha:entity:details', async (request, reply) => {
-  try {
-    const entityDetails = await getEntityDetails(request.payload);
-    reply({
-      requestId: request.requestId,
-      inReplyTo: request.requestId,
-      fromApp: 'arbreouquoi',
-      status: 'success',
-      result: entityDetails,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    reply({
-      requestId: request.requestId,
-      inReplyTo: request.requestId,
-      fromApp: 'arbreouquoi',
-      status: 'error',
-      error: {
-        code: 'ARBREOUQUOI_ENTITY_DETAILS_ERROR',
-        message: error.message
-      },
-      timestamp: new Date().toISOString()
-    });
-  }
-});
-
-// Exemple: handler pour arbreouquoi:ha:area:entities
-this.interAppClient.onRequest('arbreouquoi:ha:area:entities', async (request, reply) => {
-  try {
-    const areaEntities = await getAreaEntities(request.payload);
-    reply({
-      requestId: request.requestId,
-      inReplyTo: request.requestId,
-      fromApp: 'arbreouquoi',
-      status: 'success',
-      result: areaEntities,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    reply({
-      requestId: request.requestId,
-      inReplyTo: request.requestId,
-      fromApp: 'arbreouquoi',
-      status: 'error',
-      error: {
-        code: 'ARBREOUQUOI_AREA_ENTITIES_ERROR',
-        message: error.message
-      },
-      timestamp: new Date().toISOString()
-    });
-  }
-});
-```
-
-*Document généré par Mistral Vibe*  
-*Co-Authored-By: Mistral Vibe <vibe@mistral.ai>*
+*Document initialement généré par Mistral Vibe, fusionné et corrigé par Claude (19/09/2026).*

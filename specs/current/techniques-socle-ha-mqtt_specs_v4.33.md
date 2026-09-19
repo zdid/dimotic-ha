@@ -1,8 +1,31 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.31  
-**Date :** 23 Août 2026  
+**Version :** 4.33  
+**Date :** 19 Septembre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.33** : **§9bis ajoutée — communication générique inter-modules (Fire & Forget +
+> Request/Reply), demande explicite utilisateur** ("doit être décrit... dans le core puisque c'est
+> lui qui en assume le transport"). Le core (`emitGeneric`/`onGeneric`/`offGeneric` sur `IEventBus`,
+> `IpcEventBus` pour le transport inter-process, `CorrelatedRequester` pour le Request/Reply corrélé)
+> est le seul propriétaire du transport ; `guide-nouvelle-application_specs_v2.0.md` §3.2/§3.2bis ne
+> fait plus que pointer ici plutôt que de dupliquer la description du mécanisme. §5.5 (ancienne
+> section "Communication Inter-Applications", décrivant le même `InterAppClient`/
+> `ApplicationCapabilities` jamais implémenté) vidée en conséquence, remplacée par un pointeur vers
+> §9bis. `inter-app-communication_specs` (même conception jamais construite, "Spécification active"
+> depuis juillet 2026) **retirée de `specs/current/`** — archivée pour l'historique, plus référencée
+> nulle part comme document courant.
+
+> **v4.32** : **`Dockerfile` étend sa copie au-delà de `applications/`** (§11) — `scripts/` (racine
+> du dépôt) et `compose.deploy.yaml` sont désormais copiés dans l'image (builder + runtime), en plus
+> de `tsconfig.json`/`applications/` déjà couverts depuis v4.22. Nécessaire pour l'app `outils`
+> (18/09/2026) : son mécanisme d'archive auto-extractible (`BundleBuilder.ts`, voir
+> `guide-nouvelle-application_specs_v2.0.md` §8) lit ces fichiers pour construire un téléchargement
+> autonome — absents de l'image, cette fonctionnalité échouait silencieusement sur toute instance
+> Docker réellement déployée (ha2, noisy2...), constaté seulement en conditions réelles alors qu'elle
+> fonctionnait en développement (dépôt complet cloné). `node_modules/js-yaml` reste volontairement
+> NON copié à la racine (jamais présent dans l'image, propre au workspace pnpm de dev) — le bundle
+> embarque `applications/outils/node_modules/js-yaml` à la place, dépendance propre de cette app.
 
 > **v4.31** : **Déploiement de dimotic-ha lui-même sur d'autres machines** (§4.3bis, §7.1, §11.4bis)
 > — nouveau `targets: DeploymentTargetConfig[]` sur le schéma config racine (`disabledApps`
@@ -901,147 +924,12 @@ UI                        SocketBridge / handlers.ts         ConfigWriter / Rest
 
 ### 5.5 Communication Inter-Applications
 
-> **⭐ NOUVEAU v4.7** : Toutes les applications (sauf core) partagent le même EventBus et peuvent communiquer entre elles.
-> Voir [inter-app-communication_specs_v1.0.md](inter-app-communication_specs_v1.0.md) pour la spécification complète.
-
-**Principe fondamental :** L'EventBus est **partagé entre toutes les applications**. Cela permet une communication directe et découplée.
-
-#### 5.5.1 Deux patterns de communication
-
-| Pattern | Description | Synchronisation | Utilisation |
-|---------|-------------|-----------------|-------------|
-| **Fire & Forget** | Événement unidirectionnel, aucune réponse attendue | Asynchrone | Notifications, événements de cycle de vie |
-| **Request/Reply** | Question/Réponse avec corrélation via `requestId` | **Asynchrone avec Promises** | Appels de service, requêtes de données |
-
-**Tous les échanges inter-applications sont asynchrones.** Aucun appel synchrone n'est autorisé.
-
-#### 5.5.2 Système de corrélation Request/Reply
-
-Pour les communications où une réponse est attendue :
-
-```
-Émetteur ──────[Request]──► EventBus ──────► Récepteur
-     │         requestId: "app1-xxx-1"         │
-     │                                        ▼
-     │                               [Traitement ASYNCHRONE]
-     │                                        │
-     └──────────────────[Reply]◄──────────────┘
-              requestId: "app1-xxx-1"
-              inReplyTo: "app1-xxx-1"
-```
-
-**Structure de base :**
-- **Request** : `{ requestId, capability, payload, fromApp, timestamp }`
-- **Reply** : `{ requestId, inReplyTo, fromApp, status, result?, error?, timestamp }`
-
-**Mécanisme :**
-1. L'émetteur génère un `requestId` unique (`{appId}-{timestamp}-{seq}`)
-2. L'émetteur émet la Request sur l'EventBus
-3. Le récepteur traite la demande de manière **asynchrone**
-4. Le récepteur émet la Reply avec le même `requestId`
-5. L'émetteur reçoit la Reply via son `RequestTracker` (Promise résolue/rejetée)
-6. Si timeout dépassé, la Promise est rejetée
-
-#### 5.5.3 Déclaration des capacités
-
-**Toute application (sauf core) DOIT exporter** ses capacités dans `domain/capabilities.ts` :
-
-```typescript
-// applications/{app-name}/domain/capabilities.ts
-import type { AppRequest, AppReply, ApplicationCapabilities, RequestHandler } from '../../../core/src/types/interapp';
-
-export const {APP_NAME}_CAPABILITIES: ApplicationCapabilities = {
-  id: '{app-name}',
-  name: '{App Name}',
-  description: 'Description des capacités de cette application',
-  version: '1.0',
-
-  // Capacités gérées (Request/Reply)
-  handledRequests: {
-    '{app-name}:capability': {
-      description: 'Description de cette capacité',
-      requestType: 'AppRequest<MyRequestPayload>',
-      responseType: 'AppReply<MyReplyResult>',
-      handler: myCapabilityHandler
-    }
-  },
-
-  // Événements émettables (Fire & Forget)
-  emittedEvents: {
-    '{app-name}:event': {
-      description: 'Description de l\'événement',
-      payloadType: 'MyEventPayload'
-    }
-  }
-};
-```
-
-#### 5.5.4 Intégration décentralisée
-
-`AppService` dans le core :
-- **Détecte** les applications disponibles
-- **Injecte** le même EventBus à toutes les applications
-- Chaque application **documente** ses capacités dans sa spécification (section 9)
-- Les conflits de noms sont évités par convention entre développeurs
-
-#### 5.5.5 Utilisation via InterAppClient
-
-**Dans une application (appelante) :**
-```typescript
-import { InterAppClient } from '../../../core/src/application/InterAppClient';
-
-class MyAppService {
-  private interApp: InterAppClient;
-
-  constructor(eventBus: IEventBus, logger: Logger) {
-    this.interApp = new InterAppClient(eventBus, logger, '{app-name}');
-  }
-
-  async callScheduler() {
-    // Pose une question (asynchrone)
-    const reply = await this.interApp.request(
-      'scheduler:schedule',
-      { action: 'turn_on', at: '+15m' },
-      5000 // timeout 5 secondes
-    );
-
-    if (reply.status === 'success') {
-      console.log('OK:', reply.result);
-    }
-  }
-
-  notifyEvent() {
-    // Émet un événement (Fire & Forget)
-    this.interApp.emit('myapp:event', { data: 'value' });
-  }
-}
-```
-
-**Dans une application (réceptrice) :**
-```typescript
-class SchedulerService {
-  constructor(eventBus: IEventBus, logger: Logger) {
-    this.interApp = new InterAppClient(eventBus, logger, 'scheduler');
-    
-    // Configurer le handler
-    this.interApp.onRequest(
-      'scheduler:schedule',
-      SCHEDULER_CAPABILITIES.handledRequests['scheduler:schedule'].handler
-    );
-  }
-}
-```
-
-#### 5.5.6 Points clés à retenir
-
-1. **⭐ EventBus partagé** : Toutes les applications utilisent la même instance
-2. **⭐ Communication asynchrone** : Aucune communication bloquante
-3. **⭐ Corrélation obligatoire** : Toujours utiliser `requestId` et `inReplyTo`
-4. **⭐ Déclaration explicite** : Toute capacité DOIT être déclarée
-5. **⭐ Typage fort** : Toujours typer les payloads avec TypeScript
-6. **⭐ Pas de couplage direct** : Les applications ne connaissent pas l'implémentation des autres
-
-> **📖 Pour plus de détails :** Voir [inter-app-communication_specs_v1.0.md](inter-app-communication_specs_v1.0.md)
+> **Obsolète depuis v4.33 (19/09/2026)** — cette section décrivait `InterAppClient`/
+> `ApplicationCapabilities`/`domain/capabilities.ts`/`requestId`+`inReplyTo`, **jamais implémentés**
+> (recherche exhaustive dans le dépôt, zéro occurrence). Contenu retiré. Le mécanisme RÉEL (Fire &
+> Forget `emitGeneric`/`onGeneric`, Request/Reply corrélé via `CorrelatedRequester`) est documenté en
+> **§9bis** de ce même document. `inter-app-communication_specs` (qui décrivait la même conception
+> jamais construite) a été retirée de `specs/current/` en conséquence, archivée pour l'historique.
 
 ### 5.6 Porte d'authentification OAuth2 HA (accès externe)
 
@@ -1512,8 +1400,12 @@ interface HaStructuredRegistry {
 
 La détermination du QUOI est assurée par le module `HaClassifier` qui implémente l'interface `IHaClassifier`.
 
-**Document de référence pour RFXCOM** : Pour les règles spécifiques aux devices RFXCOM (notamment la priorité du champ `subType`),
-voir [`specs-classification-rfxcom-v1.0.md`](specs-classification-rfxcom-v1.0.md).
+**Document de référence pour RFXCOM** : `classification-rfxcom_specs_v1.0.md` décrivait ces règles mais a été
+**archivé le 19/09/2026** comme conception jamais construite (ne correspond ni à `determineQuoi()` réel côté
+RFXCOM, ni au classifieur générique réel `TaxonomyHaClassifier`, basé sur la taxonomie du `name`, pas sur
+`subType`/`device_class`) — voir `specs/archives/v5.17-rfxcom/classification-rfxcom_specs_v1.0.md` et le
+bandeau en tête de `fonctionnelles-rfxcom_specs_v6.0.md`. Le §8.3.1 ci-dessous décrit donc lui aussi un
+mécanisme non vérifié contre le code réel, non corrigé dans cette session (hors périmètre).
 
 #### 8.3.0 Priorités de Classification (Générique)
 Pour toutes les entités, l'ordre de priorité est :
@@ -1537,7 +1429,8 @@ l'ordre de priorité est **modifié** pour tenir compte des champs spécifiques 
 
 > **Exemple** : Une entité avec `attributes.subType = "Temperature"` et `device_class = "humidity"` sera classée comme `température` (priorité à `subType`).
 
-Voir [`specs-classification-rfxcom-v1.0.md`](specs-classification-rfxcom-v1.0.md) pour le **mapping complet** `subType`/`type` → QUOI.
+Mapping `subType`/`type` → QUOI ci-dessus : voir l'avertissement ci-dessus, `classification-rfxcom_specs_v1.0.md`
+est archivé et non conforme au code réel (`applications/rfxcom/src/domain/classification.ts::determineQuoi()`).
 
 ```typescript
 interface IHaClassifier {
@@ -2256,6 +2149,76 @@ type AppEvents = {
 
 Le `SocketBridge` s'abonne aux événements EventBus et les retransmet à Socket.io.
 Il est le **seul point de contact** entre EventBus et Socket.io.
+
+---
+
+## 9bis. Communication générique inter-modules — Fire & Forget et Request/Reply
+
+> **⭐ v4.33 (19/09/2026)** — le §9 ci-dessus documente le typage `AppEvents` historique (couche HA
+> ↔ application) ; cette section couvre le mécanisme **générique**, à chaîne libre, réellement
+> utilisé par la majorité du code actuel — y compris pour toute communication entre applications,
+> qui n'a **jamais** eu de mécanisme dédié séparé malgré ce qu'affirmait
+> `inter-app-communication_specs` (`InterAppClient`/`ApplicationCapabilities`, jamais implémenté).
+> Le socle (`IEventBus`/`IpcEventBus`) est le seul propriétaire de ce transport — toute application
+> ne fait que le consommer (voir `guide-nouvelle-application_specs_v2.0.md` §3.2/§3.2bis pour l'usage
+> côté app).
+
+### 9bis.1 Interface `IEventBus` — deux implémentations, une même API
+
+`applications/core/src/application/IEventBus.ts` définit `emitGeneric<D>(event: string, data: D):
+boolean`, `onGeneric<D>(event: string, listener: (data: D) => void): void`,
+`offGeneric<D>(event: string, listener): void` — événements à nom de chaîne libre (`'<app>:<sujet>:
+<action>'`), pas de map de types centralisée contrairement à `AppEvents` (§9).
+
+Deux implémentations, **transparentes l'une pour l'autre** (même code applicatif fonctionne avec les
+deux, seule l'instanciation dans `index.ts`/`standalone.ts` change) :
+- **`EventBus`** — in-process (app tournant dans le process du core, `runsAsSeparateProcess` absent
+  ou `false`) : émission/écoute directes, synchrones en interne.
+- **`IpcEventBus`** — inter-process (`runsAsSeparateProcess: true`, voir §5) : `process.send()`/
+  `process.on('message')` entre le core et le process enfant de l'app. Un module qui émet et écoute
+  son propre événement fonctionne aussi (repli local, pas besoin d'aller-retour IPC pour ça).
+
+### 9bis.2 Fire & Forget
+
+Pattern par défaut pour tout événement sans réponse attendue — notification de changement d'état,
+statut, résultat d'une opération déjà en cours :
+
+```typescript
+// Émetteur
+eventBus.emitGeneric('outils:status', { scripts: [...] });
+
+// Récepteur (même app ou une autre — l'émetteur ne sait pas qui écoute)
+eventBus.onGeneric<OutilsStatus>('outils:status', (status) => { /* ... */ });
+```
+
+Aucune garantie de livraison ni de réponse — c'est la responsabilité de l'appelant de gérer
+l'absence de réaction si c'en est une (voir 9bis.3 si une réponse est réellement nécessaire).
+
+### 9bis.3 Request/Reply corrélé — `CorrelatedRequester`
+
+Pour les cas où une réponse EST attendue : `applications/core/src/application/
+CorrelatedRequester.ts` — helper générique (id de corrélation + `Promise` + timeout) au-dessus des
+trois primitives ci-dessus, centralisé le 24/08/2026 (dupliqué à l'identique dans `ia`/
+`planificateur` avant cette date). Fonctionne à l'identique que l'EventBus sous-jacent soit
+in-process ou `IpcEventBus`.
+
+```typescript
+export class CorrelatedRequester<TRequest extends object, TReply extends { correlation_id: string }> {
+  constructor(eventBus: IEventBus, requestEvent: string, replyEvent: string) {}
+  request(payload: TRequest, timeoutMs: number): Promise<TReply>;
+  // Émet requestEvent avec { ...payload, correlation_id }, résout au premier replyEvent portant
+  // le même correlation_id, rejette au timeout — écouteur nettoyé (offGeneric) dans les deux cas.
+}
+```
+
+**Usage réel** — dialogue `ia`↔`planificateur` (réinterprétation d'un déclenchement à l'exécution) :
+`planificateur` envoie `planificateur:deploy` (payload + `correlation_id` généré), `ia`
+(`DeployResponder.wire()`) écoute, traite, répond sur `planificateur:deploy:reply` avec le même
+`correlation_id`. Même mécanisme réutilisé par `HaBridgeClient`/`HaQueryBridge` (accès HA depuis un
+process séparé, découplé de `HaStructureRegistry`/`HaWsClient` qui ne traversent pas l'IPC).
+
+**Convention de nommage** : `<domaine>:<action>` pour la requête, `<domaine>:<action>:reply` pour la
+réponse.
 
 ---
 

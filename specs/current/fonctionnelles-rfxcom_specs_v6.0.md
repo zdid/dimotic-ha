@@ -1,6 +1,144 @@
-# Spécifications Fonctionnelles - Module RFXCOM
+# Spécifications — Module RFXCOM
 
-*Version 5.16 - 16 Août 2026*
+**Version :** 6.0
+**Date :** 19 Septembre 2026
+**Auteur :** Mistral Vibe / Claude
+**Statut :** En production
+**Type :** Application d'intégration
+**Dépend de :** `nommage_specs_v1.0.md` (protocole de taxonomie QUOI/OÙ), `techniques-socle-ha-mqtt_specs_v4.33.md`,
+`guide-nouvelle-application_specs_v2.0.md`, `fonctionnelles-supervisor_specs_v2.9.md` (§9.1/§9.4 pour le
+principe multi-instances utilisé en Partie 1 §17bis)
+
+> **v6.0 (19/09/2026)** — **Fusion de `fonctionnelles-rfxcom_specs_v5.17.md` +
+> `implementation-rfxcom_specs_v1.5.md` + `recepteurs-emetteurs-rfxcom_specs_v5.4.md`** en un seul
+> document (même chantier de restructuration que pour ARBREOUQUOI et NOMMAGE plus tôt cette session :
+> "il y a plusieurs specs qui traitent de rfxcom, il faut les regrouper"). Trois parties clairement
+> séparées dans ce même document : **Partie 1 — Fonctionnel** (§, numérotation inchangée),
+> **Partie 2 — Technique / Implémentation** (§T, préfixe pour ne pas renuméroter et casser les
+> renvois internes existants), **Partie 3 — Récepteurs, Émetteurs et Scènes** (§R, même principe) —
+> ce troisième document reste distinct de la Partie 1 malgré le recoupement de sujet (nomenclature,
+> architecture récepteurs/émetteurs) car il apporte un niveau de détail technique réellement
+> complémentaire, non dupliqué ailleurs (schéma Zod complet §R5.3, interfaces TypeScript complètes
+> §R10, payloads MQTT Discovery détaillés par type d'entité §R7, checklist d'implémentation §R12.1)
+> et il est activement cité par nom et numéro de section dans au moins 8 fichiers TypeScript réels de
+> `applications/rfxcom/src/domain/` — voir l'avertissement plus bas sur ce point précis.
+>
+> **Aucun contenu `InterAppClient`/`ApplicationCapabilities` mort à retirer ici** : la Partie 1
+> documentait déjà correctement ce pattern comme non implémenté (§22.3, corrigé en v5.9/v5.17) ; les
+> Parties 2 et 3 n'en contenaient aucune trace (implementation-rfxcom l'avait déjà retirée en v1.3,
+> recepteurs-emetteurs-rfxcom n'en a jamais eu).
+>
+> **Deux notes de correction ajoutées** (contenu conservé intégralement, pas de perte d'information) :
+> Partie 2 §T8.1 et Partie 3 §R4.3 décrivaient toutes deux, à la date de leur dernière mise à jour
+> (10/08 et 03/08/2026), la perte silencieuse de `lastOn`/`lastLevel`/`lastValue` au rechargement
+> comme un défaut **non corrigé** — un correctif réel est intervenu depuis (15/08/2026, voir Partie 1
+> §9.2/§9.2bis/§9.2ter/§20) sans que ces deux sections, plus anciennes, n'en soient informées. Un
+> encart a été ajouté à chacune pointant vers l'état réel actuel, sans modifier le texte original
+> (qui reste correct historiquement pour la date à laquelle il a été écrit).
+>
+> **⚠️ Point important : `classification-rfxcom_specs_v1.0.md` n'a PAS été fusionné dans ce
+> document**, malgré son sujet directement lié à RFXCOM (contrairement au cas NOMMAGE où l'exclusion
+> tenait à des références externes). Vérification faite avant fusion : ce document (11/07/2026, jamais
+> mis à jour depuis) décrit un mécanisme de classification — cascade de priorité `HaClassifier`
+> générique (`subType` > `device_class` > `domain` > `entity_id` > `non_classifie`), QUOI multi-valeurs,
+> `isDimmable` forçant le QUOI du récepteur à `"eclairage"` — **qui ne correspond pas** au mécanisme
+> réellement implémenté (`applications/rfxcom/src/domain/classification.ts::determineQuoi()`, déjà
+> documenté fidèlement en Partie 1 §9.3 et Partie 2 §T5.1 : une simple table `SUBTYPE_TO_QUOI`/
+> `TYPE_TO_QUOI`, sans cascade, sans `device_class`, sans multi-QUOI, sans notion de `non_classifie`
+> côté RFXCOM) ni au classifieur générique réel du socle (`TaxonomyHaClassifier`, qui classe depuis la
+> chaîne de taxonomie `name`, pas depuis `subType`/`device_class`). Les tables de mapping QUOI du
+> document (§4/§5) diffèrent aussi de la casse et du contenu réels (`"température"` minuscule vs
+> `"Température"` réel ; `Pressure`/`Gas`/`Smoke`/`CO2`/`VOC`/`Moisture`/`Illuminance`/`Energy`/
+> `Voltage`/`Water`/`Flow` documentés mais absents du code). **Décision utilisateur (19/09/2026) :
+> archivé comme conception jamais construite**, à la manière de l'ancien `inter-app-communication_specs`
+> — déplacé vers `specs/archives/v5.17-rfxcom/classification-rfxcom_specs_v1.0.md`, aucune modification
+> de son contenu. Références mises à jour en conséquence dans `techniques-socle-ha-mqtt_specs` §8.3
+> (bandeau ajouté, §8.3.1 lui-même signalé comme non vérifié contre le réel) et `PROMPT.md`/
+> `PROMPT_PROJET.md`. Reste néanmoins cité par un commentaire de
+> `applications/rfxcom/src/domain/classification.ts` ("Conforme à ... et classification-rfxcom_specs_v1.0.md
+> §4/§5") et `types.ts` — cette conformité déclarée dans le code ne concerne en réalité que les deux
+> tableaux de mapping, pas le reste du document (cascade/multi-QUOI/conflits), et même ces deux tableaux
+> divergent du code réel comme détaillé ci-dessus ; correction de ces commentaires **hors périmètre**
+> de cette session (changement de code, pas de specs).
+>
+> **⚠️ Avertissement — références de code devenues obsolètes (hors périmètre de cette fusion) :**
+> au moins 8 fichiers TypeScript de `applications/rfxcom/src/domain/` (`classification.ts`,
+> `devices-config-schema.ts`, `types.ts`, `RfxComService.ts`, `socket-events.ts`, et les 3 fichiers
+> `receivers/*.ts`) portent des commentaires citant `recepteurs-emetteurs-rfxcom_specs` par son nom de
+> fichier et un numéro de section (ex: "§4.2", "§8.2", "§6.3"). Ces sections existent toujours dans ce
+> document fusionné (renumérotées avec le préfixe R — ex: §4.2 → §R4.2), mais le nom de fichier cité
+> dans le code ne correspond plus. Modification du code source **volontairement hors périmètre** de
+> cette fusion de specs (changement de masse sur du code, nécessiterait sa propre confirmation
+> explicite) — signalé ici pour un futur nettoyage.
+>
+> Anciennes versions (`fonctionnelles-rfxcom_specs_v5.17.md`, `implementation-rfxcom_specs_v1.5.md`,
+> `recepteurs-emetteurs-rfxcom_specs_v5.4.md`) archivées.
+
+---
+
+## 📚 Table des Matières
+
+**Partie 1 — Fonctionnel**
+1. [Introduction](#1-introduction)
+2. [Référentiel de Nommage et Taxonomie](#2-référentiel-de-nommage-et-taxonomie)
+3. [Architecture](#3-architecture)
+4. [Types de Devices et Entités Supportés](#4-types-de-devices-et-entités-supportés)
+5. [Gestion des Émetteurs et Récepteurs](#5-gestion-des-émetteurs-et-récepteurs)
+6. [Format des Messages RFXCOM](#6-format-des-messages-rfxcom)
+7. [Mappage vers Home Assistant](#7-mappage-vers-home-assistant)
+8. [Configuration](#8-configuration)
+9. [État au Démarrage et Gestion des Données QUOI/OÙ](#9-état-au-démarrage-et-gestion-des-données-quoiou)
+10. [Fichier de Configuration Centralisé](#10-fichier-de-configuration-centralisé)
+11. [Traces et Journalisation](#11-traces-et-journalisation)
+12. [Interface Web et Socket.io](#12-interface-web-et-socketio)
+13. [Scénarios d'Utilisation](#13-scénarios-dutilisation)
+14. [Gestion des États](#14-gestion-des-états)
+15. [Commandes](#15-commandes)
+16. [Traduction Commandes HA → RFXCOM](#16-traduction-commandes-ha--rfxcom)
+17. [Découverte et Retrait MQTT](#17-découverte-et-retrait-mqtt)
+    - 17bis. [Multi-instances — Recouvrement RF et Relais entre Bridges](#17bis-multi-instances--recouvrement-rf-et-relais-entre-bridges-nouveau-v516)
+18. [Arborescence des Programmes](#18-arborescence-des-programmes)
+19. [Tests](#19-tests)
+20. [Limites et Contraintes](#20-limites-et-contraintes)
+21. [Roadmap](#21-roadmap)
+22. [Annexes](#22-annexes)
+
+**Partie 2 — Technique / Implémentation**
+- T1. [Introduction](#t1-introduction)
+- T2. [Architecture de l'Implémentation](#t2-architecture-de-limplémentation)
+- T3. [Intégration de la Bibliothèque rfxcom (réelle)](#t3-intégration-de-la-bibliothèque-rfxcom-réelle)
+- T4. [Gestion du Transceiver RFXCOM](#t4-gestion-du-transceiver-rfxcom)
+- T5. [Détection et Classification des Devices](#t5-détection-et-classification-des-devices)
+- T6. [Exécution des Commandes](#t6-exécution-des-commandes)
+- T7. [Mappage des Protocoles (réel — 3 protocoles émetteurs)](#t7-mappage-des-protocoles-réel--3-protocoles-émetteurs)
+- T8. [Persistance et Validation](#t8-persistance-et-validation)
+- T9. [Configuration Requise](#t9-configuration-requise)
+- T10. [Gestion des Erreurs](#t10-gestion-des-erreurs)
+- T11. [Séquence de Démarrage/Arrêt](#t11-séquence-de-démarragearrêt)
+- T12. [Tests et Validation](#t12-tests-et-validation)
+- T13. [Limites et Contraintes](#t13-limites-et-contraintes)
+- T14. [Annexes](#t14-annexes)
+
+**Partie 3 — Récepteurs, Émetteurs et Scènes**
+- R1. [Introduction](#r1-introduction)
+- R2. [Référentiel de Nommage](#r2-référentiel-de-nommage)
+- R3. [Définitions Clés](#r3-définitions-clés)
+- R4. [Architecture Récepteurs ↔ Émetteurs](#r4-architecture-récepteurs--émetteurs)
+- R5. [Fichier de Configuration Centralisé](#r5-fichier-de-configuration-centralisé)
+- R6. [Modules Dédiés](#r6-modules-dédiés)
+- R7. [MQTT Discovery](#r7-mqtt-discovery)
+- R8. [Flux de Données](#r8-flux-de-données)
+- R9. [Exemples Complets](#r9-exemples-complets)
+- R10. [Types TypeScript](#r10-types-typescript)
+- R11. [Intégration Interface Web](#r11-intégration-interface-web)
+- R12. [Annexes](#r12-annexes)
+
+---
+
+# Partie 1 — Fonctionnel
+
+*Version 5.17 - 19 Septembre 2026 — §22.3 : référence morte vers `inter-app-communication_specs`
+(retirée de `specs/current/`) corrigée vers `techniques-socle-ha-mqtt_specs` §9bis.*
 *⭐ Nouvelle §17bis "Multi-instances — Recouvrement RF et Relais entre Bridges" : ferme une lacune
 documentaire (le mécanisme `registered-devices`/`claimed-elsewhere`, construit plus tôt cette
 session avant même la migration en process séparé, n'avait jamais été documenté dans ce fichier —
@@ -102,34 +240,6 @@ correction de la numérotation des sections (dérivée depuis 5.7).*
 > retiré, remplacé par un filtre matériel unique poussé en RAM au RFXtrx433. Voir historique §22.3.
 
 ---
-
-## 📌 Table des Matières
-1. [Introduction](#1-introduction)
-2. [Référentiel de Nommage et Taxonomie](#2-référentiel-de-nommage-et-taxonomie)
-3. [Architecture](#3-architecture)
-4. [Types de Devices et Entités Supportés](#4-types-de-devices-et-entités-supportés)
-5. [Gestion des Émetteurs et Récepteurs](#5-gestion-des-émetteurs-et-récepteurs)
-6. [Format des Messages RFXCOM](#6-format-des-messages-rfxcom)
-7. [Mappage vers Home Assistant](#7-mappage-vers-home-assistant)
-8. [Configuration](#8-configuration)
-9. [État au Démarrage et Gestion des Données QUOI/OÙ](#9-état-au-démarrage-et-gestion-des-données-quoiou)
-10. [Fichier de Configuration Centralisé](#10-fichier-de-configuration-centralisé)
-11. [Traces et Journalisation](#11-traces-et-journalisation)
-12. [Interface Web et Socket.io](#12-interface-web-et-socketio)
-13. [Scénarios d'Utilisation](#13-scénarios-dutilisation)
-14. [Gestion des États](#14-gestion-des-états)
-15. [Commandes](#15-commandes)
-16. [Traduction Commandes HA → RFXCOM](#16-traduction-commandes-ha--rfxcom)
-17. [Découverte et Retrait MQTT](#17-découverte-et-retrait-mqtt)
-    - 17bis. [Multi-instances — Recouvrement RF et Relais entre Bridges](#17bis-multi-instances--recouvrement-rf-et-relais-entre-bridges-nouveau-v516)
-18. [Arborescence des Programmes](#18-arborescence-des-programmes)
-19. [Tests](#19-tests)
-20. [Limites et Contraintes](#20-limites-et-contraintes)
-21. [Roadmap](#21-roadmap)
-22. [Annexes](#22-annexes)
-
----
-
 ## 1. Introduction
 
 ### 1.1 Objectif
@@ -148,7 +258,7 @@ Ce document décrit les spécifications fonctionnelles du module d'intégration 
 
 ## 2. Référentiel de Nommage et Taxonomie
 
-**⚠️ Ce module respecte strictement [spec-nommage-v1.0.md](spec-nommage-v1.0.md)**
+**⚠️ Ce module respecte strictement [nommage_specs_v1.0.md](nommage_specs_v1.0.md)**
 
 ### 2.1 Format du name (Obligatoire)
 ```
@@ -1532,11 +1642,11 @@ Voir historique §22.3 pour le détail complet des versions précédentes.
 ## 22. Annexes
 
 ### 22.1 Références
-- [Spécification de Nommage **OBLIGATOIRE**](spec-nommage-v1.0.md) ⭐
-- [Spécifications Implémentation RFXCOM](implementation-rfxcom_specs_v1.5.md)
-- [Spécifications Récepteurs/Émetteurs RFXCOM](recepteurs-emetteurs-rfxcom_specs_v5.4.md)
-- [Spécifications Techniques Socle HA-MQTT **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.30.md) ⭐
-- [Spécifications Fonctionnelles Supervision Multi-Machines](fonctionnelles-supervisor_specs_v2.6.md)
+- [Spécification de Nommage **OBLIGATOIRE**](nommage_specs_v1.0.md) ⭐
+- **Partie 2 — Technique / Implémentation** de ce document (§T1 et suivants)
+- **Partie 3 — Récepteurs, Émetteurs et Scènes** de ce document (§R1 et suivants)
+- [Spécifications Techniques Socle HA-MQTT **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.33.md) ⭐
+- [Spécifications Fonctionnelles Supervision Multi-Machines](fonctionnelles-supervisor_specs_v2.9.md)
   (§9.1/§9.4 — conception complète du principe "une entité, un endroit" et de `registered-devices`,
   voir §17bis de ce document pour son usage réel côté RFXCOM)
 - [Documentation librairie npm rfxcom](https://www.npmjs.com/package/rfxcom)
@@ -1561,8 +1671,10 @@ Voir historique §22.3 pour le détail complet des versions précédentes.
 > ⚠️ **Cette section décrit une conception qui n'a jamais été codée.** Aucune trace de
 > `InterAppClient` dans `applications/rfxcom/`. Conservée ici à titre de mémoire de conception (le
 > pattern Request/Reply existe et est utilisé par d'autres briques du projet), mais ne doit **pas**
-> être considérée comme une capacité actuellement exposée par RFXCOM. Si ce chantier est repris un
-> jour, repartir de `inter-app-communication_specs_v1.0.md` plutôt que de ce texte figé.
+> être considérée comme une capacité actuellement exposée par RFXCOM. `inter-app-communication_specs`
+> a été retirée de `specs/current/` (19/09/2026, même conception jamais construite). Si ce chantier
+> est repris un jour, repartir de `techniques-socle-ha-mqtt_specs` §9bis (mécanisme réel :
+> `emitGeneric`/`onGeneric` + `CorrelatedRequester`) plutôt que de ce texte figé.
 
 Événements Fire & Forget envisagés : `rfxcom:device:detected`, `rfxcom:device:removed`,
 `rfxcom:device:state:updated`, `rfxcom:message:received`, `rfxcom:scan:started/completed`,
@@ -1593,4 +1705,1511 @@ Capacités Request/Reply envisagées : `rfxcom:devices:list`, `rfxcom:device:get
 
 ---
 
-*Conforme à [spec-nommage-v1.0.md](spec-nommage-v1.0.md) et [techniques-socle-ha-mqtt_specs](techniques-socle-ha-mqtt_specs_v4.19.md)*
+*Conforme à [nommage_specs_v1.0.md](nommage_specs_v1.0.md) et [techniques-socle-ha-mqtt_specs](techniques-socle-ha-mqtt_specs_v4.33.md)*
+
+---
+
+# Partie 2 — Technique / Implémentation
+
+
+## T1. Introduction
+
+### T1.1 Objectif
+Ce document décrit l'implémentation technique **réelle** du module RFXCOM, à partir de la
+bibliothèque npm `rfxcom` telle qu'installée dans `node_modules/rfxcom` (pas telle que documentée
+en théorie) — c'est la démarche suivie par `applications/rfxcom/src/types/rfxcom.d.ts`, dont le
+commentaire d'en-tête précise explicitement que les déclarations couvrent *"QUE la surface
+réellement utilisée par RfxComTransceiver.ts — vérifiée directement dans le code source installé"*.
+
+### T1.2 Périmètre
+- **Inclus** : intégration de la bibliothèque `rfxcom`, initialisation du transceiver, détection/
+  classification des devices RF433, exécution des commandes via les transmitters, mappage entre
+  les événements réels de la bibliothèque et le modèle interne.
+- **Exclus** : configuration matérielle du transceiver, gestion du port série au niveau OS
+  (au-delà de la détection automatique, voir `fonctionnelles-rfxcom_specs` §8.2), configuration
+  MQTT et HA WebSocket (`techniques-socle-ha-mqtt_specs`).
+
+### T1.3 Prérequis
+- Transceiver RFXtrx433 connecté via port série, détecté automatiquement (voir
+  `fonctionnelles-rfxcom_specs` §8.2) ou configuré manuellement (`/dev/ttyUSB0` par défaut).
+- NPM package `rfxcom` (dépendance de `applications/rfxcom`).
+
+### T1.4 Référentiels
+- **⭐ [fonctionnelles-rfxcom_specs_v5.12.md](#1-introduction)** - Spécifications fonctionnelles principales
+- **⭐ [techniques-socle-ha-mqtt_specs_v4.19.md](techniques-socle-ha-mqtt_specs_v4.33.md)** - Socle technique
+- **⭐ [nommage_specs_v1.0.md](nommage_specs_v1.0.md)** - Règles de nommage
+- **⭐ [recepteurs-emetteurs-rfxcom_specs_v5.4.md](#r1-introduction)** - Récepteurs et émetteurs
+
+---
+
+## T2. Architecture de l'Implémentation
+
+### T2.1 Composants Principaux (réels, avec taille de fichier)
+
+| Composant | Fichier | Lignes | Responsabilité |
+|-----------|---------|--------|----------------|
+| `RfxComService` | `applications/rfxcom/src/domain/RfxComService.ts` | ~1085 | Orchestration principale (dépasse la règle des 400 lignes/fichier, voir `fonctionnelles-rfxcom_specs` §20) |
+| `RfxComTransceiver` | `applications/rfxcom/src/domain/transceiver/RfxComTransceiver.ts` | ~517 | Enveloppe la bibliothèque `rfxcom`, normalise les événements par protocole |
+| `PortDetector` | `applications/rfxcom/src/domain/transceiver/PortDetector.ts` | ~48 | Détection automatique du port série |
+| `DeviceManager` | `applications/rfxcom/src/domain/devices/DeviceManager.ts` | ~147 | Registry des devices, construction du `uniqueId` |
+| `ReceiverManager` | `applications/rfxcom/src/domain/receivers/ReceiverManager.ts` | ~102 | Orchestre les récepteurs (switch/light/cover) |
+| `BaseReceiver` / `ReceiverSwitch` / `ReceiverLight` / `ReceiverCover` | `applications/rfxcom/src/domain/receivers/*.ts` | 38 / 66 / 107 / 147 | Interface commune `IReceiverModule` + implémentations |
+| `SceneManager` / `SceneExecutor` | `applications/rfxcom/src/domain/scenes/*.ts` | 43 / 91 | Registry + exécution des scènes |
+| `ConfigFileManager` | `applications/rfxcom/src/domain/yaml/ConfigFileManager.ts` | 96 | Lecture/écriture YAML du fichier centralisé |
+| `taxonomy.ts` / `classification.ts` | `applications/rfxcom/src/domain/*.ts` | 100 / 99 | Extraction taxonomie, classification QUOI/composant HA |
+| `rfxcom.d.ts` | `applications/rfxcom/src/types/rfxcom.d.ts` | ~153 | Déclarations TypeScript **manuelles**, limitées à la surface réellement utilisée |
+
+> ⚠️ **`RfxComConfigService` n'existe pas.** La configuration est chargée directement via
+> `IAppConfigProvider` + `config-schema.ts` (paramètres généraux) et `ConfigFileManager` (fichier
+> YAML des devices/récepteurs/scènes).
+
+### T2.2 Flux de Données (réel)
+
+```
+Transceiver RFXCOM (port série)
+        │
+        ▼ (événements PAR PROTOCOLE — pas d'événement générique 'device')
+   'lighting1' | 'lighting2' | 'blinds1' | 'temperaturehumidity1' | 'temperature1' | 'elec1' | ...
+        │
+        ▼
+RfxComTransceiver — normalisation vers RfxComRawMessage (type/subType/sensorId/seqNbr/signalLevel/batteryLevel/data)
+        │
+        ▼
+RfxComService.handleRfxMessage() → DeviceManager.handleRawMessage()
+        │
+        ▼
+Classification (classification.ts) + mise à jour config-rfxcom-devices-v1.0.yaml
+        │
+        ▼
+Si transmitToHa: publication MQTT (discovery + état) via le socle
+```
+
+---
+
+## T3. Intégration de la Bibliothèque rfxcom (réelle)
+
+### T3.1 Import
+
+**Fichier**: `applications/rfxcom/src/domain/transceiver/RfxComTransceiver.ts`
+
+```typescript
+import * as rfxcom from 'rfxcom';
+```
+
+> ⚠️ Aucun import `RfxComDeviceEvent` ni type `RfxCom as RfxComType` depuis un fichier
+> `types/rfxcom` — ces noms n'existent pas dans le code réel.
+
+### T3.2 Déclarations TypeScript manuelles (`rfxcom.d.ts`)
+
+Le fichier `applications/rfxcom/src/types/rfxcom.d.ts` déclare **uniquement** ce qui est utilisé :
+
+| Déclaration | Contenu |
+|---|---|
+| `RfxComOptions` | `{debug?, deviceParameters?}` — **rien d'autre**, pas de `concurrency`/`timeout` |
+| `ProtocolSubtypeTable` | Table bidirectionnelle `Record<number,string> & Record<string,number>` (produite par `reflect()` de la bibliothèque) |
+| `class RfxCom extends EventEmitter` | `initialise(cb?)`, `close()`, `on(event, listener)` générique, `static dumpHex()` |
+| `Lighting1Event` / `Lighting2Event` / `Blinds1Event` / `TemperatureHumidity1Event` / `Temperature1Event` / `Elec1Event` | Formes des événements réellement consommés |
+| `abstract class Transmitter` | Classe de base |
+| `type TransmitCallback` | `(err, response, seqnbr) => void` — invoqué une fois la trame **écrite sur le port série**, PAS une confirmation RF433 |
+| `class Lighting1` | `switchOn`/`switchOff` |
+| `class Lighting2` | `switchOn`/`switchOff`/`setLevel(deviceId, level 0-15)` |
+| `class Lighting4` | `sendData(data, pulseWidth, cb?)` |
+| `class Blinds1` | `open`/`close(deviceId, direction?, cb?)`/`stop` |
+| Tables `lighting1`/`lighting2`/`lighting4`/`lighting5`/`lighting6`/`blinds1`/`security1`, `packetNames` | Constantes de la bibliothèque |
+
+**Non déclaré, accédé via `as any`** avec commentaire explicite dans le code :
+`rfxcom.protocols[receiverTypeCode]`, `device.enableRFXProtocols()`, `device.getRFXStatus()` — ces
+trois éléments n'existent nulle part dans les déclarations officielles/tierces disponibles, la
+gestion des protocoles matériel (`fonctionnelles-rfxcom_specs` §8.3) les utilise malgré tout après
+vérification directe du comportement en conditions réelles.
+
+---
+
+## T4. Gestion du Transceiver RFXCOM
+
+### T4.1 Différences réelles avec l'API précédemment documentée (v1.2)
+
+| Point | Documenté jusqu'à v1.2 | Réel |
+|---|---|---|
+| Événement de détection | `'device'` générique | Un événement par protocole (`'lighting1'`, `'lighting2'`, `'blinds1'`, `'temperaturehumidity1'`, `'temperature1'`, `'elec1'`, ...) |
+| Connexion réussie | `'connect'` | `'ready'` |
+| Connexion échouée | `'error'` | `'connectfailed'` / `'disconnect'` (avec message) |
+| Ordre statut/prêt | `'status'` après `'connect'` | `'status'` peut arriver **avant ou après** `'ready'` — aucun ordre garanti |
+| Options du constructeur | `{debug, deviceParameters, concurrency: 3, timeout: 12000}` | **`{debug}` uniquement** — aucun `deviceParameters`/`concurrency`/`timeout` n'est jamais passé |
+| Événement générique `'error'` | Existe | N'existe pas dans le cycle de vie utilisé — les échecs passent par `'connectfailed'`/`'disconnect'` |
+
+### T4.2 Construction et Connexion (réel)
+
+**Fichier** : `RfxComTransceiver.ts::connect()`
+
+```typescript
+async connect({ port, baudRate }: { port: string; baudRate: number }): Promise<void> {
+  this.device = new rfxcom.RfxCom(port, { debug: this.debugEnabled });
+  let settled = false;
+
+  this.device.on('ready', () => { if (!settled) { settled = true; /* resolve */ } });
+  this.device.on('connectfailed', (msg) => { if (!settled) { settled = true; /* reject */ } });
+  this.device.on('disconnect', (msg) => { if (!settled) { settled = true; /* reject */ } });
+  this.device.on('status', (status) => { this.onHardwareStatusCallback?.(status); });
+
+  this.setupProtocolListeners(this.device);
+  this.device.initialise(onReadyCallback);
+}
+```
+
+Un drapeau `settled` garantit que la promesse de connexion ne se résout/rejette qu'**une seule
+fois**, quel que soit l'ordre d'arrivée de `'ready'`/`'connectfailed'`/`'disconnect'`.
+
+### T4.3 Écouteurs par Protocole (réel, remplace l'ancien §4.3 générique)
+
+`setupProtocolListeners(device)` enregistre un écouteur **par nom d'événement de protocole**, pas
+un écouteur générique `'device'`. Chaque écouteur normalise son événement natif vers
+`RfxComRawMessage` (voir `fonctionnelles-rfxcom_specs` §6.1).
+
+**Normalisations particulières :**
+- **`temperaturehumidity1`** : un seul paquet RF433 produit **deux** messages normalisés
+  (Temperature + Humidity) — le device physique (ex: TH9) a un seul `sensorId` mais deux entrées
+  logiques distinctes (voir `fonctionnelles-rfxcom_specs` §2.2 sur le rôle du `subType` dans
+  l'identifiant).
+- **`security1`** : Motion/Contact déterminé par une heuristique sur le nom du subtype
+  (`/PIR|MOTION/i`), pas un champ structuré — best-effort documenté.
+- **`resolveSensorIdentity`** — cas particuliers : Lighting1 utilise `houseCode+unitCode` en
+  minuscules (le champ `id` de la bibliothèque est jugé redondant/peu fiable) ; Lighting4 utilise
+  `String(evt.data)` (pas de `id`/`houseCode` disponible pour ce protocole).
+
+### T4.4 Fermeture
+
+```typescript
+disconnect(): void {
+  this.device?.close();
+  this.device = undefined;
+}
+```
+
+---
+
+## T5. Détection et Classification des Devices
+
+### T5.1 Classification réelle (`classification.ts`, remplace les anciennes méthodes fictives
+`mapRfxComProtocolToDeviceType`/`enrichDeviceFromPacketType`)
+
+| Fonction | Rôle |
+|---|---|
+| `determineQuoi(type, subType)` | QUOI depuis `SUBTYPE_TO_QUOI`/`TYPE_TO_QUOI` (voir `fonctionnelles-rfxcom_specs` §9.3) |
+| `getProtocole(type)` | Nom de protocole interne (minuscules) |
+| `getDefaultComponent(type, subType)` | Composant HA par défaut (sensor/binary_sensor) |
+| `buildStateDeviceId(protocole, subType, sensorId, unitCode?)` | Encodage du `deviceId` d'état/commande |
+| `getDefaultUnit(subType)` | Unité HA par défaut (°C, %, A, W...) |
+
+`SUBTYPE_TO_QUOI`/`TYPE_TO_QUOI` couvrent Temperature/Humidity/Motion/Contact/Current/Power et
+Lighting1/2/4/5/6/Blinds1 — **Lighting5/6 → "Interrupteur"**, **Blinds1 → "Volet"** (absents des
+tables documentées jusqu'à v1.2, qui ne couvraient que 3 packet types Lighting).
+
+### T5.2 Construction du `uniqueId` (`DeviceManager.ts::buildUniqueId`)
+
+```typescript
+const uniqueId = `${protocole}_${message.subType.toLowerCase()}_${message.sensorId.toLowerCase()}${unitSuffix}`;
+// unitSuffix = message.unitCode !== undefined ? `_${unitCode}` : ''
+```
+Voir `fonctionnelles-rfxcom_specs` §2.2 pour la justification (disambiguïsation multi-mesures et
+multi-boutons).
+
+### T5.3 Détection
+
+**Il n'existe pas de méthode `startDiscovery()` avec timer de 2 secondes.** La détection est
+purement **continue et passive** : chaque événement de protocole reçu du transceiver déclenche
+immédiatement `handleRawMessage()`. Aucun état "en cours de scan" n'est maintenu côté serveur —
+`getStatus().scanInProgress` retourne toujours `false` en dur, bien que le champ existe et que les
+événements `rfxcom:scan:start`/`:complete`/`:failed` soient déclarés côté Socket.io (aucun
+gestionnaire serveur ne les traite, voir `fonctionnelles-rfxcom_specs` §20).
+
+---
+
+## T6. Exécution des Commandes
+
+### T6.1 Flux d'Exécution (réel)
+
+```
+HA → EventBus → RfxComService.applyReceiverCommand()   ⭐ v1.5 : enveloppe recordOrder() +
+        │                                                  applyReceiverCommandInternal()
+        ▼
+⭐ v1.5 : transceiver.isConnected() ? sinon échec propre, aucun envoi tenté
+        │
+        ▼
+ReceiverManager → Receiver{Switch|Light|Cover}.translateHaCommand()
+        │
+        ▼
+RfxComTransceiver.getOrCreateTransmitter(protocole, subType) — cache par `${protocole}:${subType}`
+        │
+        ▼
+Appel de la méthode du transmitter (switchOn/switchOff/setLevel/open/close/stop)
+        │
+        ▼
+buildAckLogger() — callback loggé à l'écriture sur le port série (pas une confirmation RF433)
+        │
+        ▼
+⭐ v1.5 : recordOrder() journalise le résultat réel (recentOrders, 100 max, rfxcom:orders:list)
+```
+
+**⭐ v1.5** : `applyReceiverCommand()` (nom conservé côté appelant) enveloppe désormais
+`applyReceiverCommandInternal()` (logique inchangée, renommée) — chaque appel est journalisé via
+`recordOrder(receiverId, command, value, result)`, quel que soit le point de sortie (échec précoce
+— transceiver non connecté, récepteur/émetteur introuvable — ou succès/échec de `sendCommand()`).
+Voir `fonctionnelles-rfxcom_specs` §8.6/§8.7/§8.8 pour le contexte complet (anomalie constatée en
+direct : publication d'état optimiste sur transceiver débranché).
+
+### T6.2 Dispatch par Protocole (réel — remplace `instanceof` fictif)
+
+**Il n'y a pas de dispatch par `instanceof rfxcom.Lighting1`** (les classes réelles ne sont même
+pas toutes déclarées dans `rfxcom.d.ts`). Le dispatch réel est un `switch` sur la chaîne
+`protocole` :
+
+```typescript
+switch (protocole) {
+  case 'lighting1': /* rfxcom.Lighting1 */ break;
+  case 'lighting2': /* rfxcom.Lighting2 */ break;
+  case 'blinds1':   /* rfxcom.Blinds1 */ break;
+  default: /* non transmissible — voir §7 */
+}
+```
+
+Seuls **3 protocoles** disposent d'un transmitter réellement instanciable :
+`lighting1`, `lighting2`, `blinds1` (`getOrCreateTransmitter`). Lighting4/5/6 n'ont **aucun**
+chemin de commande — ils ne sont utilisables qu'en réception (émetteurs/boutons).
+
+### T6.3 Commande DIM — échelle réelle
+
+```typescript
+// Échelle native RFXCOM : 0-15, PAS 0-100 ni 0-255
+const level = Math.round(((value ?? 100) / 100) * 15);
+const clamped = Math.max(0, Math.min(15, level));
+transmitter.setLevel(deviceId, clamped);
+```
+
+### T6.4 Mappage des Actions (réel)
+
+| Action HA | Protocoles Supportés |
+|-----------|---------------------|
+| `turn_on` / `turn_off` | lighting1, lighting2, blinds1 (open/close pour cover) |
+| `toggle` | lighting1, lighting2 |
+| `set_level` | lighting2 uniquement (0-15 natif) |
+| `open` / `close` / `stop` | blinds1 uniquement |
+
+---
+
+## T7. Mappage des Protocoles (réel — 3 protocoles émetteurs)
+
+### T7.1 Protocoles → Classes Transmitter (réel)
+
+| Protocole | Classe Transmitter | Peut transmettre ? |
+|-----------|-------------------|-----------------|
+| lighting1 | `rfxcom.Lighting1` | ✅ |
+| lighting2 | `rfxcom.Lighting2` | ✅ |
+| lighting4 | — | ❌ réception seule |
+| lighting5 | — | ❌ réception seule |
+| lighting6 | — | ❌ réception seule |
+| blinds1 | `rfxcom.Blinds1` | ✅ |
+
+> ⚠️ Les protocoles `lighting3`, `switch1`, `blinds2`, `blinds3`, `security1` documentés jusqu'à
+> v1.2 n'ont **aucune** trace dans le code réel — ni classification, ni transmitter, ni mention.
+
+### T7.2 Résolution des Descripteurs de Protocole
+
+Les descripteurs de transmission (subtype exact attendu par la bibliothèque) sont résolus
+dynamiquement via `rfxcom.protocols[receiverTypeCode]` (accès non déclaré, `as any`) — pas une
+table statique en dur dans le code applicatif comme documenté jusqu'à v1.2 (`rfxcom.lighting1.IMPULS`
+etc. écrits en dur). Un nom de protocole inconnu du catalogue matériel rapporté est silencieusement
+filtré (`.filter(d => !!d)`), avec avertissement si la liste résultante est vide.
+
+---
+
+## T8. Persistance et Validation
+
+### T8.1 ⚠️ Perte silencieuse des champs d'état au rechargement (le plus important gap de ce document)
+
+> **📌 Mise à jour v6.0 (19/09/2026)** : cette section, écrite le 10/08/2026, décrit ce défaut comme
+> non corrigé. Un correctif réel est intervenu depuis pour `lastValue`/`commandDeviceId` (devices) et
+> `lastOn`/`lastLevel` (récepteurs) — voir **Partie 1 §9.2/§9.2bis/§9.2ter/§20** (15/08/2026 pour les
+> devices ; le correctif récepteurs, antérieur au 07/08/2026, avait déjà été noté stale dans le
+> tableau de la Partie 1 §20). Le texte ci-dessous reste correct pour l'analyse de la cause racine
+> (mécanisme Zod `strip`), seul le statut "non corrigé" est dépassé.
+
+`ConfigFileManager.ts` utilise Zod pour valider **et** pour produire la valeur effectivement
+utilisée :
+
+- **`save()`** : `schema.parse(config)` pour valider (résultat **jeté**), puis `yaml.dump(config)`
+  sur l'objet **original**, non filtré → tous les champs, même non déclarés au schéma (ex:
+  `lastOn`, `lastLevel`, `lastValue`, `commandDeviceId`), **sont bien écrits sur disque**.
+- **`load()`** : retourne directement `schema.parse(parsed)` → en mode `strip` (défaut de
+  `z.object()`), **tous les champs non déclarés au schéma sont silencieusement supprimés** du
+  résultat utilisé par l'application.
+
+**Conséquence concrète, vérifiée sur l'installation de référence** : `lastOn`/`lastLevel` sont
+bien présents dans `data/rfxcom/config-rfxcom-devices-v1.0.yaml` (écrits par chaque commande), mais
+`lastOn` y vaut systématiquement `false` — parce qu'il est relu comme `undefined` à chaque
+démarrage (jamais `true`, car la valeur réellement écrite n'a plus le temps d'être relue avant que
+la rafale OFF de démarrage ne la réécrive). `lastValue` (devices non-récepteurs) et
+`commandDeviceId` n'apparaissent **jamais** dans le fichier réel — leurs points d'écriture ne sont
+jamais atteints en pratique dans le flux actuel.
+
+**C'est la cause racine documentée** de la rafale de commandes OFF envoyée à tous les récepteurs à
+chaque redémarrage (`fonctionnelles-rfxcom_specs` §9.1/§20) : `receiver.config.lastOn` étant
+toujours `undefined` après rechargement, le service ne peut jamais distinguer "état inconnu au
+redémarrage" de "éteint la dernière fois" et applique systématiquement `turn_off` par sécurité.
+
+**Schéma réel des devices/récepteurs** (`devices-config-schema.ts`) — champs déclarés vs champs
+présents côté TypeScript (`types.ts`) uniquement :
+
+| Champ | Déclaré au schéma Zod | Déclaré côté TS (`types.ts`) | Conséquence |
+|---|---|---|---|
+| `transmitToHa` | ✅ (défaut `false`) | ✅ | OK |
+| `unitCode` | ✅ (devices) | ✅ | OK |
+| `lastSeen` | ✅ (devices) | ✅ | OK |
+| `lastValue` | ❌ | ✅ | Toujours stripé au rechargement |
+| `commandDeviceId` | ❌ | ✅ | Toujours stripé au rechargement |
+| `lastOn` (switch/light) | ❌ | ✅ | Toujours stripé au rechargement |
+| `lastLevel` (light) | ❌ | ✅ | Toujours stripé au rechargement |
+
+### T8.2 Validation à la sauvegarde
+
+`rfxComDevicesConfigSchema` inclut un `.refine()` global garantissant l'unicité des `receiverId` à
+travers `rfxcom_receivers` — la seule validation transversale du fichier (le reste est structurel,
+par type de device/récepteur/scène).
+
+---
+
+## T9. Configuration Requise
+
+### T9.1 Configuration Technique Réelle (remplace l'exemple fictif v1.2)
+
+> ⚠️ Il n'y a **pas** de `config/technical-config.yaml`, ni de champs
+> `transceiverType`/`serialTimeoutMs`/`discoveryIntervalMs`/`receivers`/`scenes`/`appairages` au
+> niveau de la config générale. Voir `fonctionnelles-rfxcom_specs` §8.1 pour les **7 champs réels**
+> de `data/rfxcom/config.yaml` (`enabled`, `port`, `baudRate`, `bridgeInstance`,
+> `devicesConfigFile`, `autoDiscovery`, `enabledHardwareProtocols`).
+
+### T9.2 Récepteur RFXCOM (réel)
+
+Voir `fonctionnelles-rfxcom_specs` §10.1 et `recepteurs-emetteurs-rfxcom_specs` §10 pour la
+structure réelle et complète (`ReceiverSwitchConfig`/`ReceiverLightConfig`/`ReceiverCoverConfig`/
+`ReceiverSceneConfig`) — l'exemple v1.2 (`deviceClass`, `subunitCode`, `groupCode`, `inverted`,
+`haExposed`, `quoi`, `ou` comme champs plats du récepteur) ne correspond à aucune structure
+existante dans le code.
+
+---
+
+## T10. Gestion des Erreurs
+
+### T10.1 Codes d'Erreur Réellement Émis
+
+Sur les 7 codes documentés jusqu'à v1.2, **seuls 2 sont effectivement émis par le code** :
+
+| Code | Description | Émis ? |
+|------|-------------|-----------|
+| `RFXCOM_CONNECTION_ERROR` | Erreur de connexion au transceiver (échec initial ou reconnexion à chaud) | ✅ |
+| `RFXCOM_COMMAND_FAILED` | Échec de l'exécution d'une commande (transmission, push protocoles) | ✅ |
+| `RFXCOM_TRANSCEIVER_NOT_INITIALIZED` / `_NOT_CONNECTED` / `_UNSUPPORTED_PROTOCOL` / `_UNSUPPORTED_ACTION` / `_DEVICE_NOT_FOUND` | — | ❌ jamais émis dans le code actuel |
+
+### T10.2 Format des Erreurs
+Inchangé — voir `specs-erreurs-v1.0.md`.
+
+---
+
+## T11. Séquence de Démarrage/Arrêt
+
+### T11.1 Démarrage (réel, détaillé — remplace le §11.1 générique v1.2)
+
+1. `logger.info('Démarrage du service RFXCOM...')`
+2. `configFileManager.load()` — validation Zod ; en échec, log + config vide (pas de crash)
+3. `deviceManager.loadConfigured(...)`, `receiverManager.loadReceivers(...)`,
+   `sceneManager.loadScenes(...)` (scènes filtrées par `type: 'scene'`)
+4. **Création du verrou `protocolsPushGate`** + filet de sécurité 20s — **avant** tout
+   enregistrement d'écouteur EventBus/Socket.io (ordre critique, voir
+   `fonctionnelles-rfxcom_specs` §8.3)
+5. Enregistrement des écouteurs EventBus (`integration:rfxcom:command`,
+   `integration:rfxcom:bridge:connection`, `app:module:config:saved`, ⭐ v1.4
+   `integration:rfxcom:ha:online`) et Socket.io (24 gestionnaires)
+6. `eventBus.emitGeneric('integration:bridge:register', ...)`
+7. Enregistrement des callbacks du transceiver (`onMessage`, `onConnectionChange`,
+   `onHardwareStatus` — ce dernier déclenche le push de protocoles une fois par session, résout le
+   verrou à la fin, voir `fonctionnelles-rfxcom_specs` §8.3)
+8. **Résolution du port** (`PortDetector` en premier, `config.port` en fallback — voir
+   `fonctionnelles-rfxcom_specs` §8.2)
+9. `await transceiver.connect({port, baudRate})` — en échec : `WARNING`, erreur émise, **verrou
+   résolu immédiatement** (rien à pousser)
+10. Émission des listes initiales (statut, devices, récepteurs, scènes, protocoles)
+11. `logger.info('Service RFXCOM démarré')`
+
+**La découverte MQTT n'est PAS publiée à cette étape** — elle est déclenchée séparément par le
+gestionnaire `integration:rfxcom:bridge:connection`, lui-même conditionné par la résolution du
+verrou `protocolsPushGate` (`this.protocolsPushGate.then(() => this.publishInitialDiscoveries())`).
+
+**⭐ v1.4 — Second déclencheur, indépendant du verrou ci-dessus** :
+```typescript
+this.eventBus.onGeneric<{ bridgeInstance: string }>(
+  `integration:${MODULE_NAME}:ha:online`,
+  () => this.publishInitialDiscoveries()
+);
+```
+Alimenté par le birth message MQTT natif de HA (`homeassistant/status`), pas par la connexion du
+bridge RFXCOM — couvre le cas où HA redémarre seul sans que notre propre client MQTT ne se
+déconnecte. Voir `techniques-socle-ha-mqtt_specs` §8.5.4bis pour le mécanisme socle
+(`HaMqttIntegrationService.onHaOnline()` → `IntegrationBridge` → événement générique
+`integration:{module}:ha:online`).
+
+**Comportement en cas d'échec de connexion** : `WARNING` (pas `ERROR`), `isConnected = false`,
+application non bloquée, indicateur UI "Déconnecté".
+
+**⭐ v1.5 — Boucle de reconnexion automatique (5s)** :
+```typescript
+this.transceiver.onConnectionChange((connected) => {
+  this.emitStatus();
+  if (connected) this.stopReconnectLoop();
+  else this.startReconnectLoop();
+});
+```
+Enregistré avant le tout premier `connect()` — un échec de connexion initial déclenche donc aussi
+`notifyConnection(false, ...)` côté `RfxComTransceiver`, et donc la boucle, sans code dédié dans le
+bloc `catch` de `start()`. `startReconnectLoop()` est idempotent (`setInterval`, 5000ms) ;
+`attemptAutoReconnect()` (une itération) : `if (transceiver.isConnected()) { stopReconnectLoop(); return; }`,
+sinon `transceiver.disconnect()` (referme une instance orpheline éventuelle) puis
+`transceiver.connect({port: resolvePort(), baudRate})` — échec silencieux, nouvelle tentative dans
+5s. `resolvePort()` redétecte via `PortDetector` à chaque tentative (le port `/dev/serial/by-id`
+peut réapparaître sous le même chemin stable). Nettoyée dans `stop()`.
+
+### T11.2 Arrêt
+
+```typescript
+async stop(): Promise<void> {
+  transceiver.disconnect();
+  eventBus.emitGeneric('integration:bridge:unregister', ...);
+  emitStatus();
+}
+```
+Ne republie/retire **pas** les découvertes MQTT à l'arrêt.
+
+### T11.3 Reconnexion à Chaud (réel — remplace le mécanisme fictif "AppService redémarre tout le
+module")
+
+> ⚠️ **AppService ne redémarre plus le module entier** à chaque sauvegarde de configuration. Ce
+> comportement a été désactivé côté RFXCOM (comportement générique du socle conservé pour les
+> autres modules qui n'implémentent pas leur propre reconnexion).
+
+Voir `fonctionnelles-rfxcom_specs` §8.5 pour le détail complet (`reconnectTransceiverIfConfigChanged`) :
+comparaison port effectif + `baudRate` avant/après, déconnexion/réinitialisation du verrou
+anti-boucle protocoles/reconnexion si changement détecté, sans toucher au `bridgeInstance` ni
+republier la découverte.
+
+---
+
+## T12. Tests et Validation
+
+### T12.1 Scénarios de Test (mis à jour)
+
+| ID | Description | Critère de Succès |
+|----|-------------|------------------|
+| RFX-T-001 | Initialisation du transceiver | `'ready'` reçu, `isConnected = true` |
+| RFX-T-002 | Détection d'un message par protocole | Message normalisé transmis à `handleRfxMessage` |
+| RFX-T-003 | Exécution commande ON (lighting1/2, blinds1) | Méthode du transmitter appelée avec les bons paramètres |
+| RFX-T-004 | Exécution commande set_level (lighting2) | Conversion vers l'échelle 0-15 correcte |
+| RFX-T-005 | Déconnexion (`'disconnect'`/`'connectfailed'`) | `isConnected = false`, `emitStatus()` |
+| RFX-T-006 | Protocole non transmissible (lighting4/5/6) | Commande rejetée proprement, pas de crash |
+| RFX-T-007 | Verrou `protocolsPushGate` | Découverte initiale n'a lieu qu'après résolution du verrou |
+| RFX-T-008 | Filet de sécurité 20s | Le verrou se résout même sans statut matériel reçu |
+
+### T12.2 Validation de la Configuration
+
+Voir `config-schema.ts` (§8.1 de `fonctionnelles-rfxcom_specs`) et `devices-config-schema.ts`
+(§8.2 de ce document) — pas de méthode `validateRfxComConfig` séparée, la validation Zod est
+appliquée directement au chargement/à la sauvegarde.
+
+---
+
+## T13. Limites et Contraintes
+
+### T13.1 Limites Réelles de l'Intégration
+
+| Limite | Impact | Solution |
+|--------|--------|----------|
+| Seuls lighting1/lighting2/blinds1 peuvent transmettre | Un récepteur avec `primaryEmitter` Lighting4/5/6 ne peut envoyer aucune commande | Limite de la bibliothèque elle-même, pas de contournement |
+| Aucune option `timeout`/`concurrency` passée au constructeur | Pas de contrôle applicatif sur ces paramètres (comportement par défaut de la bibliothèque) | Non ajustable actuellement |
+| `RFXMeter`/Elec sans bit de filtrage matériel | Impossible de filtrer cette catégorie de protocoles | Acceptée |
+| `lastOn`/`lastLevel`/`lastValue`/`commandDeviceId` strippés au rechargement (§8.1) | Cause racine de la rafale OFF à chaque redémarrage | Non corrigé — nécessiterait d'étendre le schéma Zod |
+| ACK = écriture port série, pas confirmation RF433 | Toute commande reste optimiste, pas de garantie de réception par le device physique | Acceptée, documentée |
+
+### T13.2 Protocoles Non Supportés (transmission)
+`lighting4`, `lighting5`, `lighting6`, `security1` : réception uniquement, aucun transmitter
+disponible dans le code applicatif actuel.
+
+### T13.3 Contraintes Matérielles
+- Le transceiver doit être branché avant/pendant le démarrage (détection automatique tolère un
+  branchement tardif suivi d'une reconnexion à chaud, §11.3).
+- Permissions du port série appropriées (`dialout` ou équivalent).
+- `baudRate` cohérent avec le matériel (38400 par défaut).
+
+---
+
+## T14. Annexes
+
+### T14.1 Références
+- **[Bibliothèque rfxcom npm](https://www.npmjs.com/package/rfxcom)**
+- **[fonctionnelles-rfxcom_specs_v5.12.md](#1-introduction)** ⭐
+- **[techniques-socle-ha-mqtt_specs_v4.19.md](techniques-socle-ha-mqtt_specs_v4.33.md)** ⭐
+- **[recepteurs-emetteurs-rfxcom_specs_v5.4.md](#r1-introduction)** ⭐
+
+### T14.2 Glossaire
+
+| Terme | Définition |
+|-------|------------|
+| Transceiver | Appareil RFXtrx433 qui émet/reçoit les signaux RF433 |
+| Transmitter | Classe de la bibliothèque `rfxcom` permettant d'envoyer des commandes pour un protocole spécifique — seuls Lighting1/Lighting2/Blinds1 en ont un côté applicatif |
+| protocolsPushGate | Verrou retardant la première découverte MQTT jusqu'à la tentative de push des protocoles matériel |
+| ACK (accusé de réception) | Confirmation d'écriture sur le port série, PAS de réception RF433 par le device physique |
+
+### T14.3 Exemple Complet (réel)
+
+```typescript
+// Construction (voir PlanificateurService/RfxComService pour le pattern d'injection réel)
+const transceiver = new RfxComTransceiver(logger);
+transceiver.onMessage((msg) => deviceManager.handleRawMessage(msg));
+transceiver.onHardwareStatus(async (status) => {
+  await this.pushEnabledHardwareProtocolsOnce(status);
+});
+
+const port = this.resolvePort(); // PortDetector puis fallback config
+await transceiver.connect({ port, baudRate: this.config.baudRate });
+```
+
+### T14.4 Historique
+
+| Version | Date | Auteur | Changements |
+|---------|------|--------|------------|
+| 1.0 | 2026-07-11 | Mistral Vibe | Version initiale - Intégration de la bibliothèque rfxcom npm |
+| 1.2 | 2026-07-17 | Mistral Vibe | Démarrage automatique via AppService, injection `IAppConfigProvider`, traces détaillées |
+| 1.4 | 2026-08-10 | Claude | **Second déclencheur de découverte** (§11.1) — listener `integration:rfxcom:ha:online` rappelant `publishInitialDiscoveries()`, alimenté par le birth message MQTT natif de HA. Voir `fonctionnelles-rfxcom_specs` v5.11 et `techniques-socle-ha-mqtt_specs` §8.5.4bis. Ancienne version v1.3 archivée. |
+| 1.5 | 2026-08-10 | Claude | **Vérification `isConnected()` + journal des ordres** (§6.1) — `applyReceiverCommand()` refuse tout envoi si le transceiver n'est pas connecté, chaque ordre journalisé (`recordOrder()`, `rfxcom:orders:list`). **Boucle de reconnexion automatique** (§11.1, 5s) sur `onConnectionChange(connected=false)`. Voir `fonctionnelles-rfxcom_specs` v5.12. Ancienne version v1.4 archivée. |
+| 1.3 | 2026-08-03 | Claude | **Réécriture complète des sections décrivant l'API de la bibliothèque `rfxcom`** (§2-§8, §11, §13), qui documentaient une API fictive jamais celle réellement publiée (pas d'événement générique `'device'`, pas de `'connect'`/`'error'` génériques, options du constructeur réduites à `{debug}`, dispatch par `switch` sur le protocole et non `instanceof`, échelle de dim réelle 0-15). Nouvelle §8 "Persistance et Validation" documentant la cause racine, jusqu'ici non identifiée dans les specs, de la rafale de commandes OFF à chaque redémarrage (`lastOn`/`lastLevel`/`lastValue`/`commandDeviceId` écrits en YAML mais strippés au rechargement par le schéma Zod). §11.1/§11.3 réécrites (verrou `protocolsPushGate`, reconnexion à chaud propre à RFXCOM plutôt que redémarrage du module entier par AppService). Section "Communication Inter-Applications" (§9 de la v1.2, jamais implémentée, doublon de numérotation avec l'ancienne §9) retirée de ce document — voir l'annexe correspondante dans `fonctionnelles-rfxcom_specs_v5.12.md` §22.3, qui la documente une seule fois pour l'ensemble du module RFXCOM avec la mention explicite "non implémentée". |
+
+---
+
+*Conforme à [fonctionnelles-rfxcom_specs_v5.12.md](#1-introduction), [techniques-socle-ha-mqtt_specs_v4.19.md](techniques-socle-ha-mqtt_specs_v4.33.md) et [nommage_specs_v1.0.md](nommage_specs_v1.0.md)*
+
+---
+
+# Partie 3 — Récepteurs, Émetteurs et Scènes
+
+## R1. Introduction
+
+### R1.1 Objectif
+Ce document **complète** les [spécifications principales](#1-introduction) en
+détaillant la gestion des **récepteurs logiques** et **émetteurs physiques RFXCOM**.
+
+### R1.2 Périmètre
+| Inclus | Exclus |
+|--------|--------|
+| Récepteurs déclarés via fichier YAML | Gestion matériel RFXCOM |
+| Émetteurs (devices Lighting1/2/4/5/6) | Implémentation bas niveau de la bibliothèque `rfxcom` |
+| Appairage émetteurs ↔ récepteurs (N↔N) | — |
+| Scènes (SceneManager/SceneExecutor) | — |
+
+### R1.3 Public Cible
+- Développeurs implémentant RFXCOM
+- Intégrateurs Home Assistant
+- Mainteneurs du socle HA-MQTT
+
+### R1.4 Conformité
+- [nommage_specs_v1.0.md](nommage_specs_v1.0.md) (format `quoi---ou--ou`)
+- [techniques-socle-ha-mqtt_specs](techniques-socle-ha-mqtt_specs_v4.33.md) (architecture 5 couches)
+- [fonctionnelles-rfxcom_specs](#1-introduction) (spécifications principales)
+
+---
+
+## R2. Référentiel de Nommage
+
+### R2.1 Format du `name` (Obligatoire)
+```
+quoi---lieu_precis--lieu--lieu_pere--lieu_grand_pere
+```
+
+### R2.2 Nommage Technique (réel — corrigé v5.4)
+
+**Pour TOUS les devices RFXCOM (capteurs ET émetteurs) :**
+```
+<protocole>_<subType>_<sensorId>[_<unitCode>]
+```
+
+| Type | Protocole | subType | sensorId | unitCode | `uniqueId` |
+|------|-----------|---------|----------|----------|------------|
+| RFXSensor Temperature | `rfxsensor` | `temperature` | `0xa5b3` | — | `rfxsensor_temperature_0xa5b3` |
+| RFXMeter Current | `rfxmeter` | `current` | `0xb2c3` | — | `rfxmeter_current_0xb2c3` |
+| Lighting1 | `lighting1` | `x10` | `0x01a2` | — | `lighting1_x10_0x01a2` |
+| Lighting2 | `lighting2` | `ac` | `0x02be2c02` | `13` | `lighting2_ac_0x02be2c02_13` |
+| Lighting4 | `lighting4` | `pt2262` | `0x1001` | — | `lighting4_pt2262_0x1001` |
+
+Le `subType` et le `unitCode` sont **nécessaires** à l'unicité — voir
+`fonctionnelles-rfxcom_specs` §2.2 pour la justification complète (un TH9 envoie Temperature et
+Humidity sous le même `sensorId`, une télécommande multi-boutons envoie plusieurs `unitCode` sous
+le même `sensorId`).
+
+**Pour les récepteurs logiques :**
+```
+recepteur_<timestamp>
+```
+**Pas** une séquence `001`/`002` — un identifiant généré à la création, du type `recepteur_1000890`
+(observé en production). Idem pour les scènes : `scene_<timestamp>`.
+
+> ✅ **Garantie d'unicité** : combinaison protocole+subType+sensorId(+unitCode), ou timestamp de
+> création pour les récepteurs/scènes.
+
+### R2.3 QUOI = Type Fonctionnel Pur ⭐
+
+| SubType/Type RFXCOM | QUOI (auto-déterminé) | Exemple name complet |
+|----------------|----------------------|----------------------|
+| Temperature | **Température** | `Température---Salon` |
+| Humidity | **Humidité** | `Humidité---Cuisine` |
+| Current/Power | **Courant/Puissance** | `Courant---Tableau` |
+| Motion (heuristique) | **Mouvement** | `Mouvement---Couloir` |
+| Contact (heuristique) | **Contact** | `Contact---Entrée` |
+| Lighting1 | **Interrupteur** | `Interrupteur---Salon` |
+| Lighting2 | **Bouton** | `Bouton---Salon` |
+| Lighting4 | **Télécommande** | `Télécommande---Salon` |
+| Lighting5, Lighting6 | **Interrupteur** | `Interrupteur---Salon` |
+| Blinds1 | **Volet** | `Volet---Salon` |
+
+> ⚠️ `Curtain1`/`Blind1` (documentés jusqu'à v5.3 dans `SUBTYPE_TO_QUOI`) n'existent pas dans le
+> code réel — seul `Blinds1` (récepteur `cover`) est géré, voir `fonctionnelles-rfxcom_specs` §4.4.
+
+### R2.4 Règle de Transmission vers HA
+
+**⭐ Depuis v5.4 (application) — remplace la règle QUOI/OÙ documentée jusqu'à v5.3 de ce document** :
+les données ne sont transmissibles vers HA **que si** `transmitToHa: true` est coché pour ce
+device/récepteur/scène (case à cocher dans les fenêtres modales) — voir
+`fonctionnelles-rfxcom_specs` §9.1.
+
+---
+
+## R3. Définitions Clés
+
+### R3.1 Terminologie
+
+| Terme | Définition | Type HA | Nom Technique |
+|-------|------------|---------|---------------|
+| **Device RFXCOM** | Appareil **physique** RFXCOM (capteur OU émetteur) | variable | `<protocole>_<subType>_<sensorId>[_<unitCode>]` |
+| **Émetteur** | Device **Lighting1/2/4/5/6** qui **émet** des signaux RF433 | **binary_sensor** (par défaut) | idem |
+| **Récepteur** | Entité **logique** déclarée dans le fichier YAML, **associée à des émetteurs** | switch, light, cover | `recepteur_<timestamp>` |
+| **Scène** | Entité logique orchestrant plusieurs récepteurs | `device_automation` (déclencheur) | `scene_<timestamp>` |
+| **primaryEmitter** | **Émetteur principal** d'un récepteur, utilisé pour envoyer les commandes RF433 | - | - |
+| **Appairage** | Lien entre émetteur et récepteur (**N↔N**), stocké dans `rfxcom_receivers[].emitters[]` | - | - |
+
+### R3.2 Règles Fondamentales
+
+1. **unique_id contient TOUJOURS protocole+subType+sensorId(+unitCode)** pour TOUS les devices
+2. **QUOI = type fonctionnel pur** : "Température", "Humidité", "Courant", "Bouton" (PAS "Température Salon")
+3. **QUOI auto-déterminé** depuis type/subType RFXCOM
+4. **Émetteurs Lighting = binary_sensor par défaut** : ils émettent on/off
+5. **Appairages dans le fichier YAML** : chaque récepteur contient sa liste d'émetteurs dans `emitters[]`
+6. **primaryEmitter obligatoire** (récepteurs commandables) : détermine le device RFXCOM cible pour les commandes HA
+7. **Relations N↔N**, avec une asymétrie importante — voir §4.4
+8. **Lighting2 variateur** : l'information "variateur" vient **exclusivement** de `isDimmable`
+
+---
+
+## R4. Architecture Récepteurs ↔ Émetteurs
+
+### R4.1 Modèle Conceptuel (5 Couches)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              COUCHE PRÉSENTATION (UI Web + Socket.io)            │
+├─────────────────────────────────────────────────────────────────┤
+│              COUCHE APPLICATION (EventBus + SocketBridge)        │
+├─────────────────────────────────────────────────────────────────┤
+│                    COUCHE MÉTIER                                │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                    RfxComService                            │  │
+│  │  ┌─────────────────┐       ┌─────────────────────────────┐  │  │
+│  │  │   ÉMETTEURS      │       │      RÉCEPTEURS              │  │  │
+│  │  │ (Lighting1/2/4/5/6)│      │   (logiques)                 │  │  │
+│  │  │  binary_sensor   │◄──────►│ switch/light/cover           │  │  │
+│  │  └─────────────────┘  N↔N    │  + primaryEmitter + emitters[]│  │  │
+│  │                                │  (asymétriques, voir §4.4)   │  │  │
+│  │                                └─────────────────────────────┘  │  │
+│  │  ┌─────────────────────────────────────────────────────┐    │  │
+│  │  │  ReceiverManager → ReceiverSwitch/ReceiverLight/ReceiverCover │  │
+│  │  └─────────────────────────────────────────────────────┘    │  │
+│  │  ┌─────────────────────────────────────────────────────┐    │  │
+│  │  │        SceneManager (registre) ⇄ SceneExecutor        │    │  │
+│  │  └─────────────────────────────────────────────────────┘    │  │
+│  └────────────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────┤
+│           COUCHE HA (HaMqttIntegrationService + EventBus)        │
+├─────────────────────────────────────────────────────────────────┤
+│         COUCHE INFRASTRUCTURE (ConfigService + MqttTransport)     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### R4.2 Mapping N↔N (Appairages)
+
+```typescript
+// Structure d'un récepteur avec ses émetteurs associés
+interface BaseReceiverConfig {
+  receiverId: string;
+  name: string;
+  primaryEmitter: string;
+  emitters: AssociatedEmitter[];
+  transmitToHa: boolean;
+}
+
+interface AssociatedEmitter {
+  emitterId: string;
+  action: 'toggle' | 'on' | 'off' | 'set_level' | 'open' | 'close' | 'stop';  // enum strict, pas string libre
+}
+```
+
+**Exemple de mapping dans le fichier YAML :**
+```yaml
+rfxcom_receivers:
+  recepteur_1000890:
+    receiverId: "recepteur_1000890"
+    name: "Lumière---Salon"
+    type: "light"
+    isDimmable: true
+    primaryEmitter: "lighting2_ac_0x02be2c02_13"
+    emitters:
+      - emitterId: "lighting2_ac_0x02be2c02_13"
+        action: "toggle"
+      - emitterId: "lighting2_ac_0x02be2c02_14"
+        action: "set_level"
+    transmitToHa: true
+```
+
+### R4.3 ⭐ Persistance de `lastOn`/`lastLevel` — réponse définitive (nouveau v5.4)
+
+> **📌 Mise à jour v6.0 (19/09/2026)** : cette section, écrite le 03/08/2026, conclut que le défaut
+> n'est "non corrigé à ce jour". Un correctif réel est intervenu depuis (avant le 07/08/2026 pour
+> `lastOn`/`lastLevel` — voir **Partie 1 §20**, qui note ce même retard de mise à jour) : ces champs
+> sont désormais déclarés au schéma Zod et survivent au rechargement. L'analyse de la cause racine
+> ci-dessous reste correcte, seule la conclusion "non corrigé" est dépassée.
+
+Une question laissée ouverte dans des sessions précédentes ("`lastOn` est-il jamais persisté ?")
+a désormais une réponse **vérifiée et définitive** :
+
+- **`ReceiverSwitch.applyEmitterCommand`** et **`ReceiverLight.applyEmitterCommand`** mettent bien
+  à jour `this.config.lastOn` (et `lastLevel` pour Light) à chaque commande appliquée, et le
+  fichier est bien réécrit (`ConfigFileManager.save()`) — **ces valeurs sont bien présentes dans le
+  YAML sur disque**, vérifié directement sur l'installation de référence.
+- **Mais** `lastOn`/`lastLevel` **ne sont pas déclarés** dans `devices-config-schema.ts`
+  (`baseReceiverFields`, `ReceiverSwitchConfig`, `ReceiverLightConfig`) — seulement dans le type
+  TypeScript `types.ts`. Or `ConfigFileManager.load()` retourne le résultat de
+  `schema.parse(...)`, et Zod **supprime silencieusement** (mode `strip`, comportement par défaut
+  de `z.object()`) tout champ non déclaré au schéma.
+- **Conséquence** : à chaque redémarrage, `receiver.config.lastOn` est relu comme `undefined`,
+  quelle que soit la valeur réellement écrite juste avant l'arrêt. C'est la cause racine
+  (désormais confirmée) de la rafale de commandes OFF envoyée à **tous** les récepteurs à chaque
+  démarrage — voir `fonctionnelles-rfxcom_specs` §9.1/§20 et `implementation-rfxcom_specs` §8.1
+  pour le détail technique complet du mécanisme de perte.
+- **`ReceiverCover`** n'a de toute façon **aucun** champ `lastOn`/`lastLevel` équivalent — sa
+  position est recalculée à partir du temps écoulé et perdue à chaque redémarrage par conception.
+
+> Non corrigé à ce jour. Corriger nécessiterait d'ajouter ces champs (et `lastValue`,
+> `commandDeviceId`, côté devices) au schéma Zod — voir Roadmap de `fonctionnelles-rfxcom_specs`.
+
+### R4.4 ⭐ Asymétrie `primaryEmitter` / `emitters[]` (nouveau v5.4)
+
+**`ReceiverManager.findReceiversForEmitter()` ne recherche que dans `emitters[]`, jamais dans
+`primaryEmitter` lui-même.** Concrètement : un émetteur qui n'est référencé que comme
+`primaryEmitter` d'un récepteur (et absent de `emitters[]`) ne redéclenche **jamais** ce récepteur
+en écho lorsqu'il émet un message RF433 — y compris après une commande HA→RFXCOM envoyée via ce
+même `primaryEmitter`.
+
+C'est pourquoi le chemin HA→récepteur (§8.3) **doit** mettre à jour explicitement l'état interne
+(et donc `lastOn`/`lastLevel`, voir §4.3) après avoir envoyé une commande — il ne peut pas compter
+sur un écho RF433 en retour, contrairement à ce qu'on pourrait supposer d'une architecture purement
+événementielle. Vérifié en conditions réelles (30/07/2026) : sans cet appel explicite, `lastOn`
+restait absent du YAML après un OFF réellement envoyé et reçu par le device physique.
+
+**Recommandation pratique** : si un `primaryEmitter` doit aussi réagir en écho à ses propres
+émissions RF433 (ex: bouton physique qui commande également son propre récepteur), il doit être
+**également** ajouté à `emitters[]`, pas seulement désigné comme `primaryEmitter`.
+
+---
+
+## R5. Fichier de Configuration Centralisé
+
+### R5.1 `config-rfxcom-devices-v1.0.yaml`
+
+**Structure complète (identifiants réels) :**
+
+```yaml
+rfxcom_devices:
+  rfxsensor_temperature_0xa5b3:
+    sensorId: "0xA5B3"
+    type: "RFXSensor"
+    subType: "Temperature"
+    name: "Température---Salon"
+    protocole: "rfxsensor"
+    defaultQuoi: "Température"
+    transmitToHa: true
+    lastSeen: "2026-08-03T10:15:00.000Z"
+
+  lighting2_ac_0x02be2c02_13:
+    sensorId: "0x02BE2C02"
+    unitCode: 13
+    type: "Lighting2"
+    subType: "AC"
+    name: "Bouton---Salon"
+    protocole: "lighting2"
+    defaultQuoi: "Bouton"
+    transmitToHa: false
+
+rfxcom_receivers:
+  recepteur_1000890:
+    receiverId: "recepteur_1000890"
+    name: "Lumière---Salon"
+    type: "light"
+    isDimmable: true
+    primaryEmitter: "lighting2_ac_0x02be2c02_13"
+    emitters:
+      - emitterId: "lighting2_ac_0x02be2c02_13"
+        action: "toggle"
+    transmitToHa: true
+
+  recepteur_1000901:
+    receiverId: "recepteur_1000901"
+    name: "Volet---Fenêtre--Cuisine"
+    type: "cover"
+    coverType: "blinds1"
+    primaryEmitter: "blinds1_lincoln_0x03c4"
+    openTimeSec: 25
+    closeTimeSec: 20
+    emitters:
+      - emitterId: "blinds1_lincoln_0x03c4"
+        action: "open"
+    transmitToHa: true
+
+  scene_1000851:
+    receiverId: "scene_1000851"
+    type: "scene"
+    sceneType: "parallel"
+    delayBetweenCommands: 0
+    actions: []
+    transmitToHa: true
+```
+
+### R5.2 Règles du Fichier
+
+| Règle | Description |
+|-------|-------------|
+| **Format** | YAML strict |
+| **Chargement** | Au démarrage du service RFXCOM |
+| **Sauvegarde** | À chaque modification (via UI) |
+| **Validation** | Schéma Zod obligatoire, **résultat filtré effectivement utilisé au chargement** — voir §4.3 pour la conséquence sur `lastOn`/`lastLevel` |
+
+### R5.3 Schéma de Validation Zod (réel — `devices-config-schema.ts`)
+
+```typescript
+// Type de device — 8 valeurs réelles (pas 5)
+const rfxComDeviceTypeSchema = z.enum([
+  'RFXSensor', 'RFXMeter', 'Lighting1', 'Lighting2', 'Lighting4', 'Lighting5', 'Lighting6', 'Blinds1',
+]);
+
+const rfxComDeviceSchema = z.object({
+  uniqueId: z.string(),
+  sensorId: z.string(),
+  type: rfxComDeviceTypeSchema,
+  subType: z.string(),
+  protocole: z.string(),
+  name: z.string(),
+  defaultQuoi: z.string(),
+  transmitToHa: z.boolean().default(false),
+  unitCode: z.number().optional(),
+  lastSeen: z.string().optional(),
+  // ⚠️ lastValue et commandDeviceId existent côté TS (types.ts) mais PAS ici — strippés au rechargement, voir §4.3
+});
+
+const associatedEmitterSchema = z.object({
+  emitterId: z.string(),
+  action: z.enum(['toggle', 'on', 'off', 'set_level', 'open', 'close', 'stop']),
+});
+
+const baseReceiverFields = {
+  receiverId: z.string(),
+  name: z.string(),
+  primaryEmitter: z.string(),
+  emitters: z.array(associatedEmitterSchema).default([]),
+  transmitToHa: z.boolean().default(false),
+  // ⚠️ lastOn/lastLevel existent côté TS (types.ts) mais PAS ici — strippés au rechargement, voir §4.3
+};
+
+const receiverSwitchConfigSchema = z.object({ ...baseReceiverFields, type: z.literal('switch') });
+const receiverLightConfigSchema = z.object({
+  ...baseReceiverFields, type: z.literal('light'),
+  isDimmable: z.boolean().default(false),
+});
+const receiverCoverConfigSchema = z.object({
+  ...baseReceiverFields, type: z.literal('cover'),
+  coverType: z.enum(['blinds1', /* ... 6 valeurs au total */]),
+  openTimeSec: z.number().positive(),
+  closeTimeSec: z.number().positive(),
+});
+
+// ⭐ La scène n'a NI primaryEmitter NI emitters (confirmé, inchangé depuis v5.2)
+const sceneActionSchema = z.object({
+  target: z.string(), command: z.string(), value: z.number().optional(), delayMs: z.number().optional(),
+});
+const receiverSceneConfigSchema = z.object({
+  receiverId: z.string(), name: z.string(), type: z.literal('scene'), transmitToHa: z.boolean().default(false),
+  sceneType: z.enum(['parallel', 'sequential']).default('sequential'),
+  delayBetweenCommands: z.number().default(500),
+  actions: z.array(sceneActionSchema).min(1),
+});
+
+// Schéma complet du fichier, avec contrainte d'unicité des receiverId (nouveau, non documenté avant v5.4)
+const rfxComDevicesConfigSchema = z.object({
+  rfxcom_devices: z.record(rfxComDeviceSchema),
+  rfxcom_receivers: z.record(z.discriminatedUnion('type', [
+    receiverSwitchConfigSchema, receiverLightConfigSchema, receiverCoverConfigSchema, receiverSceneConfigSchema,
+  ])),
+}).refine(/* unicité des receiverId à travers rfxcom_receivers */);
+```
+
+---
+
+## R6. Modules Dédiés
+
+### R6.1 Architecture Modulaire
+
+Les scènes ne sont **pas** un 4ème `IReceiverModule`. `ReceiverManager` ne charge que
+switch/light/cover (il ignore explicitement `type: 'scene'` lors du chargement) ; les scènes sont
+gérées par `SceneManager` (registre CRUD) + `SceneExecutor` (exécution parallel/sequential), qui
+**réutilisent** `ReceiverManager` pour appliquer chaque commande de scène à son récepteur cible.
+
+```
+                        RfxComService
+                  (Gestion centrale)
+          ┌───────────────────────────┼───────────────────────────┐
+          v                           v                           v
+┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
+│    ReceiverSwitch     │   │    ReceiverLight      │   │    ReceiverCover      │
+│    (pour switch)      │   │    (pour light)       │   │    (pour cover)       │
+└─────────────────────┘   └─────────────────────┘   └─────────────────────┘
+          ▲                           ▲                           ▲
+          └───────────────────────────┼───────────────────────────┘
+                                       │ commande sur le récepteur cible
+                     ┌─────────────────────────┐      ┌──────────────────┐
+                     │      SceneManager        │◄────►│  SceneExecutor   │
+                     │  (registre CRUD scènes)  │      │ (parallel/sequential) │
+                     └─────────────────────────┘      └──────────────────┘
+```
+
+### R6.2 Interface Commune (réelle)
+
+**Fichier** : `receivers/BaseReceiver.ts`
+
+```typescript
+interface IReceiverModule {
+  readonly config: CommandableReceiverConfig;
+  translateHaCommand(command: string, value?: number): ReceiverCommandResult;
+  applyEmitterCommand(action: string, value?: number): void;
+  getState(): Record<string, unknown>;
+  getDiscoveryEssential(): EssentialEntityData;
+}
+
+interface ReceiverCommandResult {
+  action: string;
+  value?: number;
+}
+```
+
+Interface **synchrone** (pas de `Promise`) — `config` est injecté par le constructeur, pas par une
+méthode `initialize()` séparée. `RfxComService` orchestre l'appel à `translateHaCommand()` puis
+l'envoi RF433 et la publication d'état ; le module ne publie pas lui-même vers MQTT.
+`CommandableReceiverConfig` = switch/light/cover uniquement (§10) : les scènes ne l'implémentent
+pas.
+
+### R6.3 ReceiverLight (avec variateur)
+
+```typescript
+interface ReceiverLightConfig extends BaseReceiverConfig {
+  type: 'light';
+  isDimmable: boolean;
+  lastOn?: boolean;    // ⚠️ jamais relu après redémarrage, voir §4.3
+  lastLevel?: number;  // ⚠️ idem
+}
+```
+
+- **`isDimmable: true`** : accepte on/off/toggle/**set_level** (échelle native 0-15, voir
+  `implementation-rfxcom_specs` §6.3).
+- **`isDimmable: false`** : comportement simple switch.
+
+### R6.4 ReceiverSwitch
+
+```typescript
+interface ReceiverSwitchConfig extends BaseReceiverConfig {
+  type: 'switch';
+  lastOn?: boolean;   // ⚠️ jamais relu après redémarrage, voir §4.3
+}
+```
+**Commandes :** on, off, toggle.
+
+### R6.5 ReceiverCover (avec délais)
+
+```typescript
+interface ReceiverCoverConfig extends BaseReceiverConfig {
+  type: 'cover';
+  coverType: 'blinds1';   // ⚠️ une seule valeur gérée en pratique (voir §7 de fonctionnelles-rfxcom_specs)
+  openTimeSec: number;    // OBLIGATOIRE
+  closeTimeSec: number;   // OBLIGATOIRE
+}
+```
+**Commandes :** open, close, stop (pas de `set_position` — non implémenté). Position recalculée à
+partir du temps écoulé, **jamais persistée** (pas de champ `lastPosition`).
+
+---
+
+## R7. MQTT Discovery
+
+### R7.1 Discovery pour Device RFXCOM (Capteur ou Émetteur) — corrigé v5.4
+
+```json
+{
+  "name": "{{ taxonomy.raw_quoi }}",
+  "unique_id": "{{ protocole }}_{{ subType }}_{{ sensorId }}",
+  "~": "homeassistant/{{ component }}/{{ protocole }}_{{ subType }}_{{ sensorId }}",
+  "state_topic": "rfxcom/{{ bridgeInstance }}/{{ deviceId }}/state",
+  "value_template": "{{ '{{ value_json.state }}' }}",
+  "json_attributes_topic": "homeassistant/{{ component }}/{{ protocole }}_{{ subType }}_{{ sensorId }}/attributs",
+  "device": {
+    "identifiers": ["{{ protocole }}_{{ subType }}_{{ sensorId }}"],
+    "name": "RFXCOM {{ type }} {{ subType }}",
+    "manufacturer": "RFXCOM",
+    "model": "{{ protocole | uppercase }}",
+    "suggested_area": "{{ taxonomy.nom_lieu }}"
+  }
+}
+```
+
+> Le payload d'état ne contient que `{"state": "ON"}` (+ `signal_level`/`battery_level` en
+> attributs HA standard, séparés) — **aucune clé `attributs_taxonomie` en clair** dans ce message,
+> voir `fonctionnelles-rfxcom_specs` §2.6 pour le topic dédié.
+
+**Exemple Lighting2 (Émetteur = binary_sensor), bridge `rfx_bridge_0001` :**
+```json
+{
+  "name": "Bouton",
+  "unique_id": "lighting2_ac_0x02be2c02_13",
+  "component": "binary_sensor",
+  "entity_category": "diagnostic",
+  "state_topic": "rfxcom/rfx_bridge_0001/lighting2_ac__0x02be2c02_13/state",
+  "device": {
+    "identifiers": ["lighting2_ac_0x02be2c02_13"],
+    "name": "RFXCOM Lighting2 AC",
+    "manufacturer": "RFXCOM",
+    "model": "LIGHTING2",
+    "suggested_area": "Salon"
+  },
+  "payload_on": "ON",
+  "payload_off": "OFF"
+}
+```
+
+### R7.2 Discovery pour Récepteur
+
+**Récepteur de type light (avec variateur), bridge `rfx_bridge_0001` :**
+```json
+{
+  "name": "Lumière",
+  "unique_id": "recepteur_1000890",
+  "component": "light",
+  "state_value_template": "{{ '{{ value_json.state }}' }}",
+  "device": {
+    "identifiers": ["recepteur_1000890"],
+    "name": "Lumière",
+    "manufacturer": "RFXCOM",
+    "model": "ReceiverLight",
+    "suggested_area": "Salon"
+  },
+  "command_topic": "rfxcom/rfx_bridge_0001/recepteur_1000890/set",
+  "state_topic": "rfxcom/rfx_bridge_0001/recepteur_1000890/state",
+  "payload_on": "ON",
+  "payload_off": "OFF"
+}
+```
+
+> ⚠️ **Le composant `light` attend `state_value_template`, pas `value_template`** — distinction
+> vérifiée contre une instance HA réelle, absente de toute version précédente de ce document. Les
+> autres composants (switch/cover/sensor) utilisent `value_template`.
+>
+> Pour un récepteur logique, `deviceId` = son `receiverId` directement (pas de décomposition
+> protocole/sous-protocole, un récepteur pouvant agréger plusieurs émetteurs).
+
+### R7.3 ⭐ Discovery pour Scène (nouveau détail v5.4)
+
+Publiée comme `device_automation` (déclencheur, pas d'état/entité classique) :
+
+```json
+{
+  "name": "Soirée",
+  "unique_id": "rfxcom_scene_1000851",
+  "automation_type": "trigger",
+  "type": "scene_executed",
+  "subtype": "1000851",
+  "topic": "rfxcom/rfx_bridge_0001/scene_1000851/set",
+  "payload": "{}",
+  "device": {
+    "identifiers": ["rfxcom_scene_1000851"],
+    "name": "RFXCOM Scène",
+    "manufacturer": "RFXCOM",
+    "model": "Scene"
+  }
+}
+```
+
+> ⚠️ **`type`/`subtype` sont requis par le schéma HA `device_automation`** — leur absence produit
+> l'erreur HA "required key not provided @ data['type']", découverte en conditions réelles et
+> corrigée depuis ; **absents de la v5.3 de ce document**. `subtype` porte le `receiverId` de la
+> scène (sans le préfixe `scene_`).
+>
+> **Pas de topic d'attributs de taxonomie pour les scènes** : `device_automation` est un
+> déclencheur, sans équivalent HA à `json_attributes_topic` — voir `fonctionnelles-rfxcom_specs`
+> §15.3.3.
+>
+> Attention à ne pas confondre l'`objectId` de découverte (`rfxcom_scene_{sceneId}`, `sceneId`
+> **sans** préfixe) et le `deviceId` d'état/commande (`scene_{sceneId}`).
+
+---
+
+## R8. Flux de Données
+
+### R8.1 Initialisation
+
+```
+Démarrage
+  → PortDetector.detect() puis fallback config.port
+  → ConfigFileManager.load() (config-rfxcom-devices-v1.0.yaml)
+  → DeviceManager.loadConfigured() / ReceiverManager.loadReceivers() / SceneManager.loadScenes()
+  → Création du verrou protocolsPushGate (voir fonctionnelles-rfxcom_specs §8.3)
+  → Connexion transceiver
+  → Push protocoles matériel (résout le verrou)
+  → publishInitialDiscoveries() (devices, récepteurs, scènes avec transmitToHa: true)
+```
+Voir `fonctionnelles-rfxcom_specs` §8.3/§11.1 et `implementation-rfxcom_specs` §11.1 pour le détail
+complet et l'ordre exact.
+
+### R8.2 Traitement Message RF433 (Émetteur)
+
+```
+Message RF433 reçu
+  → RfxComTransceiver normalise (type/subType/sensorId/unitCode)
+  → DeviceManager construit l'emitterId (protocole_subType_sensorId[_unitCode])
+  → ReceiverManager.findReceiversForEmitter(emitterId) — recherche UNIQUEMENT dans emitters[] (§4.4)
+  → Pour chaque récepteur trouvé : applyEmitterCommand(action, value?) puis persistance (§4.3)
+  → Si emitterId inconnu de rfxcom_devices : ajout automatique (transmitToHa: false par défaut)
+```
+
+### R8.3 Traitement Commande MQTT (HA → Récepteur → Device RFXCOM)
+
+```
+Commande MQTT reçue (topic .../set)
+  → RfxComService résout le récepteur cible depuis le deviceId
+  → Récupère primaryEmitter (PAS via emitters[], voir §4.4)
+  → module.translateHaCommand(command, value?) → { action, value? }
+  → RfxComTransceiver envoie la trame RF433 au device du primaryEmitter
+  → Mise à jour EXPLICITE de l'état interne + lastOn/lastLevel (pas d'écho automatique, §4.4)
+  → Publication de l'état MQTT du récepteur
+```
+
+### R8.4 Événements EventBus Spécifiques à RFXCOM
+
+Voir `fonctionnelles-rfxcom_specs` §12.3 pour la liste complète et à jour des événements
+Socket.io réellement implémentés (server↔client). Côté EventBus interne (module↔application), les
+événements utilisés sont `integration:rfxcom:command` (HA→app), `integration:rfxcom:bridge:connection`
+(statut bridge), `integration:bridge:register`/`:unregister` — génériques au socle, pas spécifiques
+à un vocabulaire RFXCOM séparé comme documenté jusqu'à v5.3 (`rfxcom:device:detected`,
+`rfxcom:receiver:command`, `rfxcom:appairage:*` en tant qu'événements EventBus n'existent pas ;
+seuls leurs équivalents Socket.io existent, voir §11).
+
+---
+
+### R8.5 Topics MQTT Spécifiques à RFXCOM
+
+#### R8.5.1 Encodage du `deviceId` RFXCOM
+
+Pour un **device physique**, le `deviceId` utilisé dans les topics d'état/commande encode le
+protocole complet :
+```
+{protocole}_{sousProtocole}__{sensorId}_{unitCode}
+```
+**Exemple complet :** `lighting2_ac__0x017340ca_10`
+
+Pour un **récepteur logique**, `deviceId` = son `receiverId` directement.
+
+> ⚠️ Ce `deviceId` est **distinct** de `unique_id`/`object_id` (`<protocole>_<subType>_<sensorId>`,
+> voir §2.2) utilisé dans le topic de découverte HA.
+
+#### R8.5.2 Topics d'État et de Commande (App ↔ HA) — ⭐ corrigé v5.4, plus de slash initial
+
+| Topic | Direction | Payload | QoS | Retain |
+|-------|-----------|---------|-----|--------|
+| `rfxcom/{bridgeInstance}/{deviceId}/state` | App → HA | `{ "state": "ON"\|"OFF" }` | 0 | false |
+| `rfxcom/{bridgeInstance}/{deviceId}/set` | HA → App | `{ "state": "ON"\|"OFF", "brightness"?: 0-255 }` | 1 | false |
+
+> ⚠️ **Les exemples précédents de ce document (jusqu'à v5.3) portaient tous un `/` initial erroné**
+> (`/rfxcom/...`) — un premier niveau de topic MQTT vide, non standard. Le format générique du
+> socle avait déjà été corrigé dans `techniques-socle-ha-mqtt_specs` v4.16 (29/07/2026), mais cette
+> correction n'avait jamais été répercutée dans les exemples spécifiques à RFXCOM de ce document.
+
+#### R8.5.3 Topics de Découverte RFXCOM (App → HA)
+
+| Topic | Direction | Payload | QoS | Retain |
+|-------|-----------|---------|-----|--------|
+| `homeassistant/{component}/{object_id}/config` | App → HA | Message de discovery (§7) | 1 | true |
+| `homeassistant/{component}/{object_id}/attributs` | App → HA | `{"attributs_taxonomie": {...}}`, publié uniquement à la (re)découverte | 1 | true |
+
+#### R8.5.4 LWT (Last Will and Testament)
+
+| Topic | Direction | Payload | QoS | Retain |
+|-------|-----------|---------|-----|--------|
+| `rfxcom/{bridgeInstance}/status` | App → Broker | `"online"` / `"offline"` | 1 | true |
+
+#### R8.5.5 Retrait de Découverte
+
+Voir `fonctionnelles-rfxcom_specs` §17.3 — publication d'une chaîne vide retenue sur le topic de
+découverte, à la désélection (`transmitToHa: true → false`) ou à la suppression.
+
+---
+
+## R9. Exemples Complets
+
+### R9.1 Installation Résidentielle (identifiants réels)
+
+```yaml
+rfxcom_devices:
+  rfxsensor_temperature_0xa5b3:
+    sensorId: "0xA5B3"
+    type: "RFXSensor"
+    subType: "Temperature"
+    name: "Température---Salon"
+    protocole: "rfxsensor"
+    defaultQuoi: "Température"
+    transmitToHa: true
+
+  lighting2_ac_0x02be2c02_13:
+    sensorId: "0x02BE2C02"
+    unitCode: 13
+    type: "Lighting2"
+    subType: "AC"
+    name: "Bouton---Salon"
+    protocole: "lighting2"
+    defaultQuoi: "Bouton"
+    transmitToHa: false
+
+  lighting2_ac_0x02be2c02_14:
+    sensorId: "0x02BE2C02"
+    unitCode: 14
+    type: "Lighting2"
+    subType: "AC"
+    name: "Bouton---Cuisine"
+    protocole: "lighting2"
+    defaultQuoi: "Bouton"
+    transmitToHa: false
+
+rfxcom_receivers:
+  recepteur_1000890:
+    receiverId: "recepteur_1000890"
+    name: "Lumière---Salon"
+    type: "light"
+    isDimmable: true
+    primaryEmitter: "lighting2_ac_0x02be2c02_13"
+    emitters:
+      - emitterId: "lighting2_ac_0x02be2c02_13"
+        action: "toggle"
+      - emitterId: "lighting2_ac_0x02be2c02_14"
+        action: "set_level"
+    transmitToHa: true
+```
+
+**Comportement :**
+- Appui sur `lighting2_ac_0x02be2c02_13` → `recepteur_1000890` toggle (car dans `emitters[]`)
+- Appui sur `lighting2_ac_0x02be2c02_14` → `recepteur_1000890` passe au niveau configuré
+- Commande HA `light.recepteur_1000890/set` → RF433 envoyé au `primaryEmitter`
+  (`lighting2_ac_0x02be2c02_13`), état mis à jour explicitement (§4.4)
+- Un appui sur le `primaryEmitter` **seul** (hors `emitters[]`) ne redéclencherait **pas** le
+  récepteur — voir §4.4
+
+---
+
+## R10. Types TypeScript
+
+**Fichiers réels** : `applications/rfxcom/src/domain/types.ts` (interfaces) et
+`applications/rfxcom/src/domain/devices-config-schema.ts` (schéma Zod, §5.3) — **pas**
+`src/domain/integrations/rfxcom/types-recepteurs.ts` comme documenté jusqu'à v5.3, chemin qui
+n'existe pas.
+
+```typescript
+export type ReceiverType = 'switch' | 'light' | 'cover' | 'scene';
+export type CoverType = 'blinds1';   // une seule valeur en pratique
+
+export interface AssociatedEmitter {
+  emitterId: string;
+  action: 'toggle' | 'on' | 'off' | 'set_level' | 'open' | 'close' | 'stop';
+}
+
+export interface SceneAction {
+  target: string;
+  command: string;
+  value?: number;
+  delayMs?: number;
+}
+
+export interface BaseReceiverConfig {
+  receiverId: string;
+  name: string;
+  primaryEmitter: string;
+  emitters: AssociatedEmitter[];
+  transmitToHa: boolean;
+  icon?: string;
+}
+
+export interface ReceiverSwitchConfig extends BaseReceiverConfig {
+  type: 'switch';
+  lastOn?: boolean;        // ⚠️ non déclaré au schéma Zod, voir §4.3
+}
+
+export interface ReceiverLightConfig extends BaseReceiverConfig {
+  type: 'light';
+  isDimmable: boolean;
+  lastOn?: boolean;        // ⚠️ idem
+  lastLevel?: number;      // ⚠️ idem
+}
+
+export interface ReceiverCoverConfig extends BaseReceiverConfig {
+  type: 'cover';
+  coverType: CoverType;
+  openTimeSec: number;
+  closeTimeSec: number;
+}
+
+// Scène — ne dérive PAS de BaseReceiverConfig (inchangé depuis v5.2)
+export interface ReceiverSceneConfig {
+  receiverId: string;
+  name: string;
+  type: 'scene';
+  transmitToHa: boolean;
+  sceneType: 'parallel' | 'sequential';
+  delayBetweenCommands: number;
+  actions: SceneAction[];
+}
+
+export type CommandableReceiverConfig = ReceiverSwitchConfig | ReceiverLightConfig | ReceiverCoverConfig;
+export type ReceiverConfig = CommandableReceiverConfig | ReceiverSceneConfig;
+
+export interface RfxComDeviceInfo {
+  uniqueId: string;          // <protocole>_<subType>_<sensorId>[_<unitCode>]
+  sensorId: string;
+  unitCode?: number;
+  type: string;
+  subType: string;
+  defaultQuoi: string;
+  name: string;
+  protocole: string;
+  transmitToHa: boolean;
+  lastSeen?: string;
+  // lastValue / commandDeviceId existent côté TS mais pas au schéma — voir §4.3
+}
+
+export interface RfxComDevicesConfigFile {
+  rfxcom_devices: Record<string, RfxComDeviceInfo>;
+  rfxcom_receivers: Record<string, ReceiverConfig>;
+}
+```
+
+---
+
+## R11. Intégration Interface Web
+
+### R11.1 Données Exposées via Socket.io
+
+Voir `fonctionnelles-rfxcom_specs` §12.3 pour la liste complète et exacte (server→client et
+client→server) — ce document ne la duplique plus pour éviter toute divergence future ; seuls les
+événements directement liés aux récepteurs/scènes sont rappelés ici :
+
+```typescript
+'rfxcom:receivers:list': { receivers: ReceiverConfig[] }
+'rfxcom:receiver:create' / ':update' / ':delete'
+'rfxcom:scenes:list': { scenes: ReceiverSceneConfig[] }
+'rfxcom:scene:create' / ':update' / ':delete' / ':execute' / ':cancel'
+'rfxcom:device:set_name': { uniqueId: string; name: string }
+```
+
+### R11.2 Workflow UI - Configuration Complète
+
+**Étape 1 : Détection des devices** — inchangé, voir `fonctionnelles-rfxcom_specs` §13.5.
+
+**Étape 2 : Configuration QUOI/OÙ pour un device**
+```
+Sélection d'un device → fenêtre modale, 5 champs séparés (Quoi/Lieu précis/Lieu/Père/Grand-père),
+chacun avec sa propre icône de sauvegarde (💾). Recomposition côté serveur en un seul `name` avant
+envoi de 'rfxcom:device:set_name' (contrat inchangé depuis v5.0).
+```
+
+**Étape 3 : Création Récepteur + primaryEmitter + Émetteurs**
+```
+"Créer Récepteur" → fenêtre modale :
+  - receiverId auto-généré (timestamp, pas séquentiel — voir §2.2)
+  - Taxonomie en 5 champs séparés
+  - type (switch/light/cover)
+  - primaryEmitter : liste déroulante à libellé lisible dérivé de la taxonomie (ex: "Bouton · Salon
+    (lighting2_ac_0x02be2c02_13)"), pas le uniqueId brut seul
+  - emitters : multi-sélection sur la même liste — ⚠️ penser à y inclure aussi le primaryEmitter
+    si un écho de ses propres émissions RF433 est souhaité (voir §4.4)
+  - isDimmable (light) / openTimeSec+closeTimeSec obligatoires (cover)
+→ 'rfxcom:receiver:create' avec la config complète
+```
+
+---
+
+## R12. Annexes
+
+### R12.1 Checklist d'Implémentation
+| Tâche | Statut |
+|-------|--------|
+| Auto-détermination QUOI depuis subType | ✅ |
+| unique_id avec protocole+subType+sensorId(+unitCode) | ✅ |
+| QUOI = type fonctionnel pur | ✅ |
+| Lighting = binary_sensor par défaut | ✅ |
+| Fichier YAML centralisé | ✅ |
+| primaryEmitter dans chaque récepteur | ✅ |
+| Liste des émetteurs appairés dans le récepteur | ✅ |
+| Lighting2 variateur via configuration | ✅ |
+| Types TypeScript complets | ✅ |
+| Schéma Zod pour validation | ✅ (mais incomplet — voir §4.3) |
+| Receiver{Switch,Light,Cover} | ✅ |
+| Discovery MQTT (devices/récepteurs/scènes) | ✅ |
+| Socket.io handlers | ✅ |
+| Scènes (SceneManager/SceneExecutor + UI) | ✅ |
+| Persistance fiable de `lastOn`/`lastLevel` au redémarrage | ❌ **non résolu**, voir §4.3 |
+
+### R12.2 Conformité
+- ✅ [nommage_specs_v1.0.md](nommage_specs_v1.0.md)
+- ✅ [techniques-socle-ha-mqtt_specs](techniques-socle-ha-mqtt_specs_v4.33.md)
+- ✅ [fonctionnelles-rfxcom_specs](#1-introduction)
+
+### R12.3 Références
+- [Spécifications Principales RFXCOM](#1-introduction)
+- [Spécifications Implémentation RFXCOM](#t1-introduction)
+- [Spécification de Nommage **OBLIGATOIRE**](nommage_specs_v1.0.md) ⭐
+- [Spécifications Techniques Socle **OBLIGATOIRE**](techniques-socle-ha-mqtt_specs_v4.33.md) ⭐
+
+### R12.4 Historique
+| Version | Date | Auteur | Changements |
+|---------|------|--------|------------|
+| 1.0 → 4.0 | 2026-07-07 → 07-08 | Mistral Vibe | Version initiale, intégration nommage, corrections techniques |
+| 5.0 | 2026-07-09 | Mistral Vibe | Fichier YAML centralisé, primaryEmitter, émetteurs dans récepteur |
+| 5.1 | 2026-07-21 | Claude | Refonte topics MQTT §8.5 (bridge_instance, encodage deviceId) |
+| 5.2 | 2026-07-21 | Claude | Implémentation réelle des Scènes, `ReceiverSceneConfig` ne dérive plus de `BaseReceiverConfig` |
+| 5.3 | 2026-07-27 | Claude | Mise à jour du workflow UI (taxonomie 5 champs, fenêtres modales, libellés lisibles) |
+| 5.4 | 2026-08-03 | Claude | **Rattrapage complet code/specs** : format réel du `uniqueId` (protocole+subType+sensorId+unitCode), réponse définitive sur la persistance `lastOn`/`lastLevel` (écrits mais strippés au rechargement — cause racine de la rafale OFF, §4.3), asymétrie `primaryEmitter`/`emitters[]` documentée (§4.4), correction du slash initial erroné sur tous les topics (§8.5.2), détail complet de la découverte de scène avec `type`/`subtype` requis (§7.3), schéma Zod réel à jour (§5.3, 8 types de device, contrainte d'unicité `receiverId`), `receiverId` en timestamp et non séquentiel (§2.2). |
+
+---
+
+*Document conforme à [nommage_specs_v1.0.md](nommage_specs_v1.0.md) et [techniques-socle-ha-mqtt_specs](techniques-socle-ha-mqtt_specs_v4.33.md)*

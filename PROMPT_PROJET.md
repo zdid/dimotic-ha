@@ -360,7 +360,7 @@ projet/
 | **Type d'Application** | **Spécifications Additionnelles** | **Cas d'Usage** |
 |------------------------|----------------------------------|-----------------|
 | **Intégration MQTT** (RFXCOM, Zigbee2MQTT, etc.) | `integrationbridge-mqtt-auto_specs` | Applications intégrant du matériel via MQTT |
-| **Application RFXCOM** | `fonctionnelles-rfxcom_specs` + `recepteurs-emetteurs-rfxcom_specs` + `classification-rfxcom_specs` + `implementation-rfxcom_specs` | **Maintenance et développement** spécifique RFXCOM |
+| **Application RFXCOM** | `fonctionnelles-rfxcom_specs` (fusion Fonctionnel+Implémentation+Récepteurs/Émetteurs depuis le 19/09/2026, v6.0 — un seul fichier, 3 parties §/§T/§R) ; `classification-rfxcom_specs` archivé le 19/09/2026 comme conception jamais construite (non conforme au code réel), voir l'avertissement en tête de `fonctionnelles-rfxcom_specs_v6.0.md` | **Maintenance et développement** spécifique RFXCOM |
 | **Application EVOO7** | `fonctionnelles-evoo7_specs` | **Maintenance et développement** spécifique EVOO7 (régulateur de chauffage/PAC VR Electronique) |
 | **Application NOMMAGE** | `fonctionnelles-nommage_specs` + `implementation-nommage_specs` | **Maintenance et développement** spécifique NOMMAGE (au-delà des conventions de nommage génériques déjà couvertes par `nommage_specs` §Pour TOUTE Nouvelle Application) |
 | **Application ARBREOUQUOI** | `fonctionnelles-arbreouquoi_specs` + `implementation-arbreouquoi_specs` | **Maintenance et développement** spécifique ARBREOUQUOI |

@@ -1,6 +1,8 @@
 # Spécifications Fonctionnelles - Module ESPDISPLAY
 
-*Version 1.1 - 15 Août 2026*
+*Version 1.2 - 19 Septembre 2026 — §9.1 : référence morte vers `inter-app-communication_specs`
+(retirée de `specs/current/`, jamais implémentée) corrigée vers `techniques-socle-ha-mqtt_specs`
+§9bis.*
 *Met à jour la v1.0 : exécution à distance par SSH (§6.3) — nécessaire depuis que le bouton HAPLAN
 "Déployer sur l'écran" est utilisé en production sur `ha2`, qui n'a ni python3 ni le conteneur
 `esphome` (Pi4, RAM insuffisante, voir §6.2 déjà existant). Gagne aussi une configuration UI (§5.2)
@@ -313,9 +315,9 @@ applications/haplan/tools/
 ### 9.1 Références
 - [Spécifications Fonctionnelles HAPLAN](fonctionnelles-haplan_specs_v1.2.md) ⭐ (§3.6/§8.9 —
   déclencheur actuel, seul appelant)
-- [Communication Inter-Applications](inter-app-communication_specs_v1.0.md) ⭐ (pattern EventBus
-  générique)
-- [Spécifications Techniques Socle](techniques-socle-ha-mqtt_specs_v4.28.md) ⭐
+- [Spécifications Techniques Socle](techniques-socle-ha-mqtt_specs_v4.33.md) ⭐ §9bis pour le
+  mécanisme réel de communication inter-app (Fire & Forget + `CorrelatedRequester` — remplace la
+  référence à `inter-app-communication_specs`, jamais implémentée, retirée de `specs/current/`)
 
 ### 9.2 Glossaire
 | Terme | Définition |

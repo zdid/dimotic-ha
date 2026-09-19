@@ -55,20 +55,18 @@
 | Fichier (base, sans version) | Description |
 |---|---|
 | `architectural-patterns_specs` | Patterns architecturaux MQTT/WS |
-| `classification-rfxcom_specs` | Classifieur RFXCOM (IHaClassifier) |
+| `classification-rfxcom_specs` | **Archivé (19/09/2026)** : conception jamais construite (IHaClassifier RFXCOM), ne correspond pas au code réel — voir `specs/archives/v5.17-rfxcom/` et l'avertissement en tête de `fonctionnelles-rfxcom_specs_v6.0.md` |
 | `erreurs_specs` | Codes d'erreur et états standardisés |
 | `fonctionnelles-arbreouquoi_specs` | Spécifications fonctionnelles ARBREOUQUOI |
 | `fonctionnelles-nommage_specs` | Spécifications fonctionnelles NOMMAGE |
-| `fonctionnelles-rfxcom_specs` | Spécifications fonctionnelles RFXCOM |
+| `fonctionnelles-rfxcom_specs` | Spécifications RFXCOM — fusion Fonctionnel+Implémentation+Récepteurs/Émetteurs depuis le 19/09/2026 (v6.0, un seul fichier, 3 parties §/§T/§R) |
 | `guide-nouvelle-application_specs` | Guide de création d'une nouvelle application |
 | `implementation-arbreouquoi_specs` | Implémentation ARBREOUQUOI |
 | `implementation-nommage_specs` | Implémentation NOMMAGE |
-| `implementation-rfxcom_specs` | Implémentation RFXCOM |
 | `integrationbridge-mqtt-auto_specs` | Démarrage/arrêt automatique MQTT et HA-WS |
 | `inter-app-communication_specs` | Communication inter-applications (Request/Reply, EventBus partagé) |
 | `nommage_specs` | Conventions de nommage QUOI/OÙ |
 | `presentation_specs` | Couche Présentation (TypeScript + Web Components) |
-| `recepteurs-emetteurs-rfxcom_specs` | Récepteurs/Émetteurs RFXCOM |
 | `techniques-socle-ha-mqtt_specs` | Spécifications techniques du socle (architecture 5 couches) |
 
 ---
