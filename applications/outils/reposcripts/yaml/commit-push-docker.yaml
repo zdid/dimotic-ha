@@ -1,0 +1,10 @@
+id: commit-push-docker
+title: "Commit + push + tag + build Docker"
+description: >-
+  Saisir juste un titre (+ détail optionnel) de commit : ajoute tout, committe, pousse. Case à
+  cocher "construire Docker" : si cochée, calcule et propose le prochain tag de version à
+  l'exécution (auto-incrémenté depuis le dernier vX.Y.Z réel du dépôt, modifiable), puis construit
+  et publie l'image Docker Hub (--build-only, sans déployer sur aucune machine). Confirmations
+  interactives avant chaque action irréversible. À lancer soi-même depuis un clone du dépôt.
+filename: commit-push-docker.sh
+requiresSudo: false
