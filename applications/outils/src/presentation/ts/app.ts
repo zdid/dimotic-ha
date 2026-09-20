@@ -16,6 +16,7 @@ interface OutilScriptSummary {
   description: string;
   filename: string;
   requiresSudo: boolean;
+  builtin: boolean;
 }
 
 interface OutilsStatus {
@@ -36,6 +37,8 @@ interface OutilScriptDetail extends OutilScriptSummary {
   hasBundling: boolean;
   // ⭐ 19/09/2026 — dernières valeurs saisies, persistées côté serveur (voir renderVariableField).
   savedValues: Record<string, string>;
+  // ⭐ 20/09/2026 — contenu brut du <id>.yaml (voir bouton "Télécharger en .zip").
+  yamlContent: string;
 }
 
 interface AddScriptResult {
@@ -44,6 +47,13 @@ interface AddScriptResult {
 }
 
 interface BundleResult {
+  success: boolean;
+  token?: string;
+  filename?: string;
+  error?: string;
+}
+
+interface ZipResult {
   success: boolean;
   token?: string;
   filename?: string;
@@ -94,16 +104,14 @@ function setupEventListeners(): void {
     if (btn) btn.disabled = false;
     if (result.success) {
       showAlert('Script ajouté.', 'success', 'add');
-      const titleInput = $('add-title') as HTMLInputElement | null;
-      const descInput = $('add-description') as HTMLTextAreaElement | null;
-      const filenameInput = $('add-filename') as HTMLInputElement | null;
-      const fileInput = $('add-file') as HTMLInputElement | null;
-      const sudoInput = $('add-sudo') as HTMLInputElement | null;
-      if (titleInput) titleInput.value = '';
-      if (descInput) descInput.value = '';
-      if (filenameInput) filenameInput.value = '';
-      if (fileInput) fileInput.value = '';
-      if (sudoInput) sudoInput.checked = false;
+      const yamlInput = $('add-yaml') as HTMLInputElement | null;
+      const wrapperInput = $('add-wrapper') as HTMLInputElement | null;
+      const engineInput = $('add-engine') as HTMLInputElement | null;
+      const zipInput = $('add-zip') as HTMLInputElement | null;
+      if (yamlInput) yamlInput.value = '';
+      if (wrapperInput) wrapperInput.value = '';
+      if (engineInput) engineInput.value = '';
+      if (zipInput) zipInput.value = '';
     } else {
       showAlert(result.error || 'Échec de l\'ajout.', 'error', 'add');
     }
@@ -124,6 +132,7 @@ function setupEventListeners(): void {
   });
 
   socket.on('outils:bundle:result', (result: BundleResult) => { onBundleResult(result); });
+  socket.on('outils:zip:result', (result: ZipResult) => { onZipResult(result); });
 
   socket.on('connect', () => {
     console.log('[Outils UI] Connecté au serveur Socket.io');
@@ -135,7 +144,9 @@ function setupEventListeners(): void {
   });
 
   $('btn-add-script')?.addEventListener('click', () => { void submitAddScript(); });
+  $('btn-add-zip')?.addEventListener('click', () => { void submitAddZip(); });
   $('btn-generate')?.addEventListener('click', () => generateAndDownload());
+  $('btn-generate-zip')?.addEventListener('click', () => { void generateZip(); });
   $('btn-copy-command')?.addEventListener('click', () => { void copyCommand(); });
 }
 
@@ -163,9 +174,10 @@ function renderScriptList(): void {
         <span>${escapeHtml(s.description || 'Aucune description')}</span>
       </div>
       <div class="script-actions">
+        ${s.builtin ? '<span class="builtin-badge">intégré</span>' : ''}
         ${s.requiresSudo ? '<span class="sudo-badge">sudo</span>' : ''}
         <button class="btn btn-primary btn-small" data-action="select" data-id="${escapeHtml(s.id)}">Sélectionner</button>
-        <button class="btn btn-danger btn-small" data-action="delete" data-id="${escapeHtml(s.id)}">Retirer</button>
+        ${s.builtin ? '' : `<button class="btn btn-danger btn-small" data-action="delete" data-id="${escapeHtml(s.id)}">Retirer</button>`}
       </div>
     </div>
   `).join('');
@@ -364,6 +376,37 @@ function onBundleResult(result: BundleResult): void {
   showGeneratedCommand();
 }
 
+/** ⭐ 20/09/2026 — .zip contenant le wrapper substitué + son yaml (+ dépendances @outils:bundle
+ *  éventuelles) — toujours disponible, contrairement à l'archive auto-extractible (réservée aux
+ *  scripts avec dépendances déclarées). Mêmes valeurs de variables que "Générer et télécharger". */
+function generateZip(): void {
+  if (!socket || !currentDetail) return;
+
+  let content = currentDetail.content;
+  for (const v of currentDetail.variables) {
+    content = content.split(`__${v}__`).join(readVariableValue(v));
+  }
+
+  const btn = $('btn-generate-zip') as HTMLButtonElement | null;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Génération du zip...'; }
+  socket.emit('outils:zip:build', { id: currentDetail.id, content });
+}
+
+function onZipResult(result: ZipResult): void {
+  const btn = $('btn-generate-zip') as HTMLButtonElement | null;
+  if (btn) { btn.disabled = false; btn.textContent = '🗜️ Télécharger en .zip (script + yaml + wrapper)'; }
+
+  if (!result.success || !result.token) {
+    showAlert(result.error || 'Échec de la génération du zip.', 'error', 'list');
+    return;
+  }
+
+  const a = document.createElement('a');
+  a.href = `/api/apps/outils/download/${result.token}`;
+  a.download = result.filename || 'script.zip';
+  a.click();
+}
+
 function showGeneratedCommand(): void {
   if (!currentDetail) return;
   const commandBox = $('command-box');
@@ -391,44 +434,75 @@ async function copyCommand(): Promise<void> {
   }
 }
 
+/** Dépose un fichier via la route générique POST /api/apps/outils/upload, tagué avec `batchId`
+ *  (corrèle les 3 dépôts séparés côté serveur — voir OutilsService.handleUpload) et `role`. */
+async function uploadPart(batchId: string, role: 'yaml' | 'wrapper' | 'engine' | 'zip', file: File): Promise<void> {
+  const formData = new FormData();
+  formData.append('batchId', batchId);
+  formData.append('role', role);
+  formData.append('file', file, file.name);
+  const response = await fetch('/api/apps/outils/upload', { method: 'POST', body: formData });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.message || `HTTP ${response.status}`);
+  }
+}
+
+/**
+ * ⭐ 20/09/2026 — 3 dépôts séparés (demande explicite, "pas un zip") : yaml + wrapper obligatoires,
+ * moteur optionnel, chacun envoyé par un appel HTTP séparé mais corrélé par un même `batchId` —
+ * le serveur finalise (écriture réelle + `outils:script:add:result`) dès que yaml+wrapper sont
+ * tous les deux arrivés.
+ */
 async function submitAddScript(): Promise<void> {
-  const titleInput = $('add-title') as HTMLInputElement | null;
-  const descInput = $('add-description') as HTMLTextAreaElement | null;
-  const filenameInput = $('add-filename') as HTMLInputElement | null;
-  const fileInput = $('add-file') as HTMLInputElement | null;
-  const sudoInput = $('add-sudo') as HTMLInputElement | null;
+  const yamlInput = $('add-yaml') as HTMLInputElement | null;
+  const wrapperInput = $('add-wrapper') as HTMLInputElement | null;
+  const engineInput = $('add-engine') as HTMLInputElement | null;
   const btn = $('btn-add-script') as HTMLButtonElement | null;
 
-  const title = (titleInput?.value || '').trim();
-  const description = (descInput?.value || '').trim();
-  const filename = (filenameInput?.value || '').trim();
-  const requiresSudo = sudoInput?.checked ? 'true' : 'false';
-  const file = fileInput?.files?.[0];
+  const yamlFile = yamlInput?.files?.[0];
+  const wrapperFile = wrapperInput?.files?.[0];
+  const engineFile = engineInput?.files?.[0];
 
-  if (!title || !file) {
-    showAlert('Titre et fichier .sh sont obligatoires.', 'error', 'add');
+  if (!yamlFile || !wrapperFile) {
+    showAlert('Le yaml et le wrapper (.sh) sont obligatoires.', 'error', 'add');
     return;
   }
 
-  const formData = new FormData();
-  formData.append('title', title);
-  formData.append('description', description);
-  formData.append('requiresSudo', requiresSudo);
-  if (filename) formData.append('filename', filename);
-  formData.append('file', file, filename || file.name);
-
   if (btn) btn.disabled = true;
   try {
-    const response = await fetch('/api/apps/outils/upload', { method: 'POST', body: formData });
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(body.message || `HTTP ${response.status}`);
-    }
-    // Résultat réel (ajout réussi ou non) relayé par outils:script:add:result (Socket.io) — cette
-    // réponse HTTP n'est qu'un accusé de réception, même convention que scriptsha/HAPLAN.
+    const batchId = crypto.randomUUID();
+    await uploadPart(batchId, 'yaml', yamlFile);
+    if (engineFile) await uploadPart(batchId, 'engine', engineFile);
+    // Le wrapper en dernier : c'est lui qui déclenche la finalisation côté serveur une fois les
+    // deux pièces obligatoires réunies (voir OutilsService.handleUpload).
+    await uploadPart(batchId, 'wrapper', wrapperFile);
+    // Résultat réel (ajout réussi ou non) relayé par outils:script:add:result (Socket.io) — ces
+    // réponses HTTP ne sont que des accusés de réception, même convention que scriptsha/HAPLAN.
   } catch (error) {
     if (btn) btn.disabled = false;
     showAlert(`Échec du dépôt: ${error instanceof Error ? error.message : String(error)}`, 'error', 'add');
+  }
+}
+
+/** ⭐ 20/09/2026, demande explicite — import d'un .zip précédemment exporté (voir generateZip()) :
+ *  un seul dépôt, autonome (pas de batchId à corréler, tout arrive dans le même fichier). */
+async function submitAddZip(): Promise<void> {
+  const zipInput = $('add-zip') as HTMLInputElement | null;
+  const btn = $('btn-add-zip') as HTMLButtonElement | null;
+  const zipFile = zipInput?.files?.[0];
+
+  if (!zipFile) {
+    showAlert('Choisissez un fichier .zip à importer.', 'error', 'add');
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  try {
+    await uploadPart(crypto.randomUUID(), 'zip', zipFile);
+  } catch (error) {
+    if (btn) btn.disabled = false;
+    showAlert(`Échec de l'import: ${error instanceof Error ? error.message : String(error)}`, 'error', 'add');
   }
 }
 

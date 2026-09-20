@@ -13,7 +13,10 @@ export const OUTILS_SOCKET_EVENTS = {
   DELETE_RESULT: 'outils:script:delete:result',
   // ⭐ 18/09/2026 — BundleResult { success, token?, filename?, error? } ; le token pointe vers
   // GET /api/apps/outils/download/:token (voir PresentationServer), pas de contenu binaire ici.
-  BUNDLE_RESULT: 'outils:bundle:result'
+  BUNDLE_RESULT: 'outils:bundle:result',
+  // ⭐ 20/09/2026 — ZipResult, même forme/route que BUNDLE_RESULT, fichier .zip au lieu d'une
+  // archive auto-extractible.
+  ZIP_RESULT: 'outils:zip:result'
 } as const;
 
 export const OUTILS_CLIENT_EVENTS = {
@@ -26,6 +29,10 @@ export const OUTILS_CLIENT_EVENTS = {
   // texte qu'un téléchargement direct) ; uniquement pour un script avec au moins une directive
   // @outils:bundle (voir OutilScriptDetail.hasBundling) — résultat sur outils:bundle:result.
   BUILD_BUNDLE: 'outils:bundle:build',
+  // ⭐ 20/09/2026 — { id, content } même contrat que BUILD_BUNDLE, produit un .zip plutôt qu'une
+  // archive auto-extractible — résultat sur outils:zip:result. Proposé pour TOUT script (pas
+  // seulement ceux avec @outils:bundle) : contient au minimum le wrapper substitué + son yaml.
+  BUILD_ZIP: 'outils:zip:build',
   // ⭐ 19/09/2026 — { id, values: Record<string,string> } : sauvegarde les valeurs saisies (voir
   // ScriptValues.ts), aucun résultat renvoyé (fire-and-forget, simple confort).
   SAVE_VALUES: 'outils:values:save'

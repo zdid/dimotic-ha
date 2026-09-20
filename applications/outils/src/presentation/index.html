@@ -73,6 +73,7 @@
     .script-item .script-info span { font-size: 0.85em; color: var(--color-text-muted); display: block; margin-top: 3px; }
     .script-item .script-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .sudo-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.72em; background: rgba(255, 152, 0, 0.15); color: #ff9800; border: 1px solid #ff9800; white-space: nowrap; }
+    .builtin-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.72em; background: rgba(76, 175, 80, 0.15); color: var(--color-success); border: 1px solid var(--color-success); white-space: nowrap; }
     .empty-hint { color: var(--color-text-muted); font-size: 0.9em; }
 
     .form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin: 10px 0; }
@@ -132,35 +133,37 @@
 
       <div class="card" id="add-card" style="display: none;">
         <h2>➕ Ajouter un script</h2>
+        <p class="empty-hint">3 fichiers séparés — le yaml (id/titre/description/filename/sudo) et
+          le wrapper (.sh) sont obligatoires, le moteur est optionnel (fichier réel supplémentaire
+          référencé par le wrapper via un commentaire <code>@outils:bundle</code>).</p>
         <div class="alert alert-success" id="add-success"></div>
         <div class="alert alert-error" id="add-error"></div>
         <div class="form-row">
           <div>
-            <label for="add-title">Titre</label>
-            <input type="text" id="add-title" placeholder="Créer une carte SD Raspberry Pi">
+            <label for="add-yaml">Yaml (obligatoire)</label>
+            <input type="file" id="add-yaml" accept=".yaml,.yml,text/yaml">
           </div>
           <div>
-            <label for="add-filename">Nom de fichier proposé au téléchargement</label>
-            <input type="text" id="add-filename" placeholder="flash-sd-card.sh">
+            <label for="add-wrapper">Wrapper .sh (obligatoire)</label>
+            <input type="file" id="add-wrapper" accept=".sh,.bash,text/plain">
           </div>
-        </div>
-        <div class="form-row">
-          <div style="flex: 1 1 100%;">
-            <label for="add-description">Description</label>
-            <textarea id="add-description" placeholder="Ce que fait ce script, quand l'utiliser..."></textarea>
-          </div>
-        </div>
-        <div class="form-row">
           <div>
-            <label for="add-file">Fichier .sh</label>
-            <input type="file" id="add-file" accept=".sh,.bash,text/plain">
-          </div>
-          <div class="checkbox-row">
-            <input type="checkbox" id="add-sudo">
-            <label for="add-sudo" style="margin: 0;">Nécessite sudo</label>
+            <label for="add-engine">Moteur (optionnel)</label>
+            <input type="file" id="add-engine">
           </div>
         </div>
         <button class="btn btn-primary" id="btn-add-script">➕ Ajouter</button>
+
+        <p class="empty-hint" style="margin-top: 18px;">Ou déposer directement un .zip exporté
+          depuis un autre site (bouton "Télécharger en .zip" d'un script) — remplace les 3 zones
+          ci-dessus.</p>
+        <div class="form-row">
+          <div>
+            <label for="add-zip">Zip exporté (alternative aux 3 zones ci-dessus)</label>
+            <input type="file" id="add-zip" accept=".zip,application/zip">
+          </div>
+        </div>
+        <button class="btn btn-primary" id="btn-add-zip">🗜️ Importer le zip</button>
       </div>
 
       <div class="card" id="detail-card" style="display: none;">
@@ -173,6 +176,7 @@
         </div>
 
         <button class="btn btn-primary" id="btn-generate">⬇️ Générer et télécharger</button>
+        <button class="btn btn-secondary" id="btn-generate-zip">🗜️ Télécharger en .zip (script + yaml + wrapper)</button>
 
         <div class="command-box" id="command-box" style="display: none;">
           <code id="command-text"></code>
@@ -187,6 +191,6 @@
 
   <script type="module" src="/applications/outils/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-09-18 - Création de l'application Outils -->
+  <!-- Derniere modification: 2026-09-20 - Scripts intégrés (reposcripts) + export/import zip + 3 zones de dépôt -->
 </body>
 </html>

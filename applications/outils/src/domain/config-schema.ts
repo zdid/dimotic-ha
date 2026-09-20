@@ -1,24 +1,31 @@
 /**
  * Schéma de configuration Outils — section `outils` de data/config.yaml.
  *
- * Bibliothèque de scripts shell paramétrables : titre + description en config, contenu du script
- * lui-même dans un fichier séparé (`data/outils/scripts/<id>.sh`) — même principe que les autres
- * applications qui séparent config.yaml (petit, structuré) de leurs données volumineuses (arexx
- * sépare déjà `arexx-sensors-v1.0.yaml`, par exemple).
+ * ⭐ 20/09/2026 — la liste des scripts n'est PLUS stockée ici (ancien tableau `scripts` dans
+ * data/outils/config.yaml, qui vivait entièrement en dehors du dépôt git donc jamais embarqué
+ * dans l'image Docker). Chaque script est désormais son propre triplet de fichiers
+ * (`<id>.yaml` + `<id>.sh` [+ moteur optionnel]) dans deux arborescences parallèles — voir
+ * ScriptTemplate.ts :
+ *   - `applications/outils/reposcripts/{yaml,wrappers,scripts}/` — scripts intégrés, dans le
+ *     dépôt git, donc présents dans l'image Docker sur toute machine qui la fait tourner.
+ *   - `data/outils/reposcripts/{yaml,wrappers,scripts}/` — scripts ajoutés par l'utilisateur
+ *     (formulaire d'ajout), propres à cette machine comme avant.
+ * `outilsConfigSchema` reste déclaré (vide) uniquement parce que chaque application enregistrée
+ * doit fournir un schéma de config — aucun champ n'est actuellement utilisé.
  */
 
 import { z } from 'zod';
 
 /**
- * Un script de la bibliothèque — ⭐ 18/09/2026, demande explicite : "gérer des scripts, titre et
- * description... stockés dans l'image elle-même... comme les autres applications qui ont des
- * données". Les VARIABLES ne sont PAS déclarées ici : détectées automatiquement dans le contenu du
- * script (jetons `__NOM__`, même convention que `BackupScript.ts` de l'app sauvegarde) — voir
- * `detectVariables()` dans `ScriptTemplate.ts`. Pas de round-trip serveur pour la génération : le
- * contenu est envoyé au navigateur à la sélection, la substitution et le téléchargement se font
- * côté client.
+ * Métadonnées d'un script de la bibliothèque (contenu d'un fichier `<id>.yaml`) — ⭐ 18/09/2026,
+ * demande explicite : "gérer des scripts, titre et description... stockés dans l'image
+ * elle-même... comme les autres applications qui ont des données". Les VARIABLES ne sont PAS
+ * déclarées ici : détectées automatiquement dans le contenu du script wrapper (jetons `__NOM__`,
+ * même convention que `BackupScript.ts` de l'app sauvegarde) — voir `detectVariables()` dans
+ * `ScriptTemplate.ts`. Pas de round-trip serveur pour la génération : le contenu est envoyé au
+ * navigateur à la sélection, la substitution et le téléchargement se font côté client.
  */
-const outilScriptSchema = z.object({
+export const outilScriptSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   description: z.string().default(''),
@@ -30,16 +37,10 @@ const outilScriptSchema = z.object({
   requiresSudo: z.boolean().default(false)
 });
 
-export const outilsConfigSchema = z.object({
-  scripts: z.array(outilScriptSchema).default([])
-}).refine(
-  (config) => new Set(config.scripts.map((s) => s.id)).size === config.scripts.length,
-  { message: 'Chaque script doit avoir un id unique', path: ['scripts'] }
-);
-
-export type OutilsConfig = z.infer<typeof outilsConfigSchema>;
 export type OutilScriptConfig = z.infer<typeof outilScriptSchema>;
 
-export const DEFAULT_OUTILS_CONFIG: OutilsConfig = {
-  scripts: []
-};
+export const outilsConfigSchema = z.object({}).passthrough();
+
+export type OutilsConfig = z.infer<typeof outilsConfigSchema>;
+
+export const DEFAULT_OUTILS_CONFIG: OutilsConfig = {};

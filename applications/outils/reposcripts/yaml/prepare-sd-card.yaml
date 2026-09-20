@@ -1,0 +1,9 @@
+id: prepare-sd-card
+title: "1/2 — Préparer une image carte SD/clé USB Raspberry Pi"
+description: >-
+  Emballe scripts/flash-sd-card.js --prepare (déjà dans le dépôt) : télécharge l'image
+  officielle, la personnalise (SSH + utilisateur) SANS écrire sur une carte/clé physique —
+  aucun périphérique requis. À lancer avant le script de flashage (2/2), qui installera
+  ensuite systématiquement Docker CE, dimotic-ha, Node.js+serialport+mqtt et mosquitto-clients.
+filename: prepare-sd-card.sh
+requiresSudo: true

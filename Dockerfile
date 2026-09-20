@@ -65,11 +65,14 @@ WORKDIR /app
 COPY tsconfig.json ./
 COPY docker ./docker
 COPY applications ./applications
-# ⭐ 18/09/2026 (bug réel évité avant publication) — scripts/ et compose.deploy.yaml sont lus par
-# l'app outils (BundleBuilder.ts) pour construire une archive auto-extractible téléchargeable
-# (voir data/outils/scripts/*.sh, directives @outils:bundle) : absents jusqu'ici de l'image, la
-# fonctionnalité échouait silencieusement sur toute instance réellement déployée (ha2, noisy2...),
-# ne fonctionnant que sur une machine de dev avec le dépôt complet cloné à côté.
+# ⭐ 18/09/2026 (bug réel évité avant publication) — compose.deploy.yaml est lu par l'app outils
+# (BundleBuilder.ts) pour construire une archive auto-extractible téléchargeable (directives
+# @outils:bundle) : absent jusqu'ici de l'image, la fonctionnalité échouait silencieusement sur
+# toute instance réellement déployée (ha2, noisy2...), ne fonctionnant que sur une machine de dev
+# avec le dépôt complet cloné à côté. ⭐ 20/09/2026 — les scripts/gabarits eux-mêmes de la
+# bibliothèque outils (voir applications/outils/reposcripts/{yaml,wrappers,scripts}/) sont déjà
+# couverts par `COPY applications ./applications` ci-dessus ; `scripts/` (racine, ne contient plus
+# que copy-assets.js, lié au build racine obsolète) reste copié par simplicité/rétrocompatibilité.
 COPY scripts ./scripts
 COPY compose.deploy.yaml ./compose.deploy.yaml
 
@@ -103,7 +106,7 @@ WORKDIR /app
 
 COPY --from=builder --chown=node:node /app/tsconfig.json ./tsconfig.json
 COPY --from=builder --chown=node:node /app/applications ./applications
-# ⭐ 18/09/2026 — voir le commentaire identique dans l'étape builder ci-dessus.
+# ⭐ 18/09/2026, ⭐ 20/09/2026 — voir le commentaire identique dans l'étape builder ci-dessus.
 COPY --from=builder --chown=node:node /app/scripts ./scripts
 COPY --from=builder --chown=node:node /app/compose.deploy.yaml ./compose.deploy.yaml
 

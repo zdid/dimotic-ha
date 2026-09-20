@@ -1,32 +1,105 @@
 /**
- * Stockage du contenu des scripts (fichiers `.sh` séparés de config.yaml, voir config-schema.ts)
- * et détection des variables `__NOM__` — même convention que
- * `applications/sauvegarde/src/domain/BackupScript.ts`.
+ * Stockage des scripts de la bibliothèque Outils — ⭐ 20/09/2026, remplace l'ancien schéma
+ * (une entrée par script dans `data/outils/config.yaml`, contenu séparé dans
+ * `data/outils/scripts/<id>.sh`, jamais dans le dépôt git donc jamais embarqué dans l'image
+ * Docker). Chaque script est désormais un triplet de fichiers, dans l'une de deux arborescences
+ * parallèles :
+ *
+ *   <root>/yaml/<id>.yaml      — métadonnées (voir outilScriptSchema, config-schema.ts)
+ *   <root>/wrappers/<id>.sh    — le script proposé au téléchargement, variables `__NOM__` +
+ *                                 commentaires `@outils:hint/select/checklist/default` dedans
+ *                                 (mécanisme inchangé, voir detectVariables/detectVariableHints)
+ *   <root>/scripts/            — bassin partagé de "moteurs" (fichiers réels référencés par des
+ *                                 directives `@outils:bundle` — voir detectBundlePaths), PAS un
+ *                                 fichier par id : un moteur peut être partagé par plusieurs
+ *                                 wrappers (ex: flash-sd-card.js, utilisé par les deux phases
+ *                                 SD card)
+ *
+ * `<root>` = soit `builtinRoot()` (applications/outils/reposcripts/, dans le dépôt git — survit à
+ * `find ./applications -name '*.ts' -delete` dans le Dockerfile car ce ne sont pas des .ts, donc
+ * présent dans l'image Docker sur toute machine qui la fait tourner, lecture seule côté app), soit
+ * `dataRoot()` (data/outils/reposcripts/, gitignored comme le reste de data/, propre à chaque
+ * machine — scripts ajoutés via le formulaire "Ajouter un script").
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as yaml from 'js-yaml';
+import { outilScriptSchema, type OutilScriptConfig } from './config-schema';
 
-function scriptsDir(): string {
-  return path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'outils', 'scripts');
+/** applications/outils/reposcripts — deux niveaux au-dessus de dist/domain/. */
+export function builtinRoot(): string {
+  return path.join(__dirname, '..', '..', 'reposcripts');
 }
 
-function scriptFilePath(id: string): string {
-  return path.join(scriptsDir(), `${id}.sh`);
+/** data/outils/reposcripts — scripts ajoutés par l'utilisateur, propres à cette machine. */
+export function dataRoot(): string {
+  return path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'outils', 'reposcripts');
 }
 
-export function readScriptContent(id: string): string {
-  return fs.readFileSync(scriptFilePath(id), 'utf8');
+function yamlDir(root: string): string {
+  return path.join(root, 'yaml');
 }
 
-export function writeScriptContent(id: string, content: string): void {
-  fs.mkdirSync(scriptsDir(), { recursive: true });
-  fs.writeFileSync(scriptFilePath(id), content, 'utf8');
+function wrappersDir(root: string): string {
+  return path.join(root, 'wrappers');
 }
 
-export function deleteScriptContent(id: string): void {
-  const filePath = scriptFilePath(id);
-  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+function enginesDir(root: string): string {
+  return path.join(root, 'scripts');
+}
+
+/** Lit tous les `<id>.yaml` valides d'une arborescence — une entrée illisible/invalide est
+ *  ignorée individuellement (pas de crash de toute la liste pour un fichier corrompu). */
+export function listYamlScripts(root: string): OutilScriptConfig[] {
+  const dir = yamlDir(root);
+  if (!fs.existsSync(dir)) return [];
+  const entries: OutilScriptConfig[] = [];
+  for (const file of fs.readdirSync(dir)) {
+    if (!file.endsWith('.yaml') && !file.endsWith('.yml')) continue;
+    try {
+      const raw = yaml.load(fs.readFileSync(path.join(dir, file), 'utf8'));
+      entries.push(outilScriptSchema.parse(raw));
+    } catch {
+      // Fichier ignoré individuellement — ne doit pas empêcher l'affichage des autres scripts.
+    }
+  }
+  return entries;
+}
+
+export function readWrapperContent(root: string, id: string): string {
+  return fs.readFileSync(path.join(wrappersDir(root), `${id}.sh`), 'utf8');
+}
+
+export function writeWrapperContent(root: string, id: string, content: string): void {
+  fs.mkdirSync(wrappersDir(root), { recursive: true });
+  fs.writeFileSync(path.join(wrappersDir(root), `${id}.sh`), content, 'utf8');
+}
+
+export function writeYamlEntry(root: string, entry: OutilScriptConfig): void {
+  fs.mkdirSync(yamlDir(root), { recursive: true });
+  fs.writeFileSync(path.join(yamlDir(root), `${entry.id}.yaml`), yaml.dump(entry), 'utf8');
+}
+
+export function readYamlContent(root: string, id: string): string {
+  return fs.readFileSync(path.join(yamlDir(root), `${id}.yaml`), 'utf8');
+}
+
+/** Retire le triplet yaml+wrapper d'un script (jamais appelé sur builtinRoot() — voir
+ *  OutilsService.handleDeleteScript, qui refuse la suppression d'un script intégré). Le moteur
+ *  partagé éventuel dans scripts/ n'est PAS supprimé : peut être référencé par d'autres scripts. */
+export function deleteScriptFiles(root: string, id: string): void {
+  const yamlPath = path.join(yamlDir(root), `${id}.yaml`);
+  const wrapperPath = path.join(wrappersDir(root), `${id}.sh`);
+  if (fs.existsSync(yamlPath)) fs.unlinkSync(yamlPath);
+  if (fs.existsSync(wrapperPath)) fs.unlinkSync(wrapperPath);
+}
+
+/** Dépose un fichier moteur optionnel dans le bassin partagé scripts/ (ex: un .js référencé par
+ *  une directive @outils:bundle du wrapper) — nom de fichier libre, pas lié à un id de script. */
+export function writeEngineFile(root: string, filename: string, content: Buffer): void {
+  fs.mkdirSync(enginesDir(root), { recursive: true });
+  fs.writeFileSync(path.join(enginesDir(root), filename), content);
 }
 
 /**
@@ -78,6 +151,9 @@ export type VariableHint =
  * Une variable sans directive reste un simple champ texte (comportement par défaut, inchangé).
  * `default` (⭐ 18/09/2026) préremplit un champ texte ou présélectionne une option d'un `select` —
  * sans objet pour un `checklist` (rien à présélectionner par défaut pour l'instant).
+ *
+ * ⭐ 20/09/2026 — décision explicite : reste dans le `.sh` (pas absorbé par le `<id>.yaml`, qui ne
+ * porte que l'identité du script — titre/description/filename/sudo).
  */
 export function detectVariableHints(content: string): Record<string, VariableHint> {
   const hints: Record<string, VariableHint> = {};
@@ -136,7 +212,7 @@ export interface BundlePath {
  * auto-extractible autonome (le fichier téléchargé sinon échoue hors d'un clone du dépôt — bug réel
  * constaté : "scripts/flash-sd-card.js introuvable" quand le script est lancé depuis Téléchargements) :
  *
- *   # @outils:bundle scripts/flash-sd-card.js
+ *   # @outils:bundle applications/outils/reposcripts/scripts/flash-sd-card.js => scripts/flash-sd-card.js
  *   # @outils:bundle applications/outils/node_modules/js-yaml => node_modules/js-yaml
  *
  * Chaque chemin SOURCE est relatif à la racine du dépôt, copié tel quel (répertoires y compris,
@@ -146,7 +222,7 @@ export interface BundlePath {
  * `node_modules/js-yaml` à la racine (seul un pnpm workspace de développement en a un) ; la seule
  * copie garantie présente en production est celle, propre, de `applications/outils/` (dépendance
  * déclarée dans son package.json) — d'où ce remap vers `node_modules/js-yaml`, le chemin que
- * `scripts/flash-sd-card.js` résout relativement à lui-même (`require('../node_modules/js-yaml')`),
+ * `flash-sd-card.js` résout relativement à lui-même (`require('../node_modules/js-yaml')`),
  * quelle que soit la racine réelle d'où la source a été lue.
  *
  * Un script SANS directive `@outils:bundle` reste un simple téléchargement direct d'un seul fichier

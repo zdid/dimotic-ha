@@ -9,6 +9,10 @@ export interface OutilScriptSummary {
   description: string;
   filename: string;
   requiresSudo: boolean;
+  // ⭐ 20/09/2026 — true si le script vient de applications/outils/reposcripts/ (dans le dépôt
+  // git, embarqué dans l'image Docker, lecture seule côté app), false s'il a été ajouté par
+  // l'utilisateur (data/outils/reposcripts/, propre à cette machine, supprimable).
+  builtin: boolean;
 }
 
 export interface OutilsStatus {
@@ -30,6 +34,9 @@ export interface OutilScriptDetail extends OutilScriptSummary {
   // `variableHints[x].default` côté client (voir app.ts) — l'historique réel de l'utilisateur est
   // plus pertinent qu'un défaut générique déclaré par le script.
   savedValues: Record<string, string>;
+  // ⭐ 20/09/2026 — contenu brut du <id>.yaml, pour le proposer en téléchargement séparé (voir
+  // OutilScriptSummary.builtin/hasEngine) et pour le zip.
+  yamlContent: string;
 }
 
 export interface AddScriptResult {
@@ -38,8 +45,17 @@ export interface AddScriptResult {
 }
 
 /** Réponse à `outils:bundle:build` — le fichier réel est servi par la route HTTP générique
- *  `GET /api/apps/outils/download/:token` (voir PresentationServer), pas par Socket.io. */
+ *  GET /api/apps/outils/download/:token (voir PresentationServer), pas de contenu binaire ici. */
 export interface BundleResult {
+  success: boolean;
+  token?: string;
+  filename?: string;
+  error?: string;
+}
+
+/** Réponse à `outils:zip:build` — même route de téléchargement générique que BundleResult (le
+ *  fichier réel est un .zip, pas une archive auto-extractible tar+stub). */
+export interface ZipResult {
   success: boolean;
   token?: string;
   filename?: string;

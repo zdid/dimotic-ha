@@ -1,0 +1,8 @@
+id: duckdns-caddy
+title: "Accès externe (DuckDNS + Caddy)"
+description: >-
+  Jusqu'à 5 domaines DuckDNS indépendants (au moins 1 requis) : cron de mise à jour DuckDNS
+  dédié par domaine, Caddyfile (reverse proxy avec TLS automatique) et conteneur Docker Caddy
+  partagé pour tous les domaines configurés.
+filename: duckdns-caddy.sh
+requiresSudo: true

@@ -20,13 +20,14 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import archiver from 'archiver';
 import type { BundlePath } from './ScriptTemplate';
 
 function repoRoot(): string {
   return process.env.PROJECT_ROOT || process.cwd();
 }
 
-function downloadsDir(): string {
+export function downloadsDir(): string {
   return path.join(repoRoot(), 'data', 'outils', 'tmp', 'downloads');
 }
 
@@ -35,26 +36,35 @@ export interface BuiltBundle {
   filename: string;
 }
 
-export function buildBundle(content: string, bundlePaths: BundlePath[], outputFilename: string): BuiltBundle {
+/** Copie `content` (nommé `runName`) + chaque `bundlePaths` dans un répertoire temporaire, miroir
+ *  de la racine du dépôt — partagé par buildBundle() (archive auto-extractible) et buildZip()
+ *  (.zip brut), seule la mise en forme finale diffère. Appelant responsable du nettoyage. */
+function stageFiles(content: string, runName: string, bundlePaths: BundlePath[]): string {
   const root = repoRoot();
-  const token = crypto.randomBytes(16).toString('hex');
   const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'outils-bundle-'));
+  fs.writeFileSync(path.join(stagingDir, runName), content, { mode: 0o755 });
+
+  for (const { src: relSrc, dest: relDest } of bundlePaths) {
+    const src = path.join(root, relSrc);
+    if (!fs.existsSync(src)) {
+      fs.rmSync(stagingDir, { recursive: true, force: true });
+      throw new Error(`Chemin déclaré par @outils:bundle introuvable: ${relSrc} (racine résolue: ${root})`);
+    }
+    const dest = path.join(stagingDir, relDest);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    // dereference: true — au cas où la source soit un symlink (ex: pnpm en dev).
+    fs.cpSync(src, dest, { recursive: true, dereference: true });
+  }
+
+  return stagingDir;
+}
+
+export function buildBundle(content: string, bundlePaths: BundlePath[], outputFilename: string): BuiltBundle {
+  const token = crypto.randomBytes(16).toString('hex');
+  const stagingDir = stageFiles(content, 'run.sh', bundlePaths);
   const tarPath = path.join(os.tmpdir(), `outils-bundle-${token}.tar.gz`);
 
   try {
-    fs.writeFileSync(path.join(stagingDir, 'run.sh'), content, { mode: 0o755 });
-
-    for (const { src: relSrc, dest: relDest } of bundlePaths) {
-      const src = path.join(root, relSrc);
-      if (!fs.existsSync(src)) {
-        throw new Error(`Chemin déclaré par @outils:bundle introuvable: ${relSrc} (racine résolue: ${root})`);
-      }
-      const dest = path.join(stagingDir, relDest);
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      // dereference: true — au cas où la source soit un symlink (ex: pnpm en dev).
-      fs.cpSync(src, dest, { recursive: true, dereference: true });
-    }
-
     execFileSync('tar', ['czf', tarPath, '-C', stagingDir, '.']);
 
     // Marqueur ancré en début de ligne (^) : awk s'arrête dès qu'il le trouve, avant d'avoir à
@@ -107,4 +117,46 @@ export function buildBundle(content: string, bundlePaths: BundlePath[], outputFi
     fs.rmSync(stagingDir, { recursive: true, force: true });
     fs.rmSync(tarPath, { force: true });
   }
+}
+
+/**
+ * ⭐ 20/09/2026, demande explicite — alternative "à plat" à buildBundle() : un .zip ordinaire
+ * plutôt qu'une archive auto-extractible, pour qui préfère l'extraire lui-même. Mêmes fichiers que
+ * l'archive auto-extractible (`runName` + les dépendances `@outils:bundle`), `extraFiles` en plus
+ * (ex: le `<id>.yaml` du script, absent de bundlePaths car ce n'est pas une dépendance déclarée
+ * dans le `.sh` — juste un fichier à ajouter tel quel dans le zip).
+ */
+export function buildZip(
+  content: string,
+  runName: string,
+  bundlePaths: BundlePath[],
+  extraFiles: Record<string, string>,
+  outputFilename: string
+): Promise<BuiltBundle> {
+  const token = crypto.randomBytes(16).toString('hex');
+  const stagingDir = stageFiles(content, runName, bundlePaths);
+  for (const [name, text] of Object.entries(extraFiles)) {
+    fs.writeFileSync(path.join(stagingDir, name), text, 'utf8');
+  }
+
+  return new Promise((resolve, reject) => {
+    fs.mkdirSync(downloadsDir(), { recursive: true });
+    const outputPath = path.join(downloadsDir(), token);
+    const output = fs.createWriteStream(outputPath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    output.on('close', () => {
+      fs.rmSync(stagingDir, { recursive: true, force: true });
+      fs.writeFileSync(`${outputPath}.meta.json`, JSON.stringify({ filename: outputFilename }));
+      resolve({ token, filename: outputFilename });
+    });
+    archive.on('error', (error) => {
+      fs.rmSync(stagingDir, { recursive: true, force: true });
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
+
+    archive.pipe(output);
+    archive.directory(stagingDir, false);
+    void archive.finalize();
+  });
 }

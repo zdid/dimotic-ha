@@ -1,0 +1,9 @@
+id: agent-ha-deploy
+title: "Agent Claude Code — déploiement sur Home Assistant (SSH)"
+description: >-
+  Génère un script qui se dépose lui-même (scp) sur la machine visée — normalement celle d'où
+  vous téléchargez ce script — puis s'y exécute (ssh) pour lancer Claude Code dans un screen
+  détaché, briefé sur une instance Home Assistant donnée, accessible ensuite via le Remote
+  Control de Claude Code depuis un téléphone/autre poste.
+filename: agent-ha-deploy.sh
+requiresSudo: false

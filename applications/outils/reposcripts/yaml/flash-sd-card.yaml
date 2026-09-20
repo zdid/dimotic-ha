@@ -1,0 +1,11 @@
+id: flash-sd-card
+title: "2/2 — Flasher une carte SD/clé USB Raspberry Pi"
+description: >-
+  Ne redemande que MACHINE (+ WiFi) — le reste du profil (modèle, distro, hostname,
+  utilisateur, paquets, apps) est retrouvé automatiquement depuis la phase 1/2. Écrit l'image
+  sur la carte/clé choisie, puis enchaîne agrandissement du rootfs, clé SSH dimotic-ha,
+  paquets/apps et WiFi via prepare-sd-card.sh. Installés SYSTÉMATIQUEMENT à cette étape, sans
+  case à cocher : Docker CE (get.docker.com), /docker/dimotic-ha/ (compose.yaml prêt, non
+  démarré), Node.js+npm+serialport+mqtt (globaux), mosquitto-clients, build-essential.
+filename: flash-sd-card.sh
+requiresSudo: true

@@ -1,24 +1,41 @@
 /**
  * OutilsService — orchestrateur de l'application Outils (bibliothèque de scripts shell
- * paramétrables). Chargement/rechargement de la config, ajout par upload générique, suppression,
- * lecture d'un script (contenu + variables détectées). La génération/téléchargement elle-même se
- * fait entièrement côté navigateur — rien à orchestrer côté serveur pour ça.
+ * paramétrables). Chargement de la liste des scripts (fusion intégrés + ajoutés, voir
+ * ScriptTemplate.ts), ajout via 3 dépôts corrélés (yaml + wrapper + moteur optionnel),
+ * suppression (scripts ajoutés uniquement), lecture d'un script (contenu + variables détectées).
+ * La génération/téléchargement elle-même se fait entièrement côté navigateur — rien à orchestrer
+ * côté serveur pour ça, sauf pour un script avec dépendances réelles (@outils:bundle, archive
+ * auto-extractible ou .zip, voir BundleBuilder.ts).
  */
 
+import AdmZip from 'adm-zip';
+import * as yamlLib from 'js-yaml';
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
-import { outilsConfigSchema, type OutilsConfig, type OutilScriptConfig } from './config-schema';
-import type { OutilsStatus, OutilScriptDetail, AddScriptResult, BundleResult } from './types';
-import { readScriptContent, writeScriptContent, deleteScriptContent, detectVariables, detectVariableHints, detectBundlePaths } from './ScriptTemplate';
-import { buildBundle } from './BundleBuilder';
+import { outilScriptSchema, type OutilsConfig, type OutilScriptConfig } from './config-schema';
+import type { OutilsStatus, OutilScriptDetail, AddScriptResult, BundleResult, ZipResult } from './types';
+import {
+  builtinRoot, dataRoot, listYamlScripts, readWrapperContent, writeWrapperContent,
+  writeYamlEntry, readYamlContent, deleteScriptFiles, writeEngineFile,
+  detectVariables, detectVariableHints, detectBundlePaths
+} from './ScriptTemplate';
+import { buildBundle, buildZip } from './BundleBuilder';
 import { readSavedValues, saveValues } from './ScriptValues';
 
 const MODULE_NAME = 'outils';
+const UPLOAD_BATCH_TTL_MS = 10 * 60 * 1000;
 
 interface UploadEventPayload {
   buffer: unknown;
   filename: string;
   mimetype: string;
   fields: Record<string, unknown>;
+}
+
+interface PendingUploadBatch {
+  createdAt: number;
+  yamlContent?: string;
+  wrapper?: { content: string };
+  engine?: { content: Buffer; filename: string };
 }
 
 export interface IOutilsService {
@@ -28,20 +45,15 @@ export interface IOutilsService {
 }
 
 export class OutilsService implements IOutilsService {
-  private config: OutilsConfig;
+  private readonly pendingUploads = new Map<string, PendingUploadBatch>();
 
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
+    // ⭐ 20/09/2026 — plus utilisé pour les scripts (voir config-schema.ts), conservé pour la
+    // signature standard de factory attendue par AppService.
     private readonly configProvider: IAppConfigProvider<OutilsConfig>
-  ) {
-    this.config = this.loadConfig();
-  }
-
-  private loadConfig(): OutilsConfig {
-    const raw = this.configProvider.getAppConfig() as Partial<OutilsConfig>;
-    return outilsConfigSchema.parse(raw);
-  }
+  ) {}
 
   async start(): Promise<void> {
     this.logger.info('OutilsService', 'Démarrage du service Outils...');
@@ -54,10 +66,23 @@ export class OutilsService implements IOutilsService {
     this.logger.info('OutilsService', 'Arrêt du service Outils...');
   }
 
+  /** Fusionne scripts intégrés (applications/outils/reposcripts/, dans l'image Docker) et scripts
+   *  ajoutés (data/outils/reposcripts/, propres à cette machine) — un id intégré prime toujours
+   *  sur un id ajouté homonyme (ne devrait pas arriver, finalizeUpload() le bloque déjà en amont). */
+  private loadMergedScripts(): Array<OutilScriptConfig & { root: string; builtin: boolean }> {
+    const builtin = listYamlScripts(builtinRoot()).map((s) => ({ ...s, root: builtinRoot(), builtin: true }));
+    const builtinIds = new Set(builtin.map((s) => s.id));
+    const custom = listYamlScripts(dataRoot())
+      .filter((s) => !builtinIds.has(s.id))
+      .map((s) => ({ ...s, root: dataRoot(), builtin: false }));
+    return [...builtin, ...custom];
+  }
+
   getStatus(): OutilsStatus {
     return {
-      scripts: this.config.scripts.map((s) => ({
-        id: s.id, title: s.title, description: s.description, filename: s.filename, requiresSudo: s.requiresSudo
+      scripts: this.loadMergedScripts().map((s) => ({
+        id: s.id, title: s.title, description: s.description, filename: s.filename,
+        requiresSudo: s.requiresSudo, builtin: s.builtin
       }))
     };
   }
@@ -69,39 +94,35 @@ export class OutilsService implements IOutilsService {
   private setupSocketEventListeners(): void {
     this.eventBus.onGeneric('outils:status:get', () => this.emitStatus());
 
-    this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (event) => {
-      if (event.moduleId !== MODULE_NAME || !event.success) return;
-      this.configProvider.reload();
-      this.config = this.loadConfig();
-      this.emitStatus();
-    });
-
     this.eventBus.onGeneric<{ id: string }>('outils:script:get', (data) => this.handleGetScript(data.id));
     this.eventBus.onGeneric<{ id: string }>('outils:script:delete', (data) => this.handleDeleteScript(data.id));
     this.eventBus.onGeneric<UploadEventPayload>('outils:internal:upload', (data) => this.handleUpload(data));
     this.eventBus.onGeneric<{ id: string; content: string }>('outils:bundle:build', (data) => this.handleBuildBundle(data.id, data.content));
+    this.eventBus.onGeneric<{ id: string; content: string }>('outils:zip:build', (data) => this.handleBuildZip(data.id, data.content));
     this.eventBus.onGeneric<{ id: string; values: Record<string, string> }>('outils:values:save', (data) => saveValues(data.id, data.values));
   }
 
   private handleGetScript(id: string): void {
-    const script = this.config.scripts.find((s) => s.id === id);
+    const script = this.loadMergedScripts().find((s) => s.id === id);
     if (!script) {
       this.eventBus.emitGeneric('outils:error', { message: `Script introuvable: ${id}` });
       return;
     }
     try {
-      const content = readScriptContent(id);
+      const content = readWrapperContent(script.root, id);
       const detail: OutilScriptDetail = {
         id: script.id,
         title: script.title,
         description: script.description,
         filename: script.filename,
         requiresSudo: script.requiresSudo,
+        builtin: script.builtin,
         content,
         variables: detectVariables(content),
         variableHints: detectVariableHints(content),
         hasBundling: detectBundlePaths(content).length > 0,
-        savedValues: readSavedValues(id)
+        savedValues: readSavedValues(id),
+        yamlContent: readYamlContent(script.root, id)
       };
       this.eventBus.emitGeneric('outils:script:result', detail);
     } catch (error) {
@@ -120,13 +141,13 @@ export class OutilsService implements IOutilsService {
    * simplicité/robustesse plutôt que de faire confiance à un `content` fourni par le client).
    */
   private handleBuildBundle(id: string, content: string): void {
-    const script = this.config.scripts.find((s) => s.id === id);
+    const script = this.loadMergedScripts().find((s) => s.id === id);
     if (!script) {
       this.emitBundleResult({ success: false, error: `Script introuvable: ${id}` });
       return;
     }
     try {
-      const template = readScriptContent(id);
+      const template = readWrapperContent(script.root, id);
       const bundlePaths = detectBundlePaths(template);
       if (bundlePaths.length === 0) {
         this.emitBundleResult({ success: false, error: `Script sans dépendance @outils:bundle: ${id}` });
@@ -143,20 +164,43 @@ export class OutilsService implements IOutilsService {
     this.eventBus.emitGeneric('outils:bundle:result', result);
   }
 
+  /** ⭐ 20/09/2026 — .zip contenant le wrapper substitué + son yaml, et les éventuelles dépendances
+   *  @outils:bundle (mêmes fichiers que buildBundle(), simplement pas emballés en archive
+   *  auto-extractible) — proposé pour tout script, avec ou sans dépendance déclarée. */
+  private handleBuildZip(id: string, content: string): void {
+    const script = this.loadMergedScripts().find((s) => s.id === id);
+    if (!script) {
+      this.emitZipResult({ success: false, error: `Script introuvable: ${id}` });
+      return;
+    }
+    try {
+      const template = readWrapperContent(script.root, id);
+      const bundlePaths = detectBundlePaths(template);
+      const yamlContent = readYamlContent(script.root, id);
+      const zipFilename = script.filename.replace(/\.sh$/i, '') + '.zip';
+      buildZip(content, script.filename, bundlePaths, { [`${id}.yaml`]: yamlContent }, zipFilename)
+        .then(({ token, filename }) => this.emitZipResult({ success: true, token, filename }))
+        .catch((error: unknown) => this.emitZipResult({ success: false, error: error instanceof Error ? error.message : String(error) }));
+    } catch (error) {
+      this.emitZipResult({ success: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  private emitZipResult(result: ZipResult): void {
+    this.eventBus.emitGeneric('outils:zip:result', result);
+  }
+
   private handleDeleteScript(id: string): void {
-    const exists = this.config.scripts.some((s) => s.id === id);
-    if (!exists) {
+    const script = this.loadMergedScripts().find((s) => s.id === id);
+    if (!script) {
       this.eventBus.emitGeneric('outils:script:delete:result', { success: false, error: `Script introuvable: ${id}` });
       return;
     }
-    this.config = { ...this.config, scripts: this.config.scripts.filter((s) => s.id !== id) };
-    const saveResult = this.configProvider.savePartialConfig(this.config);
-    if (!saveResult.success) {
-      this.eventBus.emitGeneric('outils:script:delete:result', { success: false, error: saveResult.error });
+    if (script.builtin) {
+      this.eventBus.emitGeneric('outils:script:delete:result', { success: false, error: 'Un script intégré ne peut pas être retiré (livré avec dimotic-ha).' });
       return;
     }
-    deleteScriptContent(id);
-    this.eventBus.emitGeneric('app:module:config:saved', { moduleId: MODULE_NAME, success: true });
+    deleteScriptFiles(dataRoot(), id);
     this.emitStatus();
     this.eventBus.emitGeneric('outils:script:delete:result', { success: true });
   }
@@ -171,62 +215,120 @@ export class OutilsService implements IOutilsService {
     return Buffer.from(value as ArrayLike<number>);
   }
 
-  private slugify(text: string): string {
-    return text
-      .toLowerCase()
-      .normalize('NFD').replace(/[̀-ͯ]/g, '')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
+  /**
+   * ⭐ 20/09/2026 — remplace l'ancien formulaire "titre/description + un seul fichier" : 3 dépôts
+   * séparés (yaml + wrapper obligatoires, moteur optionnel), corrélés par `fields.batchId` (généré
+   * côté navigateur), chacun envoyé par un appel séparé à la route générique
+   * POST /api/apps/outils/upload (voir ScriptsHaService.handleUpload pour le même patron de
+   * buffer/filename/mimetype/fields). Finalisé (écriture réelle) dès que yaml+wrapper sont tous les
+   * deux arrivés pour un batchId donné — le moteur, s'il arrive après, est simplement ajouté au
+   * pool partagé sans reconditionner le reste.
+   */
+  private handleUpload(data: UploadEventPayload): void {
+    const role = typeof data.fields?.role === 'string' ? data.fields.role : '';
+
+    // ⭐ 20/09/2026 — import zip (export d'un autre site) : autonome, pas de corrélation batchId
+    // nécessaire, tout arrive dans un seul fichier.
+    if (role === 'zip') {
+      this.handleZipImport(this.toBuffer(data.buffer));
+      return;
+    }
+
+    const batchId = typeof data.fields?.batchId === 'string' ? data.fields.batchId : '';
+    if (!batchId || (role !== 'yaml' && role !== 'wrapper' && role !== 'engine')) {
+      this.emitAddResult({ success: false, error: 'Dépôt invalide (batchId/role manquant).' });
+      return;
+    }
+    this.pruneStaleUploads();
+
+    const buffer = this.toBuffer(data.buffer);
+    const batch: PendingUploadBatch = this.pendingUploads.get(batchId) ?? { createdAt: Date.now() };
+    if (role === 'yaml') batch.yamlContent = buffer.toString('utf8');
+    else if (role === 'wrapper') batch.wrapper = { content: buffer.toString('utf8') };
+    else batch.engine = { content: buffer, filename: data.filename };
+    this.pendingUploads.set(batchId, batch);
+
+    if (batch.yamlContent && batch.wrapper) {
+      this.finalizeUpload(batchId, batch);
+    }
   }
 
   /**
-   * Reçoit un script uploadé via la route générique POST /api/apps/outils/upload — voir
-   * ScriptsHaService.handleUpload pour le même patron (buffer/filename/mimetype/fields).
-   * `fields` attendu : title (requis), description (optionnel), requiresSudo ('true'/'false',
-   * champ de formulaire HTML — jamais un booléen réel à travers multipart/form-data).
+   * ⭐ 20/09/2026, demande explicite — import d'un .zip précédemment exporté (voir
+   * handleBuildZip/buildZip), pour partager un script custom entre sites sans repasser par les 3
+   * dépôts séparés. Ne lit QUE le `.yaml` et le wrapper qu'il désigne (`filename`) — jamais
+   * `zip.extractAllTo()` (vulnérabilité connue de suivi de symlink côté destination sur les
+   * versions d'adm-zip <0.6.1, corrigée mais évitée par prudence : on ne construit jamais un
+   * chemin disque à partir d'un nom d'entrée fourni par l'archive elle-même, uniquement depuis
+   * `entry.id`/`entry.filename` validés par `outilScriptSchema`). Limitation assumée : les
+   * dépendances `@outils:bundle` éventuelles d'un script custom (rare — les scripts intégrés,
+   * seuls à avoir des dépendances aujourd'hui, en référencent déjà des copies déjà présentes dans
+   * l'image sur la machine cible) ne sont PAS ré-importées — seuls yaml+wrapper le sont.
    */
-  private handleUpload(data: UploadEventPayload): void {
+  private handleZipImport(buffer: Buffer): void {
     try {
-      const title = typeof data.fields?.title === 'string' ? data.fields.title.trim() : '';
-      const description = typeof data.fields?.description === 'string' ? data.fields.description.trim() : '';
-      const requiresSudo = data.fields?.requiresSudo === 'true' || data.fields?.requiresSudo === true;
+      const zip = new AdmZip(buffer);
+      const entries = zip.getEntries();
 
-      if (!title) {
-        this.emitAddResult({ success: false, error: 'Titre requis' });
+      const yamlEntry = entries.find((e) => !e.isDirectory && (e.entryName.endsWith('.yaml') || e.entryName.endsWith('.yml')));
+      if (!yamlEntry) {
+        this.emitAddResult({ success: false, error: 'Zip sans fichier .yaml — import impossible.' });
+        return;
+      }
+      const entry = outilScriptSchema.parse(yamlLib.load(yamlEntry.getData().toString('utf8')));
+
+      if (this.loadMergedScripts().some((s) => s.id === entry.id && s.builtin)) {
+        this.emitAddResult({ success: false, error: `L'id "${entry.id}" est déjà utilisé par un script intégré.` });
         return;
       }
 
-      const id = this.uniqueId(this.slugify(title));
-      const content = this.toBuffer(data.buffer).toString('utf8');
-      const filename = data.filename && data.filename.trim() ? data.filename.trim() : `${id}.sh`;
-
-      const newScript: OutilScriptConfig = { id, title, description, filename, requiresSudo };
-      this.config = { ...this.config, scripts: [...this.config.scripts, newScript] };
-      const saveResult = this.configProvider.savePartialConfig(this.config);
-      if (!saveResult.success) {
-        this.emitAddResult({ success: false, error: saveResult.error });
+      const wrapperEntry = entries.find((e) => !e.isDirectory && e.entryName === entry.filename);
+      if (!wrapperEntry) {
+        this.emitAddResult({ success: false, error: `Zip : wrapper "${entry.filename}" introuvable dedans.` });
         return;
       }
-      writeScriptContent(id, content);
 
-      this.eventBus.emitGeneric('app:module:config:saved', { moduleId: MODULE_NAME, success: true });
+      writeYamlEntry(dataRoot(), entry);
+      writeWrapperContent(dataRoot(), entry.id, wrapperEntry.getData().toString('utf8'));
+
       this.emitStatus();
       this.emitAddResult({ success: true });
     } catch (error) {
-      this.emitAddResult({ success: false, error: error instanceof Error ? error.message : String(error) });
+      this.emitAddResult({ success: false, error: `Import zip échoué: ${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  private finalizeUpload(batchId: string, batch: PendingUploadBatch): void {
+    this.pendingUploads.delete(batchId);
+    try {
+      const parsed = yamlLib.load(batch.yamlContent!);
+      const entry = outilScriptSchema.parse(parsed);
+
+      if (this.loadMergedScripts().some((s) => s.id === entry.id && s.builtin)) {
+        this.emitAddResult({ success: false, error: `L'id "${entry.id}" est déjà utilisé par un script intégré.` });
+        return;
+      }
+
+      writeYamlEntry(dataRoot(), entry);
+      writeWrapperContent(dataRoot(), entry.id, batch.wrapper!.content);
+      if (batch.engine) writeEngineFile(dataRoot(), batch.engine.filename, batch.engine.content);
+
+      this.emitStatus();
+      this.emitAddResult({ success: true });
+    } catch (error) {
+      this.emitAddResult({ success: false, error: `Yaml invalide: ${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  private pruneStaleUploads(): void {
+    const now = Date.now();
+    for (const [id, batch] of this.pendingUploads) {
+      if (now - batch.createdAt > UPLOAD_BATCH_TTL_MS) this.pendingUploads.delete(id);
     }
   }
 
   private emitAddResult(result: AddScriptResult): void {
     this.eventBus.emitGeneric('outils:script:add:result', result);
-  }
-
-  private uniqueId(base: string): string {
-    const root = base || 'script';
-    if (!this.config.scripts.some((s) => s.id === root)) return root;
-    let i = 2;
-    while (this.config.scripts.some((s) => s.id === `${root}-${i}`)) i++;
-    return `${root}-${i}`;
   }
 
   static create(
