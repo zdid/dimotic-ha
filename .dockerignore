@@ -10,3 +10,12 @@ logs/
 backups/
 specs/archives/
 *.log
+
+# ⚠️ 20/09/2026, incident réel — Docker ne lit QUE ce fichier (racine), jamais les .gitignore
+# imbriqués ailleurs dans l'arbre : des profils de flashage contenant des secrets en clair (mot de
+# passe premier boot, identifiants WiFi), protégés par
+# applications/outils/reposcripts/scripts/sd-card-profiles/.gitignore côté git, se sont retrouvés
+# publiés sans le vouloir dans l'image Docker Hub (v3.0.1). Toujours dupliquer ici toute règle
+# .gitignore imbriquée qui protège un secret — jamais supposer qu'elle s'applique aussi à Docker.
+applications/outils/reposcripts/scripts/sd-card-profiles/*.yaml
+data/outils/reposcripts/scripts/sd-card-profiles/*.yaml
