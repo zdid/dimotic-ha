@@ -13,7 +13,12 @@ l'utilisateur — donc non fonctionnel/non vérifiable jusqu'à ce branchement.
       adresse MAC) sur `192.168.1.201` pour cette machine (noisy2) — plus robuste qu'une IP fixe
       configurée seulement côté noisy2 (NetworkManager) : évite qu'un autre appareil se voie
       attribuer `.201` par erreur, et rend l'attribution visible/documentée dans l'interface du
-      routeur.
+      routeur. MAC `eth0` de noisy2 : `dc:a6:32:34:2c:f5`.
+- [ ] **Interfaces WiFi (relevées le 21/09/2026, non utilisées à ce jour — les deux machines sont
+      en filaire)** : vérifier l'attribution d'adresse pour le WiFi de chaque machine sur le
+      routeur du site de noisy, et les nommer `noisy-w`/`noisy2-w` (distinct des noms filaires
+      `noisy`/`noisy2` déjà utilisés) pour éviter toute confusion si le WiFi est activé un jour.
+      MAC `wlan0` noisy : `b8:27:eb:60:1f:49`. MAC `wlan0` noisy2 : `dc:a6:32:34:2c:f6`.
 - [ ] Confirmer que noisy2 a bien démarré avec l'IP fixe `192.168.1.201` (`ip addr show eth0`,
       configurée via NetworkManager, connexion "Wired connection 1").
 - [ ] Vérifier qu'aucun autre appareil du site de noisy n'utilise déjà `192.168.1.201` (collision).
