@@ -138,11 +138,11 @@ export function renderBackupScript(params: BackupScriptParams): string {
     'STATUS_JSON="{"',
     'FIRST_ENTRY=1',
     'add_status() {',
-    '  local name="$1" success="$2" cadences="$3"',
+    '  local name="$1" success="$2" cadences="$3" tar_exit="${4:-}" tar_log="${5:-}"',
     '  if [ "$FIRST_ENTRY" -eq 0 ]; then STATUS_JSON="$STATUS_JSON,"; fi',
     '  FIRST_ENTRY=0',
     '  STATUS_JSON="$STATUS_JSON',
-    '  \\"$name\\": {\\"lastRun\\": \\"$(date -Iseconds)\\", \\"success\\": $success, \\"cadences\\": \\"$cadences\\"}"',
+    '  \\"$name\\": {\\"lastRun\\": \\"$(date -Iseconds)\\", \\"success\\": $success, \\"cadences\\": \\"$cadences\\", \\"tarExit\\": \\"$tar_exit\\", \\"tarLog\\": \\"$tar_log\\"}"',
     '}',
     '',
     'OVERALL_FAIL=0',
@@ -157,17 +157,38 @@ export function renderBackupScript(params: BackupScriptParams): string {
     '',
     '  TMP_TAR=$(mktemp --suffix=.tar.gz)',
     '  TMP_MANIFEST=$(mktemp)',
-    '  find "$DIR" -mindepth 1 -maxdepth 1 -printf \'%f\\n\' | sort > "$TMP_MANIFEST"',
+    // ⭐ 23/09/2026, décision (point 14 de la conception de la restauration) : chaque ligne du
+    // manifeste porte, après une tabulation, la taille DÉCOMPRESSÉE de l'élément en octets
+    // (`du -sb`, mesurée juste avant l'archivage) — l'assistant de restauration la lit AVANT de
+    // télécharger l'archive, pour l'afficher par case et vérifier l'espace libre sur la cible.
+    // Premier champ inchangé (nom de l'élément), les manifestes plus anciens restent lisibles.
+    '  find "$DIR" -mindepth 1 -maxdepth 1 -printf \'%f\\n\' | sort | while IFS= read -r ENTRY; do',
+    '    printf \'%s\\t%s\\n\' "$ENTRY" "$(du -sb "$DIR/$ENTRY" 2>/dev/null | cut -f1)"',
+    '  done > "$TMP_MANIFEST"',
     '',
-    '  if ! tar -czf "$TMP_TAR" -C / "${DIR#/}" 2>/dev/null; then',
-    '    add_status "$NAME" false "archive"',
+    // ⭐ 23/09/2026, demande explicite (échec intermittent « archive » en test réel sur ha2, sans
+    // aucune trace — stderr était jeté) : la sortie d'erreur de tar va dans un fichier daté sous
+    // BACKUP_DIR (jamais sauvegardé), SUPPRIMÉ si tar sort en 0, CONSERVÉ sinon pour analyse a
+    // posteriori. Code 1 de GNU tar = « des fichiers ont changé/disparu pendant la lecture »
+    // (base HA, mosquitto, logs actifs) : archive quand même exploitable → on continue (le
+    // fichier de log conservé dit lesquels). Seul un code ≥ 2 (erreur fatale) arrête ce parent.
+    '  TAR_LOG="$BACKUP_DIR/tar-${NAME}-$(date +%Y-%m-%d_%H%M%S).log"',
+    '  mkdir -p "$BACKUP_DIR"',
+    '  tar -czf "$TMP_TAR" -C / "${DIR#/}" 2>"$TAR_LOG"',
+    '  TAR_EXIT=$?',
+    '  if [ "$TAR_EXIT" -eq 0 ]; then',
+    '    rm -f "$TAR_LOG"',
+    '    TAR_LOG=""',
+    '  fi',
+    '  if [ "$TAR_EXIT" -ge 2 ]; then',
+    '    add_status "$NAME" false "archive" "$TAR_EXIT" "$TAR_LOG"',
     '    OVERALL_FAIL=1',
     '    rm -f "$TMP_TAR" "$TMP_MANIFEST"',
     '    continue',
     '  fi',
     '',
     '  if ! tar -tzf "$TMP_TAR" >/dev/null 2>&1; then',
-    '    add_status "$NAME" false "integrite"',
+    '    add_status "$NAME" false "integrite" "$TAR_EXIT" "$TAR_LOG"',
     '    OVERALL_FAIL=1',
     '    rm -f "$TMP_TAR" "$TMP_MANIFEST"',
     '    continue',
@@ -193,7 +214,7 @@ export function renderBackupScript(params: BackupScriptParams): string {
     '',
     '  SUCCESS=true',
     '  [ -z "$CADENCES_DONE" ] && SUCCESS=false',
-    '  add_status "$NAME" "$SUCCESS" "$CADENCES_DONE"',
+    '  add_status "$NAME" "$SUCCESS" "$CADENCES_DONE" "$TAR_EXIT" "$TAR_LOG"',
     '',
     '  rm -f "$TMP_TAR" "$TMP_MANIFEST"',
     'done',

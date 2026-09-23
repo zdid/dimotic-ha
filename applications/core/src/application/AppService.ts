@@ -347,6 +347,13 @@ export class AppService {
       this.haWsClient.reconfigure(config.ha.ws);
     }
 
+    // ⭐ 23/09/2026 — lien HA de la page d'accueil : émis jusqu'ici une seule fois au démarrage
+    // (registerCoreSocketEvents), il restait sur l'ancienne adresse après un changement de
+    // ha.ws.host jusqu'au redémarrage (constaté en test live, .19 → .51).
+    if (config.ha?.ws?.host) {
+      this.eventBus.emitGeneric(SOCLE_SOCKET_EVENTS.HA_ADDRESS, { host: config.ha.ws.host, port: config.ha.ws.port });
+    }
+
     // Reconfigurer le logger si le niveau a changé
     if (config.logging?.level && this.logger) {
       const newLevel = config.logging.level as 'debug' | 'info' | 'warn' | 'error';

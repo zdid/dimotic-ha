@@ -151,6 +151,9 @@ export * from './infrastructure/EventBus';
 
 // Environnement d'exécution (détection Docker, posée par core au bootstrap — voir index.ts)
 export { detectDockerEnvironment, isRunningInDocker } from './infrastructure/runtime/docker';
+// ⭐ 23/09/2026 — IP LAN de la machine (assistant de restauration de l'app sauvegarde : comparaison
+// avec l'IP de la machine source, et SSH vers son propre hôte quand dimotic-ha tourne sous Docker).
+export { getPrimaryIPv4Address } from './infrastructure/runtime/network';
 
 // Exécution distante (SSH/SCP + contrôle uniforme start/stop/restart d'une unité Docker/systemd) —
 // voir infrastructure/remote/, mutualise ce que rpigpio/teleinfo/espdisplay réimplémentaient chacune

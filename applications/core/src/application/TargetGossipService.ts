@@ -151,18 +151,8 @@ export class TargetGossipService {
       this.republishScripts();
     });
 
-    // ⭐ 17/09/2026 — demande/réponse pour l'app sauvegarde (import assisté des cibles déjà
-    // gossipées comme base de départ pour ses propres répertoires couverts) : réutilise
-    // CorrelatedRequester (même mécanisme que ia↔planificateur, voir StructuredRouter.ts), pas de
-    // nouveau sous-système. Renvoie les données BRUTES (id/host/remoteDir) — c'est à sauvegarde de
-    // les transformer en suggestions de répertoires, `core` ne connaît rien de son schéma.
-    this.eventBus.onGeneric<{ correlation_id: string }>('sauvegarde:gossip-targets:get', ({ correlation_id }) => {
-      this.eventBus.emitGeneric('sauvegarde:gossip-targets:reply', {
-        correlation_id,
-        targets: this.configService.getTargets().map((t) => ({ ...t, site: this.resolveSiteFor(t) })),
-        haStackTargets: this.configService.getHaStackTargets().map((t) => ({ ...t, site: this.resolveSiteFor(t) }))
-      });
-    });
+    // ⭐ 23/09/2026 — demande/réponse 'sauvegarde:gossip-targets:get' retirée avec le bouton
+    // « Importer depuis le gossip » de l'app sauvegarde (demande explicite, test live).
 
     this.republish();
     this.logger.info('TargetGossip', `Synchronisation entre instances active (machineId: ${this.machineId})`);

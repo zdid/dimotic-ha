@@ -2,7 +2,7 @@
  * Module principal de l'application Sauvegarde/Restauration
  *
  * Scanné par AppService pour la détection automatique. Exporte SAUVEGARDE_APP (métadonnées) et
- * createSauvegardeService (factory). Voir specs/current/fonctionnelles-sauvegarde_specs_v1.3.md.
+ * createSauvegardeService (factory). Voir specs/current/fonctionnelles-sauvegarde_specs_v1.4.md.
  */
 
 import {
@@ -97,19 +97,10 @@ export const SAUVEGARDE_UI_METADATA: ModuleUiMetadata = {
       // listant, pas à pré-déclarer ici.
       description: "Une ligne par machine à couvrir. « Pousser » dépose le mot de passe Nextcloud ET le script de sauvegarde + son cron quotidien (3h05) sur la machine — la machine devient alors autonome, plus besoin de dimotic-ha pour que ses sauvegardes continuent. La machine de destination d'une restauration se choisit séparément, dans l'assistant de restauration.",
       icon: '🗂️',
+      // ⭐ 23/09/2026 — bouton « Importer depuis le gossip » retiré (demande explicite, test live) :
+      // la source (core.targets/haStackTargets) ne contenait que des cibles de déploiement
+      // périmées, sans site, parfois en 127.0.0.1 — les machines se saisissent à la main.
       fields: [
-        {
-          // ⭐ 17/09/2026 — bouton générique (type 'button', ModuleManager.ts). Placé AVANT le
-          // champ 'targets' ci-dessous à la fois dans l'ordre du tableau ET visuellement (demande
-          // explicite : "il faut que le bouton soit au-dessus de la liste des machines") — un champ
-          // 'array' occupe désormais toute la largeur de la grille (ConfigForm.ts), ce qui pousse
-          // tout ce qui le précède sur sa propre ligne au-dessus plutôt que côte à côte.
-          name: 'gossipImport',
-          label: '📡 Importer depuis le gossip',
-          type: 'button',
-          action: 'sauvegarde:gossip:import',
-          hint: "Propose une ligne pour chaque machine dimotic-ha déjà connue par gossip — n'écrase jamais une entrée existante, ajoute seulement ce qui manque."
-        },
         {
           // ⭐ 17/09/2026, demande explicite : la poussée du mot de passe Nextcloud par machine
           // (SSH, §3bis de la spec) vit ICI, sur cette page de Paramètres Techniques — pas sur le
@@ -198,6 +189,14 @@ export const SAUVEGARDE_MENU_CONFIG: ApplicationMenuConfig = {
       icon: '📊',
       path: '/applications/sauvegarde/presentation/index.html',
       order: 1
+    },
+    {
+      // ⭐ 23/09/2026 — assistant de restauration (page autonome, comme le tableau de bord HAPLAN).
+      id: 'restauration',
+      label: 'Restauration',
+      icon: '♻️',
+      path: '/applications/sauvegarde/presentation/sauvegarde/restauration.html',
+      order: 2
     }
   ]
 };
@@ -226,14 +225,7 @@ export const SAUVEGARDE_APP: ApplicationModule & { menu?: ApplicationMenuConfig 
   socketEvents: SAUVEGARDE_SOCKET_EVENTS,
 
   // Process séparé, comme arexx/teleinfo/rpigpio — voir fonctionnelles-supervisor_specs.
-  runsAsSeparateProcess: true,
-
-  // ⭐ 17/09/2026 — sans ça, la requête gossip vers core (CorrelatedRequester, voir
-  // SauvegardeService.handleGossipImport) ne traverserait jamais la frontière de process : ceci
-  // n'est PAS couvert par `socketEvents` (qui ne concerne que le pont Socket.io client↔serveur),
-  // c'est le pont EventBus process↔process, même mécanisme que ia/planificateur
-  // (voir leurs bridgedEvents respectifs pour 'ia:command'/'ia:command:reply').
-  bridgedEvents: ['sauvegarde:gossip-targets:get', 'sauvegarde:gossip-targets:reply']
+  runsAsSeparateProcess: true
 };
 
 // ============================================================================

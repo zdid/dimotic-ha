@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Restauration — Sauvegarde/Restauration</title>
+
+  <link rel="stylesheet" href="/styles/main.css">
+
+  <style>
+    body { background: var(--color-bg); color: var(--color-text); }
+    .restore { max-width: 860px; margin: 0 auto; padding: 20px; }
+    .restore h1 { color: var(--color-accent); margin-bottom: 4px; }
+    .restore .back { font-size: 0.9em; }
+    .step {
+      background: var(--color-surface);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      margin: 18px 0;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+    .step[hidden] { display: none; }
+    .step h2 { margin: 0 0 12px; font-size: 1.1em; border-bottom: 1px solid var(--color-primary); padding-bottom: 8px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+    label { display: block; font-size: 0.85em; color: var(--color-text-muted); margin-bottom: 4px; }
+    input[type=text], select { width: 100%; box-sizing: border-box; padding: 8px; border-radius: 4px; border: 1px solid var(--color-primary); background: var(--color-bg); color: var(--color-text); }
+    .btn { padding: 9px 18px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em; margin-top: 12px; }
+    .btn-primary { background: var(--color-accent); color: white; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .msg { margin-top: 10px; font-size: 0.9em; }
+    .msg.error { color: var(--color-error); }
+    .msg.ok { color: var(--color-success); }
+    .msg.warn { color: var(--color-warning); }
+    .items { list-style: none; padding: 0; margin: 8px 0 0; }
+    .items li { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .items li .size { margin-left: auto; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+    .all { font-weight: bold; padding-bottom: 6px; border-bottom: 1px solid var(--color-primary); }
+    .totals { margin-top: 12px; font-size: 0.95em; }
+    .notice { background: rgba(255,255,255,0.04); border-left: 3px solid var(--color-warning); padding: 8px 12px; margin: 8px 0; font-size: 0.9em; }
+    .notice.info { border-left-color: var(--color-link); }
+    .prereq { margin-top: 12px; font-size: 0.9em; }
+    .prereq summary { cursor: pointer; color: var(--color-link); }
+    .prereq textarea { width: 100%; box-sizing: border-box; font-family: monospace; font-size: 0.85em; background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-primary); border-radius: 4px; padding: 6px; resize: vertical; }
+    .btn-small { padding: 4px 10px; margin-top: 4px; font-size: 0.8em; background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-primary); }
+    .checks { list-style: none; padding: 0; margin: 6px 0; }
+    .checks li { padding: 3px 0; }
+    .confirm { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: 0.9em; color: var(--color-text); }
+    .state-running { color: var(--color-link); }
+    .state-failed { color: var(--color-error); }
+    .state-ok { color: var(--color-success); }
+  </style>
+</head>
+<body>
+  <div class="restore">
+    <a class="back" href="/">← Retour</a>
+    <h1>♻️ Restauration</h1>
+    <p class="description">Restaure une sauvegarde Nextcloud sur la <strong>machine de destination</strong> choisie ci-dessous
+      (accès SSH root avec la clé de dimotic-ha).
+      Étape 1 : arrêt et remplacement des éléments choisis, <strong>sans aucun redémarrage</strong>.
+      Étape 2 : démarrage, après vérification.</p>
+
+    <!-- ① Connexion -->
+    <section class="step" id="step-connect">
+      <h2>① Connexion Nextcloud</h2>
+      <div class="grid">
+        <div><label for="nc-url">URL du serveur</label><input type="text" id="nc-url" placeholder="https://nextcloud.exemple.fr"></div>
+        <div><label for="nc-user">Utilisateur</label><input type="text" id="nc-user"></div>
+        <div><label for="nc-root">Sous-dossier racine</label><input type="text" id="nc-root" placeholder="backups-dimotic"></div>
+        <div><label for="nc-password">Mot de passe d'application (non conservé)</label>
+          <input type="text" id="nc-password" autocomplete="off" spellcheck="false"></div>
+        <div><label for="dest-host">Machine de destination (IP, SSH root) — cette machine : <span id="local-ip">…</span></label>
+          <input type="text" id="dest-host" placeholder="192.168.1.x"></div>
+      </div>
+      <details class="prereq" id="prereq">
+        <summary>Prérequis obligatoire : autoriser la clé SSH de ce dimotic-ha pour root sur la destination</summary>
+        <p>La destination n'a besoin de rien d'autre (dimotic-ha, Docker, curl, tar : installés par l'étape 1 s'ils manquent).
+          Sur une image fraîchement installée, root refuse souvent le mot de passe en SSH : utiliser alors la commande
+          à coller <strong>sur la destination</strong> (en root ou via <code>sudo -i</code>).</p>
+        <label for="cmd-authorize">Sur la destination :</label>
+        <textarea id="cmd-authorize" rows="3" readonly></textarea>
+        <button class="btn btn-small" data-copy="cmd-authorize">Copier</button>
+        <label for="cmd-copyid" style="margin-top:10px">Ou, si root accepte le mot de passe, depuis la machine qui fait tourner ce dimotic-ha
+          (chemin de la clé à adapter : <code>data/core/ssh/id_ed25519.pub</code> sous le répertoire de dimotic-ha) :</label>
+        <textarea id="cmd-copyid" rows="1" readonly></textarea>
+        <button class="btn btn-small" data-copy="cmd-copyid">Copier</button>
+      </details>
+      <button class="btn btn-primary" id="btn-connect">Se connecter</button>
+      <button class="btn btn-small" id="btn-probe">Tester la destination</button>
+      <div class="msg" id="connect-msg"></div>
+      <div id="probe-result"></div>
+    </section>
+
+    <!-- ② Source -->
+    <section class="step" id="step-source" hidden>
+      <h2>② Sauvegarde à restaurer</h2>
+      <div class="grid">
+        <div><label for="src-site">Site</label><select id="src-site"></select></div>
+        <div><label for="src-machine">Machine</label><select id="src-machine"></select></div>
+        <div><label for="src-date">Date</label><select id="src-date"></select></div>
+      </div>
+      <div class="msg" id="source-msg"></div>
+    </section>
+
+    <!-- ③ Contenu -->
+    <section class="step" id="step-content" hidden>
+      <h2>③ Contenu à restaurer</h2>
+      <ul class="items" id="items"></ul>
+      <div class="totals" id="totals"></div>
+    </section>
+
+    <!-- ④ Vérifications -->
+    <section class="step" id="step-checks" hidden>
+      <h2>④ Vérifications avant l'étape 1</h2>
+      <div id="checks"></div>
+      <div id="dest-checks"></div>
+      <div class="notice info">🔌 <strong>zigbee2mqtt</strong> : le dongle doit être déplacé physiquement de la machine
+        source vers la machine de destination, sur le même chemin de périphérique que celui de la configuration restaurée.</div>
+      <div class="notice info">⏹️ Arrêter la <strong>machine source</strong> avant l'étape 2 (démarrage), et lui retirer son
+        adresse : la machine de destination doit reprendre l'IP de la source (réservation DHCP sur sa MAC).</div>
+      <label class="confirm"><input type="checkbox" id="confirm-step1">
+        <span id="confirm-step1-text">Les éléments cochés seront arrêtés puis remplacés sur la destination ; l'existant est déplacé dans /docker-backup-&lt;date&gt;.</span></label>
+      <button class="btn btn-primary" id="btn-step1" disabled>Lancer l'étape 1 — restauration sans redémarrage</button>
+      <div class="msg" id="step1-msg"></div>
+    </section>
+
+    <!-- ⑤ Progression -->
+    <section class="step" id="step-progress" hidden>
+      <h2>⑤ Progression — <span id="progress-host"></span></h2>
+      <div id="progress-state"></div>
+      <ul class="items" id="progress-items"></ul>
+      <div class="msg" id="progress-meta"></div>
+    </section>
+
+    <!-- ⑥ Démarrage -->
+    <section class="step" id="step-start" hidden>
+      <h2>⑥ Étape 2 — démarrage</h2>
+      <div class="notice">Rien n'a été redémarré. Avant de démarrer : aller voir la machine si besoin, <strong>arrêter la machine
+        source</strong>, lui retirer son adresse et donner cette adresse à la destination (réservation DHCP), déplacer le dongle zigbee.
+        Les éléments sont démarrés un par un, <strong>dimotic-ha en dernier</strong>.</div>
+      <label class="confirm"><input type="checkbox" id="confirm-step2"> Vérifications faites, la source est arrêtée.</label>
+      <button class="btn btn-primary" id="btn-step2" disabled>Démarrer (étape 2)</button>
+      <div class="msg" id="step2-msg"></div>
+    </section>
+  </div>
+
+  <script defer src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script type="module" src="restauration-app.js"></script>
+
+  <!-- Derniere modification: 2026-09-23 20:40:00 - Écrans ⑤ (progression) et ⑥ (démarrage), lancement de l'étape 1 -->
+</body>
+</html>

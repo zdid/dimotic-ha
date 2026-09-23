@@ -526,10 +526,22 @@ export class ModuleManager {
     // une fois `item.id` non vide, seule la lecture de `item.id` (la condition) est enregistrée,
     // donc un futur changement de site/machine ne redéclenche plus rien. Une ligne déjà persistée
     // (chargée avec un id existant, même selon une ancienne convention) n'est donc jamais réécrite.
+    //
+    // ⭐ 23/09/2026 — bug constaté en test live : le x-effect s'exécutait dès la création de la
+    // ligne, site/machine encore vides → id "-", figé définitivement. Désormais l'id d'une ligne
+    // NOUVELLE est recalculé à chaque frappe ; seules les lignes déjà persistées (ids présents au
+    // chargement, `lockedIds`) ou poussées avec succès (ajoutées à `lockedIds` par pushSecret)
+    // gardent leur id tel quel.
     const hiddenIdFrom = field.hiddenIdFrom;
     const hiddenIdEffectAttr = hiddenIdFrom && hiddenIdFrom.length > 0
-      ? ` x-effect="if (!item.id) { item.id = [${hiddenIdFrom.map(f => `item.${f}`).join(', ')}].map(v => String(v||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')).join('-') }"`
+      ? ` x-effect="if (!lockedIds.includes(item.id)) { const parts = [${hiddenIdFrom.map(f => `item.${f}`).join(', ')}].map(v => String(v||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')); item.id = parts.every(p => p) ? parts.join('-') : '' }"`
       : '';
+    // ⭐ 23/09/2026 (2e bug live) : une ligne vide recevait l'id "-" (parties vides jointes), identique
+    // à l'id historique "-" d'une ligne persistée → présent dans lockedIds → figé, et la poussée
+    // écrasait l'autre machine. Désormais : id vide tant qu'une partie manque, et seuls les ids
+    // bien formés (non vides, sans tiret en bord) peuvent être verrouillés.
+    const isWellFormedId = (v: unknown): boolean => typeof v === 'string' && /^[a-z0-9](?:.*[a-z0-9])?$/.test(v);
+    const lockedIdsJson = this.escapeHtmlAttr(JSON.stringify(items.map((it: { id?: unknown }) => it && it.id).filter(isWellFormedId)));
 
     // ⭐ 17/09/2026 — état/méthode Alpine additionnels, uniquement si `field.secretPush` est
     // déclaré (ex: SAUVEGARDE_UI_METADATA `targets`). `passwords`/`pushErrors`/`pushingIds` sont
@@ -550,10 +562,12 @@ export class ModuleManager {
         if (!appPassword) { this.pushErrors[targetId] = 'Mot de passe manquant.'; return; }
         this.pushErrors[targetId] = '';
         this.pushingIds.push(targetId);
-        const result = await window.app.moduleManager.pushArraySecret('${this.escapeJsString(secretPush.action)}', targetId, appPassword);
+        const result = await window.app.moduleManager.pushArraySecret('${this.escapeJsString(secretPush.action)}', '${moduleId}', JSON.parse(JSON.stringify(item)), appPassword);
         this.pushingIds = this.pushingIds.filter(id => id !== targetId);
         if (result.success) {
           item.${secretPush.statusField} = true;
+          if (result.id) item.id = result.id;
+          if (item.id && !this.lockedIds.includes(item.id)) this.lockedIds.push(item.id);
           this.passwords[targetId] = '';
         } else {
           this.pushErrors[targetId] = result.error || 'Échec de la poussée.';
@@ -562,9 +576,9 @@ export class ModuleManager {
 
     const secretPushItemHtml = secretPush ? `
       <div class="config-array-item-secret">
-        <input type="password" x-model="passwords[item.id]"
+        <input type="text" x-model="passwords[item.id]"
                placeholder="${this.escapeHtmlAttr(secretPush.passwordPlaceholder || 'Mot de passe')}"
-               autocomplete="new-password" />
+               autocomplete="off" spellcheck="false" />
         <button type="button" class="btn btn-secondary btn-small" :disabled="pushingIds.includes(item.id)" @click="pushSecret(item)">
           <span x-text="pushingIds.includes(item.id) ? 'Envoi...' : '${this.escapeJsString(secretPush.pushButtonLabel || '📤 Pousser')}'"></span>
         </button>
@@ -593,7 +607,7 @@ export class ModuleManager {
         const key = action + ':' + targetId;
         this.actionErrors[key] = '';
         this.runningKeys.push(key);
-        const result = await window.app.moduleManager.triggerArrayRowAction(action, targetId);
+        const result = await window.app.moduleManager.triggerArrayRowAction(action, '${moduleId}', JSON.parse(JSON.stringify(item)));
         this.runningKeys = this.runningKeys.filter(k => k !== key);
         if (!result.success) {
           this.actionErrors[key] = result.error || 'Échec.';
@@ -618,7 +632,7 @@ export class ModuleManager {
 
     return `
       <div class="form-group config-array" id="${id}"
-           x-data="{ items: ${itemsJson}${secretPushStateJs}${rowActionsStateJs} }"
+           x-data="{ items: ${itemsJson}, lockedIds: ${lockedIdsJson}${secretPushStateJs}${rowActionsStateJs} }"
            x-effect="window.app.moduleManager.setModuleFieldRaw('${moduleId}', '${fieldName}', JSON.parse(JSON.stringify(items)))">
         <label>${field.label}</label>
         ${field.hint ? `<div class="field-hint">${field.hint}</div>` : ''}
@@ -652,25 +666,27 @@ export class ModuleManager {
    * le résultat (plutôt qu'un simple success/error comme triggerAction()) : plusieurs lignes
    * peuvent pousser en parallèle, chacune doit reconnaître SA propre réponse.
    */
-  pushArraySecret(action: string, targetId: string, appPassword: string): Promise<{ success: boolean; error?: string }> {
+  pushArraySecret(action: string, moduleId: string, item: { id: string }, appPassword: string): Promise<{ success: boolean; error?: string; id?: string }> {
+    const targetId = item.id;
     return new Promise((resolve) => {
       const resultEvent = `${action}:result`;
-      const onResult = (result: { targetId?: string; success?: boolean; error?: string } = {}) => {
+      const onResult = (result: { targetId?: string; success?: boolean; error?: string; id?: string } = {}) => {
         if (result.targetId !== targetId) return;
         this.socket.off(resultEvent, onResult);
-        resolve({ success: !!result.success, error: result.error });
+        resolve({ success: !!result.success, error: result.error, id: result.id });
       };
       this.socket.on(resultEvent, onResult);
-      this.socket.emit(action, { targetId, appPassword });
+      this.socket.emit(action, { targetId, appPassword, item, moduleConfig: this.moduleConfigs[moduleId] });
     });
   }
 
   /**
    * Déclenche une action générique pour UN élément d'un champ 'array' (ex: « Lancer une sauvegarde
    * maintenant », voir `rowActions` sur `ConfigField`) — même principe que pushArraySecret() mais
-   * sans mot de passe : le payload émis est juste `{ targetId }`.
+   * sans mot de passe : le payload émis est `{ targetId, item, moduleConfig }`.
    */
-  triggerArrayRowAction(action: string, targetId: string): Promise<{ success: boolean; error?: string }> {
+  triggerArrayRowAction(action: string, moduleId: string, item: { id: string }): Promise<{ success: boolean; error?: string }> {
+    const targetId = item.id;
     return new Promise((resolve) => {
       const resultEvent = `${action}:result`;
       const onResult = (result: { targetId?: string; success?: boolean; error?: string } = {}) => {
@@ -679,7 +695,7 @@ export class ModuleManager {
         resolve({ success: !!result.success, error: result.error });
       };
       this.socket.on(resultEvent, onResult);
-      this.socket.emit(action, { targetId });
+      this.socket.emit(action, { targetId, item, moduleConfig: this.moduleConfigs[moduleId] });
     });
   }
 

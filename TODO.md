@@ -1,5 +1,124 @@
 # Liste des problèmes à résoudre
 
+## ✅ DÉCISION restauration (23/09/2026, à reporter dans la spec sauvegarde en fin de debug)
+- **Remplacement d'une machine = la nouvelle machine reprend l'adresse IP de l'ancienne**
+  (réservation DHCP sur sa MAC, source arrêtée) — aucune réécriture d'adresse dans les fichiers
+  restaurés, les appareils (firmware) retrouvent HA seuls. Seul scénario traité pour l'instant.
+  Réécriture source→destination (clone/essai sur autre IP) : écartée pour le moment.
+- Premier essai : ha2 (arrêtée) restaurée sur orangepi4pro (192.168.1.147 → reprendra .51).
+- Ordre de travail : interface graphique d'abord, script de restauration ensuite.
+- **Compléments (23/09 soir)** : la restauration se pilote depuis N'IMPORTE QUEL dimotic-ha
+  (ex. stfort → restaure ha2 sur orangepi4pro) vers une destination juste installée, dimotic-ha
+  présent ou non — seul prérequis : `ssh-copy-id` de la clé de dimotic-ha vers root@destination
+  (afficher clé publique + commande dans l'écran ①, et rappeler que root refuse souvent le mot de
+  passe SSH sur une image fraîche → ajout manuel dans /root/.ssh/authorized_keys via sudo).
+  Écran ④ : contrôles SSH root, docker + docker compose, curl, tar, espace libre. **Docker absent →
+  installé** par l'étape 1 (script officiel get.docker.com, même méthode que prepare-sd-card.sh ;
+  curl/tar installés par apt si absents). Point 10 (`/docker-temp`) ne concerne QUE le cas où la
+  destination est la machine qui pilote ; piloter depuis une autre machine = cas recommandé,
+  `/docker/dimotic-ha` de la destination traité comme toute autre application.
+  ✅ Interface faite le 23/09 20:00 (bloc prérequis clé+commandes, bouton « Tester la destination »,
+  contrôles dans ④) — testé : orangepi4pro tout ✅ 24 Go ; falbala → « clé non autorisée ».
+  Reste : l'installation elle-même (dans le script de l'étape 1).
+- 🟡 **Script de restauration + écrans ⑤/⑥ écrits le 23/09 20:40** : `RestoreScript.ts` (bash détaché,
+  phase1/phase2, état `/dimotic-backup/restore-status.json`, journal conservé), `RestoreService.ts`
+  (dépôt SSH script+netrc, lancement `setsid nohup`, relecture 3 s), événements `restore:start/start2/
+  status`. Testé en bac à sable local (faux Nextcloud file://, faux /docker) : phase1+phase2 OK, bug de
+  variable écrasée trouvé et corrigé. **Non testés** : docker compose stop/up réels, installation
+  apt/Docker, relocalisation /docker-temp, échec de place.
+  Essais réels 23/09 sur orangepi4pro : étape 1 stfort/stfort OK (19:37), étape 1 stfort/ha2 OK (19:48, 6
+  éléments) mais « Timeout 30 s » au lancement → corrigé (`cd / ; setsid …` au lieu de `cd / && … &`).
+  Étape 2 pas encore lancée (attend arrêt ha2 + bascule DHCP .51).
+- 🟡 **Écrans ①-④ livrés le 23/09 19:00** (lecture seule) : `sauvegarde/restauration.html` +
+  `restauration-app.ts`, `NextcloudWebDavClient.ts`, événements `sauvegarde:restore:*`, entrée de menu
+  « Restauration ». Testé : chargement, préremplissage, mot de passe refusé. ⭐ Destination = IP
+  saisie (SSH root, préremplie avec l'IP locale) — remplace la décision 4 « locale seulement ». Reste : essai avec le vrai
+  mot de passe, écrans ⑤/⑥ + script.
+- **Décisions assistant (23/09)** : (1) emplacement à creuser ; (2) sauvegardes listées depuis
+  Nextcloud (pas depuis la config) ; (3) mot de passe Nextcloud saisi dans l'assistant, jamais
+  stocké ; (4) destination = la machine qui fait tourner dimotic-ha (locale) en V1 ; (5)
+  avertissement non bloquant si IP destination ≠ IP source ; (6) une case « tout » + une case par
+  élément du manifeste ; (7) dates journalier/hebdo mélangées dans une seule liste ; (8)
+  progression par étapes ; (9) script bash généré ; (10) dimotic-ha dans l'archive : à trancher ;
+  (11) l'existant est déplacé dans `/docker-backup-<date>` ; (12) **deux étapes** : restauration
+  SANS aucun redémarrage, puis démarrage séparé après validation humaine (aller voir la machine,
+  arrêter la source) ; (13) dongle zigbee : simple texte dans l'assistant ; (14) archive téléchargée
+  et extraite SUR la machine cible — il faut connaître le volume décompressé pour vérifier la place.
+- **Compléments tranchés (23/09)** :
+  - (1) page « Restauration » dans l'app Sauvegarde (HTML/TS, Shadow DOM + Alpine) + lien depuis
+    Paramètres Techniques ; permet aussi de saisir URL/utilisateur Nextcloud (machine vierge).
+  - (10) si dimotic-ha est coché : le script (détaché via `setsid nohup`, avancement dans
+    `/dimotic-backup/restore-status.json`, relu par l'assistant après reconnexion) arrête
+    `/docker/dimotic-ha`, le déplace dans `/docker-temp/dimotic-ha`, le relance de là (volumes
+    relatifs → garde ses propres données), attend `healthy`, puis continue. Étape 2 : il est
+    remplacé EN DERNIER par celui restauré, `/docker-temp/dimotic-ha` part dans `/docker-backup-<date>/`.
+    Étape sautée hors Docker (dev falbala).
+  - (11)+(6) seuls les répertoires cochés sont déplacés dans `/docker-backup-<date>/<app>`.
+  - (12) étape 1 = `docker compose stop` des éléments cochés, déplacement, extraction, AUCUN
+    redémarrage ; étape 2 « Démarrer » = `up -d` après validation humaine.
+  - (14) volume décompressé : écrit dans le manifeste au moment de la sauvegarde (`du -sb` total +
+    par sous-répertoire) ; repli `tar -tvzf` pour les archives existantes. Contrôle : compressé +
+    décompressé ≤ espace libre.
+  - Exécution par SSH root sur la propre machine de dimotic-ha (conteneur sans accès à /docker),
+    mot de passe Nextcloud par stdin.
+
+## 🆕 Option de déploiement « sans paramétrage » (discussion du 23/09/2026, pas commencé)
+- **Besoin** : un déploiement de dimotic-ha vers une nouvelle machine embarque les données de la
+  machine source (constaté sur orangepi4pro 192.168.1.147 : token HA, hôte HA/MQTT, cibles
+  apprises par gossip de falbala). ~~Bouton d'effacement~~ abandonné au profit d'une **option au
+  niveau du déploiement** : déployer sans `data/` (config vierge), en gardant seulement ce qui est
+  propre à la machine cible (machineId généré sur place, port web, clé SSH du parc).
+
+## ✅ Sauvegarde : corrections d'id (23/09/2026, faites 18:30, pas encore retestées en réel) + manifeste avec tailles (`nom<TAB>octets`)
+- Écran : id vide (pas `-`) tant que site ou machine est vide — un id invalide ne doit jamais être
+  figé par `lockedIds`.
+- Serveur : `resolveTarget` ne garde l'id envoyé que s'il désigne une ligne persistée de MÊME hôte,
+  sinon `deriveTargetId(site, machine)` — une poussée ne doit jamais écraser une autre machine.
+- Réparer `data/sauvegarde/config.yaml` (falbala) : remettre ha2 (192.168.1.51, déployé) en
+  `stfort-ha2`, stfort en `stfort-stfort`, supprimer l'id `-`.
+
+## 🐛 Sauvegarde : anomalies constatées en test live (23/09/2026)
+- ✅ Corrigé le 23/09 (spec v1.4) : import gossip supprimé ; « Pousser »/« Lancer maintenant »
+  sur les données à l'écran + enregistrement automatique après poussée réussie ; mot de passe
+  visible à la saisie ; id `-` (recalcul tant que la ligne est nouvelle) ; timeout 15 min.
+  **Pas encore retesté en réel.**
+- 🟡 **Laissé en l'état (décision explicite du 23/09)** : mot de passe Nextcloud en clair dans les
+  logs serveur ET renvoyé à tous les navigateurs — le pont générique `SocketBridge.registerAppSocketEvents`
+  rediffuse aussi les événements client→serveur déclarés par une app, et `broadcast()` logue le
+  payload. Piste : événements « client → serveur uniquement » déclarés par l'app + masquage des clés
+  password/token/secret dans les logs (le token HA y est aussi en clair via `config:save`).
+- 🟡 **Corrigé le 23/09, pas encore re-poussé ni retesté** — script : stderr de tar dans
+  `/dimotic-backup/tar-<parent>-<date_heure>.log`, supprimé si code 0, conservé sinon ; code 1
+  toléré (archive poussée), échec seulement à ≥ 2 ; `status.json` porte `tarExit`/`tarLog`.
+  Reste : afficher à l'écran l'étape en échec plutôt que « ssh a quitté avec le code 1 ».
+  Constat d'origine : 🐛 **Échec intermittent à l'étape `archive`** (2e essai réel, 23/09 16:49) : `tar -czf` a rendu
+  un code ≠ 0 sur `/docker` (1,4 Go) alors que la même commande relancée juste après sort en 0.
+  Cause très probable : code 1 de GNU tar = « fichier modifié/supprimé pendant la lecture »
+  (base HA, mosquitto, logs actifs) — non fatal, mais le script (`BackupScript.ts`) traite tout
+  code ≠ 0 comme un échec et **masque stderr** (`2>/dev/null`), donc aucune trace. Pistes : accepter
+  le code 1 (échouer seulement à ≥ 2) et envoyer stderr de tar dans `cron.log`. Côté écran, le seul
+  message était « ssh a quitté avec le code 1 » : remonter la sortie du script / `status.json`.
+- 🐛 **Nouvelle ligne stfort a écrasé ha2 dans la config** (23/09 17:00) : l'id d'une ligne vide
+  valait `-` au premier x-effect, identique à l'id historique `-` de la ligne ha2 → présent dans
+  `lockedIds` → figé ; la poussée (upsert par id) a remplacé ha2 par stfort dans
+  `data/sauvegarde/config.yaml`. Machines intactes (ha2 garde script+cron).
+- 🟡 Poussée vers noisy (192.168.1.62) : `No route to host` depuis stfort — attendu (site distant).
+- 🟡 Le mot de passe saisi est rattaché à l'id de la ligne : modifier site/machine d'une ligne
+  NOUVELLE après avoir tapé le mot de passe le fait disparaître du champ (id recalculé).
+- 🟡 « Lancer maintenant » : si le délai est dépassé, le script continue orphelin sur la machine
+  (connexion SSH fermée) — l'écran affiche un échec alors que la sauvegarde peut réussir ; lire
+  `/dimotic-backup/status.json` serait plus fiable.
+
+## ✅ Accueil : lien HA périmé après changement de `ha.ws.host` (constaté et corrigé le 23/09/2026, pas retesté)
+- **Symptôme** : après enregistrement de `ha.ws.host` 192.168.1.19 → 192.168.1.51 (Paramètres
+  techniques), le core se reconnecte bien à la nouvelle HA mais la page d'accueil affiche toujours
+  `http://192.168.1.19:8123` jusqu'au redémarrage.
+- **Cause** : `app:ha-address` (événement persistant) n'est émis qu'une fois, dans
+  `registerCoreSocketEvents()` (`applications/core/src/application/AppService.ts` ~l.821) ;
+  `handleConfigReload()` (~l.339) ne le réémet pas.
+- **Correctif prévu** : réémettre `SOCLE_SOCKET_EVENTS.HA_ADDRESS` avec `config.ha.ws` dans
+  `handleConfigReload()`.
+
 ## 🔧 Plan : écoute passive RS485 du DDZY422-D2 chez noisy (préparé le 14/09/2026, pas encore exécuté)
 - **Idée de l'utilisateur** : plutôt que d'interroger activement le DDZY422-D2 (bloqué depuis des
   semaines, `AcknowledgeError` systématique quel que soit l'esclave testé — voir plus bas), envoyer

@@ -1,6 +1,6 @@
 /**
  * Schéma de configuration Sauvegarde/Restauration — section `sauvegarde` de data/config.yaml.
- * Voir specs/current/fonctionnelles-sauvegarde_specs_v1.3.md §3bis/§4quater/§6/§6bis.
+ * Voir specs/current/fonctionnelles-sauvegarde_specs_v1.4.md §3bis/§4quater/§6/§6bis.
  */
 
 import { z } from 'zod';
@@ -17,7 +17,7 @@ import { z } from 'zod';
  */
 export const SECRET_FILE_PATH = '/dimotic-secrets/nextcloud-backup';
 
-const sauvegardeNextcloudSchema = z.object({
+export const sauvegardeNextcloudSchema = z.object({
   // ⭐ 17/09/2026 — juste le domaine (ex. https://dimoticloud.duckdns.org), PAS le chemin WebDAV
   // complet : la remarque de l'utilisateur ("user ne sert à rien s'il n'est pas forcé dans
   // l'adresse") a fait remplacer l'ancien champ `baseUrl` (URL WebDAV complète, redondante avec
@@ -87,10 +87,11 @@ export type SauvegardeTargetConfig = z.infer<typeof sauvegardeTargetSchema>;
  * identifiant ? ... il sera non visible et constitué de site+machine", demande explicite). Plus
  * de champ "Identifiant" éditable dans Paramètres Techniques (voir SAUVEGARDE_UI_METADATA côté
  * `domain/index.ts` — `id` retiré des `itemFields`) : ModuleManager.generateArrayFieldHtml
- * calcule le même id côté navigateur via un x-effect Alpine, UNIQUEMENT tant que `item.id` est
- * vide (ne réécrase jamais un id déjà persisté — évite de casser les lignes déjà en production,
- * dont l'id historique ne suit pas forcément cette convention). Cette fonction est le pendant
- * SERVEUR de ce même calcul (import gossip, `handleGossipImport`) — la formule DOIT rester
+ * calcule le même id côté navigateur via un x-effect Alpine, recalculé à chaque frappe tant que la
+ * ligne n'est ni enregistrée ni poussée (⭐ 23/09/2026 — avant : figé dès la création de la ligne,
+ * encore vide, d'où un id "-" constaté en test live), jamais pour une ligne déjà persistée. Cette
+ * fonction est le pendant SERVEUR de ce même calcul (repli de `SauvegardeService.resolveTarget`
+ * pour une ligne à l'écran sans id) — la formule DOIT rester
  * identique aux deux endroits, sans quoi un id généré ici ne correspondrait plus à ce qu'un
  * navigateur recalculerait pour la même paire site/machine.
  */
