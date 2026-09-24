@@ -1,3 +1,4 @@
+import type { ApplicationStatus, ApplicationDetail } from '../config/ApplicationManager';
 /**
  * Composant ApplicationsManager - Gestion des applications
  * Affiche et permet d'activer/désactiver les applications
@@ -86,6 +87,12 @@ const createTemplate = (): HTMLTemplateElement => {
         color: white;
       }
       
+      /* ⭐ 24/09/2026 — repères nouvelle / externe / état du process */
+      .app-badge.new { background: var(--color-warning, #f0a020); color: #000; }
+      .app-badge.origin { background: transparent; border: 1px solid var(--color-primary); color: var(--color-text-muted); }
+      .app-badge.state-crashed { background: var(--color-error); color: #fff; }
+      .app-badge.state-restarting, .app-badge.state-starting { background: var(--color-warning, #f0a020); color: #000; }
+      .app-badge.state-stopped { background: var(--color-text-muted); color: #fff; }
       .app-badge.disabled {
         background-color: #e74c3c;
         color: white;
@@ -255,7 +262,7 @@ const createTemplate = (): HTMLTemplateElement => {
 };
 
 export class ApplicationsManager extends HTMLElement {
-  private applications: { activated: string[]; disabled: string[] } = { activated: [], disabled: [] };
+  private applications: ApplicationStatus = { activated: [], disabled: [] };
   private loading: boolean = false;
   private error: string | null = null;
 
@@ -377,6 +384,35 @@ export class ApplicationsManager extends HTMLElement {
     }
   }
   
+  private detail(appId: string): ApplicationDetail | undefined {
+    return this.applications.details?.find((d) => d.appId === appId);
+  }
+
+  /** ⭐ 24/09/2026 — repères communs aux deux listes : nouvelle, origine (racine externe). */
+  private extraBadges(appId: string): string {
+    const d = this.detail(appId);
+    if (!d) return '';
+    const badges: string[] = [];
+    if (d.isNew) badges.push('<span class="app-badge new" title="Jamais vue par ce core : arrivée désactivée">Nouvelle</span>');
+    if (d.origin === 'externe') badges.push('<span class="app-badge origin" title="data/applications/">externe</span>');
+    if (d.origin === 'externe-remplace') badges.push('<span class="app-badge origin" title="data/applications/ remplace applications/">externe (remplace l\'interne)</span>');
+    return badges.join('');
+  }
+
+  /** État du process d'une application activée (ProcessSupervisor). */
+  private stateBadge(appId: string): string {
+    const state = this.detail(appId)?.state ?? 'running';
+    const labels: Record<string, string> = {
+      running: 'Activée',
+      starting: 'Démarrage…',
+      restarting: 'Plantée — relance en cours',
+      crashed: 'Plantée — arrêtée',
+      stopped: 'Arrêtée'
+    };
+    const cls = state === 'running' ? 'activated' : `state-${state}`;
+    return `<span class="app-badge ${cls}">${labels[state] ?? state}</span>`;
+  }
+
   private render(): void {
     this.renderActivatedList();
     this.renderDisabledList();
@@ -402,9 +438,12 @@ export class ApplicationsManager extends HTMLElement {
         <div class="app-info">
           <span>📦</span>
           <span class="app-name">${app}</span>
-          <span class="app-badge activated">Activée</span>
+          ${this.stateBadge(app)}${this.extraBadges(app)}
         </div>
         <div class="app-actions">
+          ${this.detail(app)?.state === 'crashed' ? `<button
+            onclick="if(window.app && window.app.appManager) { window.app.appManager.restartApplication('${app}'); }"
+            class="btn btn-success">Relancer</button>` : ''}
           <button 
             onclick="if(window.app && window.app.appManager) { window.app.appManager.disableApplication('${app}'); } else { console.error('appManager non disponible'); }"
             class="btn btn-warning"
@@ -436,7 +475,7 @@ export class ApplicationsManager extends HTMLElement {
         <div class="app-info">
           <span>📦</span>
           <span class="app-name">${app}</span>
-          <span class="app-badge disabled">Désactivée</span>
+          <span class="app-badge disabled">Désactivée</span>${this.extraBadges(app)}
         </div>
         <div class="app-actions">
           <button 
@@ -454,7 +493,9 @@ export class ApplicationsManager extends HTMLElement {
   private updateLoadingState(): void {
     const refreshBtn = this.shadowRoot!.getElementById('refresh-btn');
     if (refreshBtn) {
-      refreshBtn.setAttribute('disabled', this.loading ? 'true' : 'false');
+      // ⭐ 24/09/2026, bug corrigé : setAttribute('disabled', 'false') DÉSACTIVE quand même (en HTML
+      // seule la présence de l'attribut compte) — le bouton « Rafraîchir la liste » restait inactif.
+      refreshBtn.toggleAttribute('disabled', this.loading);
       refreshBtn.textContent = this.loading ? 'Chargement...' : 'Rafraîchir la liste';
     }
   }

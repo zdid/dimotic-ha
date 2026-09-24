@@ -3,9 +3,20 @@
  * Gère l'activation/désactivation des applications
  */
 
-interface ApplicationStatus {
+export interface ApplicationDetail {
+  appId: string;
+  /** ⭐ 24/09/2026 — racine d'où vient l'application (voir application/appRoots.ts côté serveur). */
+  origin: 'interne' | 'externe' | 'externe-remplace';
+  /** Jamais vue par ce core avant : arrivée désactivée (décision du 24/09/2026). */
+  isNew: boolean;
+  /** État du process (ProcessSupervisor) : stopped, starting, running, restarting, crashed. */
+  state: string;
+}
+
+export interface ApplicationStatus {
   activated: string[];
   disabled: string[];
+  details?: ApplicationDetail[];
 }
 
 interface ApplicationEnableResult {
@@ -47,6 +58,15 @@ export class ApplicationManager {
       }));
     });
     
+    // ⭐ 24/09/2026 — état des process en direct (dont 'crashed') et résultat de « Relancer ».
+    this.socket.on('app:process:state', () => this.socket.emit('app:applications:list'));
+    this.socket.on('app:applications:restart:result', (data: ApplicationEnableResult) => {
+      if (!data.success) {
+        window.dispatchEvent(new CustomEvent('applications:error', { detail: { message: `Relance de ${data.appId} impossible : ${data.error || 'Inconnu'}` } }));
+      }
+      this.socket.emit('app:applications:list');
+    });
+
     // Écouter les résultats d'activation
     this.socket.on('app:applications:enable:result', (data: ApplicationEnableResult) => {
       this.loading = false;
@@ -151,6 +171,11 @@ export class ApplicationManager {
     }));
   }
   
+  /** ⭐ 24/09/2026 — relance une application en état 'crashed' (abandon après 5 crashs rapprochés). */
+  restartApplication(appId: string): void {
+    this.socket.emit('app:applications:restart', { appId });
+  }
+
   /**
    * Rafraîchit la liste des applications
    */

@@ -133,6 +133,13 @@ export class IntegrationBridge {
   initialize(): void {
     this.eventBus.onGeneric<BridgeRegisterEvent>('integration:bridge:register', (data) => this.handleBridgeRegister(data));
     this.eventBus.onGeneric<BridgeRegisterEvent>('integration:bridge:unregister', (data) => this.handleBridgeUnregister(data));
+    // ⭐ 24/09/2026 (bug n°2 de l'analyse du 24/09) : `integration:bridge:unregister` n'est émis que par
+    // le stop() PROPRE de l'application — un crash, un SIGKILL (SIGTERM ignoré) ou une désactivation
+    // laissaient le bridge MQTT, tenu ici par le core, connecté : HA voyait les entités disponibles
+    // alors que l'application était morte. Nettoyage désormais fait par le core lui-même, idempotent.
+    this.eventBus.onGeneric<{ appId: string }>('app:unregistered', (data) => this.unregisterModule(data.appId, 'application désactivée'));
+    this.eventBus.onGeneric<{ appId: string; requested: boolean; code: number | null; signal: string | null }>('app:process:exited', (data) =>
+      this.unregisterModule(data.appId, data.requested ? 'process arrêté' : `process terminé sans arrêt propre (code=${data.code}, signal=${data.signal})`));
     this.eventBus.onGeneric<ConfigSaveResult>('config:save:result', (result) => this.handleConfigSaveResult(result));
 
     this.haMqttService.onCommand((command) => {
@@ -185,6 +192,14 @@ export class IntegrationBridge {
     } else {
       this.logger.debug('bridge', `Bridge enregistré mais MQTT désactivé: ${key}`);
     }
+  }
+
+  /** Désenregistre TOUS les bridges d'un module (id d'application = moduleName) — voir le constructeur. */
+  private unregisterModule(moduleName: string, reason: string): void {
+    const registrations = Array.from(this.registeredBridges.values()).filter((r) => r.moduleName === moduleName);
+    if (registrations.length === 0) return;
+    this.logger.info('bridge', `${moduleName} : ${reason} — désenregistrement par le core de ${registrations.length} bridge(s) MQTT (statut offline publié)`);
+    for (const registration of registrations) this.handleBridgeUnregister(registration);
   }
 
   private handleBridgeUnregister(data: BridgeRegisterEvent): void {

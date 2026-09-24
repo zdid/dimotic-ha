@@ -1,0 +1,23 @@
+{
+  "name": "testcycle",
+  "version": "1.0.0",
+  "description": "Application de TEST du cycle de vie des applications par le core (ajout, activation, désactivation, retrait, crash) — MQTT + HA WebSocket + config. Embarquée dans l'image Docker, désactivée par défaut.",
+  "main": "dist/domain/index.js",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -b",
+    "build:ui": "tsc -p src/presentation/tsconfig.ui.json",
+    "watch": "tsc -w"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

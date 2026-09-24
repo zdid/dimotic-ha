@@ -105,6 +105,18 @@ export class ModuleContainer extends HTMLElement {
     window.addEventListener('modules:loaded', (e: any) => {
       console.log('[ModuleContainer] Événement modules:loaded reçu:', e.detail);
       const modules = e.detail.modules;
+      // ⭐ 24/09/2026 — application désactivée ou retirée (absente de la liste) : oublier son HTML
+      // en cache, sinon sa réactivation — éventuellement depuis un AUTRE dossier (racine externe
+      // data/applications/ qui remplace l'interne) — réaffichait l'ancienne page jusqu'au
+      // rechargement complet de l'onglet (constaté en test réel le 24/09).
+      const presentIds = new Set((modules as Array<{ id: string }>).map((m) => m.id));
+      for (const cachedId of Object.keys(this.moduleContents)) {
+        if (cachedId === 'accueil' || presentIds.has(cachedId)) continue;
+        delete this.moduleContents[cachedId];
+        delete this.moduleInited[cachedId];
+        if (this.displayedModule === cachedId) this.displayedModule = null;
+        console.log(`[ModuleContainer] Cache HTML oublié pour ${cachedId} (application retirée de la liste)`);
+      }
       // ⭐ 27/08/2026 — page d'accueil par défaut (remplace l'ancien auto-sélection du premier
       // module métier) dès qu'au moins une application tourne (sinon rien d'utile à afficher,
       // même règle qu'avant pour ce cas limite).

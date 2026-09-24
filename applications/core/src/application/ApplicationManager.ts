@@ -8,11 +8,7 @@ import { Logger } from '../infrastructure/logger';
 import type { RestartManager } from './RestartManager';
 import type { ConfigService } from '../infrastructure/config/ConfigService';
 import type { ProcessSupervisor } from '../supervisor';
-
-/** Fenêtre glissante avant redémarrage après une activation/désactivation — voir
- *  RestartManager.scheduleRestart() : chaque nouvel appel pendant ce délai le réinitialise à
- *  15s, laissant le temps d'enchaîner plusieurs changements avant un seul redémarrage. */
-const APPLICATION_TOGGLE_RESTART_DELAY_MS = 15000;
+import { scanApplications, resolveAppDir, isValidAppId, ensureExternalRoot, type AppOrigin } from './appRoots';
 
 /**
  * ApplicationManager - Gère l'activation et la désactivation dynamique des applications
@@ -31,11 +27,15 @@ const APPLICATION_TOGGLE_RESTART_DELAY_MS = 15000;
  * application encore présente dans applications_désactivées/ (installations existantes, ex.
  * ha2) vers applications/ + `disabledApps`, pour une transition sans intervention manuelle.
  *
+ * ⭐ 24/09/2026 — deux racines (`applications/` interne, `data/applications/` externe, voir
+ * appRoots.ts), rapprochement disque/config (`reconcile()` : application nouvelle = désactivée) et
+ * JAMAIS de redémarrage du core pour une application : activer/désactiver délèguent à AppService
+ * (`setLifecycleHooks`) qui démarre ou arrête l'application à chaud.
+ *
  * Responsabilités :
- * - Lister les applications activées et désactivées
- * - Activer une application (retrait de `disabledApps`)
- * - Désactiver une application (ajout à `disabledApps`)
- * - Déclencher un restart après modification
+ * - Lister les applications activées et désactivées (+ origine, repère « nouvelle »)
+ * - Activer une application (retrait de `disabledApps` + démarrage à chaud)
+ * - Désactiver une application (ajout à `disabledApps` + arrêt à chaud)
  */
 export class ApplicationManager {
   private readonly projectRoot: string;
@@ -73,6 +73,11 @@ export class ApplicationManager {
     }
 
     this.migrateLegacyDisabledDir();
+
+    const externalRootError = ensureExternalRoot(this.projectRoot);
+    if (externalRootError) {
+      this.logger.warn('ApplicationManager', externalRootError);
+    }
   }
 
   /**
@@ -130,143 +135,129 @@ export class ApplicationManager {
   }
 
   /**
-   * Liste toutes les applications (activées + désactivées)
+   * ⭐ 24/09/2026 — rapprochement entre le disque (les deux racines, voir appRoots.ts) et la config
+   * (`disabledApps` / `knownApps`), appelé au démarrage du core et à chaque ouverture de Gestion des
+   * applications (décision du 24/09 : jamais de redémarrage du core pour une application).
+   * - application jamais vue → ajoutée à `disabledApps` (arrive DÉSACTIVÉE) et repérée « nouvelle » ;
+   * - `knownApps` absent (version antérieure) : installation NEUVE → tout désactivé ; mise à jour
+   *   d'une installation existante → état actuel conservé (sinon tout se désactiverait d'un coup) ;
+   * - application disparue du disque → retirée de `knownApps`/`disabledApps` et signalée dans
+   *   `removed` (l'appelant arrête ce qui tournait encore). Revenue plus tard, elle est à nouveau
+   *   « nouvelle », donc désactivée.
    */
-  listAll(): { activated: string[]; disabled: string[] } {
-    const all = this.getApplicationsInDir(this.appsDir).filter((appId) => appId !== 'core');
-    const disabledSet = new Set(this.configService.getDisabledApps());
+  reconcile(): { added: string[]; removed: string[] } {
+    const present = [...scanApplications().keys()];
+    const known = this.configService.getKnownApps();
+    let disabled = this.configService.getDisabledApps();
+    let added: string[] = [];
+    let removed: string[] = [];
 
-    const activated = all.filter((appId) => !disabledSet.has(appId));
-    const disabled = all.filter((appId) => disabledSet.has(appId));
-
-    return { activated, disabled };
-  }
-
-  /**
-   * Récupère la liste des applications dans un répertoire
-   */
-  private getApplicationsInDir(baseDir: string): string[] {
-    const apps: string[] = [];
-
-    if (!existsSync(baseDir)) return apps;
-
-    try {
-      const entries = readdirSync(baseDir).filter(entry => {
-        if (entry.startsWith('.')) return false;
-        const fullPath = path.join(baseDir, entry);
-        try {
-          return statSync(fullPath).isDirectory();
-        } catch {
-          return false;
-        }
-      });
-
-      for (const entry of entries) {
-        if (this.isValidAppDir(path.join(baseDir, entry))) {
-          apps.push(entry);
-        }
+    if (known === undefined) {
+      if (this.configService.isFreshInstall()) {
+        disabled = [...new Set([...disabled, ...present])];
+        added = present;
+        this.logger.info('ApplicationManager', `Installation neuve : toutes les applications arrivent désactivées (${present.join(', ')})`);
+      } else {
+        this.logger.info('ApplicationManager', `Mise à jour : mémorisation des applications existantes, état activé/désactivé conservé (${present.join(', ')})`);
       }
-    } catch (error) {
-      this.logger.warn('ApplicationManager', `Erreur de lecture du répertoire ${baseDir}: ${error}`);
+    } else {
+      added = present.filter((id) => !known.includes(id));
+      removed = known.filter((id) => !present.includes(id));
+      if (added.length > 0) {
+        disabled = [...new Set([...disabled, ...added])];
+        this.logger.info('ApplicationManager', `Application(s) nouvelle(s), désactivée(s) en attendant d'être activée(s) : ${added.join(', ')}`);
+      }
+      if (removed.length > 0) {
+        this.logger.info('ApplicationManager', `Application(s) disparue(s) du disque : ${removed.join(', ')}`);
+      }
     }
 
-    return apps;
+    disabled = disabled.filter((id) => present.includes(id));
+    for (const id of added) this.newApps.add(id);
+    for (const id of removed) this.newApps.delete(id);
+
+    const unchanged = known !== undefined && added.length === 0 && removed.length === 0
+      && disabled.length === this.configService.getDisabledApps().length;
+    if (!unchanged) {
+      const result = this.configService.setAppLists(disabled, present);
+      if (!result.success) {
+        this.logger.error('ApplicationManager', `Échec d'enregistrement des listes d'applications: ${result.error}`);
+      }
+    }
+    return { added, removed };
   }
 
+  /** Applications repérées « nouvelles » depuis le démarrage de ce core (repère UI, jamais persisté). */
+  private readonly newApps = new Set<string>();
+
   /**
-   * Vérifie qu'un répertoire est une application valide
-   * (contient un répertoire src/ ou dist/ ou package.json)
+   * Liste toutes les applications (activées + désactivées) — `details` (⭐ 24/09/2026) : origine
+   * (interne / externe / externe-remplace) et repère « nouvelle » pour Gestion des applications.
    */
-  private isValidAppDir(dirPath: string): boolean {
-    const srcDir = path.join(dirPath, 'src');
-    const distDir = path.join(dirPath, 'dist');
-    const packageJson = path.join(dirPath, 'package.json');
+  listAll(): { activated: string[]; disabled: string[]; details: Array<{ appId: string; origin: AppOrigin; isNew: boolean }> } {
+    const apps = scanApplications();
+    const disabledSet = new Set(this.configService.getDisabledApps());
+    const all = [...apps.keys()];
+    return {
+      activated: all.filter((appId) => !disabledSet.has(appId)),
+      disabled: all.filter((appId) => disabledSet.has(appId)),
+      details: [...apps.values()].map((a) => ({ appId: a.appId, origin: a.origin, isNew: this.newApps.has(a.appId) }))
+    };
+  }
 
-    // Une application valide a au moins un de ces éléments
-    return existsSync(srcDir) || existsSync(distDir) || existsSync(packageJson);
+  /** Dossier effectif d'une application (racine externe prioritaire), voir appRoots.ts. */
+  resolveAppDir(appId: string): string | undefined {
+    return resolveAppDir(appId);
   }
 
   /**
-   * ⭐ 25/08/2026, bug réel corrigé : `enable()` utilisait `processSupervisor.isRegistered(appId)`
-   * pour décider entre spawn ciblé et redémarrage complet — mais une app DÉSACTIVÉE n'est jamais
-   * enregistrée auprès de ProcessSupervisor (`AppService.detectApplicationModules()` filtre les
-   * apps désactivées AVANT de les enregistrer), donc `isRegistered` renvoie systématiquement
-   * `false` pour toute app qu'on active depuis l'état désactivé — même une app qui déclare
-   * `runsAsSeparateProcess: true` dans son propre module. Résultat : activer n'importe quelle app
-   * déclenchait toujours un redémarrage complet de core, l'exact problème que la migration en
-   * process séparé (fonctionnelles-supervisor_specs v2.6) était censée éliminer.
-   *
-   * Délégué à AppService (voir `setActivateSeparateProcessHook`) plutôt que réimplémenté ici :
-   * activer une app en process séparé exige non seulement de l'enregistrer/démarrer auprès de
-   * ProcessSupervisor, mais aussi tout le câblage EventBus↔app que `detectApplicationModules()`
-   * fait pour chaque app au démarrage (autoBridgeSocketEvents, ha:bridge:reply,
-   * integration:{id}:*, bridgedEvents propres à l'app) — dupliquer cette logique ici l'aurait
-   * fait diverger silencieusement à la première évolution de l'une des deux copies. ApplicationManager
-   * n'a pas accès à SupervisorEventBridge ; AppService, qui l'a déjà, fournit ce hook après sa
-   * propre construction (voir AppService.ts).
+   * ⭐ 24/09/2026 — activation/désactivation réelles déléguées à AppService (seul à tenir modules,
+   * SocketBridge, ProcessSupervisor, schémas) : UN chemin « activer » et UN chemin « désactiver »,
+   * les mêmes au démarrage, au clic, à l'apparition ou à la disparition d'un dossier.
+   * `activateHook` renvoie un message d'erreur, ou `undefined` si l'application tourne.
    */
-  private activateSeparateProcessHook?: (appId: string, appDir: string) => boolean;
+  private activateHook?: (appId: string, appDir: string) => string | undefined;
+  private deactivateHook?: (appId: string) => void;
 
-  setActivateSeparateProcessHook(hook: (appId: string, appDir: string) => boolean): void {
-    this.activateSeparateProcessHook = hook;
+  setLifecycleHooks(activate: (appId: string, appDir: string) => string | undefined, deactivate: (appId: string) => void): void {
+    this.activateHook = activate;
+    this.deactivateHook = deactivate;
   }
 
   /**
-   * ⭐ 28/08/2026, bug réel corrigé : `disable()` arrêtait bien le process (processSupervisor.stop)
-   * mais ne retirait jamais l'app de `AppService.modules` ni ne réémettait `app:modules:registered`
-   * — le menu (Sidebar/ModuleManager, alimenté par `app:modules:list`) continuait donc d'afficher
-   * l'entrée jusqu'au prochain redémarrage complet de core, aucune confirmation visible que l'arrêt
-   * avait bien eu lieu. Même raisonnement que setActivateSeparateProcessHook ci-dessus : AppService
-   * est seul à connaître `this.modules`, ApplicationManager lui délègue donc la mise à jour.
-   */
-  private deactivateSeparateProcessHook?: (appId: string) => void;
-
-  setDeactivateSeparateProcessHook(hook: (appId: string) => void): void {
-    this.deactivateSeparateProcessHook = hook;
-  }
-
-  /**
-   * Active une application (retire son id de `disabledApps`)
+   * Active une application (retire son id de `disabledApps`) et la démarre tout de suite — jamais
+   * de redémarrage du core (décision du 24/09/2026).
    */
   enable(appId: string): { success: boolean; error?: string; restarting?: boolean } {
     try {
-      if (!this.isValidAppId(appId)) {
+      if (!isValidAppId(appId)) {
         return { success: false, error: `Nom d'application invalide: ${appId}` };
       }
-
-      if (!existsSync(path.join(this.appsDir, appId))) {
-        return { success: false, error: `Application ${appId} introuvable dans applications/` };
+      const appDir = resolveAppDir(appId);
+      if (!appDir) {
+        return { success: false, error: `Application ${appId} introuvable (applications/ ni data/applications/)` };
       }
-
       const disabledApps = this.configService.getDisabledApps();
       if (!disabledApps.includes(appId)) {
         return { success: false, error: `Application ${appId} déjà activée` };
       }
 
+      // `undefined` = succès (l'application tourne) — ne JAMAIS écrire `hook?.() ?? 'erreur'` ici : ce
+      // `??` transformait chaque réussite en échec (bug du 24/09/2026, trouvé au premier test réel).
+      if (!this.activateHook) {
+        return { success: false, error: 'activation indisponible (hook non installé)' };
+      }
+      const error = this.activateHook(appId, appDir);
+      if (error) {
+        return { success: false, error: `Activation de ${appId} impossible : ${error}` };
+      }
       const result = this.configService.setDisabledApps(disabledApps.filter((id) => id !== appId));
       if (!result.success) {
         return { success: false, error: result.error };
       }
-
-      // ⭐ fonctionnelles-supervisor_specs v2.6 §8.2 : une app en process séparé se démarre seule,
-      // sans redémarrer tout core (objectif même de la migration) — contrairement au comportement
-      // par défaut ci-dessous (§8.1, redémarrage complet du process, toujours utilisé pour les
-      // apps in-process tant qu'elles n'ont pas été migrées).
-      //
-      // ⭐ 25/08/2026, bug réel corrigé : on ne peut pas se fier à isRegistered() ici — une app
-      // désactivée n'est jamais enregistrée auprès de ProcessSupervisor. Le hook (voir
-      // setActivateSeparateProcessHook ci-dessus) lit la capacité de l'app depuis son propre
-      // module et fait l'enregistrement + tout le câblage EventBus nécessaires ; il ne reste plus
-      // qu'à démarrer le process une fois ce câblage en place.
-      const separateProcess = !!this.activateSeparateProcessHook?.(appId, path.join(this.appsDir, appId));
-      if (separateProcess) {
-        this.processSupervisor!.start(appId);
-      } else {
-        this.restartManager.scheduleRestart(APPLICATION_TOGGLE_RESTART_DELAY_MS, `Application ${appId} activée`);
-      }
-      this.logger.info('ApplicationManager', `Application ${appId} activée`);
-
-      return { success: true, restarting: !separateProcess };
+      this.newApps.delete(appId);
+      this.logger.info('ApplicationManager', `Application ${appId} activée (${appDir})`);
+      return { success: true, restarting: false };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.logger.error('ApplicationManager', `Erreur lors de l'activation de ${appId}: ${errorMessage}`);
@@ -275,43 +266,31 @@ export class ApplicationManager {
   }
 
   /**
-   * Désactive une application (ajoute son id à `disabledApps`)
+   * Désactive une application (ajoute son id à `disabledApps`) et l'arrête tout de suite, en défaisant
+   * tout ce que l'activation avait mis en place (voir AppService.deactivateApp()).
    */
   disable(appId: string): { success: boolean; error?: string; restarting?: boolean } {
     try {
-      if (!this.isValidAppId(appId)) {
+      if (!isValidAppId(appId)) {
         return { success: false, error: `Nom d'application invalide: ${appId}` };
       }
-
       if (appId === 'core') {
         return { success: false, error: `Impossible de désactiver l'application core` };
       }
-
-      if (!existsSync(path.join(this.appsDir, appId))) {
-        return { success: false, error: `Application ${appId} introuvable dans applications/` };
+      if (!resolveAppDir(appId)) {
+        return { success: false, error: `Application ${appId} introuvable (applications/ ni data/applications/)` };
       }
-
       const disabledApps = this.configService.getDisabledApps();
       if (disabledApps.includes(appId)) {
         return { success: false, error: `Application ${appId} déjà désactivée` };
       }
-
       const result = this.configService.setDisabledApps([...disabledApps, appId]);
       if (!result.success) {
         return { success: false, error: result.error };
       }
-
-      // ⭐ fonctionnelles-supervisor_specs v2.6 §8.2 — voir enable() ci-dessus.
-      const separateProcess = !!this.processSupervisor?.isRegistered(appId);
-      if (separateProcess) {
-        this.processSupervisor!.stop(appId);
-        this.deactivateSeparateProcessHook?.(appId);
-      } else {
-        this.restartManager.scheduleRestart(APPLICATION_TOGGLE_RESTART_DELAY_MS, `Application ${appId} désactivée`);
-      }
+      this.deactivateHook?.(appId);
       this.logger.info('ApplicationManager', `Application ${appId} désactivée`);
-
-      return { success: true, restarting: !separateProcess };
+      return { success: true, restarting: false };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       this.logger.error('ApplicationManager', `Erreur lors de la désactivation de ${appId}: ${errorMessage}`);
@@ -329,14 +308,6 @@ export class ApplicationManager {
     if (!this.restartManager.isRestartScheduled()) return;
     this.logger.info('ApplicationManager', 'Écran "Gestion des applications" quitté avec un redémarrage en attente — déclenché immédiatement');
     this.restartManager.immediateRestart('Navigation quittée avec redémarrage en attente');
-  }
-
-  /**
-   * Vérifie qu'un identifiant d'application est valide
-   * (ne contient que des caractères alphanumériques, tirets et underscores)
-   */
-  private isValidAppId(appId: string): boolean {
-    return /^[a-zA-Z0-9_-]+$/.test(appId);
   }
 
   /**

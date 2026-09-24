@@ -43,6 +43,10 @@ export class SocketBridge {
    *  jusqu'ici : émis par chaque app depuis l'origine, jamais câblé côté SocketBridge). */
   private customMenus: Record<string, unknown> = {};
   private persistentEvents: Map<string, { appId: string; eventName: string; lastData: unknown }> = new Map();
+  /** ⭐ 24/09/2026 — handlers client→serveur posés par socket et par application, pour pouvoir les
+   *  (re)poser sur les sockets DÉJÀ ouverts quand une application est activée à chaud, et les
+   *  retirer quand elle est désactivée (voir attachAppHandlers()/unregisterApp()). */
+  private socketAppHandlers: Map<any, Map<string, Array<{ eventName: string; handler: (data: unknown) => void }>>> = new Map();
   /** Listeners EventBus posés par registerAppSocketEvents(), par appId — permet de les retirer
    *  avant un ré-enregistrement (ex: AppService.detectModules() ET Service.start() enregistrent
    *  chacun les mêmes événements au démarrage) pour ne jamais dupliquer un broadcast. */
@@ -284,6 +288,11 @@ export class SocketBridge {
     });
 
     // Résultat de la désactivation d'une application
+    // ⭐ 24/09/2026 — cycle de vie des applications (voir AppService.deactivateApp() / ProcessSupervisor).
+    this.eventBus.onGeneric<{ appId: string }>('app:unregistered', (data) => this.unregisterApp(data.appId));
+    this.eventBus.onGeneric('app:process:state', (data) => this.broadcast('app:process:state' as any, data as any));
+    this.eventBus.onGeneric('app:applications:restart:result', (data) => this.broadcast('app:applications:restart:result' as any, data as any));
+
     this.eventBus.on('app:applications:disable:result', (data: { appId: string; success: boolean; error?: string }) => {
       this.logger.info('SocketBridge', `EventBus → Socket.io: app:applications:disable:result pour ${data.appId}`);
       this.broadcast('app:applications:disable:result', data);
@@ -482,6 +491,11 @@ export class SocketBridge {
       // l'utilisateur a quitté l'écran "Gestion des applications" avant la fin du compte à
       // rebours : plus la peine d'attendre, déclencher tout de suite.
       // @ts-ignore
+      socket.on('app:applications:restart', (data: { appId: string }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: app:applications:restart de ${socket.id}, appId: ${data?.appId}`);
+        this.eventBus.emitGeneric('app:applications:restart', data);
+      });
+
       socket.on('app:applications:restart-now', () => {
         this.logger.info('SocketBridge', `Socket.io → EventBus: app:applications:restart-now de ${socket.id}`);
         this.eventBus.emit('app:applications:restart-now', undefined as void);
@@ -620,6 +634,7 @@ export class SocketBridge {
       // @ts-ignore
       socket.on('disconnect', () => {
         this.sockets.delete(socket);
+        this.socketAppHandlers.delete(socket);
         this.logger.info('SocketBridge', `Déconnexion Socket.io : ${socket.id}`);
       });
 
@@ -684,7 +699,60 @@ export class SocketBridge {
     }
     this.appSocketEventListeners.set(appId, newListeners);
 
+    // ⭐ 24/09/2026 : sans ça, un onglet ouvert AVANT l'activation à chaud de l'application ne pouvait
+    // rien lui envoyer (handlers client→serveur posés seulement à la connexion) jusqu'au rechargement.
+    for (const socket of this.sockets) {
+      this.attachAppHandlers(socket, appId, socketEvents);
+    }
+
     this.logger.info('SocketBridge', `Événements Socket.io enregistrés pour ${appId}: ${Object.keys(socketEvents).length} événements`);
+  }
+
+  /** Pose (en retirant d'abord ceux déjà posés) les handlers client→serveur d'une app sur un socket. */
+  private attachAppHandlers(socket: any, appId: string, socketEvents: Record<string, string>): void {
+    this.detachAppHandlers(socket, appId);
+    const handlers: Array<{ eventName: string; handler: (data: unknown) => void }> = [];
+    for (const eventName of Object.values(socketEvents)) {
+      const handler = (data: unknown) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: ${eventName} de ${socket.id}`);
+        this.eventBus.emitGeneric(eventName, data);
+      };
+      socket.on(eventName, handler);
+      handlers.push({ eventName, handler });
+    }
+    let perApp = this.socketAppHandlers.get(socket);
+    if (!perApp) {
+      perApp = new Map();
+      this.socketAppHandlers.set(socket, perApp);
+    }
+    perApp.set(appId, handlers);
+  }
+
+  private detachAppHandlers(socket: any, appId: string): void {
+    const handlers = this.socketAppHandlers.get(socket)?.get(appId);
+    if (!handlers) return;
+    for (const { eventName, handler } of handlers) socket.off(eventName, handler);
+    this.socketAppHandlers.get(socket)!.delete(appId);
+  }
+
+  /**
+   * ⭐ 24/09/2026 — application désactivée ou retirée (`app:unregistered`, AppService.deactivateApp()) :
+   * libère TOUT ce que ce pont tenait pour elle — sans ça, menu, métadonnées UI et derniers états
+   * persistants étaient rejoués à chaque nouvelle connexion, et ses écouteurs restaient actifs.
+   */
+  private unregisterApp(appId: string): void {
+    for (const { eventName, listener } of this.appSocketEventListeners.get(appId) ?? []) {
+      this.eventBus.offGeneric(eventName, listener);
+    }
+    this.appSocketEventListeners.delete(appId);
+    this.appSocketEvents.delete(appId);
+    for (const socket of this.sockets) this.detachAppHandlers(socket, appId);
+    for (const [eventName, entry] of this.persistentEvents) {
+      if (entry.appId === appId) this.persistentEvents.delete(eventName);
+    }
+    delete this.customMenus[appId];
+    delete this.moduleUiMetadata[appId];
+    this.logger.info('SocketBridge', `Application ${appId} désenregistrée (événements, menu, métadonnées, états persistants)`);
   }
 
   /**
@@ -694,20 +762,11 @@ export class SocketBridge {
   private setupDynamicAppHandlers(socket: any): void {
     this.logger.info('SocketBridge', `Configuration des handlers dynamiques pour socket ${socket.id}`);
     
-    // Pour chaque application enregistrée
     for (const [appId, socketEvents] of this.appSocketEvents) {
       this.logger.info('SocketBridge', `Configuration des handlers pour application ${appId} sur socket ${socket.id}`);
-      
-      // Configurer un handler Socket.io pour chaque événement de cette application
-      for (const [eventKey, eventName] of Object.entries(socketEvents)) {
-        // Handler Client→Server : socket.on(eventName) → EventBus.emit(eventName)
-        socket.on(eventName, (data: unknown) => {
-          this.logger.info('SocketBridge', `Socket.io → EventBus: ${eventName} de ${socket.id}`);
-          this.eventBus.emitGeneric(eventName, data);
-        });
-      }
+      this.attachAppHandlers(socket, appId, socketEvents);
     }
-    
+
     this.logger.info('SocketBridge', `Handlers dynamiques configurés pour ${this.appSocketEvents.size} applications sur socket ${socket.id}`);
   }
 

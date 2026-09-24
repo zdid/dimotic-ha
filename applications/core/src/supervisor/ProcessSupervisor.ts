@@ -15,7 +15,9 @@ import type { Logger } from '../infrastructure/logger/index';
 import { MqttTransport, type MqttTransportConfig } from '../infrastructure/transport/MqttTransport';
 import type { SupervisorEventBridge } from './SupervisorEventBridge';
 
-export type ManagedAppState = 'stopped' | 'starting' | 'running' | 'crashed';
+// ⭐ 24/09/2026 : 'restarting' = en attente de relance après un crash (backoff), distinct de
+// 'crashed' (terminal, après MAX_RAPID_ATTEMPTS) — spec supervisor §8.4.
+export type ManagedAppState = 'stopped' | 'starting' | 'running' | 'restarting' | 'crashed';
 
 /** Délai avant chaque nouvelle tentative après un crash : 1s, 2s, 4s, 8s, 16s, puis plafonné à 30s. */
 const BACKOFF_BASE_MS = 1000;
@@ -56,8 +58,19 @@ export interface LifecycleCommandBrokerConfig {
   password?: string;
 }
 
+/** ⭐ 24/09/2026 — fin d'un process d'application, quelle qu'en soit la cause : `requested` vrai
+ *  pour un arrêt demandé (désactivation, redémarrage), faux pour un crash/SIGKILL non sollicité. */
+export interface ChildExitInfo {
+  appId: string;
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  requested: boolean;
+}
+
 export class ProcessSupervisor {
   private readonly apps: Map<string, ManagedApp> = new Map();
+  private readonly stateListeners: Array<(appId: string, state: ManagedAppState) => void> = [];
+  private readonly exitListeners: Array<(info: ChildExitInfo) => void> = [];
   private commandTransport: MqttTransport | null = null;
 
   constructor(
@@ -94,7 +107,19 @@ export class ProcessSupervisor {
 
   /** Déclare une application comme devant tourner en process séparé — ne la démarre pas encore. */
   register(appId: string, appDir: string): void {
-    if (this.apps.has(appId)) return;
+    const existing = this.apps.get(appId);
+    if (existing) {
+      // ⭐ 24/09/2026 : le dossier d'une application peut changer entre deux activations (racine
+      // externe data/applications/ ajoutée ou retirée, voir application/appRoots.ts) — le premier
+      // dossier vu était gardé à vie : réactivée après suppression de sa copie externe, l'app
+      // tentait de relancer un fichier disparu au lieu de sa version interne. Mis à jour tant que
+      // le process est arrêté (jamais sous un process qui tourne).
+      if (!existing.child && existing.appDir !== appDir) {
+        this.logger.info('ProcessSupervisor', `${appId} : dossier mis à jour ${existing.appDir} → ${appDir}`);
+        existing.appDir = appDir;
+      }
+      return;
+    }
     this.apps.set(appId, {
       appId,
       appDir,
@@ -106,6 +131,30 @@ export class ProcessSupervisor {
       onStoppedForRestart: null,
       killTimer: null
     });
+  }
+
+  /** ⭐ 24/09/2026 — état visible dans Gestion des applications (spec supervisor §8.4 : un
+   *  « crashed » ne doit jamais rester silencieux). */
+  onStateChange(listener: (appId: string, state: ManagedAppState) => void): void {
+    this.stateListeners.push(listener);
+  }
+
+  /** ⭐ 24/09/2026 — le core nettoie ce qu'il tient pour l'application (bridges MQTT, voir
+   *  IntegrationBridge) à CHAQUE fin de process, pas seulement quand l'app s'arrête proprement. */
+  onChildExit(listener: (info: ChildExitInfo) => void): void {
+    this.exitListeners.push(listener);
+  }
+
+  getStates(): Record<string, ManagedAppState> {
+    return Object.fromEntries(Array.from(this.apps.values()).map((a) => [a.appId, a.state]));
+  }
+
+  private setState(app: ManagedApp, state: ManagedAppState): void {
+    if (app.state === state) return;
+    app.state = state;
+    for (const listener of this.stateListeners) {
+      try { listener(app.appId, state); } catch { /* un écouteur défaillant ne bloque pas les autres */ }
+    }
   }
 
   isRegistered(appId: string): boolean {
@@ -132,8 +181,15 @@ export class ProcessSupervisor {
 
   stop(appId: string): void {
     const app = this.apps.get(appId);
-    if (!app || !app.child) return;
+    if (!app) return;
+    // ⭐ 24/09/2026, bug corrigé (analyse du 24/09) : le minuteur de backoff était annulé APRÈS le
+    // test `!app.child` — pendant l'attente de relance d'une app qui crashe (enfant absent), stop()
+    // sortait sans rien faire et l'app redémarrait quand même, alors qu'elle venait d'être désactivée.
     this.clearBackoff(app);
+    if (!app.child) {
+      this.setState(app, 'stopped');
+      return;
+    }
     app.stopRequested = true;
     this.killGracefully(app);
   }
@@ -247,11 +303,11 @@ export class ProcessSupervisor {
   private spawnChild(app: ManagedApp): void {
     const entry = this.resolveEntryPoint(app);
     if (!entry) {
-      app.state = 'crashed';
+      this.setState(app, 'crashed');
       return;
     }
 
-    app.state = 'starting';
+    this.setState(app, 'starting');
     const startedAt = Date.now();
     // 4e canal 'ipc' (16/08/2026) : stdin/stdout/stderr toujours hérités (logs visibles dans ceux
     // de core), plus un tuyau IPC dédié — voir SupervisorEventBridge, qui remplace MQTT pour la
@@ -268,7 +324,7 @@ export class ProcessSupervisor {
     this.eventBridge?.attachChild(app.appId, child);
 
     child.on('spawn', () => {
-      app.state = 'running';
+      this.setState(app, 'running');
       this.logger.info('ProcessSupervisor', `${app.appId} démarré (pid ${child.pid})`);
     });
 
@@ -287,9 +343,14 @@ export class ProcessSupervisor {
     this.eventBridge?.detachChild(app.appId);
     const ranMs = Date.now() - startedAt;
 
+    const info: ChildExitInfo = { appId: app.appId, code, signal, requested: app.stopRequested };
+    for (const listener of this.exitListeners) {
+      try { listener(info); } catch { /* idem setState() */ }
+    }
+
     if (app.stopRequested) {
       app.stopRequested = false;
-      app.state = 'stopped';
+      this.setState(app, 'stopped');
       this.logger.info('ProcessSupervisor', `${app.appId} arrêté (code=${code}, signal=${signal})`);
       const onRestart = app.onStoppedForRestart;
       app.onStoppedForRestart = null;
@@ -304,7 +365,7 @@ export class ProcessSupervisor {
     app.attempts++;
 
     if (app.attempts > MAX_RAPID_ATTEMPTS) {
-      app.state = 'crashed';
+      this.setState(app, 'crashed');
       this.logger.error(
         'ProcessSupervisor',
         `${app.appId} : abandon après ${app.attempts - 1} tentatives rapprochées (code=${code}, signal=${signal}) — état "crashed", réactivation manuelle requise`
@@ -317,6 +378,7 @@ export class ProcessSupervisor {
       'ProcessSupervisor',
       `${app.appId} : crash (code=${code}, signal=${signal}, actif ${Math.round(ranMs / 1000)}s) — tentative ${app.attempts}/${MAX_RAPID_ATTEMPTS} dans ${delay}ms`
     );
+    this.setState(app, 'restarting');
     app.backoffTimer = setTimeout(() => {
       app.backoffTimer = null;
       this.spawnChild(app);

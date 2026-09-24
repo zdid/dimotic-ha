@@ -1,5 +1,94 @@
 # Liste des problèmes à résoudre
 
+## ✅ DÉCISION cycle de vie des applications (24/09/2026, à reporter dans la spec supervisor)
+- **Le core ne redémarre JAMAIS pour une application** : il la charge, elle annonce ce qu'elle
+  fournit (menu, événements, config, bridges), chacun fait sa part — ajout, activation,
+  désactivation, retrait, tout à chaud.
+- **Une application nouvelle (jamais vue par ce core) arrive DÉSACTIVÉE** (théorie « doucement ») —
+  y compris sur une installation neuve : toutes les applications désactivées par défaut, on active
+  celles dont la machine a besoin. (Demande déjà formulée par l'utilisateur auparavant, jamais
+  consignée ni faite.) Motif : une mise à jour d'image ou une machine neuve ne doit jamais démarrer
+  une app (ex. rfxcom sans dongle) ni publier d'entités HA sans décision explicite.
+- Mécanisme : le core mémorise les apps déjà vues ; toute app inconnue est ajoutée à `disabledApps`
+  la première fois qu'il la voit, avec un repère « nouvelle » dans Gestion des applications.
+
+## ✅ PLAN cycle de vie des applications (24/09/2026) — FAIT et validé en réel avec testcycle (spec supervisor v2.10 §8)
+1. **Un seul chemin « activer »** (démarrage du core, bouton Activer, dossier apparu) : charger le
+   module, `registerModuleSchema` + `ensureModuleSections`, câbler et démarrer le process séparé,
+   ajouter à `modules` + métadonnées UI (menu/gossip suivent). Corrige écart n°4.
+2. **Un seul chemin « désactiver »** qui défait tout : arrêt du process même en attente de backoff
+   (bug n°1), `integration:bridge:unregister` fait PAR LE CORE à la mort du process quelle qu'en soit
+   la cause (bug n°2), retrait menu/métadonnées/événements persistants de SocketBridge (n°5).
+3. **Découverte des applications sur DEUX racines** — reprise de la conception du 01/09/2026 (entrée
+   « racine externe » plus bas) : `applications/` (interne, image) + `data/applications/` (externe,
+   volume, survit aux mises à jour d'image) ; l'externe masque l'interne de même nom. Relecture au
+   démarrage et à chaque ouverture de Gestion des applications : app inconnue → ajoutée à
+   `disabledApps` + repère « nouvelle » ; app disparue → désactivée (n°6). Un seul résolveur
+   « appId → dossier » utilisé partout (AppService, hooks, route statique `/applications/:appId`).
+   Dépassé par les décisions du 24/09 : plus de redémarrage 15 s ; app externe nouvelle = désactivée.
+   **Vérifié en réel le 24/09** : une app compilée importe le core par chemin RELATIF
+   (`../../../core/dist/exports`, `../../core/dist/exports`) → cassé depuis `data/applications/`
+   (« Cannot find module ») ; **corrigé par un lien symbolique relatif créé par le core**
+   `data/applications/core → ../../applications/core` (testé avec testcycle : index ET standalone
+   résolvent `applications/core/dist/exports.js`, même instance du core que celle du process core —
+   cache Node indexé par chemin réel). À savoir : une app externe doit embarquer ses propres
+   `node_modules` (zod, js-yaml…) ; elle tourne avec le core DE L'IMAGE EN PLACE (compatibilité des
+   exports entre versions non garantie) ; nom d'app `applications` interdit (collision `data/`).
+   **Tranché le 24/09** : code dans `data/applications/<app>/`, données/config dans `data/<app>/`
+   (deux dossiers — une app passée de l'externe à l'image retrouve ses données sans migration) ;
+   arrivée de l'app par copie manuelle d'abord, upload `.zip` plus tard.
+4. **État `crashed` visible** dans Gestion des applications + « Relancer » (n°3).
+- ✅ Validé en réel avec testcycle (24/09) : application nouvelle → désactivée + repère, racine
+  externe + lien vers le core, activation/désactivation à chaud, nettoyage SocketBridge,
+  `availability_topic` (entités `unavailable` dans HA à l'arrêt), crash « apres30s » : nettoyage MQTT
+  par le core à chaque crash, backoff 1/2/4/8/16 s, état « crashed » + bouton Relancer visibles.
+- ✅ Aussi corrigés pendant les tests (24/09) : `??` qui transformait chaque activation réussie en
+  échec ; bouton « Rafraîchir la liste » toujours inactif (`setAttribute('disabled','false')`) ;
+  dossier d'app gardé à vie par ProcessSupervisor ; page servie depuis la racine externe alors que
+  l'interne tournait ; cache HTML de page du navigateur non vidé ; `availability_topic` absent de
+  toute découverte dimotic (entités jamais `unavailable`) ; handlers navigateur→app non posés sur les
+  onglets déjà ouverts. `testcycle` versionnée et embarquée dans l'image (désactivée par défaut).
+- 🟡 Restant : attributs du capteur compteur de testcycle non remontés dans HA (pas de
+  `json_attributes_topic`) ; supprimer les fichiers d'une app qui tourne rend sa page non servie
+  jusqu'à sa désactivation (voulu) ; CLAUDE.md règle 7 parle encore de `applications_désactivées/`.
+- 🐛 Nouvelle anomalie (24/09) : à chaque recréation d'un bridge après crash, le transport MQTT
+  « rejoue N publications en attente » et N grossit (12, 16, 20, 24, 28 : +4 par cycle) — la file
+  d'attente n'est pas vidée au désenregistrement du bridge ; des états périmés sont renvoyés à HA.
+- ⚠️ 5 tests `AppService.test.ts > start()` échouent DÉJÀ AVANT ces travaux (vérifié le 24/09 par
+  `git stash`) : `fs` y est simulé, `ensureGlobalSshKey()` croit la clé absente et `ssh-keygen` échoue
+  sur « Overwrite? ». À corriger dans le test (simuler aussi SshClient), pas dans le code.
+- Tests : tout avec `applications/testcycle/` sur le dev falbala, scénario par scénario (logs, UI,
+  entités MQTT dans HA). Spec supervisor §8 à mettre à jour (nouvelle version).
+
+## ✅ Analyse du core — cycle de vie des applications (24/09/2026) — écarts n°1 à n°6 corrigés et validés en réel (voir PLAN ci-dessus)
+Toutes les apps métier sont `runsAsSeparateProcess: true` : l'activation/désactivation passe par le
+chemin « à chaud » (ProcessSupervisor), le redémarrage complet de 15 s n'est plus exercé.
+- 🔴 **Désactiver une app en boucle de crash ne l'arrête pas** : `ProcessSupervisor.stop()` fait
+  `if (!app.child) return` AVANT `clearBackoff()` — pendant l'attente de backoff (enfant absent), le
+  minuteur reste armé et l'app redémarre quand même après le délai.
+- 🔴 **Crash / SIGKILL d'une app d'intégration (nommage, rfxcom, arexx, evoo7) : rien n'est nettoyé
+  côté core** — `integration:bridge:unregister` n'est émis que par le `stop()` propre de l'app ;
+  `handleExit()` ne fait que `detachChild`. Le bridge MQTT (tenu par core) reste connecté → HA voit
+  les entités disponibles alors que l'app est morte.
+- 🟠 **État `crashed` invisible** (spec supervisor §8.4 : « visible UI ») : aucun relais vers
+  l'interface ni le gossip ; et « réactiver » une app crashed est refusé (« déjà activée ») — il faut
+  désactiver puis réactiver.
+- 🟠 **Activation à chaud incomplète par rapport au démarrage** : ni `registerModuleSchema()` (la
+  config de l'app n'est plus validée par son schéma Zod jusqu'au prochain redémarrage de core), ni
+  `ensureModuleSections()`.
+- 🟠 **Désactivation à chaud : SocketBridge ne libère rien** — menu (`customMenus`), métadonnées UI,
+  événements persistants de l'app (ex. `sauvegarde:status`) et écouteurs Socket.io restent, et sont
+  rejoués à chaque nouvelle connexion. Impact visible limité (Sidebar filtre sur la liste des modules).
+- 🟠 **`docker/build-apps.sh` construit une liste FIXE d'apps** (sans `sauvegarde` ni `outils`) : elles
+  sont quand même dans l'image uniquement parce que `.dockerignore` n'exclut que le `dist/` racine —
+  leur `dist/` compilé sur falbala est copié tel quel. Fragile (image dépendante du build local) ;
+  toute nouvelle app doit être ajoutée à la main. `applications/testcycle/` exclu explicitement de
+  l'image (`.dockerignore`, 24/09).
+- 🟠 **Application ajoutée (nouveau dossier) pendant que core tourne** : listée « activée » dans
+  Gestion des applications (listAll relit le disque) mais jamais chargée ni démarrée avant un
+  redémarrage de core. **Application retirée** (dossier supprimé) : son process continue jusqu'au
+  redémarrage ; entrée éventuelle dans `disabledApps` jamais nettoyée (sans effet).
+
 ## ✅ DÉCISION restauration (23/09/2026, à reporter dans la spec sauvegarde en fin de debug)
 - **Remplacement d'une machine = la nouvelle machine reprend l'adresse IP de l'ancienne**
   (réservation DHCP sur sa MAC, source arrêtée) — aucune réécriture d'adresse dans les fichiers

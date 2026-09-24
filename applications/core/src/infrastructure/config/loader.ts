@@ -117,6 +117,7 @@ export class ConfigLoader {
   load(): AppConfig {
     if (!fs.existsSync(this.configPath)) {
       this.createDefaultConfigFile();
+      this.createdByThisProcess = true;
     }
 
     const fileContent = fs.readFileSync(this.configPath, 'utf-8');
@@ -218,6 +219,15 @@ export class ConfigLoader {
    * encore. `ha.ws_enable`/`ha.mqtt_enable` restent à `false` par défaut, donc ce fichier fraîchement
    * créé ne tente aucune connexion tant que l'utilisateur n'a pas renseigné HA/MQTT via l'UI.
    */
+  /** ⭐ 24/09/2026 — vrai si CE process a dû créer le fichier (installation neuve) : distingue une
+   *  installation neuve (toutes les applications désactivées) d'une mise à jour d'une installation
+   *  existante (état activé/désactivé conservé) quand `knownApps` n'existe pas encore. */
+  private createdByThisProcess = false;
+
+  wasCreatedByThisProcess(): boolean {
+    return this.createdByThisProcess;
+  }
+
   private createDefaultConfigFile(): void {
     fs.mkdirSync(path.dirname(this.configPath), { recursive: true });
     fs.writeFileSync(this.configPath, yaml.dump(DEFAULT_CONFIG, { indent: 2, sortKeys: false }), 'utf-8');

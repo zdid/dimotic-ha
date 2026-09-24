@@ -2,10 +2,8 @@
 // Service d'orchestration de l'application
 // Conforme à specs-techniques-socle-ha-mqtt-v4.3.md §10.1 et specs-presentation-v2.0.md §4.2
 
-import { readdir, stat } from 'node:fs/promises';
-import { Dirent, existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import * as path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { EventBus } from './EventBus';
 import { ApplicationManager } from './ApplicationManager';
 import { CoreDeployService } from './CoreDeployService';
@@ -43,6 +41,7 @@ import type {
 import { technicalConfigSchema, getRequiredMissing } from '../types/config';
 import { AppConfigProvider } from '../infrastructure/config/AppConfigProvider';
 import { SOCLE_SOCKET_EVENTS } from '../types/events';
+import { setLoadedAppDir, clearLoadedAppDir } from './appRoots';
 
 /**
  * ⭐ 24/08/2026, correctif d'un bug réel : une app requiredHaWs peut attendre `ha:ready`
@@ -185,14 +184,22 @@ export class AppService {
 
     // Initialiser le gestionnaire d'applications
     this.applicationManager = new ApplicationManager(restartManager, logger, configService, this.processSupervisor);
-    // ⭐ 25/08/2026 — voir ApplicationManager.setActivateSeparateProcessHook() et
-    // AppService.tryActivateSeparateProcessApp() pour le pourquoi (activer une app en process
-    // séparé depuis l'état désactivé exige le câblage EventBus complet, pas seulement
-    // register()+start(), et ApplicationManager n'a pas accès à SupervisorEventBridge).
-    this.applicationManager.setActivateSeparateProcessHook((appId, appDir) => this.tryActivateSeparateProcessApp(appId, appDir));
-    // ⭐ 28/08/2026 — voir ApplicationManager.setDeactivateSeparateProcessHook() : symétrique du
-    // hook d'activation ci-dessus, pour que le menu (app:modules:list) reflète bien l'arrêt.
-    this.applicationManager.setDeactivateSeparateProcessHook((appId) => this.deactivateSeparateProcessApp(appId));
+    // ⭐ 24/09/2026 — UN chemin « activer » et UN chemin « désactiver » (voir activateApp()/
+    // deactivateApp()), les mêmes au démarrage, au clic, à l'apparition ou à la disparition d'un
+    // dossier d'application — jamais de redémarrage du core (décision du 24/09/2026).
+    this.applicationManager.setLifecycleHooks(
+      (appId, appDir) => this.activateApp(appId, appDir),
+      (appId) => this.deactivateApp(appId)
+    );
+    // État des process (dont 'restarting'/'crashed', spec supervisor §8.4) visible dans Gestion des
+    // applications ; et nettoyage côté core à CHAQUE fin de process (bridges MQTT tenus par le core,
+    // voir IntegrationBridge) — un crash ou un SIGKILL n'appelle jamais le stop() propre de l'app.
+    this.processSupervisor.onStateChange((appId, state) => {
+      this.eventBus.emitGeneric('app:process:state', { appId, state });
+    });
+    this.processSupervisor.onChildExit((info) => {
+      this.eventBus.emitGeneric('app:process:exited', info);
+    });
     this.coreDeployService = new CoreDeployService(configService, this.applicationManager, logger);
     this.haStackDeployService = new HaStackDeployService(logger);
     this.haplanLovelaceDeployService = new HaplanLovelaceDeployService(logger);
@@ -250,6 +257,8 @@ export class AppService {
     this.eventBus.on('app:applications:enable', (data: { appId: string }) => this.handleApplicationEnable(data));
     this.eventBus.on('app:applications:disable', (data: { appId: string }) => this.handleApplicationDisable(data));
     this.eventBus.on('app:applications:restart-now', () => this.applicationManager.restartNowIfPending());
+    // ⭐ 24/09/2026 — « Relancer » une application en état 'crashed' (abandon après 5 crashs rapprochés).
+    this.eventBus.onGeneric<{ appId: string }>('app:applications:restart', (data) => this.handleApplicationRestart(data));
 
     // Sites externes (⭐ 27/08/2026, voir schema.ts::externalSiteSchema) — liste personnelle,
     // jamais gossipée, même patron CRUD que les cibles de déploiement ci-dessous.
@@ -427,168 +436,143 @@ export class AppService {
   }
 
   /**
-   * Détecte automatiquement les modules d'application dans applications/
-   * Nouvelle structure : chaque application est dans applications/{app}/src/domain/index.ts
-   * Conforme à specs-presentation-v2.0.md §4.3
+   * Détecte les applications au démarrage du core — ⭐ 24/09/2026 : rapprochement disque/config
+   * (`ApplicationManager.reconcile()` : application nouvelle = désactivée, deux racines interne/
+   * externe) puis `registerApp()` pour chaque application activée — le MÊME enregistrement que
+   * l'activation à chaud (activateApp()), pour que démarrage et activation ne divergent plus.
+   * Le démarrage effectif des process a lieu ensuite dans startApplicationServices().
    */
   private async detectApplicationModules(): Promise<void> {
     try {
-      // Module core (paramètres techniques) est toujours présent
       this.modules.push(this.createCoreModule());
-
-      // Chemin vers le répertoire applications
-      const projectRoot = process.env.PROJECT_ROOT || path.resolve(path.join(__dirname, '../../../'));
-      const appsDir = path.join(projectRoot, 'applications');
-
-      // Lister les répertoires dans applications/ (exclure core et desactivees)
-      let dirs: Dirent[] = [];
-      
-      try {
-        const allDirs = await readdir(appsDir, { withFileTypes: true });
-        // Filtrer : on veut les répertoires qui sont des applications (pas core, pas desactivees)
-        dirs = allDirs.filter(dir => 
-          dir.isDirectory() && 
-          dir.name !== 'core' && 
-          dir.name !== 'desactivees' &&
-          !dir.name.startsWith('.')
-        );
-      } catch (err) {
-        this.logger.warn('AppService', `Aucun répertoire applications trouvé à ${appsDir}: ${err}`);
-        return;
-      }
-
-      // Applications désactivées (data/core/config.yaml, disabledApps) — toujours présentes
-      // physiquement sous applications/ (voir ApplicationManager.ts), donc explicitement
-      // exclues ici pour reproduire le comportement antérieur (une app désactivée n'a aucune
-      // trace dans this.modules : ni entrée de menu, ni schéma de config enregistré).
-      const disabledApps = new Set(this.applicationManager.listAll().disabled);
-      dirs = dirs.filter(dir => !disabledApps.has(dir.name));
-
-      for (const dir of dirs) {
-        // Vérifier si le répertoire contient dist/domain/index.js ou src/domain/index.ts
-        //
-        // ⚠️ `dist/domain/index.js` (production, code compilé) DOIT être vérifié en premier.
-        // Ce processus lui-même tourne soit sous `tsx` (dev — `npm run dev`/`dev:local`, qui
-        // enregistre un loader TypeScript pour TOUT le processus, y compris les modules chargés
-        // dynamiquement plus bas), soit sous `node` pur (production — `node dist/index.js`,
-        // aucun loader TS). Donner la priorité à `src/domain/index.ts` (ordre inversé jusqu'ici)
-        // fonctionnait donc par accident sous `tsx`, mais échouait systématiquement en
-        // production dès que `src/` existait (systématiquement vrai, le code source restant
-        // toujours présent) — `import()`/`require()` d'un fichier `.ts` brut sous `node` pur
-        // échoue avec une erreur de syntaxe (`Unexpected token`/`Unexpected identifier`), quel
-        // que soit l'état du `dist` réellement construit. Bug resté invisible tant que le projet
-        // n'avait jamais tourné en mode production réel — découvert en testant le déploiement
-        // Docker (03/08/2026), qui exécute `node applications/core/dist/index.js` sans `tsx`.
-        const distDomainIndexJs = path.join(appsDir, dir.name, 'dist', 'domain', 'index.js');
-        const srcDomainIndexTs = path.join(appsDir, dir.name, 'src', 'domain', 'index.ts');
-        const srcDomainIndexJs = path.join(appsDir, dir.name, 'src', 'domain', 'index.js');
-
-        let domainIndexPath: string | null = null;
-
-        if (existsSync(distDomainIndexJs)) {
-          domainIndexPath = distDomainIndexJs;
-        } else if (existsSync(srcDomainIndexTs)) {
-          domainIndexPath = srcDomainIndexTs;
-        } else if (existsSync(srcDomainIndexJs)) {
-          domainIndexPath = srcDomainIndexJs;
-        }
-        
-        if (!domainIndexPath) {
-          this.logger.debug('AppService', `Pas de domain/index trouvé pour ${dir.name}, ignoré`);
-          continue;
-        }
-        
-        try {
-          // ⚠️ `require()` direct pour un `.js` compilé (toujours CommonJS dans ce projet —
-          // aucune application n'a `"type": "module"`), `import()` uniquement pour le `.ts`
-          // source (dev sous `tsx`, dont le loader transpile à la volée pour `import()`).
-          //
-          // Historique : tenter `import()` d'abord puis retomber sur `require()` en cas
-          // d'échec — comme le faisait ce bloc jusqu'ici — semble anodin mais NE L'EST PAS
-          // pour un fichier CommonJS : Node délègue la résolution d'un `import()` de CJS à
-          // son propre chargeur `require` en interne. Un premier `import()` en échec sur ce
-          // même chemin, suivi d'un `require()` de repli qui réussit (exactement ce qui se
-          // produit ici, `detectModules()` tournant avant `loadApplicationModule()` sur le
-          // même fichier), laisse le résolveur de modules de Node dans un état incohérent
-          // pour un `import()` ULTÉRIEUR du même chemin ailleurs dans le process — provoquant
-          // un deuxième échec ("Cannot find module") sur un fichier pourtant bien présent et
-          // par ailleurs chargeable. Découvert en testant le déploiement Docker (03/08/2026,
-          // premier vrai test en mode production `node` pur, jamais exercé auparavant — voir
-          // aussi le correctif de priorité dist/src juste au-dessus).
-          let module: Record<string, unknown>;
-          if (domainIndexPath.endsWith('.ts')) {
-            const moduleUrl = pathToFileURL(domainIndexPath).href;
-            module = await import(moduleUrl);
-          } else {
-            module = require(path.resolve(domainIndexPath));
-          }
-
-          // Chercher une constante *APP
-          const appKey = Object.keys(module).find(k => k.endsWith('_APP'));
-          if (appKey && module[appKey]) {
-            const appModule = module[appKey] as ApplicationModule;
-            
-            this.logger.info('AppService', `Module ${dir.name} détecté - id: ${appModule.id}, name: ${appModule.name}, type: ${appModule.type}, hasConfigUi: ${!!appModule.configUi}, configUi: ${JSON.stringify(appModule.configUi)}`);
-            
-            // Déterminer le statut de configuration
-            const configStatus = this.getModuleConfigStatus(appModule);
-            
-            // Ajouter le module avec son statut
-            this.modules.push({
-              ...appModule,
-              status: configStatus,
-            });
-
-            // ⭐ fonctionnelles-supervisor_specs v2.6 §5/§7.1 — application en process séparé :
-            // enregistre le spawn (ProcessSupervisor, qui attache le canal IPC à chaque démarrage)
-            // et ponte ses événements sens core → app (SupervisorEventBridge). Réception (app →
-            // core, ex: app:menu:register, integration:bridge:register, tout événement métier émis
-            // par l'app) déjà générique par construction avec l'IPC — un ChildProcess ne parle
-            // qu'à SON enfant, tout ce qu'il envoie arrive forcément au pont (voir attachChild()),
-            // rien à déclarer pour ce sens. Il ne reste à déclarer explicitement que le sens
-            // core → app, couvert par 3 mécanismes génériques (aucune énumération manuelle par app
-            // nécessaire) : autoBridgeSocketEvents (dérive les événements UI du payload d'app:
-            // socket-events:registered, déjà reçu automatiquement), app:module:config:saved (méta-
-            // événement partagé, toute app séparée), la famille integration:{module}:* émise par
-            // IntegrationBridge (toute app type: 'integration'). Seul un événement vraiment propre
-            // à une app (ex: espdisplay:deploy-floorplan, HAPLAN→espdisplay) reste à déclarer dans
-            // ApplicationModule.bridgedEvents.
-            if (appModule.runsAsSeparateProcess) {
-              const appDir = path.join(appsDir, dir.name);
-              this.wireSeparateProcessApp(appModule, appDir);
-            }
-
-            // Détecter le schéma Zod du module (convention {moduleId}ConfigSchema, ex:
-            // nommageConfigSchema) — permet à ConfigService.saveModuleConfig() de valider avant
-            // écriture plutôt que de tout accepter via le .passthrough() de configSchema.
-            const schemaKey = Object.keys(module).find(k => k.toLowerCase() === `${appModule.id}configschema`.toLowerCase());
-            if (schemaKey && module[schemaKey]) {
-              this.configService.registerModuleSchema(appModule.id, module[schemaKey] as any);
-              this.logger.debug('AppService', `Schéma de configuration enregistré pour ${appModule.id}`);
-            }
-
-            // Détecter les événements Socket.io de l'application
-            const socketEventsKey = Object.keys(module).find(k => k.endsWith('_SOCKET_EVENTS'));
-            if (socketEventsKey && module[socketEventsKey]) {
-              const appSocketEvents = module[socketEventsKey];
-              this.logger.info('AppService', `Événements Socket.io détectés pour ${appModule.id}: ${Object.keys(appSocketEvents).length} événements`);
-              
-              // Envoyer les événements à SocketBridge pour configuration dynamique
-              this.eventBus.emit('app:socket-events:registered', {
-                appId: appModule.id,
-                socketEvents: appSocketEvents
-              });
-            }
-
-            this.logger.info('AppService', `Module détecté : ${appModule.id} (type: ${appModule.type})`);
-          }
-        } catch (error) {
-          this.logger.warn('AppService', `Erreur de chargement du module ${dir.name}: ${error}`);
-        }
+      this.applicationManager.reconcile();
+      const { activated } = this.applicationManager.listAll();
+      for (const appId of activated) {
+        const appDir = this.applicationManager.resolveAppDir(appId);
+        if (!appDir) continue;
+        const error = this.registerApp(appId, appDir);
+        if (error) this.logger.warn('AppService', `Application ${appId} non chargée : ${error}`);
       }
     } catch (error) {
       this.logger.error('AppService', `Erreur de détection des modules: ${error}`);
     }
+  }
+
+  /**
+   * Charge le module de domaine d'une application depuis SON dossier (racine interne ou externe) —
+   * `require()` dans tous les cas : `dist/domain/index.js` (production) en priorité, sinon la source
+   * `.ts` (dev, uniquement sous tsx qui enregistre son loader pour tout le process). Le cache Node
+   * des fichiers de CE dossier est vidé d'abord : une application remplacée sur disque (racine
+   * externe) est relue, pas servie depuis une version précédente.
+   * Historique conservé : `dist` DOIT passer avant `src` (sous `node` pur, un `.ts` ne se charge pas
+   * — bug découvert au premier déploiement Docker le 03/08/2026) ; et ne jamais mélanger `import()`
+   * puis `require()` sur un même fichier CommonJS (résolveur Node incohérent ensuite, même date).
+   */
+  private loadAppModule(appDir: string): Record<string, unknown> {
+    const candidates = ['dist/domain/index.js', 'src/domain/index.ts', 'src/domain/index.js']
+      .map((entry) => path.join(appDir, entry));
+    const entry = candidates.find((candidate) => existsSync(candidate));
+    if (!entry) throw new Error(`aucun domain/index dans ${appDir}`);
+    let realDir = appDir;
+    try { realDir = realpathSync(appDir); } catch { /* garde appDir */ }
+    for (const key of Object.keys(require.cache)) {
+      if (key.startsWith(realDir + path.sep)) delete require.cache[key];
+    }
+    return require(path.resolve(entry)) as Record<string, unknown>;
+  }
+
+  /**
+   * ⭐ 24/09/2026 — ENREGISTREMENT d'une application, sans démarrage : module chargé, entrée dans
+   * `this.modules`, schéma de config Zod (convention {moduleId}ConfigSchema — l'activation à chaud
+   * l'omettait jusqu'ici, écart n°4 de l'analyse du 24/09), événements Socket.io déclarés, câblage du
+   * process séparé. Commun au démarrage (detectApplicationModules) et à l'activation à chaud
+   * (activateApp). Renvoie un message d'erreur, `undefined` si réussi.
+   */
+  private registerApp(appId: string, appDir: string): string | undefined {
+    let module: Record<string, unknown>;
+    try {
+      module = this.loadAppModule(appDir);
+    } catch (error) {
+      return `chargement du module impossible (${error instanceof Error ? error.message : String(error)})`;
+    }
+    const appKey = Object.keys(module).find((k) => k.endsWith('_APP'));
+    const appModule = appKey ? (module[appKey] as ApplicationModule) : undefined;
+    if (!appModule) return 'aucune constante *_APP exportée par domain/index';
+    if (appModule.id !== appId) return `l'id déclaré (${appModule.id}) ne correspond pas au dossier (${appId})`;
+
+    this.logger.info('AppService', `Module ${appId} détecté - id: ${appModule.id}, name: ${appModule.name}, type: ${appModule.type}, dossier: ${appDir}, hasConfigUi: ${!!appModule.configUi}`);
+    this.modules = this.modules.filter((m) => m.id !== appId);
+    this.modules.push({ ...appModule, status: this.getModuleConfigStatus(appModule) });
+    setLoadedAppDir(appId, appDir);
+
+    const schemaKey = Object.keys(module).find((k) => k.toLowerCase() === `${appId}configschema`.toLowerCase());
+    if (schemaKey && module[schemaKey]) {
+      this.configService.registerModuleSchema(appId, module[schemaKey] as any);
+      this.logger.debug('AppService', `Schéma de configuration enregistré pour ${appId}`);
+    }
+
+    const socketEventsKey = Object.keys(module).find((k) => k.endsWith('_SOCKET_EVENTS'));
+    if (socketEventsKey && module[socketEventsKey]) {
+      this.eventBus.emit('app:socket-events:registered', {
+        appId,
+        socketEvents: module[socketEventsKey] as Record<string, string>
+      });
+    }
+
+    if (appModule.runsAsSeparateProcess) {
+      if (!this.processSupervisor.isRegistered(appId)) {
+        this.wireSeparateProcessApp(appModule, appDir);
+      } else {
+        // Déjà câblée : seul le dossier peut avoir changé (racine externe ajoutée/retirée).
+        this.processSupervisor.register(appId, appDir);
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * ⭐ 24/09/2026 — ACTIVATION à chaud (bouton Activer) : enregistrement complet (registerApp) +
+   * section de config + démarrage + annonce (menu, formulaire Paramètres Techniques, gossip).
+   * Jamais de redémarrage du core. Renvoie un message d'erreur, `undefined` si l'application tourne.
+   */
+  private activateApp(appId: string, appDir: string): string | undefined {
+    const error = this.registerApp(appId, appDir);
+    if (error) return error;
+    const appModule = this.modules.find((m) => m.id === appId)!;
+    this.configService.ensureModuleSections([appId]);
+    if (appModule.runsAsSeparateProcess) {
+      this.processSupervisor.start(appId);
+    } else {
+      this.startApplicationService(appId).catch((err) => {
+        this.logger.error('AppService', `Échec du démarrage du service ${appId}: ${err}`);
+      });
+    }
+    this.eventBus.emit('app:modules:registered', { modules: this.modules });
+    if (appModule.configUi) {
+      this.eventBus.emit('app:module:ui:register', { moduleId: appId, metadata: appModule.configUi });
+    }
+    return undefined;
+  }
+
+  /**
+   * ⭐ 24/09/2026 — DÉSACTIVATION à chaud : défait tout ce que l'activation avait mis en place —
+   * arrêt du process (même en attente de relance, voir ProcessSupervisor.stop()), retrait de
+   * `this.modules` (menu, gossip), et `app:unregistered` pour que SocketBridge (menu, métadonnées,
+   * événements persistants, écouteurs) et IntegrationBridge (bridges MQTT) libèrent ce qu'ils tiennent.
+   */
+  private deactivateApp(appId: string): void {
+    if (this.processSupervisor.isRegistered(appId)) {
+      this.processSupervisor.stop(appId);
+    } else {
+      void this.stopApplicationService(appId);
+    }
+    const before = this.modules.length;
+    this.modules = this.modules.filter((m) => m.id !== appId);
+    if (this.modules.length !== before) {
+      this.eventBus.emit('app:modules:registered', { modules: this.modules });
+    }
+    clearLoadedAppDir(appId);
+    this.eventBus.emitGeneric('app:unregistered', { appId });
   }
 
   /**
@@ -614,83 +598,6 @@ export class AppService {
     }
     for (const eventName of appModule.bridgedEvents ?? []) {
       this.supervisorBridge.bridgeEvent(appModule.id, eventName);
-    }
-  }
-
-  /**
-   * ⭐ 25/08/2026 — hook fourni à ApplicationManager (setActivateSeparateProcessHook, voir son
-   * commentaire) : tente d'activer `appId` en process séparé sans redémarrer core. Charge son
-   * module (dist/domain/index.js en priorité, repli src/domain/index.ts — même logique
-   * dist-prioritaire que detectApplicationModules()) pour lire `runsAsSeparateProcess` ; si
-   * absent/false, renvoie `false` sans effet de bord (ApplicationManager retombe alors sur le
-   * redémarrage complet, seul chemin valide pour une app qui n'a jamais été migrée).
-   *
-   * Une app désactivée n'a jamais eu son wireSeparateProcessApp() initial (filtrée avant, voir
-   * detectApplicationModules()) : appelé ici. Poussée dans `this.modules` si absente (jamais
-   * activée depuis le démarrage de ce process core) pour que menu/UI la reflètent normalement.
-   */
-  private tryActivateSeparateProcessApp(appId: string, appDir: string): boolean {
-    const distDomainIndexJs = path.join(appDir, 'dist', 'domain', 'index.js');
-    const srcDomainIndexTs = path.join(appDir, 'src', 'domain', 'index.ts');
-
-    try {
-      let module: Record<string, unknown> | undefined;
-      if (existsSync(distDomainIndexJs)) {
-        module = require(path.resolve(distDomainIndexJs));
-      } else if (existsSync(srcDomainIndexTs)) {
-        // require() sur un .ts fonctionne sous tsx (loader enregistré pour tout le process, y
-        // compris les require() dynamiques) — seul contexte où ce repli est exercé, dist/domain/
-        // index.js existe toujours en production (voir docker/build-apps.sh).
-        module = require(path.resolve(srcDomainIndexTs));
-      }
-      if (!module) return false;
-
-      const appKey = Object.keys(module).find((k) => k.endsWith('_APP'));
-      const appModule = appKey ? (module[appKey] as ApplicationModule) : undefined;
-      if (!appModule?.runsAsSeparateProcess) return false;
-
-      if (!this.processSupervisor.isRegistered(appModule.id)) {
-        this.wireSeparateProcessApp(appModule, appDir);
-      }
-      if (!this.modules.some((m) => m.id === appModule.id)) {
-        this.modules.push({ ...appModule, status: this.getModuleConfigStatus(appModule) });
-        // ⭐ 28/08/2026 : sans ça, `this.modules` est à jour côté serveur mais aucun onglet ouvert
-        // (ni SocketBridge.modulesList, mis à jour uniquement sur cet événement) ne le sait tant
-        // que core n'a pas redémarré — voir deactivateSeparateProcessApp() ci-dessous, même bug,
-        // sens inverse.
-        this.eventBus.emit('app:modules:registered', { modules: this.modules });
-        // ⭐ 05/09/2026, bug réel corrigé (retour utilisateur teleinfo) : `app:modules:list` (ci-
-        // dessus) alimente le MENU (Sidebar.ts), qui affichait bien la nouvelle app aussitôt
-        // activée — mais le FORMULAIRE "Paramètres Techniques" (ConfigForm.ts) lit ses métadonnées
-        // depuis un cache CLIENT séparé (`ModuleManager.moduleUiMetadata`), rempli uniquement par
-        // `app:module:ui:register` — événement que seul `emitModuleUiMetadata()` (scan de démarrage
-        // complet) émettait jusqu'ici, jamais ce chemin d'activation à chaud. Résultat observé :
-        // "Pas de configuration UI disponible" tant que core n'était pas redémarré, malgré une
-        // activation "réussie" côté menu. Corrigé en émettant aussi cet événement ici, pour CE seul
-        // module fraîchement activé (pas emitModuleUiMetadata() en entier, inutile de reproposer
-        // les modules déjà connus).
-        if (appModule.configUi) {
-          this.eventBus.emit('app:module:ui:register', { moduleId: appModule.id, metadata: appModule.configUi });
-        }
-      }
-      return true;
-    } catch (error) {
-      this.logger.warn('AppService', `Impossible d'activer ${appId} en process séparé: ${error}`);
-      return false;
-    }
-  }
-
-  /**
-   * ⭐ 28/08/2026, bug réel corrigé — voir ApplicationManager.setDeactivateSeparateProcessHook() :
-   * retire `appId` de `this.modules` et réémet `app:modules:registered` pour que le menu
-   * (Sidebar/ModuleManager, alimenté par `app:modules:list`) reflète immédiatement l'arrêt, sans
-   * attendre un redémarrage complet de core qui n'a plus jamais lieu pour une app en process séparé.
-   */
-  private deactivateSeparateProcessApp(appId: string): void {
-    const before = this.modules.length;
-    this.modules = this.modules.filter((m) => m.id !== appId);
-    if (this.modules.length !== before) {
-      this.eventBus.emit('app:modules:registered', { modules: this.modules });
     }
   }
 
@@ -861,9 +768,34 @@ export class AppService {
    */
   private handleApplicationsList(): void {
     this.logger.info('AppService', 'Demande de liste des applications reçue');
-    const { activated, disabled } = this.applicationManager.listAll();
+    // ⭐ 24/09/2026 — relecture du disque à chaque ouverture de Gestion des applications : une
+    // application apparue arrive désactivée (repère « nouvelle »), une disparue est arrêtée.
+    const { removed } = this.applicationManager.reconcile();
+    for (const appId of removed) {
+      if (this.modules.some((m) => m.id === appId) || this.processSupervisor.isRegistered(appId)) {
+        this.logger.info('AppService', `Application ${appId} retirée du disque — arrêt`);
+        this.deactivateApp(appId);
+      }
+    }
+    const { activated, disabled, details } = this.applicationManager.listAll();
+    const states = this.processSupervisor.getStates();
     this.logger.info('AppService', `Liste des applications: activated=${JSON.stringify(activated)}, disabled=${JSON.stringify(disabled)}`);
-    this.eventBus.emit('app:applications:list:result', { activated, disabled });
+    this.eventBus.emit('app:applications:list:result', {
+      activated,
+      disabled,
+      details: details.map((d) => ({ ...d, state: activated.includes(d.appId) ? (states[d.appId] ?? 'stopped') : 'stopped' }))
+    });
+  }
+
+  /** ⭐ 24/09/2026 — relance d'une application en état 'crashed' (compteur de tentatives remis à zéro). */
+  private handleApplicationRestart(data: { appId: string }): void {
+    const known = this.processSupervisor.isRegistered(data.appId);
+    if (known) this.processSupervisor.restart(data.appId);
+    this.eventBus.emitGeneric('app:applications:restart:result', {
+      appId: data.appId,
+      success: known,
+      error: known ? undefined : `Application ${data.appId} non gérée par le superviseur`
+    });
   }
 
   /**
@@ -1463,54 +1395,15 @@ export class AppService {
    * @returns Le module chargé ou undefined
    */
   private async loadApplicationModule(moduleId: string): Promise<Record<string, unknown> | undefined> {
+    // ⭐ 24/09/2026 : dossier résolu sur les deux racines (voir appRoots.ts), même chargement que
+    // registerApp().
+    const appDir = this.applicationManager.resolveAppDir(moduleId);
+    if (!appDir) {
+      this.logger.debug('AppService', `Module ${moduleId} introuvable (applications/ ni data/applications/)`);
+      return undefined;
+    }
     try {
-      // Chemin vers le module (applications/{moduleId}/src/domain/index.ts ou dist/domain/index.js)
-      const projectRoot = process.env.PROJECT_ROOT || path.resolve(path.join(__dirname, '../../../'));
-      const appsDir = path.join(projectRoot, 'applications');
-      
-      let modulePath: string | undefined;
-
-      // Essayer applications/{moduleId}/dist/domain/index.js (production) EN PREMIER —
-      // voir le commentaire détaillé dans detectModules() ci-dessus pour la raison impérative
-      // de cet ordre (un `src/domain/index.ts` prioritaire échoue systématiquement sous `node`
-      // pur, hors `tsx`).
-      const distModulePath = path.join(appsDir, moduleId, 'dist', 'domain', 'index.js');
-      if (existsSync(distModulePath)) {
-        modulePath = distModulePath;
-      }
-
-      // Essayer applications/{moduleId}/src/domain/index.ts (développement, sous tsx)
-      if (!modulePath) {
-        const srcModulePath = path.join(appsDir, moduleId, 'src', 'domain', 'index.ts');
-        if (existsSync(srcModulePath)) {
-          modulePath = srcModulePath;
-        }
-      }
-
-      // Essayer applications/{moduleId}/src/domain/index.js (cas résiduel)
-      if (!modulePath) {
-        const srcModuleJsPath = path.join(appsDir, moduleId, 'src', 'domain', 'index.js');
-        if (existsSync(srcModuleJsPath)) {
-          modulePath = srcModuleJsPath;
-        }
-      }
-      
-      if (!modulePath) {
-        this.logger.debug('AppService', `Module ${moduleId} introuvable dans applications/`);
-        return undefined;
-      }
-      
-      // Convertir en URL pour l'import dynamique
-      // `require()` direct pour le `.js` compilé (CommonJS), `import()` uniquement pour le
-      // `.ts` source (dev sous tsx) — voir le commentaire détaillé dans detectModules().
-      let module: Record<string, unknown>;
-      if (modulePath.endsWith('.ts')) {
-        const moduleUrl = pathToFileURL(modulePath).href;
-        module = await import(moduleUrl);
-      } else {
-        module = require(path.resolve(modulePath));
-      }
-      return module;
+      return this.loadAppModule(appDir);
     } catch (error) {
       this.logger.error('AppService', `Échec du chargement du module ${moduleId}: ${error}`);
       return undefined;

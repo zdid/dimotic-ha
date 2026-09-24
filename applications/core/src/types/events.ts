@@ -74,7 +74,7 @@ export interface ServerToClientEvents {
   'app:module:config:saved': (data: { moduleId: string; success: boolean; error?: string }) => void;
 
   // Gestion des applications (NOUVEAU v4.4)
-  'app:applications:list:result': (data: { activated: string[]; disabled: string[] }) => void;
+  'app:applications:list:result': (data: { activated: string[]; disabled: string[]; details?: Array<{ appId: string; origin: 'interne' | 'externe' | 'externe-remplace'; isNew: boolean; state: string }> }) => void;
   'app:applications:enable:result': (data: { appId: string; success: boolean; error?: string; restarting?: boolean }) => void;
   'app:applications:disable:result': (data: { appId: string; success: boolean; error?: string; restarting?: boolean }) => void;
 
@@ -224,7 +224,8 @@ export interface AppEvents {
 
   // Gestion des applications (NOUVEAU v4.4)
   'app:applications:list': void;
-  'app:applications:list:result': { activated: string[]; disabled: string[] };
+  // ⭐ 24/09/2026 : `details` — origine (racine interne/externe), repère « nouvelle », état du process.
+  'app:applications:list:result': { activated: string[]; disabled: string[]; details?: Array<{ appId: string; origin: 'interne' | 'externe' | 'externe-remplace'; isNew: boolean; state: string }> };
   'app:applications:enable': { appId: string };
   'app:applications:enable:result': { appId: string; success: boolean; error?: string; restarting?: boolean };
   'app:applications:disable': { appId: string };

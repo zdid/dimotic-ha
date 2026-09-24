@@ -179,6 +179,11 @@ export const configSchema = z.object({
   // l'empêche d'être chargée. Élimine le besoin de fs.renameSync() entre deux répertoires
   // (qui échouait avec EXDEV sous overlay2 sans volume nommé dédié, voir Dockerfile).
   disabledApps: z.array(z.string()).default([]),
+  // ⭐ 24/09/2026 — applications déjà VUES par ce core (voir ApplicationManager.reconcile()) : toute
+  // application absente de cette liste est « nouvelle » et arrive désactivée (décision du 24/09 :
+  // une mise à jour d'image ou une installation neuve ne démarre jamais rien sans décision).
+  // `undefined` = jamais initialisée (installation antérieure à cette version, ou neuve).
+  knownApps: z.array(z.string()).optional(),
   // Cibles de déploiement de dimotic-ha lui-même (⭐ 23/08/2026) — voir deploymentTargetSchema.
   targets: z.array(deploymentTargetSchema).default([]),
   // Cibles de déploiement Home Assistant + Mosquitto (⭐ 24/08/2026) — voir haStackTargetSchema.

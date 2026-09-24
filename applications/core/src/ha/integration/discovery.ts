@@ -8,7 +8,7 @@
 
 import type { MqttTransport } from '../../infrastructure/transport/MqttTransport';
 import type { HaMqttDevice, HaMqttDiscoveryEntity } from './types/ha-mqtt';
-import { getDiscoveryTopic, getStateTopic, getCommandTopic, getAttributesTopic } from './types/ha-mqtt';
+import { getDiscoveryTopic, getStateTopic, getCommandTopic, getAttributesTopic, getBridgeStatusTopic } from './types/ha-mqtt';
 
 /**
  * Données essentielles qu'un module métier doit fournir pour une entité.
@@ -90,6 +90,16 @@ export function buildDiscoveryPayload(
     payload_off: essential.payloadOff,
     value_template: essential.valueTemplate,
     device: essential.device,
+    // ⭐ 24/09/2026 — disponibilité rattachée au statut du bridge (`<module>/<bridge>/status`, que
+    // le core publie déjà : `online` à la connexion, `offline` à l'arrêt, dernière volonté MQTT en
+    // cas de crash). Sans ça, HA ignorait ce topic : une application arrêtée ou plantée laissait
+    // ses entités « disponibles » avec leur dernière valeur (constaté avec testcycle le 24/09).
+    // Surchargeable via `essential.extra` pour une entité qui aurait sa propre disponibilité.
+    availability_topic: getBridgeStatusTopic(context.moduleName, context.bridgeInstance),
+    // = LWT_PAYLOAD_ONLINE / LWT_PAYLOAD_OFFLINE de MqttTransport.ts, recopiés (pas importés) :
+    // discovery.ts reste indépendant du transport (simulé en entier dans les tests).
+    payload_available: 'online',
+    payload_not_available: 'offline',
     retain: true,
     qos: 1,
   };

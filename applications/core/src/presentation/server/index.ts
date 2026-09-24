@@ -13,6 +13,7 @@ import type { EventBus } from '../../application/EventBus';
 import type { ApplicationModule } from '../../types/config';
 import { AuthService } from '../../infrastructure/auth/AuthService';
 import type { HaAutomationBackupService } from '../../ha/automations/HaAutomationBackupService';
+import { servedAppDir } from '../../application/appRoots';
 
 /**
  * Crée et configure le serveur Express + Socket.io
@@ -227,7 +228,11 @@ export class PresentationServer {
     this.app.use('/applications/:appId', (req: Request, res: Response, next: NextFunction) => {
       const fs = require('fs');
       if (!req.params.appId) return next();
-      const appsRoot = path.join(process.env.PROJECT_ROOT || this.projectRoot, 'applications', req.params.appId);
+      // ⭐ 24/09/2026 : racine externe data/applications/ prioritaire (voir application/appRoots.ts,
+      // SEUL résolveur appId → dossier) — sans ça les pages d'une app externe répondaient 404.
+      // Version CHARGÉE en priorité (voir servedAppDir) — sinon résolution sur disque.
+      const appsRoot = servedAppDir(req.params.appId, process.env.PROJECT_ROOT || this.projectRoot)
+        ?? path.join(process.env.PROJECT_ROOT || this.projectRoot, 'applications', req.params.appId);
       const distPath = path.join(appsRoot, 'dist', req.path);
       // Les apps métier (evoo7/rfxcom/nommage) compilent avec rootDir=".." (pour inclure les
       // fichiers core/src référencés) : la sortie est imbriquée sous dist/{appId}/src/... au lieu

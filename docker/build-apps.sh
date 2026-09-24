@@ -48,7 +48,10 @@ echo "=== Construction des applications métier ==="
 # .dockerignore (qui liste bien dist/, mais ne l'exclut pas pour applications/*/dist/ imbriqués —
 # cause exacte non creusée) : un build Docker sur un clone strictement neuf, sans ce dist/ résiduel,
 # aurait révélé le problème immédiatement.
-for app in arbreouquoi arexx espdisplay evoo7 haplan ia nommage planificateur rfxcom rpigpio scriptsha teleinfo; do
+# ⭐ 24/09/2026 : testcycle (application de TEST du cycle de vie, voir applications/testcycle/) —
+# embarquée dans l'image pour pouvoir éprouver le core sur n'importe quelle machine ; comme toute
+# application nouvelle, elle y arrive DÉSACTIVÉE (ApplicationManager.reconcile()).
+for app in arbreouquoi arexx espdisplay evoo7 haplan ia nommage planificateur rfxcom rpigpio scriptsha teleinfo testcycle; do
   build_app "${app}"
 done
 
