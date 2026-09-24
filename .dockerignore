@@ -5,6 +5,15 @@
 .git/
 node_modules/
 dist/
+# ⭐ 24/09/2026 : `dist/`/`node_modules/` ci-dessus ne visent QUE la racine du contexte — les dist/ et
+# node_modules/ compilés localement dans applications/*/ passaient dans l'image et masquaient toute
+# application absente du build (sauvegarde/outils le 24/09). Exclus partout : l'image est construite
+# intégralement par docker/build-apps.sh.
+**/dist/
+**/node_modules/
+# Mémoire de compilation incrémentale de TypeScript (ignorée par git, PAS par Docker) : copiée sans
+# les dist/ qu'elle décrit, elle faisait croire à tsc que tout était déjà compilé → rien n'était émis.
+**/*.tsbuildinfo
 data/
 logs/
 backups/

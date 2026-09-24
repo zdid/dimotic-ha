@@ -14,6 +14,7 @@ import type {
 import type { ConfigValidationResult, TechnicalConfig, ModuleUiMetadata } from '../types/config';
 import type { Logger } from '../infrastructure/logger/index';
 import type { AuthService } from '../infrastructure/auth/AuthService';
+import { redactForLog } from '../infrastructure/logger/redact';
 
 /**
  * SocketBridge - Traduit les événements EventBus ↔ Socket.io
@@ -126,7 +127,7 @@ export class SocketBridge {
     this.eventBus.on('config:save:requested', (config: TechnicalConfig) => {
       this.logger.info('SocketBridge', 'EventBus → Socket.io: config:save:requested');
       console.log('[SocketBridge SERVEUR] Réception config:save:requested via EventBus');
-      console.log('[SocketBridge SERVEUR] Config reçue:', JSON.stringify(config, null, 2));
+      console.log('[SocketBridge SERVEUR] Config reçue:', redactForLog(config, 2));
       // La validation et sauvegarde sont gérées par AppService
       // SocketBridge ne fait que relayer les résultats
     });
@@ -228,7 +229,7 @@ export class SocketBridge {
       // Stocker les métadonnées pour les envoyer aux nouvelles connexions
       this.moduleUiMetadata[typedData.moduleId] = typedData.metadata;
       this.broadcast('app:module:ui:register', typedData);
-      this.logger.info('SocketBridge', `Métadonnées UI relayées pour module: ${typedData.moduleId}, metadata: ${JSON.stringify(typedData.metadata)}`);
+      this.logger.info('SocketBridge', `Métadonnées UI relayées pour module: ${typedData.moduleId}, metadata: ${redactForLog(typedData.metadata)}`);
     });
 
     // Menu dynamique des applications - Relay vers l'UI (Sidebar.ts, registerCustomMenu())
@@ -422,43 +423,43 @@ export class SocketBridge {
       // Handler pour config:save
       // @ts-ignore
       socket.on('config:save', (config: TechnicalConfig) => {
-        this.logger.info('SocketBridge', `Socket.io → EventBus: config:save de ${socket.id}, config: ${JSON.stringify(config)}`);
+        this.logger.info('SocketBridge', `Socket.io → EventBus: config:save de ${socket.id}, config: ${redactForLog(config)}`);
         this.eventBus.emit('config:save:requested', config);
       });
 
       // Handler pour config:validate
       // @ts-ignore
       socket.on('config:validate', (config: Partial<TechnicalConfig>) => {
-        this.logger.info('SocketBridge', `Socket.io → EventBus: config:validate de ${socket.id}, config: ${JSON.stringify(config)}`);
+        this.logger.info('SocketBridge', `Socket.io → EventBus: config:validate de ${socket.id}, config: ${redactForLog(config)}`);
         this.eventBus.emit('config:validate:requested', config);
       });
 
       // Handler pour logs:get
       // @ts-ignore
       socket.on('logs:get', (params: { lines: number }) => {
-        this.logger.info('SocketBridge', `Socket.io → EventBus: logs:get de ${socket.id}, params: ${JSON.stringify(params)}`);
+        this.logger.info('SocketBridge', `Socket.io → EventBus: logs:get de ${socket.id}, params: ${redactForLog(params)}`);
         this.eventBus.emitGeneric('logs:get', params);
       });
 
       // Handler pour les modules
       // @ts-ignore
       socket.on('app:modules:config:get', (data: { moduleId: string }) => {
-        this.logger.info('SocketBridge', `Socket.io → EventBus: app:modules:config:get de ${socket.id}, data: ${JSON.stringify(data)}`);
+        this.logger.info('SocketBridge', `Socket.io → EventBus: app:modules:config:get de ${socket.id}, data: ${redactForLog(data)}`);
         this.eventBus.emit('app:modules:config:get', data);
       });
 
       // @ts-ignore
       socket.on('app:modules:config:save', (data: { moduleId: string; config: Record<string, unknown> }) => {
-        this.logger.info('SocketBridge', `Socket.io → EventBus: app:modules:config:save de ${socket.id}, data: ${JSON.stringify(data)}`);
+        this.logger.info('SocketBridge', `Socket.io → EventBus: app:modules:config:save de ${socket.id}, data: ${redactForLog(data)}`);
         console.log('[SocketBridge SERVEUR] Réception app:modules:config:save depuis socket');
-        console.log('[SocketBridge SERVEUR] Données reçues:', JSON.stringify(data, null, 2));
+        console.log('[SocketBridge SERVEUR] Données reçues:', redactForLog(data, 2));
         this.eventBus.emit('app:modules:config:save', data);
       });
 
       // Handler pour demander les métadonnées UI d'un module
       // @ts-ignore
       socket.on('app:module:ui:metadata:get', (data: { moduleId: string }) => {
-        this.logger.info('SocketBridge', `Socket.io → EventBus: app:module:ui:metadata:get de ${socket.id} pour ${data.moduleId}, data: ${JSON.stringify(data)}`);
+        this.logger.info('SocketBridge', `Socket.io → EventBus: app:module:ui:metadata:get de ${socket.id} pour ${data.moduleId}, data: ${redactForLog(data)}`);
         this.eventBus.emit('app:module:ui:metadata:get', data);
       });
 
@@ -653,7 +654,7 @@ export class SocketBridge {
    */
   broadcast<K extends keyof ServerToClientEvents>(event: K, data: Parameters<ServerToClientEvents[K]>[0]): void {
     this.io.emit(event as string, data);
-    this.logger.info('SocketBridge', `Broadcast ${String(event)}, data: ${JSON.stringify(data)}`);
+    this.logger.info('SocketBridge', `Broadcast ${String(event)}, data: ${redactForLog(data)}`);
   }
 
   /**

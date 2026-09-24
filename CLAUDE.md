@@ -13,13 +13,13 @@ applications/
   core/                    # Le socle — NE PEUT PAS être désactivé. package.json/tsconfig/src propres.
   <app>/                   # Chaque application métier est autonome : son propre
                             # package.json, tsconfig.json, src/, dist/ (ex: nommage, arbreouquoi)
-applications_désactivées/  # Applications désactivées
 specs/
   current/                 # Spécifications actuelles, versionnées dans le nom du fichier
   archives/vX.Y.Z/         # Anciennes versions des specs (gitignored)
   CHANGELOG.md             # Historique des évolutions de specs
 backups/                   # Sauvegardes locales (gitignored, jamais commitées)
 data/                      # Runtime, gitignored — un sous-répertoire par application
+  applications/            # Racine EXTERNE d'applications (code ; masque l'interne de même nom, survit aux mises à jour d'image)
   core/                    # config.yaml du socle (ha/web/logging)
   <app>/                   # config.yaml de l'app (objet nu) + ses fichiers de données
 logs/                      # Runtime, gitignored
@@ -47,5 +47,5 @@ cd applications/arbreouquoi && npm run build # tsc (+ watch, dev:local)
 4. **Modification de masse** (>10 fichiers OU >30% du code d'un module) OU risque de corruption identifié → **demander confirmation explicite** + créer une sauvegarde avant d'agir. Ne jamais utiliser `sed`/`awk` sur du code source sans validation manuelle préalable (`git diff`) et sauvegarde complète.
 5. **Sauvegardes** dans `backups/` : jamais commitées, jamais modifiées après création, nommage `[fichier]_backup_[AAAA-MM-JJ][_description].ext`, structure de répertoires préservée, vérification avec `diff -r` avant toute restauration, minimum 3 versions conservées.
 6. **Commentaire de date** obligatoire dans les fichiers principaux (`index.html`, etc.) : `<!-- Derniere modification: AAAA-MM-JJ HH:MM:SS - [description] -->`, à maintenir à jour immédiatement après chaque modification.
-7. **Le core** (`applications/core/`) ne peut jamais être désactivé. L'activation/désactivation des autres applications se fait uniquement via l'UI (*Paramètres Techniques > Gestion des applications*) ou par déplacement manuel entre `applications/` et `applications_désactivées/`.
+7. **Le core** (`applications/core/`) ne peut jamais être désactivé. L'activation/désactivation des autres applications se fait uniquement via l'UI (*Paramètres Techniques > Gestion des applications*), **à chaud — jamais de redémarrage du core** (liste `disabledApps` + `knownApps` dans `data/core/config.yaml` ; `applications_désactivées/` n'existe plus). **Une application nouvelle (jamais vue, ou installation neuve) arrive désactivée.** Détection sur deux racines : `applications/` et `data/applications/` (externe). Application de test du cycle de vie : `applications/testcycle/` (voir `fonctionnelles-supervisor_specs` §8).
 8. **Git** : ne pas committer `backups/` (déjà exclu via `.gitignore`), taguer les versions de specs (`git tag specs/vX.Y.Z`), branches `feature/`, `fix/`, `release/`, commits atomiques et clairs.

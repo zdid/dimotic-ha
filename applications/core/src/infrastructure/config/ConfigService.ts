@@ -3,6 +3,7 @@ import { AppConfig, HaConfig, MqttConfig, WebConfig, LoggingConfig, DeploymentTa
 import { ConfigLoader } from './loader';
 import { ConfigWriter, SaveResult } from './writer';
 import type { Logger } from '../logger/index';
+import { redactForLog } from '../logger/redact';
 
 /**
  * Service centralisé d'accès à la configuration.
@@ -141,7 +142,7 @@ export class ConfigService {
    */
   saveConfig(newConfig: AppConfig): SaveResult {
     console.log('[ConfigService SERVEUR] Sauvegarde configuration globale');
-    console.log('[ConfigService SERVEUR] Config complète:', JSON.stringify(newConfig, null, 2));
+    console.log('[ConfigService SERVEUR] Config complète:', redactForLog(newConfig, 2));
     // Le client envoie l'objet fusionné complet (TechnicalConfigManager.config, qui reflète
     // config:current — toutes les sections d'app y compris), mais depuis la restructuration
     // data/{app}/ ce endpoint ne possède plus que le socle : on ne retient que ha/web/logging,
@@ -410,7 +411,7 @@ export class ConfigService {
 
   saveModuleConfig<T>(moduleId: string, config: T): SaveResult {
     console.log('[ConfigService SERVEUR] Sauvegarde configuration module - moduleId:', moduleId);
-    console.log('[ConfigService SERVEUR] Config module:', JSON.stringify(config, null, 2));
+    console.log('[ConfigService SERVEUR] Config module:', redactForLog(config, 2));
 
     // Valeur effectivement écrite : la sortie de Zod (validation.data), pas `config` brut — un
     // schéma peut porter un .transform() qui normalise/recalcule des champs (ex: discoveryTopics

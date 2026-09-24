@@ -42,6 +42,7 @@ import { technicalConfigSchema, getRequiredMissing } from '../types/config';
 import { AppConfigProvider } from '../infrastructure/config/AppConfigProvider';
 import { SOCLE_SOCKET_EVENTS } from '../types/events';
 import { setLoadedAppDir, clearLoadedAppDir } from './appRoots';
+import { redactForLog } from '../infrastructure/logger/redact';
 
 /**
  * ⭐ 24/08/2026, correctif d'un bug réel : une app requiredHaWs peut attendre `ha:ready`
@@ -684,7 +685,7 @@ export class AppService {
     this.logger.info('AppService', 'Début émission des métadonnées UI pour les modules');
     for (const module of this.modules) {
       if (module.configUi) {
-        this.logger.info('AppService', `Module ${module.id} a un configUi, émission en cours: ${JSON.stringify(module.configUi)}`);
+        this.logger.info('AppService', `Module ${module.id} a un configUi, émission en cours: ${redactForLog(module.configUi)}`);
         this.eventBus.emit('app:module:ui:register', {
           moduleId: module.id,
           metadata: module.configUi,
@@ -756,7 +757,7 @@ export class AppService {
   private handleModuleUiRegister(data: { moduleId: string; metadata: ModuleUiMetadata }): void {
     // Pour l'instant, on relaye juste vers SocketBridge
     // L'implémentation complète sera gérée par SocketBridge
-    this.logger.info('AppService', `Métadonnées UI enregistrées pour ${data.moduleId}, metadata: ${JSON.stringify(data.metadata)}`);
+    this.logger.info('AppService', `Métadonnées UI enregistrées pour ${data.moduleId}, metadata: ${redactForLog(data.metadata)}`);
   }
 
   // ===========================================================================
@@ -779,7 +780,7 @@ export class AppService {
     }
     const { activated, disabled, details } = this.applicationManager.listAll();
     const states = this.processSupervisor.getStates();
-    this.logger.info('AppService', `Liste des applications: activated=${JSON.stringify(activated)}, disabled=${JSON.stringify(disabled)}`);
+    this.logger.info('AppService', `Liste des applications: activated=${redactForLog(activated)}, disabled=${redactForLog(disabled)}`);
     this.eventBus.emit('app:applications:list:result', {
       activated,
       disabled,
@@ -1193,7 +1194,7 @@ export class AppService {
 
     // Récupérer la liste des applications activées
     const { activated } = this.applicationManager.listAll();
-    this.logger.info('AppService', `Applications activées: ${JSON.stringify(activated)}`);
+    this.logger.info('AppService', `Applications activées: ${redactForLog(activated)}`);
 
     // Démarrage EN PARALLÈLE, pas séquentiel (08/08/2026) — une app requiredHaWs peut attendre
     // ha:ready indéfiniment (voir startApplicationService()) ; avec un for...of + await comme
@@ -1761,7 +1762,7 @@ export class AppService {
    */
   private handleConfigSave(config: TechnicalConfig): void {
     console.log('[AppService SERVEUR] Traitement de config:save:requested');
-    console.log('[AppService SERVEUR] Config à valider:', JSON.stringify(config, null, 2));
+    console.log('[AppService SERVEUR] Config à valider:', redactForLog(config, 2));
     
     const validationResult = this.validateConfig(config);
     console.log('[AppService SERVEUR] Résultat validation:', validationResult);
@@ -1830,7 +1831,7 @@ export class AppService {
   private handleModuleConfigSave(data: { moduleId: string; config: unknown }): void {
     console.log('[AppService SERVEUR] Traitement de app:modules:config:save');
     console.log('[AppService SERVEUR] Module:', data.moduleId);
-    console.log('[AppService SERVEUR] Config module:', JSON.stringify(data.config, null, 2));
+    console.log('[AppService SERVEUR] Config module:', redactForLog(data.config, 2));
     
     // Utiliser ConfigService pour sauvegarder la configuration du module
     const saveResult = this.configService.saveModuleConfig(data.moduleId, data.config);

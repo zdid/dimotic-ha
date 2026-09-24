@@ -46,6 +46,38 @@ vi.mock('node:fs', async () => {
   };
 });
 
+// ⭐ 24/09/2026 — aucune connexion MQTT réelle pendant les tests unitaires : le gossip (cibles,
+// applications) et les commandes du superviseur ouvraient une vraie connexion vers ha.mqtt.host
+// (192.168.1.100 dans baseConfig), qui réessayait en tâche de fond pendant tout le test.
+vi.mock('../../infrastructure/transport/MqttTransport', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('../../infrastructure/transport/MqttTransport');
+  class FakeMqttTransport {
+    connect(): void {}
+    disconnect(): void {}
+    publish(): void {}
+    subscribe(): void {}
+    unsubscribe(): void {}
+    onMessage(): void {}
+    onConnect(): void {}
+    onDisconnect(): void {}
+    publishStatus(): void {}
+    getConnected(): boolean { return false; }
+  }
+  return { ...actual, MqttTransport: FakeMqttTransport };
+});
+
+// ⭐ 24/09/2026 — `fs` est simulé ci-dessus (existsSync renvoie undefined) : sans ce mock,
+// AppService.start() appelait le VRAI ensureGlobalSshKey(), qui croyait la clé absente et lançait
+// ssh-keygen sur la clé réelle de la machine de dev (« Overwrite? » sans réponse → échec). Les 5
+// tests start() échouaient pour cette seule raison, sans rapport avec AppService.
+vi.mock('../../infrastructure/remote/SshClient', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('../../infrastructure/remote/SshClient');
+  return {
+    ...actual,
+    ensureGlobalSshKey: vi.fn().mockReturnValue('/tmp/test-dimotic-ssh/id_ed25519'),
+  };
+});
+
 const mockConfigService = {
   getConfig: vi.fn(),
   getHaConfig: vi.fn(),
@@ -56,6 +88,18 @@ const mockConfigService = {
   ensureModuleSections: vi.fn(),
   getDisabledApps: vi.fn().mockReturnValue([]),
   setDisabledApps: vi.fn().mockReturnValue({ success: true }),
+  // ⭐ 24/09/2026 — méthodes utilisées par AppService et ses services depuis l'écriture initiale de
+  // ce test (gossip des cibles/applications 24-27/08, cycle de vie des applications 24/09) : leur
+  // absence cassait start() (« getTargets is not a function »…), sans rapport avec ce qui est testé.
+  getTargets: vi.fn().mockReturnValue([]),
+  getHaStackTargets: vi.fn().mockReturnValue([]),
+  getZigbee2mqttTargets: vi.fn().mockReturnValue([]),
+  getExternalSites: vi.fn().mockReturnValue([]),
+  getKnownApps: vi.fn().mockReturnValue([]),
+  isFreshInstall: vi.fn().mockReturnValue(false),
+  setAppLists: vi.fn().mockReturnValue({ success: true }),
+  registerModuleSchema: vi.fn(),
+  getModuleConfig: vi.fn().mockReturnValue({}),
 } as unknown as ConfigService;
 
 const mockSocketBridge = {
@@ -155,6 +199,18 @@ describe('AppService', () => {
     mockConfigService.getHaConfig = vi.fn().mockReturnValue(baseConfig.ha);
     mockConfigService.getMqttConfig = vi.fn().mockReturnValue(baseConfig.ha?.mqtt);
     mockConfigService.getLoggingConfig = vi.fn().mockReturnValue(baseConfig.logging);
+    // ⭐ 24/09/2026 : redéfinis ici (afterEach → vi.restoreAllMocks() efface les valeurs de retour
+    // posées à la déclaration de mockConfigService).
+    mockConfigService.getTargets = vi.fn().mockReturnValue([]);
+    mockConfigService.getHaStackTargets = vi.fn().mockReturnValue([]);
+    mockConfigService.getZigbee2mqttTargets = vi.fn().mockReturnValue([]);
+    mockConfigService.getExternalSites = vi.fn().mockReturnValue([]);
+    mockConfigService.getKnownApps = vi.fn().mockReturnValue([]);
+    mockConfigService.isFreshInstall = vi.fn().mockReturnValue(false);
+    mockConfigService.setAppLists = vi.fn().mockReturnValue({ success: true });
+    mockConfigService.getDisabledApps = vi.fn().mockReturnValue([]);
+    mockConfigService.setDisabledApps = vi.fn().mockReturnValue({ success: true });
+    mockConfigService.getModuleConfig = vi.fn().mockReturnValue({});
   });
 
   afterEach(() => {
@@ -288,12 +344,10 @@ describe('AppService', () => {
       // Réinitialiser les mocks
       vi.clearAllMocks();
       
-      // Mock readdir pour simuler la détection de modules
-      const mockReaddir = vi.fn().mockResolvedValue([
-        { name: 'test-module', isDirectory: () => true } as any,
-      ]);
-      
-      vi.mocked(fsPromises.readdir).mockImplementationOnce(mockReaddir);
+      // ⭐ 24/09/2026 : la détection ne passe plus par fs.readdir (détail d'implémentation que ce test
+      // vérifiait) mais par ApplicationManager.reconcile() — rapprochement disque/config qui consulte
+      // les applications déjà connues (knownApps). On vérifie ce comportement, pas l'appel système.
+      mockConfigService.getKnownApps = vi.fn().mockReturnValue([]);
 
       appService = new AppService(
         mockEventBus,
@@ -305,7 +359,7 @@ describe('AppService', () => {
 
       await appService.start();
 
-      expect(mockReaddir).toHaveBeenCalled();
+      expect(mockConfigService.getKnownApps).toHaveBeenCalled();
     });
 
     it('should load and validate configuration', async () => {

@@ -99,6 +99,8 @@ export class IntegrationBridge {
 
   /** Bridges enregistrés par les modules, indépendamment de l'état connecté/déconnecté. */
   private registeredBridges: Map<string, BridgeRegisterEvent> = new Map();
+  /** Modules dont les événements integration:{module}:* sont déjà écoutés — voir subscribeModuleEvents(). */
+  private readonly subscribedModules: Set<string> = new Set();
 
   /** Clés (`{moduleName}:{bridgeInstance}`) des bridges actuellement connectés — sert à dériver
    *  un statut MQTT agrégé unique (`mqtt:connected`/`mqtt:disconnected`, voir §11 du socle pour
@@ -241,6 +243,13 @@ export class IntegrationBridge {
    * S'abonne, pour un module donné, à ses événements de découverte/état/passthrough.
    */
   private subscribeModuleEvents(moduleName: string): void {
+    // ⭐ 24/09/2026, bug corrigé : appelée à CHAQUE enregistrement d'un bridge, cette méthode ajoutait
+    // 6 écouteurs de plus à chaque fois — une intégration relancée (crash, désactivation/réactivation)
+    // voyait chaque découverte et chaque état publiés 2, 3, 4… fois (constaté avec testcycle : 12, 16,
+    // 20, 24, 28 publications « rejouées »). Une seule souscription par module, pour toute la vie du core.
+    if (this.subscribedModules.has(moduleName)) return;
+    this.subscribedModules.add(moduleName);
+
     this.eventBus.onGeneric<DiscoveryRequestEvent>(`integration:${moduleName}:discovery`, (data) => {
       if (!this.mqttEnabled) return;
       void this.publishDiscoveryWithArea(moduleName, data);

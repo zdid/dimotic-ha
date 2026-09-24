@@ -51,7 +51,18 @@
 - 🟡 Restant : attributs du capteur compteur de testcycle non remontés dans HA (pas de
   `json_attributes_topic`) ; supprimer les fichiers d'une app qui tourne rend sa page non servie
   jusqu'à sa désactivation (voulu) ; CLAUDE.md règle 7 parle encore de `applications_désactivées/`.
-- 🐛 Nouvelle anomalie (24/09) : à chaque recréation d'un bridge après crash, le transport MQTT
+- ✅ 24/09 après-midi — anomalies restantes du core corrigées :
+  (1) « file MQTT qui grossit » = en réalité `IntegrationBridge.subscribeModuleEvents()` ajoutait 6
+  écouteurs à chaque (ré)enregistrement d'un bridge → découvertes/états publiés 2, 3, 4… fois ; une
+  seule souscription par module (vérifié : 4 publications stables à chaque relance) ;
+  (2) secrets masqués dans les JOURNAUX uniquement (`infrastructure/logger/redact.ts`, messages
+  intacts) — vérifié : plus aucun token HA en clair dans le log ;
+  (3) `docker/build-apps.sh` en boucle sur applications/*/ + `.dockerignore` exclut `**/dist/`,
+  `**/node_modules/`, `**/*.tsbuildinfo` (la mémoire incrémentale de tsc copiée sans les dist/ faisait
+  qu'aucune app ne compilait) — build Docker de test OK, 15 apps avec dist + présentation ;
+  (4) 5 tests AppService réparés (clé SSH, faux ConfigService périmé, test lié à fs.readdir) :
+  144/144 ; (5) CLAUDE.md + PROMPT_PROJET.md v1.12 à jour (plus d'applications_desactivees/).
+- ~~🐛 Nouvelle anomalie (24/09) : à chaque recréation d'un bridge après crash, le transport MQTT
   « rejoue N publications en attente » et N grossit (12, 16, 20, 24, 28 : +4 par cycle) — la file
   d'attente n'est pas vidée au désenregistrement du bridge ; des états périmés sont renvoyés à HA.
 - ⚠️ 5 tests `AppService.test.ts > start()` échouent DÉJÀ AVANT ces travaux (vérifié le 24/09 par

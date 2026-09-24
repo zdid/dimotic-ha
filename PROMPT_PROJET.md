@@ -1,8 +1,9 @@
 # PROMPT PROJET - Règles de Développement
 
-**Version : 1.11**
-**Date : 16 Août 2026**
-**Dernière mise à jour : Table §11 "Pour Applications Spécifiques" — ligne "Supervision multi-machines (SUPERVISOR)" réécrite : passe de "conception, pas encore implémenté" à implémenté et vérifié en conditions réelles pour 7 applications (session du 16/08/2026, spec v2.6), IPC remplace MQTT pour le pont local. Aucun autre changement. Ancienne version v1.10 archivée dans `specs/archives/PROMPT_PROJET_v1.10-20260816.md`.**
+**Version : 1.12**
+**Date : 24 Septembre 2026**
+**Dernière mise à jour : Règles critiques de structure (activation/désactivation) — plus de répertoire `applications_desactivees/` (supprimé le 07/08/2026, simple liste `disabledApps`) ; activation/désactivation À CHAUD sans redémarrage du core ; application nouvelle désactivée par défaut ; détection sur deux racines `applications/` + `data/applications/` (voir `fonctionnelles-supervisor_specs_v2.10.md` §8). Ancienne version v1.11 archivée dans `specs/archives/PROMPT_PROJET_v1.11-20260816.md`.**
+**Mise à jour précédente (v1.11) : Table §11 "Pour Applications Spécifiques" — ligne "Supervision multi-machines (SUPERVISOR)" réécrite : passe de "conception, pas encore implémenté" à implémenté et vérifié en conditions réelles pour 7 applications (session du 16/08/2026, spec v2.6), IPC remplace MQTT pour le pont local. Aucun autre changement. Ancienne version v1.10 archivée dans `specs/archives/PROMPT_PROJET_v1.10-20260816.md`.**
 
 ## 📚 Table des Matières
 1. [Règles Fondamentales](#-règles-fondamentales)
@@ -257,16 +258,12 @@ projet/
 │       ├── dist/
 │       └── src/
 │
-├── applications_desactivees/ # ⭐ NOUVEAU v1.1: APPLICATIONS DÉSACTIVÉES
-│   └── [app-desactivee]/ # Exemple : application désactivée
-│       ├── package.json
-│       ├── tsconfig.json
-│       ├── dist/
-│       └── src/
+│   (⭐ v1.12 : plus de répertoire applications_desactivees/ — liste `disabledApps` dans data/core/config.yaml)
 │
 ├── data/                  # Données persistantes
-│   ├── config.yaml       # Configuration globale (socle + paramètres communs)
-│   └── [app-name]/       # Données spécifiques par application
+│   ├── core/config.yaml  # Configuration du socle (disabledApps, knownApps, ha, web, logging…)
+│   ├── applications/     # ⭐ v1.12 : racine EXTERNE d'applications (masque l'interne de même nom)
+│   └── [app-name]/       # Config (config.yaml) et données spécifiques par application
 │
 ├── logs/                  # Logs
 │   └── [app-name].log    # Logs par application ou globaux
@@ -285,9 +282,9 @@ projet/
 
 > **⚠️ RÈGLES CRITIQUES V1.1 :**
 > - **Le core (dans `applications/core/`) NE PEUT PAS être désactivé.**
-> - L'activation/désactivation des applications se fait **exclusivement** via le sous-menu **"Paramètres Techniques > Gestion des applications"** dans l'UI, ou via déplacement manuel entre `applications/` et `applications_desactivees/`.
+> - L'activation/désactivation des applications se fait **exclusivement** via le sous-menu **"Paramètres Techniques > Gestion des applications"** dans l'UI — **à chaud, jamais de redémarrage du core** ; l'état est une liste `disabledApps` (+ `knownApps`) dans `data/core/config.yaml` (le répertoire `applications_desactivees/` n'existe plus depuis le 07/08/2026). **Une application nouvelle (jamais vue, ou installation neuve) arrive désactivée** — voir `fonctionnelles-supervisor_specs_v2.10.md` §8.
 > - Chaque application est **autonome** : elle contient ses propres `package.json`, `tsconfig.json`, et `dist/`.
-> - La détection des applications est effectuée par `AppService` qui scanne **uniquement** le répertoire `applications/`.
+> - La détection des applications est effectuée par `AppService` sur **deux racines** : `applications/` (livrée avec l'image) et `data/applications/` (externe, pour tester une application sans reconstruire l'image — elle masque l'interne de même nom).
 
 ---
 

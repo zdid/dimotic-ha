@@ -40,18 +40,17 @@ echo "=== Construction de core (préalable obligatoire) ==="
 build_app core
 
 echo "=== Construction des applications métier ==="
-# ⭐ 25/08/2026 : espdisplay/rpigpio/scriptsha/teleinfo ajoutées — absentes de cette liste depuis
-# leur création, jamais construites par le build Docker. Sans dist/domain/index.js, AppService
-# retombe sur src/domain/index.ts (lecture des métadonnées) et ProcessSupervisor sur
-# src/standalone.ts (exécution) — les deux nécessitent tsx. Le bug était invisible car un dist/
-# local (construit à la main sur la machine de dev) traîne dans le contexte de build malgré
-# .dockerignore (qui liste bien dist/, mais ne l'exclut pas pour applications/*/dist/ imbriqués —
-# cause exacte non creusée) : un build Docker sur un clone strictement neuf, sans ce dist/ résiduel,
-# aurait révélé le problème immédiatement.
-# ⭐ 24/09/2026 : testcycle (application de TEST du cycle de vie, voir applications/testcycle/) —
-# embarquée dans l'image pour pouvoir éprouver le core sur n'importe quelle machine ; comme toute
-# application nouvelle, elle y arrive DÉSACTIVÉE (ApplicationManager.reconcile()).
-for app in arbreouquoi arexx espdisplay evoo7 haplan ia nommage planificateur rfxcom rpigpio scriptsha teleinfo testcycle; do
+# ⭐ 24/09/2026 : BOUCLE sur applications/*/ au lieu d'une liste fixe (demande explicite) — la liste
+# fixe a oublié des applications deux fois : espdisplay/rpigpio/scriptsha/teleinfo (corrigé le
+# 25/08/2026) puis sauvegarde/outils (constaté le 24/09/2026). L'oubli restait invisible parce que
+# le dist/ compilé sur la machine de dev passait dans l'image (.dockerignore n'excluait que le dist/
+# racine — désormais `**/dist/`, voir .dockerignore) : toute application présente dans le dépôt est
+# maintenant construite (build serveur + build:ui de sa présentation), core en premier (ci-dessus).
+# Une application nouvelle y arrive DÉSACTIVÉE (ApplicationManager.reconcile()), testcycle comprise.
+for dir in applications/*/; do
+  app="$(basename "${dir}")"
+  [ "${app}" = "core" ] && continue
+  [ -f "${dir}package.json" ] || continue
   build_app "${app}"
 done
 
