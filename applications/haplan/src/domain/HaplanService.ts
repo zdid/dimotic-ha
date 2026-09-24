@@ -30,6 +30,11 @@ import { buildLovelaceDashboardYaml } from './lovelace-generator';
 import { flattenPngOntoDarkBackground, createBlankBackgroundPng } from './image-flatten';
 import { readImageDimensions, type ImageDimensions } from './image-dimensions';
 
+/** ⭐ 24/09/2026 — délais d'expiration des déploiements (compilation ESPHome : 15-65 s constatés,
+ *  large marge ; dépôt Lovelace par SSH : quelques secondes). */
+const DEPLOY_WATCHDOG_MS = 5 * 60 * 1000;
+const LOVELACE_WATCHDOG_MS = 2 * 60 * 1000;
+
 const MODULE_NAME = 'haplan';
 
 /** Doit rester synchronisé avec la liste blanche `fileFilter` de la route d'upload
@@ -143,6 +148,7 @@ export class HaplanService implements IHaplanService {
       'espdisplay:deploy-result',
       (result) => {
         this.deployInProgress = false;
+        this.clearDeployWatchdog('écran');
         if (result.ok) {
           this.logger.info('HaplanService', `Déploiement réussi (${result.floorplanId}, ${result.durationMs}ms)`);
         } else {
@@ -159,6 +165,7 @@ export class HaplanService implements IHaplanService {
       'core:haplan-lovelace:deploy:result',
       (result) => {
         this.lovelaceDeployInProgress = false;
+        this.clearDeployWatchdog('lovelace');
         if (result.success) {
           this.logger.info('HaplanService', 'Dépôt de la carte Plan Lovelace réussi');
         } else {
@@ -168,11 +175,12 @@ export class HaplanService implements IHaplanService {
       }
     );
 
-    if (this.haBridgeClient.isAvailable()) {
-      this.haBridgeClient.onStateChanged((entity) => this.handleHaStateChanged(entity));
-    } else {
-      this.logger.warn('HaplanService',
-        'Référentiel HA indisponible (ha.ws_enable=false ?) — aucun état/commande en direct possible.');
+    // ⭐ 24/09/2026 — abonnement TOUJOURS posé (simple écoute d'événement) : avant, il ne l'était
+    // que si le référentiel était déjà chargé au démarrage — HA pas encore prêt = aucun état en
+    // direct pour toute la vie du process (icônes figées).
+    this.haBridgeClient.onStateChanged((entity) => this.handleHaStateChanged(entity));
+    if (!this.haBridgeClient.isAvailable()) {
+      this.logger.info('HaplanService', 'Référentiel HA pas encore chargé — états en direct dès sa disponibilité');
     }
 
     // ⭐ 15/09/2026 : emitTaxonomyTree() au démarrage (ci-dessous) peut s'exécuter avant que le
@@ -491,6 +499,13 @@ export class HaplanService implements IHaplanService {
     }
 
     this.deployInProgress = true;
+    this.armDeployWatchdog('écran', data.floorplanId, DEPLOY_WATCHDOG_MS, () => {
+      this.deployInProgress = false;
+      this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.FLOORPLAN_DEPLOY_RESULT, {
+        floorplanId: data.floorplanId, ok: false, durationMs: DEPLOY_WATCHDOG_MS,
+        message: `Aucune réponse d'espdisplay après ${DEPLOY_WATCHDOG_MS / 60000} min (application désactivée ou bloquée ?) — verrou libéré.`
+      });
+    });
     this.logger.info('HaplanService', `Déploiement demandé pour le plan ${data.floorplanId}`);
     this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.FLOORPLAN_DEPLOY_STARTED, { floorplanId: data.floorplanId });
     this.eventBus.emitGeneric('espdisplay:deploy-floorplan', { floorplanId: data.floorplanId });
@@ -520,7 +535,41 @@ export class HaplanService implements IHaplanService {
     this.lovelaceDeployInProgress = true;
     this.logger.info('HaplanService', `Dépôt de la carte Plan Lovelace demandé pour ${floorplanIds.length} plan(s)`);
     this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.LOVELACE_DEPLOY_STARTED, {});
+    const failLovelace = (message: string): void => {
+      this.lovelaceDeployInProgress = false;
+      this.clearDeployWatchdog('lovelace');
+      this.logger.error('HaplanService', `Dépôt de la carte Plan Lovelace : ${message}`);
+      this.eventBus.emitGeneric(HAPLAN_SOCKET_EVENTS.LOVELACE_DEPLOY_RESULT, { success: false, error: message });
+    };
+    this.armDeployWatchdog('lovelace', undefined, LOVELACE_WATCHDOG_MS,
+      () => failLovelace(`aucune réponse du core après ${LOVELACE_WATCHDOG_MS / 60000} min — verrou libéré.`));
+    try {
+      this.prepareAndSendLovelace();
+    } catch (error) {
+      // ⭐ 24/09/2026 — une erreur de préparation (image illisible…) laissait le verrou pris à vie.
+      failLovelace(`préparation impossible : ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
+  private readonly deployWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** ⭐ 24/09/2026 — verrou de déploiement libéré si aucune réponse n'arrive (espdisplay désactivée
+   *  ou bloquée, dépôt Lovelace jamais revenu) : avant, « déjà en cours » jusqu'au redémarrage. */
+  private armDeployWatchdog(kind: 'écran' | 'lovelace', floorplanId: string | undefined, ms: number, onTimeout: () => void): void {
+    this.clearDeployWatchdog(kind);
+    this.deployWatchdogs.set(kind, setTimeout(() => {
+      this.deployWatchdogs.delete(kind);
+      this.logger.warn('HaplanService', `Déploiement ${kind}${floorplanId ? ` (${floorplanId})` : ''} sans réponse après ${ms / 60000} min — verrou libéré`);
+      onTimeout();
+    }, ms));
+  }
+
+  private clearDeployWatchdog(kind: 'écran' | 'lovelace'): void {
+    const timer = this.deployWatchdogs.get(kind);
+    if (timer) { clearTimeout(timer); this.deployWatchdogs.delete(kind); }
+  }
+
+  private prepareAndSendLovelace(): void {
     const cacheBust = Date.now();
     // Sous-dossier dédié (pas de préfixe sur le nom de fichier lui-même) : le dépôt SSH copie
     // toutes les images en une seule fois vers un répertoire distant (scp source multiple ->

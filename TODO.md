@@ -1,5 +1,46 @@
 # Liste des problèmes à résoudre
 
+## 🔴 ESPDISPLAY — revue de code (24/09/2026) — constats, rien corrigé
+- 🟠 Config jamais relue (process séparé, ni `reload()` ni écoute de l'enregistrement) → changer
+  l'hôte distant / le conteneur esphome depuis l'écran n'a aucun effet avant redémarrage.
+- 🟠 Pipeline (compilation locale ou SSH) sans délai d'expiration → une compilation/SSH bloquée ne
+  rend jamais la main (haplan libère désormais son verrou, mais espdisplay reste occupé).
+- 🟡 Identifiant de plan transmis tel quel au script distant (commande forcée) — pas de contrôle
+  de format côté espdisplay.
+- 🟡 Sortie du pipeline accumulée entièrement en mémoire (logs de compilation ESPHome volumineux).
+
+## 🟡 SCRIPTSHA + HAPLAN + OUTILS — revue de code (24/09/2026) — CORRIGÉ (scriptsha v1.3, haplan v1.8 ; outils : pas de spec dédiée), à valider en réel
+- Fait : outils (id/noms de fichiers contrôlés partout, messages lisibles), haplan (abonnement aux
+  états toujours posé, verrous de déploiement avec délai d'expiration), scriptsha (délai de 30 s sur
+  les requêtes vers le core, dépôt raté annulé). Vérifié hors ligne (délais raccourcis).
+- ❌ Constat « helper minuterie renommé … 2 » : SANS OBJET à la vérification — le nom vient du
+  suffixe d'entity_id, déjà unique et au bon format, la collision ne peut pas se produire.
+- ⏸️ En suspens (décision utilisateur) : haplan, signaler les entités d'un plan absentes de HA.
+- ℹ️ outils n'a pas de spec dédiée dans specs/current.
+- Constats d'origine :
+- 🟠 **outils : écriture de fichiers hors de son dossier possible** (traversée de chemin) —
+  l'`id` d'un script (yaml ou zip importé) n'est pas contrôlé (`z.string().min(1)`) et sert à
+  construire des chemins (`<id>.yaml`, `<id>.sh`) ; idem le nom du fichier « moteur » déposé et
+  l'`id` de `outils:values:save` (écrit `<id>.json`). Un id `../../core/config` écrit hors de
+  data/outils (ex. écraser une config), depuis n'importe quel poste du réseau local.
+- 🟠 **haplan : états en direct jamais reçus si HA n'était pas prêt au démarrage** — l'abonnement
+  aux changements d'état n'est posé que si le référentiel est déjà disponible → icônes figées pour
+  toute la vie du process (même famille que « HA prêt »).
+- 🟠 **haplan : « déploiement déjà en cours » définitif** si espdisplay ne répond pas (désactivée,
+  arrêtée, plantée) ou si le dépôt Lovelace ne revient jamais — aucun délai d'expiration ; une
+  exception pendant la préparation des images Lovelace bloque aussi le verrou.
+- 🟠 **scriptsha : requêtes vers le core sans délai d'expiration** (helpers HA, liste d'entités,
+  diffusion/retrait, import) — si le core ne répond pas (HA déconnecté…), le verrou de
+  réconciliation reste pris : TOUTES les réconciliations suivantes sont ignorées (« déjà en cours »)
+  jusqu'au redémarrage ; un script reste « en cours » à l'écran.
+- 🟡 scriptsha : helper minuterie renommé « … 2 » (collision de nom) → l'automatisation, qui calcule
+  `timer.minuterie_<lumière>`, ne le trouve pas (lumière sans minuterie, en silence).
+- 🟡 scriptsha : dépôt d'un fichier — si l'écriture du manifeste échoue, le fichier et l'entrée en
+  mémoire restent (divergence).
+- 🟡 haplan : entités d'un plan disparues de HA (renommage) non signalées — positions mortes en
+  silence (cas réel : 33/33 après un renommage nommage).
+- ✅ scriptsha : protection anti-boucle de la minuterie (incident du 18/08) toujours en place.
+
 ## 🟡 NOMMAGE + TELEINFO + RPIGPIO — revue de code (24/09/2026) — CORRIGÉ (nommage v2.1, teleinfo v1.4, rpigpio v1.5), à valider en réel
 - Fait : nommage sans sources MQTT propres (préfixes via la connexion du socle, migration auto,
   testée sur la vraie config de falbala), retrait propagé, taxonomies par topic, rejeu au retour de

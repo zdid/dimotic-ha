@@ -11,7 +11,9 @@ function valuesDir(): string {
   return path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'outils', 'saved-values');
 }
 
+/** ⭐ 24/09/2026 — défense en profondeur : jamais de chemin hors de saved-values/. */
 function valuesFilePath(id: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(id)) throw new Error(`Identifiant de script invalide: ${id}`);
   return path.join(valuesDir(), `${id}.json`);
 }
 

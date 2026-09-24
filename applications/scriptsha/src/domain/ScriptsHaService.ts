@@ -407,6 +407,11 @@ const BUILTIN_SCRIPTS: BuiltinScriptDef[] = [
   }
 ];
 
+/** ⭐ 24/09/2026 — délai maximal d'attente d'une réponse du core (pont HA REST/helpers/entités) :
+ *  sans lui, une requête restée sans réponse (HA déconnecté…) gardait le verrou de réconciliation
+ *  pris à vie (« déjà en cours » jusqu'au redémarrage) et un script « en cours » à l'écran. */
+const CORE_REQUEST_TIMEOUT_MS = 30_000;
+
 export class ScriptsHaService implements IScriptsHaService {
   private readonly scriptsManager: ConfigFileManager<ScriptsConfigFile>;
   private readonly scriptsDir: string;
@@ -637,10 +642,11 @@ export class ScriptsHaService implements IScriptsHaService {
 
       const id = this.generateId(title);
       const now = new Date().toISOString();
+      const filePath = path.join(this.scriptsDir, `${id}.yaml`);
       fs.mkdirSync(this.scriptsDir, { recursive: true });
-      fs.writeFileSync(path.join(this.scriptsDir, `${id}.yaml`), text, 'utf8');
+      fs.writeFileSync(filePath, text, 'utf8');
 
-      this.scripts.push({
+      const next: ScriptEntry[] = [...this.scripts, {
         id,
         title,
         description,
@@ -651,12 +657,16 @@ export class ScriptsHaService implements IScriptsHaService {
         builtin: false,
         driftsFromBuiltin: false,
         origin: 'local'
-      });
-      const result = this.scriptsManager.save({ scripts: this.scripts });
+      }];
+      const result = this.scriptsManager.save({ scripts: next });
       if (!result.success) {
+        // ⭐ 24/09/2026 — rien ne reste d'un dépôt raté (avant : fichier + entrée en mémoire
+        // gardés, réécrits à la sauvegarde suivante).
+        try { fs.unlinkSync(filePath); } catch { /* déjà absent */ }
         this.emitError(`Échec de sauvegarde: ${result.error}`);
         return;
       }
+      this.scripts = next;
 
       this.logger.info('ScriptsHaService', `Script déposé: ${id} ("${title}")`);
       this.emitScripts();
@@ -686,7 +696,7 @@ export class ScriptsHaService implements IScriptsHaService {
       return;
     }
 
-    this.pendingAction.set(id, 'deploy');
+    this.setPendingAction(id, 'deploy');
     this.emitScripts();
     this.eventBus.emitGeneric('ha:rest:request', {
       appId: 'scriptsha',
@@ -704,7 +714,7 @@ export class ScriptsHaService implements IScriptsHaService {
       return;
     }
 
-    this.pendingAction.set(id, 'undeploy');
+    this.setPendingAction(id, 'undeploy');
     this.emitScripts();
     this.eventBus.emitGeneric('ha:rest:request', {
       appId: 'scriptsha',
@@ -712,6 +722,21 @@ export class ScriptsHaService implements IScriptsHaService {
       domain: entry.haDomain,
       id
     });
+  }
+
+  private readonly pendingActionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  private setPendingAction(id: string, action: 'deploy' | 'undeploy'): void {
+    this.pendingAction.set(id, action);
+    const previous = this.pendingActionTimers.get(id);
+    if (previous) clearTimeout(previous);
+    this.pendingActionTimers.set(id, setTimeout(() => {
+      this.pendingActionTimers.delete(id);
+      if (this.pendingAction.get(id) !== action) return;
+      this.pendingAction.delete(id);
+      this.emitError(`${action === 'deploy' ? 'Diffusion' : 'Retrait'} sans réponse de HA après ${CORE_REQUEST_TIMEOUT_MS / 1000} s — état inconnu, réessayer`, id);
+      this.emitScripts();
+    }, CORE_REQUEST_TIMEOUT_MS));
   }
 
   private handleHaRestResult(data: HaRestResultPayload): void {
@@ -724,6 +749,8 @@ export class ScriptsHaService implements IScriptsHaService {
 
     const action = this.pendingAction.get(data.id);
     this.pendingAction.delete(data.id);
+    const actionTimer = this.pendingActionTimers.get(data.id);
+    if (actionTimer) { clearTimeout(actionTimer); this.pendingActionTimers.delete(data.id); }
     if (!action) return; // résultat inattendu/périmé, ignoré
 
     const entry = this.scripts.find((s) => s.id === data.id);
@@ -801,7 +828,11 @@ export class ScriptsHaService implements IScriptsHaService {
   private helperRequest(method: 'list' | 'create' | 'delete', domain: string, id?: string, data?: Record<string, unknown>): Promise<HaHelperResultPayload> {
     const requestId = crypto.randomUUID();
     return new Promise((resolve) => {
-      this.pendingHelperRequests.set(requestId, resolve);
+      const timer = setTimeout(() => {
+        if (!this.pendingHelperRequests.delete(requestId)) return;
+        resolve({ requestId, success: false, error: `pas de réponse du core après ${CORE_REQUEST_TIMEOUT_MS / 1000} s` } as HaHelperResultPayload);
+      }, CORE_REQUEST_TIMEOUT_MS);
+      this.pendingHelperRequests.set(requestId, (result) => { clearTimeout(timer); resolve(result); });
       this.eventBus.emitGeneric('ha:helper:request', { appId: 'scriptsha', requestId, method, domain, id, data });
     });
   }
@@ -817,9 +848,14 @@ export class ScriptsHaService implements IScriptsHaService {
    *  seule réconciliation à la fois (mutex `reconcilingProvisioning`), pas besoin de corrélation. */
   private pendingEntitiesListResolve: ((result: HaEntitiesListResultPayload) => void) | null = null;
 
-  private requestEntitiesList(domain: string): Promise<HaEntitiesListResultPayload> {
+  /** `null` si le core ne répond pas dans le délai (la réconciliation abandonne alors proprement). */
+  private requestEntitiesList(domain: string): Promise<HaEntitiesListResultPayload | null> {
     return new Promise((resolve) => {
-      this.pendingEntitiesListResolve = resolve;
+      const timer = setTimeout(() => {
+        this.pendingEntitiesListResolve = null;
+        resolve(null);
+      }, CORE_REQUEST_TIMEOUT_MS);
+      this.pendingEntitiesListResolve = (result) => { clearTimeout(timer); resolve(result); };
       this.eventBus.emitGeneric('ha:entities:list:request', { appId: 'scriptsha', domain });
     });
   }
@@ -905,7 +941,7 @@ export class ScriptsHaService implements IScriptsHaService {
       'ScriptsHaService',
       `Minuterie : liste des lumières surveillées mise à jour (${lightEntityIds.length} lumière(s)), redéploiement`
     );
-    this.pendingAction.set(EXAMPLE_SCRIPT_ID, 'deploy');
+    this.setPendingAction(EXAMPLE_SCRIPT_ID, 'deploy');
     this.emitScripts();
     this.eventBus.emitGeneric('ha:rest:request', {
       appId: 'scriptsha',
@@ -937,6 +973,10 @@ export class ScriptsHaService implements IScriptsHaService {
         this.helperRequest('list', provisioning.helperDomain)
       ]);
 
+      if (!entitiesResult) {
+        this.emitError(`Réconciliation : liste des entités ${provisioning.watchDomain} sans réponse du core après ${CORE_REQUEST_TIMEOUT_MS / 1000} s — abandonnée`);
+        return;
+      }
       if (!helpersResult.success) {
         this.emitError(`Réconciliation : échec de la liste des helpers HA (${provisioning.helperDomain}): ${helpersResult.error}`);
         return;
@@ -1093,7 +1133,11 @@ export class ScriptsHaService implements IScriptsHaService {
    *  pour un autre, sans risque de collision de corrélation). */
   private fetchHaConfig(domain: 'script' | 'automation', id: string): Promise<HaRestResultPayload> {
     return new Promise((resolve) => {
-      this.pendingImportFetch.set(id, resolve);
+      const timer = setTimeout(() => {
+        if (!this.pendingImportFetch.delete(id)) return;
+        resolve({ id, success: false, error: `pas de réponse du core après ${CORE_REQUEST_TIMEOUT_MS / 1000} s` } as HaRestResultPayload);
+      }, CORE_REQUEST_TIMEOUT_MS);
+      this.pendingImportFetch.set(id, (result) => { clearTimeout(timer); resolve(result); });
       this.eventBus.emitGeneric('ha:rest:request', { appId: 'scriptsha', method: 'get', domain, id });
     });
   }

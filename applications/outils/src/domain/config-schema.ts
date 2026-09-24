@@ -25,13 +25,28 @@ import { z } from 'zod';
  * `ScriptTemplate.ts`. Pas de round-trip serveur pour la génération : le contenu est envoyé au
  * navigateur à la sélection, la substitution et le téléchargement se font côté client.
  */
+/** ⭐ 24/09/2026 — noms « simples » uniquement : `id` et `filename` servent à construire des chemins
+ *  sur disque (`<id>.yaml`, `<id>.sh`, `<id>.json`, fichier moteur) — sans ce contrôle, un id
+ *  `../../core/config` (yaml/zip déposé depuis n'importe quel poste du réseau) écrivait hors de
+ *  data/outils. Pas de `/`, pas de `..`, pas de nom caché. */
+export const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+export const SAFE_FILENAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function isSafeId(id: unknown): id is string {
+  return typeof id === 'string' && SAFE_ID.test(id);
+}
+
+export function isSafeFilename(name: unknown): name is string {
+  return typeof name === 'string' && SAFE_FILENAME.test(name) && !name.includes('..');
+}
+
 export const outilScriptSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().regex(SAFE_ID, 'identifiant invalide (lettres, chiffres, « - » et « _ » uniquement)'),
   title: z.string().min(1),
   description: z.string().default(''),
   // Nom de fichier proposé au téléchargement — indépendant de `id` (id est une clé technique,
   // filename est ce que l'utilisateur verra/exécutera, ex. "flash-sd-card.sh").
-  filename: z.string().min(1),
+  filename: z.string().refine(isSafeFilename, 'nom de fichier invalide (lettres, chiffres, « . », « - », « _ », sans « / » ni « .. »)'),
   // Beaucoup de scripts de cette bibliothèque touchent au système (montage, écriture disque,
   // paquets...) — affiché dans la commande proposée (`sudo bash <filename>` vs `bash <filename>`).
   requiresSudo: z.boolean().default(false)

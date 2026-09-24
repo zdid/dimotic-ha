@@ -11,7 +11,7 @@
 import AdmZip from 'adm-zip';
 import * as yamlLib from 'js-yaml';
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
-import { outilScriptSchema, type OutilsConfig, type OutilScriptConfig } from './config-schema';
+import { outilScriptSchema, isSafeId, isSafeFilename, type OutilsConfig, type OutilScriptConfig } from './config-schema';
 import type { OutilsStatus, OutilScriptDetail, AddScriptResult, BundleResult, ZipResult } from './types';
 import {
   builtinRoot, dataRoot, listYamlScripts, readWrapperContent, writeWrapperContent,
@@ -99,7 +99,14 @@ export class OutilsService implements IOutilsService {
     this.eventBus.onGeneric<UploadEventPayload>('outils:internal:upload', (data) => this.handleUpload(data));
     this.eventBus.onGeneric<{ id: string; content: string }>('outils:bundle:build', (data) => this.handleBuildBundle(data.id, data.content));
     this.eventBus.onGeneric<{ id: string; content: string }>('outils:zip:build', (data) => this.handleBuildZip(data.id, data.content));
-    this.eventBus.onGeneric<{ id: string; values: Record<string, string> }>('outils:values:save', (data) => saveValues(data.id, data.values));
+    this.eventBus.onGeneric<{ id: string; values: Record<string, string> }>('outils:values:save', (data) => {
+      // ⭐ 24/09/2026 — id contrôlé (chemin <id>.json) : seulement un script réellement connu.
+      if (!isSafeId(data?.id) || !this.loadMergedScripts().some((s) => s.id === data.id)) {
+        this.logger.warn('OutilsService', `Valeurs refusées pour un id de script inconnu ou invalide: ${JSON.stringify(data?.id)}`);
+        return;
+      }
+      saveValues(data.id, data.values);
+    });
   }
 
   private handleGetScript(id: string): void {
@@ -294,7 +301,7 @@ export class OutilsService implements IOutilsService {
       this.emitStatus();
       this.emitAddResult({ success: true });
     } catch (error) {
-      this.emitAddResult({ success: false, error: `Import zip échoué: ${error instanceof Error ? error.message : String(error)}` });
+      this.emitAddResult({ success: false, error: `Import zip échoué: ${describeError(error)}` });
     }
   }
 
@@ -309,6 +316,12 @@ export class OutilsService implements IOutilsService {
         return;
       }
 
+      // ⭐ 24/09/2026 — nom du fichier moteur contrôlé (sert tel quel de chemin sur disque).
+      if (batch.engine && !isSafeFilename(batch.engine.filename)) {
+        this.emitAddResult({ success: false, error: `Nom de fichier moteur invalide: « ${batch.engine.filename} » (lettres, chiffres, « . », « - », « _ »).` });
+        return;
+      }
+
       writeYamlEntry(dataRoot(), entry);
       writeWrapperContent(dataRoot(), entry.id, batch.wrapper!.content);
       if (batch.engine) writeEngineFile(dataRoot(), batch.engine.filename, batch.engine.content);
@@ -316,7 +329,7 @@ export class OutilsService implements IOutilsService {
       this.emitStatus();
       this.emitAddResult({ success: true });
     } catch (error) {
-      this.emitAddResult({ success: false, error: `Yaml invalide: ${error instanceof Error ? error.message : String(error)}` });
+      this.emitAddResult({ success: false, error: `Yaml invalide: ${describeError(error)}` });
     }
   }
 
@@ -338,4 +351,11 @@ export class OutilsService implements IOutilsService {
   ): OutilsService {
     return new OutilsService(eventBus, logger, configProvider);
   }
+}
+
+/** Message lisible — une erreur de validation Zod donne « champ : motif » au lieu de son JSON brut. */
+function describeError(error: unknown): string {
+  const issues = (error as { issues?: Array<{ path: Array<string | number>; message: string }> })?.issues;
+  if (Array.isArray(issues)) return issues.map((i) => `${i.path.join('.') || 'racine'} : ${i.message}`).join(' ; ');
+  return error instanceof Error ? error.message : String(error);
 }
