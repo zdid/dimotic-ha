@@ -1,5 +1,27 @@
 # Liste des problèmes à résoudre
 
+## 🟡 RFXCOM — revue de code (24/09/2026) — CORRIGÉ (spec v6.1), à déployer/valider en réel
+- Fait (décisions utilisateur) : derniers états dans `rfxcom-derniers-etats.json` (écriture groupée
+  ≤ 1/30 s + à l'arrêt, sans .bak), config réécrite seulement sur changement réel, migration auto
+  (testée sur une copie de la config réelle de stfort : 43 valeurs + 23 récepteurs, config identique
+  hors états) ; reload() avant reconnexion à chaud ; changement de type = suppression + recréation ;
+  arrêt propre. Scènes multi-instances : laissé de côté (décision). Reste : image Docker + stfort.
+- Constats d'origine :
+- 🔴 **Usure de la carte SD** : chaque trame RF d'un appareil paramétré réécrit TOUT
+  `config-rfxcom-devices-v1.0.yaml` (31 Ko) + copie `.bak` (persistDevicesConfig, pour `lastValue`/
+  `lastAnyValueChangeAt`/`lastOn`). Mesuré sur stfort : 5 réécritures en 2 min ≈ 3 600/jour ≈
+  220 Mo/jour sur la carte SD.
+- 🟠 **Changement de port série / débit depuis l'écran ignoré jusqu'au redémarrage** : process
+  séparé, `reconnectTransceiverIfConfigChanged` relit la config SANS `configProvider.reload()`
+  (rpigpio/teleinfo/sauvegarde/testcycle le font) → compare l'ancienne config à elle-même.
+  (evoo7/arexx : même motif à vérifier lors de leur revue.)
+- 🟡 Scènes : `registered-devices` publie `scene_<id>` mais la vérification de recouvrement cherche
+  `rfxcom_scene_<id>` → recouvrement de scène entre instances jamais détecté.
+- 🟡 Modifier le TYPE d'un récepteur publié (switch→light…) ne retire pas l'ancienne découverte →
+  entité en double dans HA.
+- 🟡 `stop()` : arrête la boucle de reconnexion PUIS déconnecte — la déconnexion la relance
+  (sans effet réel : le process s'arrête juste après).
+
 ## 🟡 Planificateur — revue de code (24/09/2026) — CORRIGÉ (spec v1.11 + ia v1.14), à valider en réel
 - Fait : refonte du déclenchement (structure exécutée et recalculée en code, plus de
   réinterprétation ni de resolvedCache, conditions soleil/numérique/état en code sinon vrai/faux via

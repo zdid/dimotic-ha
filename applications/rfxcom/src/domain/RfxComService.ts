@@ -23,6 +23,7 @@ import { SceneExecutor } from './scenes/SceneExecutor';
 import { RfxComTransceiver } from './transceiver/RfxComTransceiver';
 import { detectRfxComPort } from './transceiver/PortDetector';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
+import { LastStatesStore, type LastStatesFile } from './state/LastStatesStore';
 import { getDefaultComponent, getDefaultUnit, buildStateDeviceId } from './classification';
 import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName, buildBoutonDisplayName } from './taxonomy';
 
@@ -56,6 +57,8 @@ export class RfxComService implements IRfxComService {
   private effectiveBridgeInstance: string;
   private devicesConfig: RfxComDevicesConfigFile;
   private configFileManager: ConfigFileManager;
+  /** ⭐ 24/09/2026 — derniers états, hors config (voir LastStatesStore). */
+  private lastStatesStore: LastStatesStore;
   private deviceManager: DeviceManager;
   private receiverManager: ReceiverManager;
   private sceneManager: SceneManager;
@@ -144,6 +147,10 @@ export class RfxComService implements IRfxComService {
     this.config = this.loadConfig();
     this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
     this.configFileManager = new ConfigFileManager(this.resolveDevicesConfigPath(), this.logger);
+    this.lastStatesStore = new LastStatesStore(
+      path.join(path.dirname(this.resolveDevicesConfigPath()), 'rfxcom-derniers-etats.json'),
+      this.logger
+    );
     this.devicesConfig = { rfxcom_devices: {}, rfxcom_receivers: {} };
     this.deviceManager = new DeviceManager(this.logger);
     this.receiverManager = new ReceiverManager(this.deviceManager, this.logger);
@@ -175,9 +182,21 @@ export class RfxComService implements IRfxComService {
     this.logger.info('RfxComService', 'Démarrage du service RFXCOM...');
 
     this.devicesConfig = this.configFileManager.load();
+    // ⭐ 24/09/2026 — derniers états : fichier séparé, appliqués AVANT la construction des
+    // récepteurs (qui lisent lastOn/lastLevel/lastPosition dans leur constructeur). Une ancienne
+    // config qui les contient encore est migrée une fois (états → fichier dédié, config réécrite
+    // sans eux).
+    const legacyStates = this.extractLegacyStates();
+    this.applyLastStates(this.lastStatesStore.load());
     this.deviceManager.loadConfigured(this.devicesConfig.rfxcom_devices);
     this.receiverManager.loadReceivers(this.devicesConfig.rfxcom_receivers);
     this.sceneManager.loadScenes(this.devicesConfig.rfxcom_receivers);
+    if (legacyStates) {
+      if (this.lastStatesStore.saveNow(this.buildLastStatesSnapshot())) {
+        this.persistConfig();
+        this.logger.info('RfxComService', 'Derniers états déplacés hors de la configuration (rfxcom-derniers-etats.json) — config réécrite sans eux');
+      }
+    }
 
     // Nouveau verrou pour cette connexion, créé AVANT setupSocleEventListeners()/l'émission de
     // integration:bridge:register ci-dessous — le bridge MQTT peut être déjà connecté (partagé
@@ -260,8 +279,11 @@ export class RfxComService implements IRfxComService {
 
   async stop(): Promise<void> {
     this.logger.info('RfxComService', 'Arrêt du service RFXCOM...');
-    this.stopReconnectLoop();
+    // ⭐ 24/09/2026 — déconnexion AVANT l'arrêt de la boucle : disconnect() notifie « déconnecté »,
+    // ce qui relançait la boucle de reconnexion qu'on venait d'arrêter.
     this.transceiver.disconnect();
+    this.stopReconnectLoop();
+    this.lastStatesStore.flush();
     this.eventBus.emitGeneric('integration:bridge:unregister', {
       moduleName: MODULE_NAME,
       bridgeInstance: this.effectiveBridgeInstance
@@ -344,8 +366,16 @@ export class RfxComService implements IRfxComService {
   private async reconnectTransceiverIfConfigChanged(): Promise<void> {
     const previousPort = this.resolvePort();
     const previousBaudRate = this.config.baudRate;
+    const previousBridgeInstance = this.config.bridgeInstance;
+    // ⭐ 24/09/2026 — relit le fichier : ce process séparé garde sinon la config chargée à son
+    // démarrage, et comparait l'ancienne config à elle-même (changement de port jamais appliqué).
+    this.configProvider.reload();
     this.config = this.loadConfig();
-    this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
+    // L'identité MQTT (bridgeInstance) n'est PAS changée à chaud : les topics/abonnements en cours
+    // en dépendent — elle s'applique au prochain démarrage de l'application.
+    if (this.config.bridgeInstance !== previousBridgeInstance) {
+      this.logger.warn('RfxComService', `bridgeInstance modifié (${previousBridgeInstance} → ${this.config.bridgeInstance}) — pris en compte au prochain redémarrage de l'application RFXCOM`);
+    }
     const newPort = this.resolvePort();
 
     if (previousPort === newPort && previousBaudRate === this.config.baudRate) {
@@ -430,7 +460,9 @@ export class RfxComService implements IRfxComService {
   // ==========================================================================
 
   private handleRfxMessage(message: RfxComRawMessage): void {
-    const { uniqueId, isNew } = this.deviceManager.handleRawMessage(message);
+    const { uniqueId, isNew, commandIdChanged } = this.deviceManager.handleRawMessage(message);
+    if (commandIdChanged) this.persistConfig();
+    else if (this.deviceManager.getDevice(uniqueId)) this.persistStates(); // lastSeen
     // ⭐ 15/09/2026, demande utilisateur (surveillance volets) : jusqu'ici seul un device JAMAIS VU
     // était loggé (DeviceManager "Nouveau device détecté") — un signal RF pour un device déjà connu
     // (ex: bouton mural pressé) restait totalement silencieux, même en debug. Trace minimale ici,
@@ -465,8 +497,8 @@ export class RfxComService implements IRfxComService {
       }
       if (affectedReceivers.length > 0) {
         // applyEmitterCommand (appelé par handleEmitterMessage) a déjà mis à jour lastOn/lastLevel
-        // dans la config de chaque récepteur affecté — une seule sauvegarde pour tous.
-        this.persistDevicesConfig();
+        // de chaque récepteur affecté — derniers états, écriture groupée (LastStatesStore).
+        this.persistStates();
       }
       for (const { receiver } of affectedReceivers) {
         this.publishReceiverState(receiver);
@@ -681,7 +713,7 @@ export class RfxComService implements IRfxComService {
 
     // Met à jour lastSeen/commandDeviceId comme une réception réelle (branche "configuré" de
     // handleRawMessage, garantie ici puisque getDevice(objectId) vient de confirmer sa présence).
-    this.deviceManager.handleRawMessage(message);
+    if (this.deviceManager.handleRawMessage(message).commandIdChanged) this.persistConfig();
 
     const device = this.deviceManager.getDevice(objectId);
     if (device?.transmitToHa) {
@@ -694,7 +726,7 @@ export class RfxComService implements IRfxComService {
         if (toTransmit) this.transmitReceiverCommand(receiver, toTransmit);
       }
       if (affectedReceivers.length > 0) {
-        this.persistDevicesConfig();
+        this.persistStates();
         for (const { receiver } of affectedReceivers) {
           this.publishReceiverState(receiver);
         }
@@ -792,7 +824,7 @@ export class RfxComService implements IRfxComService {
     // ⭐ Horodatage global (15/08/2026, demande utilisateur) : dernier changement de valeur, tous
     // devices confondus — pas rattaché à un device précis, voir devices-config-schema.ts.
     this.devicesConfig.lastAnyValueChangeAt = new Date().toISOString();
-    this.persistDevicesConfig();
+    this.persistStates();
 
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.effectiveBridgeInstance,
@@ -1170,7 +1202,7 @@ export class RfxComService implements IRfxComService {
     if (receiver.config.type !== 'cover') {
       receiver.applyEmitterCommand(result.action, result.value);
     }
-    this.persistDevicesConfig();
+    this.persistStates();
     this.publishReceiverState(receiver);
     return { success: true };
   }
@@ -1464,7 +1496,7 @@ export class RfxComService implements IRfxComService {
 
     this.eventBus.onGeneric<{ uniqueId: string; name: string }>('rfxcom:device:set_name', (data) => {
       const device = this.deviceManager.setDeviceName(data.uniqueId, data.name);
-      this.persistDevicesConfig();
+      this.persistConfig();
       if (device.transmitToHa) this.publishDeviceDiscovery(device);
       this.emitDevicesList();
     });
@@ -1481,7 +1513,7 @@ export class RfxComService implements IRfxComService {
           unitCode: data.unitCode,
           name: data.name
         });
-        this.persistDevicesConfig();
+        this.persistConfig();
         this.emitDevicesList();
       }
     );
@@ -1493,7 +1525,7 @@ export class RfxComService implements IRfxComService {
         this.logger.warn('RfxComService', `Device inconnu pour set_transmit: ${data.uniqueId}`);
         return;
       }
-      this.persistDevicesConfig();
+      this.persistConfig();
       if (device.transmitToHa) {
         this.publishDeviceDiscovery(device);
       } else if (previousTransmit) {
@@ -1515,7 +1547,7 @@ export class RfxComService implements IRfxComService {
         this.removeDeviceDiscovery(device);
       }
       this.deviceManager.deleteDevice(data.uniqueId);
-      this.persistDevicesConfig();
+      this.persistConfig();
       this.publishRegisteredDevicesList();
       this.emitDevicesList();
       this.eventBus.emitGeneric('rfxcom:device:deleted', { uniqueId: data.uniqueId });
@@ -1527,7 +1559,7 @@ export class RfxComService implements IRfxComService {
         return;
       }
       this.receiverManager.addReceiver(data.config);
-      this.persistDevicesConfig();
+      this.persistConfig();
       if (data.config.transmitToHa) this.publishReceiverDiscovery(data.config.receiverId);
       this.publishRegisteredDevicesList();
       this.emitReceiversList();
@@ -1544,10 +1576,18 @@ export class RfxComService implements IRfxComService {
       // previousComponent dépend du type du récepteur, indisponible une fois retiré ci-dessous.
       const previousTransmit = existing.config.transmitToHa;
       const previousComponent = existing.getDiscoveryEssential().component;
-      const updated = { ...existing.config, ...data.config } as ReceiverConfig;
+      let updated = { ...existing.config, ...data.config } as ReceiverConfig;
+      // ⭐ 24/09/2026 (décision utilisateur) — changer le TYPE = suppression puis recréation :
+      // l'ancienne entité est retirée de HA (sinon elle restait en double, ancien composant), et le
+      // nouveau récepteur repart sans les derniers états de l'ancien type.
+      if (updated.type !== existing.config.type) {
+        if (previousTransmit) this.removeReceiverDiscovery(data.receiverId, previousComponent);
+        const { lastOn: _on, lastLevel: _level, lastPosition: _position, ...rest } = updated as ReceiverConfig & { lastOn?: boolean; lastLevel?: number; lastPosition?: number };
+        updated = rest as ReceiverConfig;
+      }
       this.receiverManager.removeReceiver(data.receiverId);
       this.receiverManager.addReceiver(updated);
-      this.persistDevicesConfig();
+      this.persistConfig();
       if (updated.transmitToHa) {
         this.publishReceiverDiscovery(updated.receiverId);
       } else if (previousTransmit) {
@@ -1564,7 +1604,7 @@ export class RfxComService implements IRfxComService {
         this.removeReceiverDiscovery(data.receiverId, existing.getDiscoveryEssential().component);
       }
       this.receiverManager.removeReceiver(data.receiverId);
-      this.persistDevicesConfig();
+      this.persistConfig();
       this.publishRegisteredDevicesList();
       this.emitReceiversList();
       this.eventBus.emitGeneric('rfxcom:receiver:deleted', { receiverId: data.receiverId });
@@ -1572,7 +1612,7 @@ export class RfxComService implements IRfxComService {
 
     this.eventBus.onGeneric<{ config: ReceiverSceneConfig }>('rfxcom:scene:create', (data) => {
       this.sceneManager.addScene(data.config);
-      this.persistDevicesConfig();
+      this.persistConfig();
       if (data.config.transmitToHa) this.publishSceneDiscovery(data.config);
       this.publishRegisteredDevicesList();
       this.emitScenesList();
@@ -1588,7 +1628,7 @@ export class RfxComService implements IRfxComService {
       const wasPublished = existing.transmitToHa;
       const updated = { ...existing, ...data.config } as ReceiverSceneConfig;
       this.sceneManager.addScene(updated);
-      this.persistDevicesConfig();
+      this.persistConfig();
       if (updated.transmitToHa) {
         this.publishSceneDiscovery(updated);
       } else if (wasPublished) {
@@ -1605,7 +1645,7 @@ export class RfxComService implements IRfxComService {
         this.removeSceneDiscovery(data.sceneId);
       }
       this.sceneManager.removeScene(data.sceneId);
-      this.persistDevicesConfig();
+      this.persistConfig();
       this.publishRegisteredDevicesList();
       this.emitScenesList();
       this.eventBus.emitGeneric('rfxcom:scene:deleted', { sceneId: data.sceneId });
@@ -1635,23 +1675,79 @@ export class RfxComService implements IRfxComService {
     this.eventBus.onGeneric('rfxcom:hardware-status:refresh', () => this.refreshHardwareStatusNow());
   }
 
-  /** Sauvegarde l'état courant des devices/récepteurs/scènes dans config-rfxcom-devices-v1.0.yaml. */
-  private persistDevicesConfig(): void {
+  /** Sauvegarde la CONFIGURATION (devices/récepteurs/scènes) dans config-rfxcom-devices-v1.0.yaml
+   *  — ⭐ 24/09/2026 : sans les derniers états (LastStatesStore), donc seulement quand la config
+   *  change réellement (paramétrage depuis l'écran, adresse de commande apprise). */
+  private persistConfig(): void {
+    const devices: Record<string, RfxComDeviceInfo> = {};
+    for (const [id, device] of Object.entries(this.deviceManager.getConfiguredDevicesRecord())) {
+      const { lastValue: _v, lastSeen: _s, ...config } = device;
+      devices[id] = config as RfxComDeviceInfo;
+    }
     const receivers: Record<string, ReceiverConfigEntry> = {};
     for (const receiver of this.receiverManager.getAllReceivers()) {
-      receivers[receiver.config.receiverId] = receiver.config as ReceiverConfigEntry;
+      const { lastOn: _on, lastLevel: _level, lastPosition: _position, ...config } = receiver.config as ReceiverConfigEntry & { lastOn?: boolean; lastLevel?: number; lastPosition?: number };
+      receivers[receiver.config.receiverId] = config as ReceiverConfigEntry;
     }
     for (const scene of this.sceneManager.getAllScenes()) {
       receivers[scene.receiverId] = scene as ReceiverConfigEntry;
     }
-    const result = this.configFileManager.save({
-      rfxcom_devices: this.deviceManager.getConfiguredDevicesRecord(),
-      rfxcom_receivers: receivers,
-      lastAnyValueChangeAt: this.devicesConfig.lastAnyValueChangeAt
-    });
+    const result = this.configFileManager.save({ rfxcom_devices: devices, rfxcom_receivers: receivers });
     if (!result.success) {
       this.logger.error('RfxComService', `Échec de sauvegarde de la configuration RFXCOM: ${result.error}`);
     }
+  }
+
+  /** Derniers états : écriture groupée (au plus une toutes les 30 s), jamais dans la config. */
+  private persistStates(): void {
+    this.lastStatesStore.scheduleSave(() => this.buildLastStatesSnapshot());
+  }
+
+  private buildLastStatesSnapshot(): LastStatesFile {
+    const snapshot: LastStatesFile = { lastAnyValueChangeAt: this.devicesConfig.lastAnyValueChangeAt, devices: {}, receivers: {} };
+    for (const device of this.deviceManager.getConfiguredDevices()) {
+      if (device.lastValue !== undefined || device.lastSeen !== undefined) {
+        snapshot.devices[device.uniqueId] = { lastValue: device.lastValue as string | number | undefined, lastSeen: device.lastSeen };
+      }
+    }
+    for (const receiver of this.receiverManager.getAllReceivers()) {
+      const c = receiver.config as { lastOn?: boolean; lastLevel?: number; lastPosition?: number };
+      if (c.lastOn !== undefined || c.lastLevel !== undefined || c.lastPosition !== undefined) {
+        snapshot.receivers[receiver.config.receiverId] = { lastOn: c.lastOn, lastLevel: c.lastLevel, lastPosition: c.lastPosition };
+      }
+    }
+    return snapshot;
+  }
+
+  /** Recopie les derniers états du fichier dédié sur la config chargée en mémoire (avant la
+   *  construction des devices/récepteurs). Un état du fichier dédié prime sur un reste de l'ancien
+   *  format. */
+  private applyLastStates(states: LastStatesFile): void {
+    if (states.lastAnyValueChangeAt) this.devicesConfig.lastAnyValueChangeAt = states.lastAnyValueChangeAt;
+    for (const [id, st] of Object.entries(states.devices)) {
+      const device = this.devicesConfig.rfxcom_devices[id];
+      if (!device) continue;
+      if (st.lastValue !== undefined) device.lastValue = st.lastValue;
+      if (st.lastSeen !== undefined) device.lastSeen = st.lastSeen;
+    }
+    for (const [id, st] of Object.entries(states.receivers)) {
+      const receiver = this.devicesConfig.rfxcom_receivers[id] as { lastOn?: boolean; lastLevel?: number; lastPosition?: number } | undefined;
+      if (!receiver) continue;
+      if (st.lastOn !== undefined) receiver.lastOn = st.lastOn;
+      if (st.lastLevel !== undefined) receiver.lastLevel = st.lastLevel;
+      if (st.lastPosition !== undefined) receiver.lastPosition = st.lastPosition;
+    }
+  }
+
+  /** true si la config chargée contient encore des derniers états (ancien format, avant le
+   *  24/09/2026) — ils sont alors conservés en mémoire et migrés au démarrage. */
+  private extractLegacyStates(): boolean {
+    if (this.devicesConfig.lastAnyValueChangeAt) return true;
+    if (Object.values(this.devicesConfig.rfxcom_devices).some((d) => d.lastValue !== undefined || d.lastSeen !== undefined)) return true;
+    return Object.values(this.devicesConfig.rfxcom_receivers).some((r) => {
+      const c = r as { lastOn?: boolean; lastLevel?: number; lastPosition?: number };
+      return c.lastOn !== undefined || c.lastLevel !== undefined || c.lastPosition !== undefined;
+    });
   }
 
   static create(

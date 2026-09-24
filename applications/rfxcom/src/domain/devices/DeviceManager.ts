@@ -56,7 +56,7 @@ export class DeviceManager {
    * — improbable mais sans coût de le rafraîchir). Sinon, l'ajoute (ou le met à jour) dans la
    * liste auto-discovery, en mémoire seulement.
    */
-  handleRawMessage(message: RfxComRawMessage): { uniqueId: string; isNew: boolean } {
+  handleRawMessage(message: RfxComRawMessage): { uniqueId: string; isNew: boolean; commandIdChanged?: boolean } {
     const protocole = getProtocole(message.type);
     // unitCode distingue les boutons d'une même télécommande multi-unités (ex: HomeEasy AC 2 ou
     // 4 boutons, tous sur le même sensorId/house code) — sans lui, tous les boutons d'une même
@@ -74,10 +74,15 @@ export class DeviceManager {
     const configured = this.configuredDevices.get(uniqueId);
     if (configured) {
       configured.lastSeen = message.timestamp.toISOString();
-      if (message.commandDeviceId) {
+      // ⭐ 24/09/2026 — commandDeviceId appartient à la CONFIG (adresse apprise, sert à commander) :
+      // signalé à l'appelant quand il change réellement, pour qu'il enregistre la config à ce
+      // moment-là seulement (et pas à chaque trame, voir LastStatesStore).
+      let commandIdChanged = false;
+      if (message.commandDeviceId && message.commandDeviceId !== configured.commandDeviceId) {
         configured.commandDeviceId = message.commandDeviceId;
+        commandIdChanged = true;
       }
-      return { uniqueId, isNew: false };
+      return { uniqueId, isNew: false, commandIdChanged };
     }
 
     const alreadyDiscovered = this.discoveredDevices.has(uniqueId);
