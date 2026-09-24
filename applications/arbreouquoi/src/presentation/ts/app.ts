@@ -2,7 +2,7 @@
  * ArbreOuquoi Application - Client Socket.io
  * Visualisation du référentiel HA organisé par OÙ → QUOI → Entités
  * Ou par QUOI → OÙ → Entités (selon le mode)
- * Derniere modification: 2026-07-20 11:00:00 - Mise à jour pour les deux modes d'affichage
+ * Derniere modification: 2026-09-24 16:30:00 - Arbres par chemin complet, recherche et filtres locaux, échappement HTML
  */
 
 import { ARBREOUQUOI_SOCKET_EVENTS } from './socket-events';
@@ -94,7 +94,9 @@ let state = {
   isConnected: false,
   isLoading: true,
   error: null as string | null,
-  filters: { showOnlyActive: true },
+  // ⭐ 24/09/2026 — filtres appliqués ICI sur l'arbre complet reçu du serveur (voir entityMatches()) :
+  // propres à cet onglet, conservés à travers les rafraîchissements.
+  filters: { showOnlyActive: true, search: '' },
   displayConfig: {
     expandAll: false,
     showQuoiIcons: true
@@ -278,10 +280,11 @@ function setupDomListeners(): void {
     setAutoRefresh(seconds);
   });
 
-  $('filter-active-only')?.addEventListener('change', (e) => {
-    const checked = (e.target as HTMLInputElement).checked;
-    state.filters.showOnlyActive = checked;
-    socket.emit(ARBREOUQUOI_SOCKET_EVENTS.FILTER_SET, { showOnlyActive: checked });
+  const activeOnly = $('filter-active-only') as HTMLInputElement | null;
+  if (activeOnly) activeOnly.checked = state.filters.showOnlyActive;
+  activeOnly?.addEventListener('change', (e) => {
+    state.filters.showOnlyActive = (e.target as HTMLInputElement).checked;
+    renderTree();
   });
 
   $('expand-all-btn')?.addEventListener('click', () => {
@@ -305,23 +308,23 @@ function setupDomListeners(): void {
     showLoading();
   });
 
-  $('search-btn')?.addEventListener('click', () => {
-    const query = ($('search-input') as HTMLInputElement)?.value || '';
-    if (query.trim()) {
-      socket.emit(ARBREOUQUOI_SOCKET_EVENTS.SEARCH, query);
-      showLoading();
-    }
+  // ⭐ 24/09/2026 — recherche locale (le serveur ignorait la requête) : noms, identifiants, pièces,
+  // appareils, lieux et types QUOI ; appliquée en direct pendant la frappe. Champ vide = tout.
+  const searchInput = $('search-input') as HTMLInputElement | null;
+  if (searchInput) searchInput.value = state.filters.search;
+  const applySearch = () => {
+    state.filters.search = (searchInput?.value || '').trim().toLowerCase();
+    renderTree();
+  };
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  searchInput?.addEventListener('input', () => {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(applySearch, 200);
   });
-
-  $('search-input')?.addEventListener('keypress', (e: KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      const query = (e.target as HTMLInputElement).value;
-      if (query.trim()) {
-        socket.emit(ARBREOUQUOI_SOCKET_EVENTS.SEARCH, query);
-        showLoading();
-      }
-    }
+  searchInput?.addEventListener('keypress', (e: KeyboardEvent) => {
+    if (e.key === 'Enter') applySearch();
   });
+  $('search-btn')?.addEventListener('click', applySearch);
 
   $('close-details-btn')?.addEventListener('click', () => {
     hideDetailsPanel();
@@ -433,90 +436,117 @@ function toEntityInfo(e: HaStructuredEntity): EntityInfo {
   return { entity: e, ouPath: [], quoiIds: e.quoi_ids, device: e.device || null, area: e.area || null };
 }
 
-function unassignedNode(unassigned: EntityInfo[], expandAll: boolean): TreeNodeData | null {
-  if (unassigned.length === 0) return null;
+/** Libellé d'un QUOI depuis le catalogue (⭐ 24/09/2026 : avant, seuls les QUOI du 1er niveau de
+ *  l'arbre étaient connus — identifiant brut affiché aux niveaux profonds). */
+function quoiLabel(quoiId: string): string {
+  return state.catalog.find(c => c.quoi.quoi_id === quoiId)?.quoi.label || quoiId;
+}
+
+/** Texte cherché par la recherche : identifiant, nom, pièce, appareil, lieux (taxonomie), QUOI. */
+function searchText(e: HaStructuredEntity): string {
+  const taxo = (e.attributes?.attributs_taxonomie ?? {}) as Record<string, unknown>;
+  const lieux = ['lieu_grand_pere', 'lieu_pere', 'lieu_principal', 'lieu_precis'].map(k => taxo[k]).filter(Boolean);
+  return [
+    e.entity_id, e.attributes?.friendly_name, e.area?.name, e.device?.name, ...lieux,
+    ...e.quoi_ids, ...e.quoi_ids.map(quoiLabel)
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function entityMatches(e: HaStructuredEntity): boolean {
+  if (state.filters.showOnlyActive && e.state === 'unavailable') return false;
+  return !state.filters.search || searchText(e).includes(state.filters.search);
+}
+
+/** Recherche en cours : développer tout ce qui contient un résultat. */
+function openByDefault(expandAll: boolean): boolean {
+  return expandAll || state.filters.search !== '';
+}
+
+function unassignedNode(entities: HaStructuredEntity[], expandAll: boolean): TreeNodeData | null {
+  const kept = entities.filter(entityMatches);
+  if (kept.length === 0) return null;
   return {
-    id: 'unassigned', kind: 'unassigned', label: `📦 Non assignés (${unassigned.length})`,
-    icon: '', count: unassigned.length, children: [], entities: unassigned, defaultOpen: expandAll
+    id: 'unassigned', kind: 'unassigned', label: `📦 Non assignés (${kept.length})`,
+    icon: '', count: kept.length, children: [], entities: kept.map(toEntityInfo), defaultOpen: openByDefault(expandAll)
   };
 }
 
+/** Groupes QUOI d'une liste d'entités (déjà filtrées). */
+function quoiGroupNodes(entities: HaStructuredEntity[], idPrefix: string, expandAll: boolean): TreeNodeData[] {
+  const map = new Map<string, HaStructuredEntity[]>();
+  for (const e of entities) for (const qi of e.quoi_ids) {
+    if (!map.has(qi)) map.set(qi, []);
+    map.get(qi)!.push(e);
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([qi, es]) => ({
+      id: `${idPrefix}|quoi|${qi}`, kind: 'quoi' as const, label: escapeHtml(quoiLabel(qi)), icon: getQuoiIcon(qi),
+      count: es.length, children: [], entities: es.map(toEntityInfo), defaultOpen: openByDefault(expandAll)
+    }));
+}
+
+/**
+ * ⭐ 24/09/2026 — réécrit : parcours récursif de la hiérarchie OÙ reçue du serveur (identifiants =
+ * chemins complets). Compteurs = entités RETENUES par les filtres dans le sous-arbre ; lieu sans
+ * entité retenue masqué (spec §7.2 « Area sans entités : masquer »).
+ */
 function normalizeOuFirstTree(tree: OuFirstTree, expandAll: boolean): TreeNodeData[] {
   const result: TreeNodeData[] = [];
-  const unassigned = unassignedNode(tree.unassigned, expandAll);
+  const unassigned = unassignedNode(tree.unassigned.map(i => i.entity), expandAll);
   if (unassigned) result.push(unassigned);
 
-  const allQuoiIds = tree.levels.flatMap(l => l.children).flatMap(g => g.quoi);
-
-  const normalizeOuWithQuoi = (node: OuWithQuoiNode): TreeNodeData => {
-    const quoiChildren: TreeNodeData[] = node.children.map(qg => ({
-      id: `quoi-${node.ou.id}-${qg.quoi.quoi_id}`, kind: 'quoi', label: escapeHtml(qg.quoi.label),
-      icon: getQuoiIcon(qg.quoi.quoi_id), count: qg.count,
-      children: [], entities: qg.entities.map(toEntityInfo), defaultOpen: expandAll
-    }));
-    const ouChildren: TreeNodeData[] = node.ou.children.map(child => {
-      const childQuoiGroups = groupEntitiesByQuoi(child.entities, allQuoiIds);
-      return normalizeOuWithQuoi({ ou: child, children: childQuoiGroups, entityCount: child.entityCount });
-    });
-    return {
-      id: node.ou.id, kind: 'ou', label: escapeHtml(node.ou.name), icon: getOuIcon(node.ou.level),
-      badge: `[${node.ou.level}]`, levelClass: `ou-level-${node.ou.level}`,
-      count: node.entityCount, children: [...quoiChildren, ...ouChildren], entities: [], defaultOpen: expandAll
-    };
-  };
-
-  for (const levelNode of tree.levels) result.push(normalizeOuWithQuoi(levelNode));
-  return result;
-}
-
-function normalizeQuoiFirstTree(tree: QuoiFirstTree, expandAll: boolean): TreeNodeData[] {
-  const result: TreeNodeData[] = [];
-  const unassigned = unassignedNode(tree.unassigned, expandAll);
-  if (unassigned) result.push(unassigned);
-
-  const normalizeOuNodeForQuoi = (node: OuNode, entities: HaStructuredEntity[], group: QuiGroupWithOu): TreeNodeData => {
-    const children = node.children.map(child => {
-      const childEntities = group.entitiesByOu[child.id] || [];
-      return normalizeOuNodeForQuoi(child, childEntities, group);
-    });
+  const walk = (node: OuNode): TreeNodeData | null => {
+    const own = node.entities.filter(entityMatches);
+    const children = node.children.map(walk).filter((c): c is TreeNodeData => c !== null);
+    const count = own.length + children.reduce((sum, c) => sum + c.count, 0);
+    if (count === 0) return null;
     return {
       id: node.id, kind: 'ou', label: escapeHtml(node.name), icon: getOuIcon(node.level),
-      badge: `[${node.level}]`, levelClass: `ou-level-${node.level}`,
-      count: entities.length + node.children.reduce((sum, c) => sum + c.entityCount, 0),
-      children, entities: entities.map(toEntityInfo), defaultOpen: expandAll
+      badge: `[${node.level}]`, levelClass: `ou-level-${node.level}`, count,
+      children: [...quoiGroupNodes(own, node.id, expandAll), ...children], entities: [], defaultOpen: openByDefault(expandAll)
     };
   };
 
-  for (const group of tree.quoiGroups) {
-    const ouChildren: TreeNodeData[] = [];
-    for (const ouNode of group.ouHierarchy) {
-      const entities = group.entitiesByOu[ouNode.id] || [];
-      if (entities.length === 0) continue;
-      ouChildren.push(normalizeOuNodeForQuoi(ouNode, entities, group));
-    }
-    result.push({
-      id: group.quoi.quoi_id, kind: 'quoi', label: escapeHtml(group.quoi.label),
-      icon: getQuoiIcon(group.quoi.quoi_id), count: group.entityCount,
-      children: ouChildren, entities: [], defaultOpen: expandAll
-    });
+  for (const level of tree.levels) {
+    const n = walk(level.ou);
+    if (n) result.push(n);
   }
   return result;
 }
 
-// Helper pour regrouper les entités par QUOI
-function groupEntitiesByQuoi(entities: HaStructuredEntity[], allQuoiIds: HaQuoiDefinition[]): QuoiGroup[] {
-  const map = new Map<string, HaStructuredEntity[]>();
-  for (const entity of entities) {
-    for (const qi of entity.quoi_ids) {
-      if (!map.has(qi)) map.set(qi, []);
-      map.get(qi)!.push(entity);
-    }
+/**
+ * ⭐ 24/09/2026 — réécrit : `ouHierarchy` = racines (enfants imbriqués), `entitiesByOu` indexé par le
+ * même chemin complet que `node.id` — avant, 20 entités sur 324 seulement étaient affichées.
+ */
+function normalizeQuoiFirstTree(tree: QuoiFirstTree, expandAll: boolean): TreeNodeData[] {
+  const result: TreeNodeData[] = [];
+  const unassigned = unassignedNode(tree.unassigned.map(i => i.entity), expandAll);
+  if (unassigned) result.push(unassigned);
+
+  for (const group of tree.quoiGroups) {
+    const walk = (node: OuNode): TreeNodeData | null => {
+      const own = (group.entitiesByOu[node.id] || []).filter(entityMatches);
+      const children = node.children.map(walk).filter((c): c is TreeNodeData => c !== null);
+      const count = own.length + children.reduce((sum, c) => sum + c.count, 0);
+      if (count === 0) return null;
+      return {
+        id: `${group.quoi.quoi_id}|${node.id}`, kind: 'ou', label: escapeHtml(node.name), icon: getOuIcon(node.level),
+        badge: `[${node.level}]`, levelClass: `ou-level-${node.level}`, count,
+        children, entities: own.map(toEntityInfo), defaultOpen: openByDefault(expandAll)
+      };
+    };
+    const ouChildren = group.ouHierarchy.map(walk).filter((c): c is TreeNodeData => c !== null);
+    const sansLieu = (group.entitiesByOu['unassigned'] || []).filter(entityMatches);
+    const count = sansLieu.length + ouChildren.reduce((sum, c) => sum + c.count, 0);
+    if (count === 0) continue;
+    result.push({
+      id: group.quoi.quoi_id, kind: 'quoi', label: escapeHtml(group.quoi.label),
+      icon: getQuoiIcon(group.quoi.quoi_id), count,
+      children: ouChildren, entities: sansLieu.map(toEntityInfo), defaultOpen: openByDefault(expandAll)
+    });
   }
-  return Array.from(map.entries()).map(([qi, es]) => ({
-    quoi: allQuoiIds.find(q => q.quoi_id === qi) || { quoi_id: qi, label: qi },
-    entities: es,
-    count: es.length
-  })).sort((a, b) => b.count - a.count);
+  return result;
 }
 
 function renderEntity(entityInfo: EntityInfo): string {
@@ -535,11 +565,11 @@ function renderEntity(entityInfo: EntityInfo): string {
          @mouseleave="hover = false"
          @click="window.arbreouquoiShowDetails('${entity.entity_id}')">
       <span class="entity-icon">${quoiIcons}</span>
-      <span class="entity-domain ${domain}">${domain}</span>
+      <span class="entity-domain ${escapeHtml(domain)}">${escapeHtml(domain)}</span>
       <span class="entity-name">${escapeHtml(entity.attributes?.friendly_name as string || entity.entity_id)}</span>
-      <span class="entity-state">${stateValue}</span>
-      ${entity.device?.name ? `<span class="entity-device">[${entity.device.name}]</span>` : ''}
-      ${areaName !== 'N/A' ? `<span class="entity-area">@${areaName}</span>` : ''}
+      <span class="entity-state">${escapeHtml(stateValue)}</span>
+      ${entity.device?.name ? `<span class="entity-device">[${escapeHtml(entity.device.name)}]</span>` : ''}
+      ${areaName !== 'N/A' ? `<span class="entity-area">@${escapeHtml(areaName)}</span>` : ''}
     </div>
   `;
 }
@@ -559,7 +589,7 @@ function renderQuoiCatalog(): void {
         // 14/08/2026 — la légende ne l'affichait auparavant que pour les icônes "❓" inconnues,
         // contrairement à la demande initiale du 08/08/2026).
         return `
-        <div class="quoi-catalog-item" title="${item.quoi.label} (${item.entityCount} entités)">
+        <div class="quoi-catalog-item" title="${escapeHtml(item.quoi.label)} (${item.entityCount} entités)">
           <span class="quoi-catalog-icon">${icon}</span>
           <span class="quoi-catalog-name">${escapeHtml(item.quoi.label)}</span>
           <span class="quoi-catalog-count">${item.entityCount}</span>
@@ -614,20 +644,20 @@ function renderEntityDetails(payload: {
     <div class="details-header">
       <h2>${escapeHtml(e.attributes?.friendly_name as string || e.entity_id)}</h2>
       <div class="details-meta">
-        <span class="meta-badge domain">${e.domain}</span>
-        ${e.device_class ? `<span class="meta-badge device-class">${e.device_class}</span>` : ''}
-        ${e.state ? `<span class="meta-badge state">État: ${e.state}</span>` : ''}
+        <span class="meta-badge domain">${escapeHtml(e.domain)}</span>
+        ${e.device_class ? `<span class="meta-badge device-class">${escapeHtml(e.device_class)}</span>` : ''}
+        ${e.state ? `<span class="meta-badge state">État: ${escapeHtml(e.state)}</span>` : ''}
       </div>
     </div>
     
     <div class="details-section">
       <h3>📋 Informations de base</h3>
       <table class="details-table">
-        <tr><td>ID Entité</td><td><code>${e.entity_id}</code></td></tr>
+        <tr><td>ID Entité</td><td><code>${escapeHtml(e.entity_id)}</code></td></tr>
         <tr><td>Nom</td><td>${escapeHtml(e.attributes?.friendly_name as string || 'N/A')}</td></tr>
-        <tr><td>Domaine</td><td>${e.domain}</td></tr>
-        ${e.device_class ? `<tr><td>Classe Appareil</td><td>${e.device_class}</td></tr>` : ''}
-        <tr><td>État</td><td>${e.state || 'N/A'}</td></tr>
+        <tr><td>Domaine</td><td>${escapeHtml(e.domain)}</td></tr>
+        ${e.device_class ? `<tr><td>Classe Appareil</td><td>${escapeHtml(e.device_class)}</td></tr>` : ''}
+        <tr><td>État</td><td>${escapeHtml(e.state || 'N/A')}</td></tr>
       </table>
     </div>
   `;
@@ -650,8 +680,8 @@ function renderEntityDetails(payload: {
       <div class="details-section">
         <h3>🏠 Area HA</h3>
         <table class="details-table">
-          <tr><td>Nom</td><td>${payload.area.name}</td></tr>
-          <tr><td>ID</td><td><code>${payload.area.area_id}</code></td></tr>
+          <tr><td>Nom</td><td>${escapeHtml(payload.area.name)}</td></tr>
+          <tr><td>ID</td><td><code>${escapeHtml(payload.area.area_id)}</code></td></tr>
         </table>
       </div>
     `;
@@ -662,8 +692,8 @@ function renderEntityDetails(payload: {
       <div class="details-section">
         <h3>📱 Appareil</h3>
         <table class="details-table">
-          <tr><td>Nom</td><td>${payload.device.name}</td></tr>
-          <tr><td>ID</td><td><code>${payload.device.id}</code></td></tr>
+          <tr><td>Nom</td><td>${escapeHtml(payload.device.name)}</td></tr>
+          <tr><td>ID</td><td><code>${escapeHtml(payload.device.id)}</code></td></tr>
         </table>
       </div>
     `;
@@ -675,9 +705,7 @@ function renderEntityDetails(payload: {
         <h3>🏷️ Classification QUOI</h3>
         <div class="quoi-tags">
           ${payload.quiIds.map(qi => {
-            const q = state.catalog.find(c => c.quoi.quoi_id === qi)?.quoi;
-            const icon = getQuoiIcon(qi);
-            return `<span class="quoi-tag">${icon} ${q?.label || qi}</span>`;
+            return `<span class="quoi-tag">${getQuoiIcon(qi)} ${escapeHtml(quoiLabel(qi))}</span>`;
           }).join('')}
         </div>
       </div>
@@ -692,7 +720,7 @@ function renderEntityDetails(payload: {
           ${payload.relatedEntities.slice(0, 10).map(re => `
             <div class="related-entity" onclick="window.arbreouquoiShowDetails('${re.entity.entity_id}')">
               <span class="related-entity-name">${escapeHtml(re.entity.attributes?.friendly_name as string || re.entity.entity_id)}</span>
-              <span class="related-entity-id">${re.entity.entity_id}</span>
+              <span class="related-entity-id">${escapeHtml(re.entity.entity_id)}</span>
             </div>
           `).join('')}
           ${payload.relatedEntities.length > 10 ? `<p class="related-more">+ ${payload.relatedEntities.length - 10} autres...</p>` : ''}
@@ -709,7 +737,7 @@ function renderEntityDetails(payload: {
           ${Object.entries(e.attributes).map(([key, value]) => {
             if (key === 'friendly_name') return '';
             if (key === 'attributs_taxonomie') return ''; // Masquer la taxonomie (déjà affichée)
-            return `<tr><td>${key}</td><td><pre>${JSON.stringify(value, null, 2)}</pre></td></tr>`;
+            return `<tr><td>${escapeHtml(key)}</td><td><pre>${escapeHtml(JSON.stringify(value, null, 2))}</pre></td></tr>`;
           }).join('')}
         </table>
       </div>
@@ -755,9 +783,9 @@ function getQuoiIcon(quoiId: string): string {
   return icons[quoiId.toLowerCase()] || '❓';
 }
 
-function escapeHtml(text: string): string {
+function escapeHtml(text: unknown): string {
   const div = document.createElement('div');
-  div.textContent = text;
+  div.textContent = text == null ? '' : String(text);
   return div.innerHTML;
 }
 
