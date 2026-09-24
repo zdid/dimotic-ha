@@ -50,8 +50,9 @@ type SavePinInput = Omit<PinDefinition, 'id' | 'createdAt' | 'updatedAt'> & { id
 
 export class RpigpioService implements IRpigpioService {
   private config: RpigpioConfig;
-  /** ⭐ 06/09/2026 — `<config.bridgeInstance (préfixe)>_<machineId>`, recalculé à chaque
-   *  (re)chargement de config (voir loadConfig()/computeBridgeInstance/DIMOTIC_MACHINE_ID).
+  /** ⭐ 06/09/2026 — `<config.bridgeInstance (préfixe)>_<machineId>`, calculé au démarrage
+   *  (⭐ 24/09/2026 : plus recalculé à chaud, voir app:module:config:saved) — voir
+   *  computeBridgeInstance/DIMOTIC_MACHINE_ID.
    *  Remplace toute utilisation de `this.config.bridgeInstance` pour les topics/identités MQTT —
    *  `config.bridgeInstance` reste le champ éditable (préfixe seul, duplicable sans risque entre
    *  machines). */
@@ -113,9 +114,22 @@ export class RpigpioService implements IRpigpioService {
     // le fichier (voir le commentaire détaillé dans TeleinfoService.ts, même correctif).
     this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (event) => {
       if (event.moduleId !== 'rpigpio' || !event.success) return;
+      const previous = this.config;
       this.configProvider.reload();
       this.config = this.loadConfig();
-      this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
+      // ⭐ 24/09/2026 — bridgeInstance (identité : topics mqtt-io déployés, topic de présence) n'est
+      // PAS changé à chaud — sinon le prochain déploiement publiait sous de nouveaux topics (entités
+      // HA en double) et la présence restait abonnée à l'ancien. Appliqué au prochain démarrage.
+      if (this.config.bridgeInstance !== previous.bridgeInstance) {
+        this.logger.warn('RpigpioService', `bridgeInstance modifié (${previous.bridgeInstance} → ${this.config.bridgeInstance}) — pris en compte au prochain redémarrage de l'application RPIGPIO`);
+      }
+      // Présence de l'agent : reconnectée si la connexion MQTT (hôte, identifiants, préfixe) change.
+      if (JSON.stringify(this.config.mqtt) !== JSON.stringify(previous.mqtt)) {
+        this.logger.info('RpigpioService', 'Paramètres MQTT modifiés — reconnexion du suivi de présence de l\'agent');
+        this.agentTransport?.disconnect();
+        this.agentOnline = null;
+        this.connectAgentPresence();
+      }
       this.emitStatus();
     });
   }
@@ -189,14 +203,26 @@ export class RpigpioService implements IRpigpioService {
       const now = new Date().toISOString();
       let saved: PinDefinition;
 
+      // ⭐ 24/09/2026 — un numéro de GPIO ne peut servir qu'une fois : deux pins sur le même GPIO
+      // produisaient une config mqtt-io invalide au déploiement (même famille que la boucle de
+      // redémarrage du 28/08).
+      const clash = this.pins.find((p) => p.pin === input.pin && p.id !== input.id);
+      if (clash) {
+        this.emitError(`Le GPIO ${input.pin} est déjà utilisé par « ${clash.quoi} ${clash.lieu} » (${clash.id}).`);
+        return;
+      }
+
+      // Liste modifiée sur une COPIE, adoptée seulement si l'écriture réussit (avant : un échec
+      // laissait la modification en mémoire, réécrite à la sauvegarde suivante).
+      const next = [...this.pins];
       if (input.id) {
-        const index = this.pins.findIndex((p) => p.id === input.id);
+        const index = next.findIndex((p) => p.id === input.id);
         if (index === -1) {
           this.emitError(`Pin introuvable: ${input.id}`);
           return;
         }
-        saved = { ...this.pins[index], ...input, id: input.id, updatedAt: now };
-        this.pins[index] = saved;
+        saved = { ...next[index], ...input, id: input.id, updatedAt: now };
+        next[index] = saved;
       } else {
         saved = {
           ...input,
@@ -204,14 +230,15 @@ export class RpigpioService implements IRpigpioService {
           createdAt: now,
           updatedAt: now
         };
-        this.pins.push(saved);
+        next.push(saved);
       }
 
-      const result = this.pinsManager.save({ pins: this.pins });
+      const result = this.pinsManager.save({ pins: next });
       if (!result.success) {
         this.emitError(`Échec de sauvegarde: ${result.error}`);
         return;
       }
+      this.pins = next;
 
       this.eventBus.emit(RPIGPIO_SOCKET_EVENTS.PIN_SAVED, saved);
       this.emitPins();
@@ -222,18 +249,18 @@ export class RpigpioService implements IRpigpioService {
   }
 
   private handleDeletePin(data: { id: string }): void {
-    const before = this.pins.length;
-    this.pins = this.pins.filter((p) => p.id !== data.id);
-    if (this.pins.length === before) {
+    const next = this.pins.filter((p) => p.id !== data.id);
+    if (next.length === this.pins.length) {
       this.emitError(`Pin introuvable: ${data.id}`);
       return;
     }
 
-    const result = this.pinsManager.save({ pins: this.pins });
+    const result = this.pinsManager.save({ pins: next });
     if (!result.success) {
       this.emitError(`Échec de suppression: ${result.error}`);
       return;
     }
+    this.pins = next;
 
     this.eventBus.emit(RPIGPIO_SOCKET_EVENTS.PIN_DELETED, { id: data.id });
     this.emitPins();

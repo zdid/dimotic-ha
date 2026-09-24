@@ -1,37 +1,44 @@
 /**
  * NommageMqttIntegrationService
  *
- * Service d'intégration MQTT pour l'application NOMMAGE.
- * Gère une connexion MQTT indépendante par source configurée (config.sources[]), toutes actives
- * simultanément — pas une seule connexion globale. Chaque source a son propre client
- * mqtt.MqttClient, sa propre reconnexion (gérée par mqtt.js, indépendante des autres sources),
- * ses propres topics.
+ * ⭐ 24/09/2026 (décision utilisateur) — plus AUCUN client MQTT propre à NOMMAGE. Les découvertes
+ * brutes sont lues via la connexion MQTT du socle : abonnement `integration:nommage:passthrough:
+ * subscribe` à chaque préfixe configuré (config.prefixes), réception par `integration:nommage:
+ * passthrough:message` (IntegrationBridge, réabonnement automatique à chaque reconnexion du socle —
+ * MqttTransport.resubscribeAll). Remplace les N connexions indépendantes aux « sources » (hôte/port/
+ * identifiants par source), prévues pour d'autres brokers mais jamais utilisées ainsi.
  *
- * Conforme à fonctionnelles-nommage_specs_v1.1.md §3.1 et implementation-nommage_specs_v1.1.md §4.1.
+ * Même interface qu'avant pour NommageService (connect/disconnect/isConnected/getSourceStatuses) :
+ * une « source » affichée = un préfixe écouté, son état = celui de la connexion MQTT du socle.
  *
- * Couche : HA (Intégration)
- * Rôle : Abstraction MQTT pour les modules de découverte
+ * Couche : Integration (Passerelle)
  */
 
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../../../core/dist/exports';
-import { computeBridgeInstance } from '../../../../../core/dist/exports';
-import { nommageConfigSchema, type NommageConfig, type NommageSourceConfig } from '../../../domain/config-schema';
+import { nommageConfigSchema, discoveryTopicsFor, type NommageConfig } from '../../../domain/config-schema';
 import type { DiscoveryMessage, SourceStatus } from '../../../domain/types';
-import * as mqtt from 'mqtt';
+
+const MODULE_NAME = 'nommage';
 
 // ============================================================================
-// Interface du service
+// Interface
 // ============================================================================
 
 export interface INommageMqttIntegrationService {
-  /** Connecte toutes les sources configurées, en parallèle. */
+  /** (Re)lit la config et s'abonne aux préfixes configurés (si le socle est connecté — sinon à la
+   *  prochaine connexion). */
   connect(): Promise<void>;
-  /** Déconnecte toutes les sources. */
+  /** Arrête de traiter les messages reçus (les abonnements du socle restent en place). */
   disconnect(): Promise<void>;
-  /** true si au moins une source est actuellement connectée. */
   isConnected(): boolean;
-  /** Statut détaillé de chaque source configurée (id + connectée ou non). */
+  /** Un élément par préfixe écouté, état = connexion MQTT du socle. */
   getSourceStatuses(): SourceStatus[];
+}
+
+/** Retrait d'une entité à la source : message retenu VIDE sur son topic de découverte. */
+export interface DiscoveryRemovedMessage {
+  sourceId: string;
+  topic: string;
 }
 
 // ============================================================================
@@ -39,216 +46,110 @@ export interface INommageMqttIntegrationService {
 // ============================================================================
 
 export class NommageMqttIntegrationService implements INommageMqttIntegrationService {
-  // Une connexion MQTT par source, stockée par sourceId
-  private clients: Map<string, mqtt.MqttClient> = new Map();
-  private connectedSources: Set<string> = new Set();
   private config: NommageConfig;
+  private bridgeConnected = false;
+  private active = false;
+  /** Topics déjà demandés au socle — le socle les rejoue lui-même à chaque reconnexion. */
+  private readonly subscribed = new Set<string>();
 
   constructor(
-    private eventBus: IEventBus,
-    private logger: Logger,
-    private configProvider: IAppConfigProvider<NommageConfig>
+    private readonly eventBus: IEventBus,
+    private readonly logger: Logger,
+    private readonly configProvider: IAppConfigProvider<NommageConfig>,
+    private readonly bridgeInstance: string
   ) {
     this.config = this.loadConfig();
+
+    this.eventBus.on(`integration:${MODULE_NAME}:bridge:connection`, (data: unknown) => {
+      const event = data as { bridgeInstance: string; connected: boolean };
+      if (event.bridgeInstance !== this.bridgeInstance) return;
+      this.bridgeConnected = event.connected;
+      if (event.connected && this.active) this.subscribeAll();
+      this.eventBus.emit('nommage:mqtt:status', { connected: event.connected });
+    });
+
+    this.eventBus.on(`integration:${MODULE_NAME}:passthrough:message`, (data: unknown) => {
+      const event = data as { bridgeInstance: string; topic: string; payload: string };
+      if (!this.active || event.bridgeInstance !== this.bridgeInstance) return;
+      this.handleIncomingMessage(event.topic, event.payload ?? '');
+    });
   }
 
-  /**
-   * Charge la config depuis le provider et applique les valeurs par défaut du schéma (le
-   * provider retourne {} si la section 'nommage' n'existe pas encore dans config.yaml).
-   */
   private loadConfig(): NommageConfig {
     return nommageConfigSchema.parse(this.configProvider.getAppConfig());
   }
 
-  // ==========================================================================
-  // Connexion MQTT — toutes les sources en parallèle
-  // ==========================================================================
-
   async connect(): Promise<void> {
     this.config = this.loadConfig();
-
+    this.active = true;
     this.logger.info('NommageMqttIntegrationService',
-      `Connexion de ${this.config.sources.length} source(s) MQTT en parallèle...`);
+      `Écoute des découvertes via la connexion MQTT du socle — préfixe(s) : ${this.config.prefixes.map((p) => p.prefix).join(', ')}`);
+    if (this.bridgeConnected) this.subscribeAll();
+  }
 
-    // Chaque source se connecte indépendamment : l'échec d'une source ne doit pas
-    // empêcher les autres de démarrer (fonctionnelles-nommage_specs §3.1).
-    const results = await Promise.allSettled(
-      this.config.sources.map((source) => this.connectSource(source))
-    );
+  async disconnect(): Promise<void> {
+    this.active = false;
+  }
 
-    results.forEach((result, index) => {
-      const source = this.config.sources[index];
-      if (result.status === 'rejected') {
-        this.logger.error('NommageMqttIntegrationService',
-          `Échec de connexion de la source "${source?.id}": ${result.reason}`);
+  isConnected(): boolean {
+    return this.bridgeConnected;
+  }
+
+  getSourceStatuses(): SourceStatus[] {
+    return this.config.prefixes.map((p) => ({ id: p.prefix, connected: this.bridgeConnected }));
+  }
+
+  /** Demande au socle les abonnements manquants. Un préfixe retiré de la config reste abonné côté
+   *  socle jusqu'au redémarrage de l'application, mais ses messages sont ignorés (matchPrefix). */
+  private subscribeAll(): void {
+    for (const { prefix } of this.config.prefixes) {
+      for (const topic of discoveryTopicsFor(prefix)) {
+        if (this.subscribed.has(topic)) continue;
+        this.eventBus.emit(`integration:${MODULE_NAME}:passthrough:subscribe`, {
+          bridgeInstance: this.bridgeInstance,
+          topic,
+          qos: 1
+        });
+        this.subscribed.add(topic);
       }
-    });
-
-    if (this.connectedSources.size === 0 && this.config.sources.length > 0) {
-      throw new Error('Aucune source MQTT n\'a pu être connectée');
     }
   }
 
-  private connectSource(source: NommageSourceConfig): Promise<void> {
-    const brokerUrl = this.buildBrokerUrl(source);
-
-    this.logger.info('NommageMqttIntegrationService',
-      `[${source.id}] Tentative de connexion MQTT à ${brokerUrl}...`);
-
-    // ⭐ 08/09/2026 — même règle que `bridgeInstance` (arexx/evoo7/rfxcom/rpigpio, voir
-    // computeBridgeInstance) : `source.mqtt.clientId` n'est plus qu'un PRÉFIXE, duplicable sans
-    // risque entre machines dimotic-ha — l'identifiant réellement utilisé pour la connexion MQTT
-    // (unique par machine) est calculé à la volée en y ajoutant `DIMOTIC_MACHINE_ID`, jamais
-    // persisté sous cette forme suffixée. Sans ce correctif, deux machines actives simultanément
-    // sur la même source avec le même `clientId` littéral se feraient s'éjecter en boucle par le
-    // broker (le protocole MQTT exige un `clientId` unique par connexion).
-    const effectiveClientId = computeBridgeInstance(source.mqtt.clientId, process.env.DIMOTIC_MACHINE_ID);
-
-    const options: mqtt.IClientOptions = {
-      clientId: effectiveClientId,
-      keepalive: source.mqtt.keepalive,
-      reconnectPeriod: source.mqtt.reconnectPeriod,
-      clean: source.mqtt.cleanSession,
-      username: source.mqtt.username,
-      password: source.mqtt.password,
-      rejectUnauthorized: source.mqtt.rejectUnauthorized
-    };
-
-    const client = mqtt.connect(brokerUrl, options);
-    this.clients.set(source.id, client);
-    this.setupMqttEventHandlers(source, client);
-
-    return new Promise<void>((resolve, reject) => {
-      const connectTimeout = setTimeout(() => {
-        reject(new Error(`[${source.id}] Timeout de connexion MQTT`));
-      }, 30000);
-
-      client.once('connect', async () => {
-        clearTimeout(connectTimeout);
-        this.logger.info('NommageMqttIntegrationService',
-          `[${source.id}] Connecté au broker MQTT avec succès`);
-        this.connectedSources.add(source.id);
-        this.emitStatusChange();
-
-        try {
-          await this.subscribeSourceTopics(source, client);
-          resolve();
-        } catch (error) {
-          reject(error);
-        }
-      });
-
-      client.once('error', (err) => {
-        clearTimeout(connectTimeout);
-        this.logger.error('NommageMqttIntegrationService',
-          `[${source.id}] Erreur de connexion MQTT: ${err.message}`);
-        reject(err);
-      });
-    });
-  }
-
-  private buildBrokerUrl(source: NommageSourceConfig): string {
-    const protocol = source.mqtt.useTls ? 'mqtts' : 'mqtt';
-    return `${protocol}://${source.mqtt.host}:${source.mqtt.port}`;
-  }
-
-  private setupMqttEventHandlers(source: NommageSourceConfig, client: mqtt.MqttClient): void {
-    client.on('message', (topic: string, payload: Buffer) => {
-      this.handleIncomingMessage(source, topic, payload);
-    });
-
-    client.on('close', () => {
-      this.logger.warn('NommageMqttIntegrationService', `[${source.id}] Déconnecté du broker MQTT`);
-      this.connectedSources.delete(source.id);
-      this.emitStatusChange();
-    });
-
-    client.on('error', (err: Error) => {
-      this.logger.error('NommageMqttIntegrationService', `[${source.id}] Erreur MQTT: ${err.message}`);
-    });
-
-    client.on('reconnect', () => {
-      this.logger.info('NommageMqttIntegrationService', `[${source.id}] Tentative de reconnexion MQTT...`);
-    });
-
-    client.on('offline', () => {
-      this.logger.warn('NommageMqttIntegrationService', `[${source.id}] Client MQTT hors ligne`);
-      this.connectedSources.delete(source.id);
-      this.emitStatusChange();
-    });
-  }
-
-  private emitStatusChange(): void {
-    // La perte d'une source ne doit pas interrompre le traitement des autres : le statut global
-    // reflète "au moins une source connectée" (fonctionnelles-nommage_specs §3.1, §8.1).
-    this.eventBus.emit('nommage:mqtt:status', {
-      connected: this.connectedSources.size > 0,
-      connectedSources: Array.from(this.connectedSources),
-      totalSources: this.config.sources.length,
-      timestamp: new Date()
-    });
-  }
-
   // ==========================================================================
-  // Traitement des messages entrants
+  // Réception
   // ==========================================================================
 
-  private handleIncomingMessage(source: NommageSourceConfig, topic: string, payload: Buffer): void {
-    try {
-      const message = this.parseMessage(topic, payload);
-
-      if (this.config.logging?.showRawMessages) {
-        this.logger.debug('NommageMqttIntegrationService',
-          `[${source.id}] Message MQTT reçu - Topic: ${topic}`);
-      }
-
-      if (this.isDiscoveryTopic(source, topic)) {
-        this.processDiscoveryMessage(source.id, topic, message);
-      }
-    } catch (error) {
-      this.logger.error('NommageMqttIntegrationService',
-        `[${source.id}] Erreur lors du traitement du message MQTT: ${error}`);
+  private matchPrefix(topic: string): string | undefined {
+    for (const { prefix } of this.config.prefixes) {
+      if (discoveryTopicsFor(prefix).some((pattern) => topicMatchesPattern(topic, pattern))) return prefix;
     }
+    return undefined;
   }
 
-  private parseMessage(topic: string, payload: Buffer): Record<string, unknown> {
+  private handleIncomingMessage(topic: string, payloadString: string): void {
+    const prefix = this.matchPrefix(topic);
+    if (!prefix) return; // autre abonné du socle (même module) ou préfixe retiré de la config
+
+    if (this.config.logging?.showRawMessages) {
+      this.logger.debug('NommageMqttIntegrationService', `[${prefix}] Message MQTT reçu - Topic: ${topic}`);
+    }
+
+    // ⭐ Retrait à la source (ex: appareil supprimé de zigbee2mqtt) : message retenu VIDE. Avant,
+    // pris pour une « découverte » `{raw:""}` relayée telle quelle à HA — l'entité restait fantôme.
+    if (payloadString.trim() === '') {
+      this.eventBus.emit('nommage:discovery:removed', { sourceId: prefix, topic } satisfies DiscoveryRemovedMessage);
+      return;
+    }
+
+    let payload: Record<string, unknown>;
     try {
-      const payloadString = payload.toString('utf8');
-      return JSON.parse(payloadString);
+      payload = JSON.parse(payloadString);
     } catch {
-      this.logger.warn('NommageMqttIntegrationService',
-        `Message non-JSON reçu sur ${topic}, traitement comme chaîne brute`);
-      return { raw: payload.toString('utf8') };
+      this.logger.warn('NommageMqttIntegrationService', `[${prefix}] Découverte non-JSON ignorée sur ${topic}`);
+      return;
     }
-  }
-
-  private isDiscoveryTopic(source: NommageSourceConfig, topic: string): boolean {
-    const { topicPrefix, discoveryTopics } = source.mqtt;
-
-    if (topicPrefix && !topic.startsWith(topicPrefix)) {
-      return false;
-    }
-
-    return discoveryTopics.some((pattern) => this.topicMatchesPattern(topic, pattern));
-  }
-
-  private topicMatchesPattern(topic: string, pattern: string): boolean {
-    // Simple wildcard matching (+ = un niveau, # = plusieurs niveaux)
-    const topicParts = topic.split('/');
-    const patternParts = pattern.split('/');
-
-    if (patternParts.includes('#')) {
-      const hashIndex = patternParts.indexOf('#');
-      return patternParts.slice(0, hashIndex).every((part, index) =>
-        part === '+' || part === topicParts[index]
-      );
-    }
-
-    if (topicParts.length !== patternParts.length) {
-      return false;
-    }
-
-    return patternParts.every((part, index) => part === '+' || part === topicParts[index]);
+    if (!payload || typeof payload !== 'object') return;
+    this.processDiscoveryMessage(prefix, topic, payload);
   }
 
   private processDiscoveryMessage(sourceId: string, topic: string, payload: Record<string, unknown>): void {
@@ -266,8 +167,7 @@ export class NommageMqttIntegrationService implements INommageMqttIntegrationSer
     // d'un device (voir AreaEnsureService), le device restait sans area de façon définitive dès
     // qu'une entité "nommée" arrivait en premier — expliquait des devices zigbee sans pièce,
     // différents à chaque redémarrage selon l'ordre d'arrivée des messages retenus.
-    if (typeof payload === 'object' && payload &&
-        typeof (payload as { device?: { name?: string } }).device?.name === 'string') {
+    if (typeof (payload as { device?: { name?: string } }).device?.name === 'string') {
       rawName = (payload as { device: { name: string } }).device.name;
     } else if (typeof payload.name === 'string') {
       rawName = payload.name;
@@ -289,81 +189,31 @@ export class NommageMqttIntegrationService implements INommageMqttIntegrationSer
       timestamp: new Date()
     };
 
-    // Émettre le message brut vers le service métier pour parsing
     this.eventBus.emit('nommage:discovery:raw', discoveryMessage);
 
     if (this.config.logging?.showRawMessages) {
-      this.logger.debug('NommageMqttIntegrationService',
-        `[${sourceId}] Message de découverte brut: ${rawName}`);
+      this.logger.debug('NommageMqttIntegrationService', `[${sourceId}] Message de découverte brut: ${rawName}`);
     }
   }
-
-  // ==========================================================================
-  // Abonnements MQTT
-  // ==========================================================================
-
-  private async subscribeSourceTopics(source: NommageSourceConfig, client: mqtt.MqttClient): Promise<void> {
-    const qos = source.mqtt.qos as 0 | 1 | 2;
-
-    for (const topic of source.mqtt.discoveryTopics) {
-      await new Promise<void>((resolve, reject) => {
-        client.subscribe(topic, { qos }, (err) => {
-          if (err) {
-            this.logger.error('NommageMqttIntegrationService',
-              `[${source.id}] Erreur d'abonnement à ${topic}: ${err.message}`);
-            reject(err);
-          } else {
-            this.logger.info('NommageMqttIntegrationService',
-              `[${source.id}] Abonné à ${topic} (QoS: ${qos})`);
-            resolve();
-          }
-        });
-      });
-    }
-  }
-
-  // ==========================================================================
-  // Déconnexion — toutes les sources
-  // ==========================================================================
-
-  async disconnect(): Promise<void> {
-    const clients = Array.from(this.clients.values());
-
-    await Promise.all(
-      clients.map(
-        (client) =>
-          new Promise<void>((resolve) => {
-            client.end(true, {}, () => resolve());
-          })
-      )
-    );
-
-    this.clients.clear();
-    this.connectedSources.clear();
-    this.logger.info('NommageMqttIntegrationService', 'Toutes les sources MQTT déconnectées');
-    this.emitStatusChange();
-  }
-
-  isConnected(): boolean {
-    return this.connectedSources.size > 0;
-  }
-
-  getSourceStatuses(): SourceStatus[] {
-    return this.config.sources.map((source) => ({
-      id: source.id,
-      connected: this.connectedSources.has(source.id)
-    }));
-  }
-
-  // ==========================================================================
-  // Factory
-  // ==========================================================================
 
   static create(
     eventBus: IEventBus,
     logger: Logger,
-    configProvider: IAppConfigProvider<NommageConfig>
+    configProvider: IAppConfigProvider<NommageConfig>,
+    bridgeInstance: string
   ): NommageMqttIntegrationService {
-    return new NommageMqttIntegrationService(eventBus, logger, configProvider);
+    return new NommageMqttIntegrationService(eventBus, logger, configProvider, bridgeInstance);
   }
+}
+
+/** Correspondance de topic MQTT (+ = un niveau, # = plusieurs niveaux). */
+function topicMatchesPattern(topic: string, pattern: string): boolean {
+  const topicParts = topic.split('/');
+  const patternParts = pattern.split('/');
+  const hashIndex = patternParts.indexOf('#');
+  if (hashIndex !== -1) {
+    return patternParts.slice(0, hashIndex).every((part, index) => part === '+' || part === topicParts[index]);
+  }
+  if (topicParts.length !== patternParts.length) return false;
+  return patternParts.every((part, index) => part === '+' || part === topicParts[index]);
 }

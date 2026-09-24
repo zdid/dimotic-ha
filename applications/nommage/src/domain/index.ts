@@ -21,7 +21,7 @@ import {
   AppConfigProvider
 } from '../../../core/dist/exports';
 import { NOMMAGE_SOCKET_EVENTS, NOMMAGE_ALL_EVENTS, NOMMAGE_PERSISTENT_EVENTS } from './socket-events';
-import { NommageService, INommageService } from './NommageService';
+import { NommageService, INommageService, BRIDGE_INSTANCE } from './NommageService';
 import { NommageMqttIntegrationService, INommageMqttIntegrationService } from '../ha/integration/nommage/NommageMqttIntegrationService';
 import { DEFAULT_NOMMAGE_CONFIG, type NommageConfig } from './config-schema';
 
@@ -67,56 +67,25 @@ export const NOMMAGE_UI_METADATA: ModuleUiMetadata = {
   menuPath: '/nommage/config',
   badge: 'MQTT',
 
-  // ⭐ v1.2 : les sources MQTT (config.sources[], une ou plusieurs, ajout/suppression dynamique)
-  // avaient nécessité une page de config dédiée (presentation/nommage/config.html) tant que le
-  // formulaire générique ne savait pas rendre un tableau dynamique. Type 'array' ajouté au socle
-  // (Alpine x-for/x-model) — la page dédiée est retirée, tout tient maintenant ici. Seule
-  // mqtt.discoveryTopics (tableau de chaînes DANS chaque source) reste non éditable ici : un
-  // sous-champ de type 'array' imbriqué dans un élément de tableau n'est pas supporté par le
-  // socle — garde ses valeurs par défaut (ou modification via config.yaml directement).
+  // ⭐ 24/09/2026 (décision utilisateur) — plus de « sources » MQTT (hôte/port/identifiants par
+  // source, jamais utilisées pour un autre broker que celui du socle) : seuls les préfixes de
+  // découverte à écouter restent, via la connexion MQTT du socle. Ancienne config migrée
+  // automatiquement (voir config-schema.ts::migrateLegacySources).
   fields: [
     {
-      title: 'Sources MQTT',
-      description: 'Une ou plusieurs connexions MQTT indépendantes, toutes actives en même temps (ex : le broker HA lui-même, et séparément Zigbee2MQTT sur un préfixe de topics différent).',
+      title: 'Préfixes de découverte écoutés',
+      description: "Préfixes MQTT où les appareils publient leurs découvertes BRUTES (ex : « homeassist » pour zigbee2mqtt et mqtt-io/rpigpio), lus via la connexion MQTT du socle — NOMMAGE les relaie enrichies (taxonomie, pièce, traductions) vers « homeassistant/ ».",
       icon: '📡',
       fields: [
         {
-          name: 'sources',
-          label: 'Sources',
+          name: 'prefixes',
+          label: 'Préfixes',
           type: 'array',
-          itemLabel: 'Source',
+          itemLabel: 'Préfixe',
           minItems: 1,
-          // Sans ça, une config fraîche sans clé 'sources' du tout affiche un tableau vide (0
-          // élément) au lieu d'une première source pré-remplie — même défaut que le schéma Zod
-          // (nommageConfigSchema), réutilisé ici comme seule source de vérité.
-          default: DEFAULT_NOMMAGE_CONFIG.sources,
+          default: DEFAULT_NOMMAGE_CONFIG.prefixes,
           itemFields: [
-            { name: 'id', label: 'Identifiant de la source', type: 'text', required: true, placeholder: 'ha-broker', hint: 'Identifiant unique (ex: "ha-broker", "zigbee2mqtt")' },
-            { name: 'mqtt.clientId', label: 'Client ID MQTT', type: 'text', required: true, placeholder: 'nommage-app', hint: 'Préfixe seul (doit être unique entre toutes les sources de CETTE machine) — un identifiant de machine y est ajouté automatiquement à la connexion, ce champ reste donc dupliable tel quel entre machines dimotic-ha sans risque de collision.' },
-            {
-              name: 'mqtt.host', label: 'Hôte MQTT', type: 'text', required: true, placeholder: '192.168.1.100', default: 'localhost',
-              // ⭐ 08/09/2026 : ne JAMAIS mettre '127.0.0.1'/'localhost' ici, même quand le broker
-              // tourne sur cette même machine — voir [[project_multimachine_config_duplication_design]]
-              // (conception "duplication config multi-machines", en pause) : `data/nommage/
-              // config.yaml` est candidat à une diffusion identique vers d'autres machines, où une
-              // adresse de boucle locale pointerait vers le mauvais broker (ou aucun), cassé
-              // silencieusement. Toujours l'adresse LAN réelle de la machine hébergeant le broker.
-              hint: 'Toujours l\'adresse IP LAN réelle du broker (ex: 192.168.1.51) — jamais "127.0.0.1" ni "localhost", même si le broker tourne sur cette machine (ce fichier peut être diffusé vers d\'autres machines).'
-            },
-            { name: 'mqtt.port', label: 'Port MQTT', type: 'number', required: true, min: 1, max: 65535, default: 1883 },
-            { name: 'mqtt.username', label: 'Utilisateur MQTT', type: 'text', placeholder: 'user' },
-            { name: 'mqtt.password', label: 'Mot de passe MQTT', type: 'password', placeholder: 'password' },
-            { name: 'mqtt.topicPrefix', label: 'Préfixe des Topics', type: 'text', required: true, placeholder: 'ha/', default: 'ha/', hint: 'Préfixe du 1er terme des topics de cette source' },
-            {
-              name: 'mqtt.qos', label: 'QoS', type: 'select', default: 1,
-              options: [
-                { value: '0', label: '0 - Au maximum une fois' },
-                { value: '1', label: '1 - Au moins une fois' },
-                { value: '2', label: '2 - Exactement une fois' }
-              ]
-            },
-            { name: 'mqtt.retain', label: 'Conserver les messages retain', type: 'boolean', default: true },
-            { name: 'mqtt.useTls', label: 'Utiliser TLS (mqtts://)', type: 'boolean', default: false }
+            { name: 'prefix', label: 'Préfixe', type: 'text', required: true, placeholder: 'homeassist', hint: 'Premier segment des topics de découverte (sans « / »). Écoute <préfixe>/+/+/config, <préfixe>/+/+/+/config et <préfixe>/+/+/+/+/config.' }
           ]
         }
       ]
@@ -230,7 +199,7 @@ export const NOMMAGE_MENU_CONFIG: ApplicationMenuConfig = {
 export const NOMMAGE_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   id: 'nommage',
   name: 'NOMMAGE',
-  description: 'Application de gestion des conventions de nommage et taxonomie pour Home Assistant. Écoute une ou plusieurs sources MQTT simultanément, parse les noms selon le format QUOI---OÙ, et relaie les messages enrichis vers HA via le Passthrough MQTT du socle.',
+  description: 'Application de gestion des conventions de nommage et taxonomie pour Home Assistant. Écoute un ou plusieurs préfixes de découverte via la connexion MQTT du socle, parse les noms selon le format QUOI---OÙ, et relaie les messages enrichis vers HA via le Passthrough MQTT du socle.',
   icon: '🏷️',
   
   menu: NOMMAGE_MENU_CONFIG,
@@ -267,7 +236,8 @@ export function createNommageService(
   const mqttService = NommageMqttIntegrationService.create(
     eventBus,
     logger,
-    configProvider
+    configProvider,
+    BRIDGE_INSTANCE
   );
   
   const service = NommageService.create(

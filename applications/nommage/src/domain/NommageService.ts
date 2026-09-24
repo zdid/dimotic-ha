@@ -4,8 +4,8 @@
  * Service métier principal de l'application NOMMAGE.
  *
  * Responsabilités :
- * - Écouter les messages de découverte bruts via EventBus (sources multiples, voir
- *   NommageMqttIntegrationService)
+ * - Écouter les messages de découverte bruts via EventBus (préfixes écoutés via la connexion MQTT
+ *   du socle, voir NommageMqttIntegrationService)
  * - Parser les messages selon le format QUOI---OÙ (nommage_specs_v1.0.md)
  * - Enrichir le message source avec les attributs de taxonomie et le relayer vers HA via le
  *   Passthrough MQTT du socle (fonctionnelles-nommage_specs §3.4, remplace l'ancien
@@ -19,7 +19,7 @@
 
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
 import type { INommageMqttIntegrationService } from '../ha/integration/nommage/NommageMqttIntegrationService';
-import { nommageConfigSchema, type NommageConfig } from './config-schema';
+import { nommageConfigSchema, discoveryTopicsFor, type NommageConfig } from './config-schema';
 import { TranslationsRepository } from './translations/TranslationsRepository';
 import type {
   DiscoveryMessage,
@@ -42,7 +42,7 @@ import type {
  * le broker HA du socle, indépendante des sources de lecture — voir techniques-socle-ha-mqtt_specs
  * §8.5.1/§8.5.6).
  */
-const BRIDGE_INSTANCE = 'main';
+export const BRIDGE_INSTANCE = 'main';
 
 /** Nombre de jours affichés dans l'historique glissant des entrées traitées (fonctionnelles-nommage_specs §3.5). */
 const DAILY_STATS_WINDOW_DAYS = 5;
@@ -65,7 +65,13 @@ export interface INommageService {
 export class NommageService implements INommageService {
   private parsedCount: number = 0;
   private lastParsedAt: Date | null = null;
-  private taxonomyStructures: TaxonomyStructure[] = [];
+  /** ⭐ 24/09/2026 — une entrée PAR TOPIC de découverte (avant : tableau qui recevait une entrée à
+   *  chaque message, doublons à chaque redémarrage de HA, croissance sans limite). */
+  private taxonomyStructures: Map<string, TaxonomyStructure> = new Map();
+  /** Dernière découverte relayée par topic source — rejouée telle quelle au retour de HA
+   *  (ha:online), et sert au retrait (topics effectivement publiés). */
+  private relayed: Map<string, { discoveryMessage: DiscoveryMessage; parsed: ParsedTaxonomy; effectiveTopic: string; attributesTopic?: string }> = new Map();
+  private taxonomyEmitTimer?: ReturnType<typeof setTimeout>;
   private mqttConnected: boolean = false;
   private status: NommageStatus = {
     connected: false,
@@ -118,18 +124,18 @@ export class NommageService implements INommageService {
 
     try {
       // Enregistrer le bridge auprès du socle pour pouvoir publier via le Passthrough MQTT
-      // (une seule connexion socle, indépendante des N sources de lecture ci-dessous).
+      // (connexion du socle, aussi utilisée pour s'abonner aux préfixes de découverte).
       this.eventBus.emit('integration:bridge:register', {
         moduleName: 'nommage',
         bridgeInstance: BRIDGE_INSTANCE
       });
 
-      // Se connecter à toutes les sources MQTT configurées, en parallèle
+      // S'abonner (via le socle) aux préfixes de découverte configurés
       await this.mqttService.connect();
       this.mqttConnected = this.mqttService.isConnected();
 
       this.logger.info('NommageService',
-        `Service démarré avec succès. ${this.config.sources.length} source(s), topics: ${this.discoveryTopics.join(', ')}`);
+        `Service démarré avec succès. ${this.config.prefixes.length} préfixe(s), topics: ${this.discoveryTopics.join(', ')}`);
 
       this.updateStatus();
       this.emitStatus();
@@ -150,6 +156,7 @@ export class NommageService implements INommageService {
     try {
       await this.mqttService.disconnect();
       this.mqttConnected = false;
+      if (this.taxonomyEmitTimer) clearTimeout(this.taxonomyEmitTimer);
 
       this.eventBus.emit('integration:bridge:unregister', {
         moduleName: 'nommage',
@@ -176,6 +183,10 @@ export class NommageService implements INommageService {
         this.handleRawDiscoveryMessage(data as DiscoveryMessage);
       });
 
+    this.eventBus.on('nommage:discovery:removed', (data: unknown) => {
+      this.handleDiscoveryRemoved(data as { sourceId: string; topic: string });
+    });
+
     this.eventBus.on('nommage:mqtt:status', (data: unknown) => {
       const status = data as { connected: boolean };
       this.mqttConnected = status.connected;
@@ -195,7 +206,7 @@ export class NommageService implements INommageService {
       this.saveConfig(data as Partial<NommageConfig>);
     });
 
-    // Nommage n'a pas d'UI de configuration dédiée : les paramètres (sources MQTT, etc.) sont
+    // Nommage n'a pas d'UI de configuration dédiée : les paramètres (préfixes, etc.) sont
     // édités via le formulaire générique "Paramètres du Module" du core, qui sauvegarde par
     // ConfigService.saveModuleConfig() (AppService.handleModuleConfigSave) — un chemin qui
     // écrit directement sur disque sans jamais émettre 'nommage:config:save' (TODO.md : ce
@@ -207,7 +218,7 @@ export class NommageService implements INommageService {
       if (result.moduleId !== 'nommage' || !result.success) return;
 
       this.logger.info('NommageService',
-        'Configuration sauvegardée via le formulaire générique — reconnexion des sources MQTT...');
+        'Configuration sauvegardée via le formulaire générique — mise à jour des abonnements...');
 
       this.reloadConfigAndReconnectMqtt().catch((error) => {
         this.logger.error('NommageService',
@@ -216,18 +227,14 @@ export class NommageService implements INommageService {
     });
 
     // ⭐ Second déclencheur de republication de découverte (voir HA_STATUS_TOPIC,
-    // techniques-socle-ha-mqtt_specs §8.5.4 — même correctif que RFXCOM). NOMMAGE ne maintient
-    // pas de liste des devices déjà vus (passthrough réactif, pas de registre local) : on
-    // déclenche donc une reconnexion complète de toutes les sources plutôt qu'un "republish"
-    // ciblé — un nouvel abonnement fait redélivrer par le broker tous les messages retenus
-    // (les découvertes déjà publiées par zigbee2mqtt/etc.), qui repassent alors par le pipeline
-    // normal (suggested_area, traductions...) comme à la connexion initiale.
+    // techniques-socle-ha-mqtt_specs §8.5.4 — même correctif que RFXCOM). ⭐ 24/09/2026 : les
+    // dernières découvertes relayées sont gardées par topic (this.relayed) — rejouées directement,
+    // au lieu de couper/rouvrir toutes les connexions (plus de connexion propre à NOMMAGE).
     this.eventBus.on('integration:nommage:ha:online', () => {
-      this.logger.info('NommageService', 'HA en ligne — reconnexion des sources MQTT pour republier la découverte');
-      this.reloadConfigAndReconnectMqtt().catch((error) => {
-        this.logger.error('NommageService',
-          `Erreur lors de la reconnexion sur HA online: ${error}`);
-      });
+      this.logger.info('NommageService', `HA en ligne — republication de ${this.relayed.size} découverte(s)`);
+      for (const { discoveryMessage, parsed } of this.relayed.values()) {
+        this.emitPassthroughDiscovery(discoveryMessage, parsed);
+      }
     });
   }
 
@@ -263,7 +270,7 @@ export class NommageService implements INommageService {
           lastUpdated: new Date()
         };
 
-        this.taxonomyStructures.push(taxonomyStructure);
+        this.taxonomyStructures.set(discoveryMessage.topic, taxonomyStructure);
 
         this.parsedCount++;
         this.lastParsedAt = new Date();
@@ -284,7 +291,7 @@ export class NommageService implements INommageService {
 
         this.updateStatus();
         this.emitStatus();
-        this.emitTaxonomyStructure();
+        this.scheduleTaxonomyEmit();
 
       } else {
         this.logger.warn('NommageService',
@@ -301,6 +308,30 @@ export class NommageService implements INommageService {
         timestamp: new Date()
       });
     }
+  }
+
+  /**
+   * ⭐ 24/09/2026 — retrait à la source (message retenu vide sur le topic de découverte, ex:
+   * appareil supprimé de zigbee2mqtt) : propagé à HA (config vide, retenue, sur le topic
+   * `homeassistant/…` réellement publié) et topic d'attributs effacé. Avant : relayé comme une
+   * « découverte » invalide, l'entité restait fantôme dans HA.
+   */
+  private handleDiscoveryRemoved(data: { sourceId: string; topic: string }): void {
+    const known = this.relayed.get(data.topic);
+    const effectiveTopic = known?.effectiveTopic ?? data.topic;
+    const haTopic = effectiveTopic.split('/').filter((s) => s.length > 0);
+    haTopic[0] = 'homeassistant';
+    this.eventBus.emit('integration:nommage:passthrough:publish', {
+      bridgeInstance: BRIDGE_INSTANCE, topic: haTopic.join('/'), payload: '', qos: 1, retain: true
+    });
+    const attributesTopic = known?.attributesTopic ?? effectiveTopic.replace(/\/config$/, '/attributs');
+    this.eventBus.emit('integration:nommage:passthrough:publish', {
+      bridgeInstance: BRIDGE_INSTANCE, topic: attributesTopic, payload: '', qos: 1, retain: true
+    });
+    this.relayed.delete(data.topic);
+    this.taxonomyStructures.delete(data.topic);
+    this.logger.info('NommageService', `[${data.sourceId}] Entité retirée à la source — retirée de HA (${haTopic.join('/')})`);
+    this.scheduleTaxonomyEmit();
   }
 
   /**
@@ -475,8 +506,9 @@ export class NommageService implements INommageService {
     // que core/discovery.ts::getAttributesTopic — "attributs" à la place de "config") : simple
     // substitution du suffixe, robuste au nombre de segments précédents (Zigbee2MQTT peut publier
     // sur 4 OU 5 segments selon la présence d'un node_id — vérifié en direct).
+    let attributesTopic: string | undefined;
     if (this.config.ha.injectTaxonomyAttributes) {
-      const attributesTopic = effectiveTopic.replace(/\/config$/, '/attributs');
+      attributesTopic = effectiveTopic.replace(/\/config$/, '/attributs');
       payload = {
         ...payload,
         json_attributes_topic: attributesTopic,
@@ -500,6 +532,7 @@ export class NommageService implements INommageService {
     };
 
     this.eventBus.emit('integration:nommage:passthrough:discovery', event);
+    this.relayed.set(discoveryMessage.topic, { discoveryMessage, parsed, effectiveTopic, attributesTopic });
 
     this.logger.debug('NommageService',
       `[${discoveryMessage.sourceId}] Relayé vers HA via Passthrough MQTT (sourceTopic: ${discoveryMessage.topic})`);
@@ -615,11 +648,22 @@ export class NommageService implements INommageService {
   }
 
   private emitTaxonomyStructure(): void {
+    const structures = Array.from(this.taxonomyStructures.values());
     this.eventBus.emit('nommage:taxonomy:structure', {
-      structures: this.taxonomyStructures,
-      count: this.taxonomyStructures.length,
+      structures,
+      count: structures.length,
       timestamp: new Date()
     });
+  }
+
+  /** ⭐ 24/09/2026 — au plus un envoi par seconde : la liste ENTIÈRE partait à l'écran à chaque
+   *  message (coût quadratique à la connexion, des centaines de découvertes retenues d'un coup). */
+  private scheduleTaxonomyEmit(): void {
+    if (this.taxonomyEmitTimer) return;
+    this.taxonomyEmitTimer = setTimeout(() => {
+      this.taxonomyEmitTimer = undefined;
+      this.emitTaxonomyStructure();
+    }, 1000);
   }
 
   private emitPersistentEvents(): void {
@@ -632,7 +676,7 @@ export class NommageService implements INommageService {
   // ==========================================================================
 
   private aggregateDiscoveryTopics(): string[] {
-    return this.config.sources.flatMap((source) => source.mqtt.discoveryTopics);
+    return this.config.prefixes.flatMap((p) => discoveryTopicsFor(p.prefix));
   }
 
   /**
@@ -642,6 +686,9 @@ export class NommageService implements INommageService {
    * fichier a été écrit ailleurs (voir listener 'app:module:config:saved' ci-dessous).
    */
   private async reloadConfigAndReconnectMqtt(): Promise<void> {
+    // ⭐ 24/09/2026 — relit le FICHIER (process séparé : sans reload(), l'ancienne config en
+    // mémoire était « rechargée » telle quelle et les nouveaux paramètres jamais appliqués).
+    this.configProvider.reload();
     this.config = this.loadConfig();
     this.discoveryTopics = this.aggregateDiscoveryTopics();
 
@@ -682,7 +729,7 @@ export class NommageService implements INommageService {
   }
 
   getTaxonomyStructures(): TaxonomyStructure[] {
-    return [...this.taxonomyStructures];
+    return Array.from(this.taxonomyStructures.values());
   }
 
   private updateStatus(): void {

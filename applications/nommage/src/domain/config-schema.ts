@@ -2,9 +2,13 @@
  * Schéma de configuration pour l'application NOMMAGE
  * Basé sur Zod pour la validation
  *
- * Conforme à fonctionnelles-nommage_specs_v1.1.md §4.3 : `sources` (tableau), toutes connectées
- * et traitées simultanément — remplace l'ancien `couples` (tableau dont seule la première entrée
- * était réellement utilisée par le code).
+ * ⭐ 24/09/2026 (décision utilisateur) — plus de connexion MQTT propre à NOMMAGE : les « sources »
+ * (hôte/port/identifiants/clientId/TLS… par source) avaient été prévues pour lire des découvertes
+ * sur d'autres brokers que celui du socle, ce qui n'a jamais servi. NOMMAGE s'abonne désormais via
+ * la connexion MQTT du socle (passthrough), et la config se réduit à la liste des PRÉFIXES de
+ * découverte à écouter (ex. "homeassist" : là où zigbee2mqtt/mqtt-io publient leurs découvertes
+ * brutes, relayées enrichies vers "homeassistant/"). Une ancienne config `sources[]` est migrée
+ * automatiquement (préfixes déduits de `sources[].mqtt.topicPrefix`).
  */
 
 import { z } from 'zod';
@@ -13,75 +17,13 @@ import { z } from 'zod';
 // Sous-schémas
 // ============================================================================
 
-// Configuration MQTT d'une source (pour écouter les messages de découverte)
-const sourceMqttConfigSchema = z.object({
-  // Connexion
-  host: z.string().default('localhost'),
-  port: z.number().min(1).max(65535).default(1883),
-  username: z.string().optional(),
-  password: z.string().optional(),
-  // ⭐ 08/09/2026 — n'est plus qu'un PRÉFIXE, duplicable sans risque entre machines dimotic-ha :
-  // voir computeBridgeInstance/DIMOTIC_MACHINE_ID (NommageMqttIntegrationService.connectSource),
-  // même correctif que `bridgeInstance` dans arexx/evoo7/rfxcom/rpigpio.
-  clientId: z.string().default('nommage-app'),
-  keepalive: z.number().min(0).max(300).default(60),
-  reconnectPeriod: z.number().min(1000).max(300000).default(5000),
-  cleanSession: z.boolean().default(true),
-
-  // Topics à écouter (découverte) — voir .transform() ci-dessous : toujours recalculé à partir
-  // de topicPrefix, jamais conservé tel quel. Ce champ n'est pas éditable dans le formulaire
-  // `array` générique (itemFields ne supporte pas les tableaux imbriqués par item) : une valeur
-  // soumise ici vient toujours du template par défaut créé à l'ajout d'une source, jamais mise à
-  // jour si topicPrefix change ensuite — la garder telle quelle a déjà causé un abonnement aux
-  // mauvais topics MQTT (TODO.md, crash serveur par afflux de messages retained).
-  discoveryTopics: z.array(z.string()).optional(),
-
-  // Préfixe des topics (ex: "ha/", "homeassistant/") — source de vérité pour discoveryTopics
-  topicPrefix: z.string().default('ha/'),
-
-  // QoS
-  qos: z.number().min(0).max(2).default(1),
-  retain: z.boolean().default(true),
-
-  // SSL/TLS
-  useTls: z.boolean().default(false),
-  rejectUnauthorized: z.boolean().default(true)
-}).transform((data) => {
-  // Toujours dérivé de topicPrefix — jamais la valeur soumise (voir commentaire ci-dessus sur
-  // discoveryTopics). topicPrefix n'est pas garanti avoir un "/" final (constaté en pratique :
-  // "homeassist" sans slash pour une source réelle, alors que le défaut du schéma est "ha/" avec)
-  // — normalisé pour ne jamais produire un topic collé du type "homeassist+/+/config".
-  const prefix = data.topicPrefix.replace(/\/+$/, '');
-
-  // Format officiel de découverte MQTT HA : <prefix>/<component>/[<node_id>/]<object_id>/config
-  // — node_id est OPTIONNEL, donc deux formes valides côté HA. Un catch-all (`prefix/#`)
-  // couvrirait toutes les formes mais réintroduirait le risque déjà rencontré (afflux de messages
-  // non pertinents, heap overflow) — des patterns bornés au lieu.
-  //
-  // ⭐ 14/09/2026 (trouvé en conditions réelles, noisy2) : troisième pattern à 4 niveaux ajouté
-  // pour `rpigpio`/mqtt-io — `generator.ts::generateMqttIoConfig()` insère le `bridgeInstance`
-  // comme segment SUPPLÉMENTAIRE dans le préfixe de découverte (`${discoveryPrefix}/
-  // ${effectiveBridgeInstance}`, pour distinguer plusieurs machines rpigpio — voir
-  // fonctionnelles-supervisor_specs v2.3 §9.2), ce qui décale le format natif mqtt-io
-  // (`prefix/component/node_id/object_id/config`, déjà couvert ci-dessus) d'un cran :
-  // `prefix/bridgeInstance/component/node_id/object_id/config`. Reste un pattern BORNÉ (4 niveaux
-  // fixes + littéral "config"), pas un joker `#` — même nature de risque que les deux patterns
-  // existants, pas la classe de risque de l'incident historique ci-dessus.
-  return {
-    ...data,
-    discoveryTopics: [`${prefix}/+/+/config`, `${prefix}/+/+/+/config`, `${prefix}/+/+/+/+/config`]
-  };
+/** Un préfixe de découverte à écouter — objet (et non simple chaîne) : le formulaire générique ne
+ *  sait éditer qu'un tableau d'objets (type 'array' + itemFields). */
+const prefixEntrySchema = z.object({
+  prefix: z.string().min(1).transform((p) => p.trim().replace(/^\/+|\/+$/g, ''))
 });
 
-// Une source = une connexion MQTT indépendante (fonctionnelles-nommage_specs §3.1, §4.3)
-const nommageSourceSchema = z.object({
-  // Identifiant unique de la source (ex: "ha-broker", "zigbee2mqtt") — utilisé dans les logs,
-  // l'UI, et le champ sourceId des événements
-  id: z.string().min(1),
-  mqtt: sourceMqttConfigSchema
-});
-
-// Configuration de transmission vers HA — commune à toutes les sources (Passthrough MQTT du socle)
+// Configuration de transmission vers HA (Passthrough MQTT du socle)
 const haConfigSchema = z.object({
   // Injecter les attributs de taxonomie dans le payload relayé
   injectTaxonomyAttributes: z.boolean().default(true),
@@ -103,7 +45,7 @@ const haConfigSchema = z.object({
   forceLightForLumiere: z.boolean().default(true)
 });
 
-// Configuration Logging — commune à toutes les sources
+// Configuration Logging
 const loggingConfigSchema = z.object({
   level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   showParsedMessages: z.boolean().default(false),
@@ -118,40 +60,59 @@ const languageConfigSchema = z.object({
 });
 
 // ============================================================================
+// Migration de l'ancien format (sources[])
+// ============================================================================
+
+/** Ancienne config `sources[].mqtt.topicPrefix` → `prefixes[]` (dédoublonnés) ; les paramètres de
+ *  connexion propres à chaque source sont abandonnés (connexion du socle désormais). */
+function migrateLegacySources(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw;
+  const config = raw as Record<string, unknown>;
+  if (config.prefixes !== undefined || !Array.isArray(config.sources)) return raw;
+  const prefixes = [...new Set(
+    (config.sources as Array<{ mqtt?: { topicPrefix?: string } }>)
+      .map((s) => (s?.mqtt?.topicPrefix ?? 'ha/').trim().replace(/^\/+|\/+$/g, ''))
+      .filter((p) => p.length > 0)
+  )];
+  const { sources: _sources, ...rest } = config;
+  return { ...rest, prefixes: prefixes.map((prefix) => ({ prefix })) };
+}
+
+// ============================================================================
 // Schéma principal
 // ============================================================================
 
-export const nommageConfigSchema = z.object({
-  // Activation générale
-
-  // Une ou plusieurs sources MQTT, toutes connectées et traitées simultanément
-  sources: z.array(nommageSourceSchema).min(1).default([
-    { id: 'ha-broker', mqtt: {} }
-  ]),
-
-  ha: haConfigSchema.default({}),
-  logging: loggingConfigSchema.default({}),
-  language: languageConfigSchema.default({})
-})
-  .refine(
-    (config) => new Set(config.sources.map((s) => s.id)).size === config.sources.length,
-    { message: 'Chaque source doit avoir un id unique', path: ['sources'] }
+export const nommageConfigSchema = z.preprocess(
+  migrateLegacySources,
+  z.object({
+    // Préfixes de découverte écoutés (via la connexion MQTT du socle)
+    prefixes: z.array(prefixEntrySchema).min(1).default([{ prefix: 'homeassist' }]),
+    ha: haConfigSchema.default({}),
+    logging: loggingConfigSchema.default({}),
+    language: languageConfigSchema.default({})
+  }).refine(
+    (config) => new Set(config.prefixes.map((p) => p.prefix)).size === config.prefixes.length,
+    { message: 'Chaque préfixe ne doit apparaître qu\'une fois', path: ['prefixes'] }
   )
-  .refine(
-    (config) => {
-      const clientIds = config.sources.map((s) => s.mqtt.clientId);
-      return new Set(clientIds).size === clientIds.length;
-    },
-    { message: 'Chaque source doit avoir un clientId MQTT unique', path: ['sources'] }
-  );
+);
+
+/**
+ * Topics de découverte écoutés pour un préfixe — format officiel HA
+ * `<prefix>/<component>/[<node_id>/]<object_id>/config` (node_id optionnel → 2 formes), plus une
+ * 3e forme à un niveau de plus pour rpigpio/mqtt-io, qui insère son bridgeInstance comme segment
+ * supplémentaire (`prefix/bridgeInstance/component/node_id/object_id/config`, trouvé en conditions
+ * réelles sur noisy2 le 14/09/2026). Patterns BORNÉS, jamais de joker `#` : un catch-all a déjà
+ * provoqué un afflux de messages retenus non pertinents (crash serveur, voir historique).
+ */
+export function discoveryTopicsFor(prefix: string): string[] {
+  return [`${prefix}/+/+/config`, `${prefix}/+/+/+/config`, `${prefix}/+/+/+/+/config`];
+}
 
 // ============================================================================
 // Types TypeScript
 // ============================================================================
 
 export type NommageConfig = z.infer<typeof nommageConfigSchema>;
-export type NommageSourceConfig = z.infer<typeof nommageSourceSchema>;
-export type NommageSourceMqttConfig = z.infer<typeof sourceMqttConfigSchema>;
 export type NommageHaConfig = z.infer<typeof haConfigSchema>;
 export type NommageLoggingConfig = z.infer<typeof loggingConfigSchema>;
 export type NommageLanguageConfig = z.infer<typeof languageConfigSchema>;
@@ -160,26 +121,8 @@ export type NommageLanguageConfig = z.infer<typeof languageConfigSchema>;
 // Valeurs par défaut
 // ============================================================================
 
-const DEFAULT_NOMMAGE_SOURCE: NommageSourceConfig = {
-  id: 'ha-broker',
-  mqtt: {
-    host: 'localhost',
-    port: 1883,
-    clientId: 'nommage-ha-broker',
-    keepalive: 60,
-    reconnectPeriod: 5000,
-    cleanSession: true,
-    discoveryTopics: ['ha/+/+/config', 'ha/+/+/+/config'], // recalculé au prochain parse (voir .transform() ci-dessus)
-    topicPrefix: 'ha/',
-    qos: 1,
-    retain: true,
-    useTls: false,
-    rejectUnauthorized: true
-  }
-};
-
 export const DEFAULT_NOMMAGE_CONFIG: NommageConfig = {
-  sources: [DEFAULT_NOMMAGE_SOURCE],
+  prefixes: [{ prefix: 'homeassist' }],
   ha: {
     injectTaxonomyAttributes: true,
     waitForHaWsBeforeDiscovery: true,
@@ -194,26 +137,3 @@ export const DEFAULT_NOMMAGE_CONFIG: NommageConfig = {
     country: 'France'
   }
 };
-
-/**
- * Construit une nouvelle source avec des valeurs par défaut, pour l'ajout dynamique dans l'UI.
- */
-export function createDefaultSource(id: string): NommageSourceConfig {
-  return {
-    id,
-    mqtt: {
-      host: 'localhost',
-      port: 1883,
-      clientId: `nommage-${id}`,
-      keepalive: 60,
-      reconnectPeriod: 5000,
-      cleanSession: true,
-      discoveryTopics: ['ha/+/+/config', 'ha/+/+/+/config'], // recalculé au prochain parse (voir .transform() ci-dessus)
-      topicPrefix: 'ha/',
-      qos: 1,
-      retain: true,
-      useTls: false,
-      rejectUnauthorized: true
-    }
-  };
-}

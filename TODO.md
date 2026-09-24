@@ -1,5 +1,37 @@
 # Liste des problèmes à résoudre
 
+## 🟡 NOMMAGE + TELEINFO + RPIGPIO — revue de code (24/09/2026) — CORRIGÉ (nommage v2.1, teleinfo v1.4, rpigpio v1.5), à valider en réel
+- Fait : nommage sans sources MQTT propres (préfixes via la connexion du socle, migration auto,
+  testée sur la vraie config de falbala), retrait propagé, taxonomies par topic, rejeu au retour de
+  HA ; teleinfo/rpigpio : présence reconnectée, ADCO/GPIO uniques, mémoire alignée, bridgeInstance
+  figé (rpigpio). Vérifié hors ligne. **⚠️ Ne pas déployer ce nommage sur noisy2** avant le retour
+  au standard (son Mosquitto n'est pas le broker du socle — matériel Pi4 à installer).
+- Décision utilisateur (24/09) : pin rpigpio supprimé → son entité est supprimée MANUELLEMENT dans
+  HA (mqtt-io ne publie pas de retrait ; rpigpio reste sans écriture MQTT).
+- Constats d'origine :
+- 🟠 **nommage : config jamais relue** (process séparé, pas de `reload()`) — sources MQTT modifiées
+  depuis l'écran : la reconnexion se fait… avec les anciens paramètres.
+- 🟠 **nommage : suppression d'une entité à la source jamais propagée à HA** — un retrait
+  (message retenu VIDE sur le topic de découverte, ex. appareil supprimé de zigbee2mqtt) n'est pas
+  du JSON → traité comme `{raw:""}`, relayé à HA comme une « découverte » invalide nommée
+  `{"raw":""}` ; l'ancienne entité reste dans HA (fantôme) et une config invalide est publiée.
+- 🟠 **nommage : liste `taxonomyStructures` sans limite** — chaque message ajoute une entrée, jamais
+  de dédoublonnage ; chaque `ha:online` reconnecte toutes les sources et fait relivrer TOUTES les
+  découvertes retenues → doublons à chaque redémarrage de HA ; la liste ENTIÈRE est renvoyée à
+  l'écran à chaque message (coût quadratique à la reconnexion, mémoire qui croît).
+- 🟠 **teleinfo + rpigpio : suivi de présence de l'agent jamais reconnecté** après modification de
+  la config MQTT (hôte, identifiants ; rpigpio : topic qui dépend de `bridgeInstance`) → présence
+  figée/fausse jusqu'au redémarrage.
+- 🟠 rpigpio : deux pins peuvent avoir le même numéro de GPIO (aucune vérification) → config
+  mqtt-io invalide au déploiement (même famille que l'incident « boucle de redémarrage » du 28/08).
+- 🟡 teleinfo + rpigpio : enregistrement en échec → la liste en mémoire garde la modification
+  (divergence mémoire/disque, réécrite à la sauvegarde suivante). teleinfo : changer l'ADCO d'un
+  compteur vers un ADCO déjà déclaré crée un doublon.
+- 🟡 rpigpio : pin supprimé → son entité reste dans HA (la découverte retenue publiée par mqtt-io
+  n'est jamais effacée ; rpigpio n'écrit jamais en MQTT, par choix).
+- 🟡 rpigpio : `bridgeInstance` modifié à chaud = nouveaux topics au prochain déploiement →
+  entités HA en double.
+
 ## 🟡 EVOO7 + AREXX — revue de code (24/09/2026) — CORRIGÉ (specs evoo7 v1.4, arexx v1.6), à valider en réel
 - Fait : reload() dans les deux, bridgeInstance figé à chaud (journalisé), arexx : acquisition
   relancée à chaud + entité retirée à la désélection/suppression, evoo7 : thermostat publié après

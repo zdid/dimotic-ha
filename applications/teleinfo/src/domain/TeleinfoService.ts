@@ -112,8 +112,18 @@ export class TeleinfoService implements ITeleinfoService {
     // `teleinfo:status` republiait bien tout seul après sauvegarde, mais avec l'hôte resté ancien).
     this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (event) => {
       if (event.moduleId !== 'teleinfo' || !event.success) return;
+      const previousMqtt = JSON.stringify(this.config.mqtt);
+      const previousFirstHost = this.config.targets[0]?.host;
       this.configProvider.reload();
       this.config = teleinfoConfigSchema.parse(this.configProvider.getAppConfig());
+      // ⭐ 24/09/2026 — le suivi de présence de l'agent gardait l'ancienne connexion MQTT (hôte,
+      // identifiants) jusqu'au redémarrage : reconnecté si ses paramètres ont changé.
+      if (JSON.stringify(this.config.mqtt) !== previousMqtt || this.config.targets[0]?.host !== previousFirstHost) {
+        this.logger.info('TeleinfoService', 'Paramètres MQTT modifiés — reconnexion du suivi de présence de l\'agent');
+        this.agentTransport?.disconnect();
+        this.agentOnline = null;
+        this.connectAgentPresence();
+      }
       this.emitStatus();
     });
   }
@@ -213,22 +223,33 @@ export class TeleinfoService implements ITeleinfoService {
       const { originalAdco, ...compteur } = input;
       const existingIndex = this.compteurs.findIndex((c) => c.adco === (originalAdco ?? compteur.adco));
 
+      // ⭐ 24/09/2026 — un ADCO ne peut appartenir qu'à un seul compteur (changer l'ADCO d'un
+      // compteur vers celui d'un autre créait un doublon).
+      if (this.compteurs.some((c, i) => c.adco === compteur.adco && i !== existingIndex)) {
+        this.emitError(`L'ADCO ${compteur.adco} est déjà déclaré pour un autre compteur.`);
+        return;
+      }
+
       if (existingIndex === -1 && this.compteurs.length >= 2) {
         this.emitError('2 compteurs déjà déclarés — la bascule GPIO ne gère que 2 positions. Supprime-en un avant d\'en ajouter un autre.');
         return;
       }
 
+      // ⭐ 24/09/2026 — liste modifiée sur une COPIE, adoptée seulement si l'écriture réussit
+      // (avant : un échec laissait la modification en mémoire, réécrite à la sauvegarde suivante).
+      const next = [...this.compteurs];
       if (existingIndex === -1) {
-        this.compteurs.push(compteur);
+        next.push(compteur);
       } else {
-        this.compteurs[existingIndex] = compteur;
+        next[existingIndex] = compteur;
       }
 
-      const result = this.compteursManager.save({ compteurs: this.compteurs });
+      const result = this.compteursManager.save({ compteurs: next });
       if (!result.success) {
         this.emitError(`Échec de sauvegarde: ${result.error}`);
         return;
       }
+      this.compteurs = next;
 
       this.eventBus.emit(TELEINFO_SOCKET_EVENTS.COMPTEUR_SAVED, compteur);
       this.emitCompteurs();
@@ -239,18 +260,18 @@ export class TeleinfoService implements ITeleinfoService {
   }
 
   private handleDeleteCompteur(data: { adco: number }): void {
-    const before = this.compteurs.length;
-    this.compteurs = this.compteurs.filter((c) => c.adco !== data.adco);
-    if (this.compteurs.length === before) {
+    const next = this.compteurs.filter((c) => c.adco !== data.adco);
+    if (next.length === this.compteurs.length) {
       this.emitError(`Compteur introuvable: ${data.adco}`);
       return;
     }
 
-    const result = this.compteursManager.save({ compteurs: this.compteurs });
+    const result = this.compteursManager.save({ compteurs: next });
     if (!result.success) {
       this.emitError(`Échec de suppression: ${result.error}`);
       return;
     }
+    this.compteurs = next;
 
     this.eventBus.emit(TELEINFO_SOCKET_EVENTS.COMPTEUR_DELETED, { adco: data.adco });
     this.emitCompteurs();
