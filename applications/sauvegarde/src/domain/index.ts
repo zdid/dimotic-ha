@@ -2,7 +2,7 @@
  * Module principal de l'application Sauvegarde/Restauration
  *
  * Scanné par AppService pour la détection automatique. Exporte SAUVEGARDE_APP (métadonnées) et
- * createSauvegardeService (factory). Voir specs/current/fonctionnelles-sauvegarde_specs_v1.4.md.
+ * createSauvegardeService (factory). Voir specs/current/fonctionnelles-sauvegarde_specs_v1.5.md.
  */
 
 import {

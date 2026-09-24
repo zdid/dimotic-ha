@@ -3,7 +3,7 @@
  *
  * Orchestrateur de l'application Sauvegarde/Restauration. Pour l'instant (tranche 1 du plan
  * d'implémentation) : chargement/rechargement de la config, statut, poussée du secret
- * par SSH — rien de Nextcloud/restauration encore, voir specs/current/fonctionnelles-sauvegarde_specs_v1.4.md §6/§6bis.
+ * par SSH — rien de Nextcloud/restauration encore, voir specs/current/fonctionnelles-sauvegarde_specs_v1.5.md §6/§6bis.
  */
 
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';

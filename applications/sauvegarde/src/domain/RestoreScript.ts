@@ -8,7 +8,8 @@
  *   méthode que prepare-sd-card.sh), relocalisation éventuelle de dimotic-ha dans /docker-temp,
  *   téléchargement + contrôle d'intégrité + contrôle de place, extraction des seuls éléments
  *   choisis, puis pour chacun : arrêt, déplacement de l'existant dans /<parent>-backup-<horodatage>/,
- *   mise en place de la version restaurée. AUCUN redémarrage.
+ *   mise en place de la version restaurée, téléchargement de ses images Docker (⭐ 24/09/2026).
+ *   AUCUN redémarrage.
  * - `restore.sh phase2 <log>` : après validation humaine, démarrage des éléments restaurés,
  *   dimotic-ha en dernier.
  *
@@ -186,6 +187,19 @@ export function renderRestoreScript(p: RestoreScriptParams): string {
     '    fi',
     '    mv "$WORK/extract/$PARENT/$it" "$dest" || fail "Mise en place de $it impossible"',
     '    ITEM_STATE[$it]="restauré, non démarré"',
+    // ⭐ 24/09/2026, demande explicite après le test réel ha2 → orangepi4pro : sur une machine neuve
+    // aucune image n'est présente, l'étape 2 les téléchargeait (HA > 1 Go) — longue coupure et
+    // `docker ps` vide pendant ce temps. Téléchargées ici, pendant que la source tourne encore :
+    // l'étape 2 se réduit à des démarrages. `pull` ne démarre rien. Échec non bloquant : l'étape 2
+    // retentera le téléchargement de toute façon.
+    '    if [ "$PARENT" = docker ] && has_compose "$dest"; then',
+    '      step images "$it : téléchargement des images Docker (rien n\'est démarré)"',
+    '      if (cd "$dest" && docker compose pull); then',
+    '        ITEM_STATE[$it]="restauré, images prêtes, non démarré"',
+    '      else',
+    '        ITEM_STATE[$it]="restauré, non démarré (images NON téléchargées : réessai à l\'étape 2)"',
+    '      fi',
+    '    fi',
     '  done',
     '',
     '  CURRENT_STEP=fin',

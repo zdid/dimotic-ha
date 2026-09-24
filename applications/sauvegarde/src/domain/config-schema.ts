@@ -1,6 +1,6 @@
 /**
  * Schéma de configuration Sauvegarde/Restauration — section `sauvegarde` de data/config.yaml.
- * Voir specs/current/fonctionnelles-sauvegarde_specs_v1.4.md §3bis/§4quater/§6/§6bis.
+ * Voir specs/current/fonctionnelles-sauvegarde_specs_v1.5.md §3bis/§4quater/§6/§6bis.
  */
 
 import { z } from 'zod';

@@ -28,7 +28,15 @@
   apt/Docker, relocalisation /docker-temp, échec de place.
   Essais réels 23/09 sur orangepi4pro : étape 1 stfort/stfort OK (19:37), étape 1 stfort/ha2 OK (19:48, 6
   éléments) mais « Timeout 30 s » au lancement → corrigé (`cd / ; setsid …` au lieu de `cd / && … &`).
-  Étape 2 pas encore lancée (attend arrêt ha2 + bascule DHCP .51).
+  ✅ **24/09 : remplacement réel de ha2 (RPi4) par l'orangepi4pro RÉUSSI** — étape 2 lancée en .147, puis
+  bascule DHCP .51 + reboot : Docker relance tout (`unless-stopped`), HA/mosquitto/dimotic-ha (identité
+  ha2_811876)/zigbee2mqtt opérationnels en .51. Changement de machine ET de type de matériel, rapide.
+  Reste : (a) zigbee2mqtt « ÉCHEC du démarrage » tant que le dongle n'est pas branché → prévoir un état
+  « périphérique absent » + « Réessayer » par élément plutôt qu'un échec définitif ; (b) comprendre
+  pourquoi l'étape 2 n'a pas pu être lancée directement en .51 ; (c) mqtt-io-rpigpio de ha2 en boucle
+  de redémarrage sur l'orangepi4pro (config sans GPIO) — à retirer par l'utilisateur.
+  (d) ✅ 24/09 : `docker compose pull` fait dès l'étape 1 (images absentes sur machine neuve → l'étape 2
+  les téléchargeait, HA > 1 Go, `docker ps` vide pendant ce temps et coupure allongée) — à éprouver en réel.
 - 🟡 **Écrans ①-④ livrés le 23/09 19:00** (lecture seule) : `sauvegarde/restauration.html` +
   `restauration-app.ts`, `NextcloudWebDavClient.ts`, événements `sauvegarde:restore:*`, entrée de menu
   « Restauration ». Testé : chargement, préremplissage, mot de passe refusé. ⭐ Destination = IP
