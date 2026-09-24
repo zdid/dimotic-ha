@@ -65,7 +65,7 @@ export class ArbreouquoiService {
    */
   private requireBridge(): HaBridgeClient {
     if (!this.haBridgeClient.isAvailable()) {
-      throw new Error('Référentiel HA indisponible (ha.ws_enable=false)');
+      throw new Error('Référentiel HA indisponible (pas encore synchronisé, ou ha.ws_enable=false)');
     }
     return this.haBridgeClient;
   }
@@ -83,32 +83,18 @@ export class ArbreouquoiService {
       // §8.1) — arbreouquoi en dépend entièrement (requiredHaWs: true), mais son absence est un état
       // normal (WS désactivé), pas une erreur : on le signale proprement plutôt que de planter.
       await this.haBridgeClient.start();
-      if (!this.haBridgeClient.isAvailable()) {
-        this.logger.warn('ArbreouquoiService',
-          'Référentiel HA indisponible (ha.ws_enable=false) — Arbre Où Quoi ne peut pas fonctionner sans lui');
-        this.emitStatus('error', 'Référentiel HA indisponible : activez ha.ws_enable pour utiliser cette application');
-        this.registerPersistentEvents();
-        return;
-      }
-
-      const entityCount = this.haBridgeClient.getAllEntities().length;
-      this.logger.info('ArbreouquoiService', `Référentiel HA initialisé avec ${entityCount} entités`);
-
-      // Démarrer le rafraîchissement automatique si activé
-      if (config.refresh.autoRefreshEnabled) {
-        this.startAutoRefresh(config.refresh.autoRefreshInterval);
-      }
-
-      // Envoyer la structure initiale selon le mode d'affichage
-      this.emitTree();
-      this.emitCatalog();
-      this.emitStats();
-
-      // Émettre le statut
-      this.emitStatus('ready', `Service démarré avec ${entityCount} entités HA, mode: ${config.display.viewMode}`);
-
-      // Enregistrer les événements persistants
       this.registerPersistentEvents();
+      if (this.haBridgeClient.isAvailable()) {
+        this.initializeWithHa();
+      } else {
+        // ⭐ 24/09/2026 — HA pas encore synchronisé (état normal au démarrage : le core ne répond plus
+        // « 0 entité » avant son premier ha:ready) ou désactivé : l'initialisation complète se fera
+        // au premier ha:ready (voir setupEventListeners). Avant, start() s'arrêtait ici et seuls
+        // l'arbre et les statistiques étaient rattrapés — ni catalogue, ni rafraîchissement auto, ni
+        // statut « ready ».
+        this.logger.info('ArbreouquoiService', 'Référentiel HA pas encore disponible — initialisation au premier ha:ready');
+        this.emitStatus('error', 'Référentiel HA pas encore disponible (synchronisation en cours, ou ha.ws_enable désactivé)');
+      }
 
       this.logger.info('ArbreouquoiService', 'Service ArbreOuQui démarré avec succès');
     } catch (error) {
@@ -116,6 +102,24 @@ export class ArbreouquoiService {
       this.emitStatus('error', `Erreur de démarrage: ${error}`);
       throw error;
     }
+  }
+
+  /** Partie de l'initialisation qui dépend du référentiel HA — au démarrage si HA est déjà prêt,
+   *  sinon au premier ha:ready (une seule fois). */
+  private haInitialized = false;
+
+  private initializeWithHa(): void {
+    this.haInitialized = true;
+    const config = this.getConfig();
+    const entityCount = this.haBridgeClient.getAllEntities().length;
+    this.logger.info('ArbreouquoiService', `Référentiel HA initialisé avec ${entityCount} entités`);
+    if (config.refresh.autoRefreshEnabled) {
+      this.startAutoRefresh(config.refresh.autoRefreshInterval);
+    }
+    this.emitTree();
+    this.emitCatalog();
+    this.emitStats();
+    this.emitStatus('ready', `Service démarré avec ${entityCount} entités HA, mode: ${config.display.viewMode}`);
   }
 
   // OPTIONNEL : Méthode stop() pour un arrêt propre
@@ -136,13 +140,24 @@ export class ArbreouquoiService {
     // part (AppService.loadHaRegistry() émet 'ha:ready' à la place, une fois rebuild() terminé) —
     // ce listener ne se déclenchait donc jamais. Restait invisible tant que le minuteur périodique
     // (autoRefreshEnabled) finissait par rattraper le coup ; démasqué en le désactivant.
+    // ⭐ 24/09/2026 — attendre le rechargement du cache HaBridgeClient (refresh()) AVANT de reconstruire :
+    // HaBridgeClient se recharge sur ce même ha:ready, en parallèle — reconstruire immédiatement lisait
+    // un cache pas encore rechargé (arbre à 0 entité, puis « indisponible »). Même patron que HaplanService.
     this.eventBus.on('ha:ready', () => {
-      this.logger.info('ArbreouquoiService', 'Référentiel HA reconstruit');
-      const config = this.getConfig();
-      if (config.refresh.refreshOnHaUpdate) {
-        this.emitTree();
-        this.emitStats();
-      }
+      this.haBridgeClient.refresh()
+        .then(() => {
+          this.logger.info('ArbreouquoiService', 'Référentiel HA reconstruit');
+          if (!this.haInitialized) {
+            if (this.haBridgeClient.isAvailable()) this.initializeWithHa();
+            return;
+          }
+          const config = this.getConfig();
+          if (config.refresh.refreshOnHaUpdate) {
+            this.emitTree();
+            this.emitStats();
+          }
+        })
+        .catch((error) => this.logger.warn('ArbreouquoiService', `Rechargement du référentiel après ha:ready échoué: ${error}`));
     });
 
     this.eventBus.on('ha:entity:updated', () => {

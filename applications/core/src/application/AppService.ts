@@ -208,7 +208,14 @@ export class AppService {
     this.targetGossipService = new TargetGossipService(configService, eventBus, logger);
     this.appGossipService = new AppGossipService(configService, eventBus, logger);
     this.haPostInstallService = new HaPostInstallService(configService, logger);
-    this.haQueryBridge = new HaQueryBridge(eventBus, logger, () => this.haStructureRegistry, () => this.haWsClient);
+    this.haQueryBridge = new HaQueryBridge(eventBus, logger, () => this.haStructureRegistry, () => this.haWsClient,
+      () => ({ enabled: this.wsEnabled, ready: this.wsRegistryReady }));
+    // ⭐ 24/09/2026 — `wsRegistryReady` n'était mis à vrai que si quelqu'un ATTENDAIT ha:ready
+    // (waitUntilWsRegistryReady, chemin in-process, plus utilisé depuis que toutes les apps sont en
+    // process séparé) : désormais tenu à jour à chaque ha:ready, lu par HaQueryBridge ci-dessus.
+    this.eventBus.onGeneric('ha:ready', () => {
+      this.wsRegistryReady = true;
+    });
 
     // Initialiser l'état WS depuis la config
     this.initializeWsState();

@@ -94,6 +94,16 @@ export class ArexxService implements IArexxService {
 
     this.setupSocketEventListeners();
 
+    // ⭐ 24/09/2026 — republication à chaque connexion du bridge MQTT (même mécanisme qu'evoo7) :
+    // la découverte publiée une seule fois au démarrage était abandonnée par le transport si le
+    // broker restait injoignable plus de 30 s, et perdue si le broker redémarrait sans persistance —
+    // arexx ne la republiait jamais (seul module d'intégration dans ce cas).
+    this.eventBus.onGeneric<{ bridgeInstance: string; connected: boolean }>(`integration:${MODULE_NAME}:bridge:connection`, (event) => {
+      if (event.bridgeInstance !== this.effectiveBridgeInstance || !event.connected) return;
+      this.logger.info('ArexxService', 'Bridge MQTT connecté — republication de la découverte des capteurs');
+      this.publishInitialDiscoveries();
+    });
+
     this.eventBus.emitGeneric('integration:bridge:register', {
       moduleName: MODULE_NAME,
       bridgeInstance: this.effectiveBridgeInstance

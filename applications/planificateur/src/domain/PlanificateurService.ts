@@ -122,6 +122,7 @@ export class PlanificateurService implements IPlanificateurService {
 
     await this.haBridgeClient.start();
     this.handler.load();
+    this.scheduleWhenHaReady();
     this.stateWatcher?.start(this.handler.listPlanifications());
     this.wireEventBus();
     this.setupSocketEventListeners();
@@ -133,6 +134,27 @@ export class PlanificateurService implements IPlanificateurService {
     this.cleanupTimer = setInterval(() => this.handler.cleanupCompletedPlanifications(), 60 * 60 * 1000);
 
     this.logger.info('PlanificateurService', 'Service planificateur démarré');
+  }
+
+  /**
+   * ⭐ 24/09/2026 — programmation + rattrapage seulement une fois HA synchronisé (voir
+   * CommandHandler.scheduleActivePlanifications()). HA déjà prêt : tout de suite ; sinon au premier
+   * `ha:ready` (ponté par le core), après rechargement du cache HaBridgeClient. Une seule fois.
+   */
+  private scheduleWhenHaReady(): void {
+    if (this.haBridgeClient.isAvailable()) {
+      this.handler.scheduleActivePlanifications();
+      return;
+    }
+    this.logger.info('PlanificateurService', 'HA pas encore synchronisé — programmation et rattrapage différés jusqu\'au premier ha:ready');
+    let scheduled = false;
+    this.eventBus.onGeneric('ha:ready', () => {
+      if (scheduled) return;
+      scheduled = true;
+      this.haBridgeClient.refresh()
+        .catch((error) => this.logger.warn('PlanificateurService', `Rechargement du référentiel HA avant rattrapage: ${error}`))
+        .finally(() => this.handler.scheduleActivePlanifications());
+    });
   }
 
   async stop(): Promise<void> {

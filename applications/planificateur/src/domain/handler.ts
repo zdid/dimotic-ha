@@ -81,6 +81,18 @@ export class CommandHandler {
     }
     if (backfilled) this.persistPlanifications();
 
+    this.cleanupCompletedPlanifications();
+    this.logger.info('CommandHandler', `Chargé: ${Object.keys(this.macros).length} macro(s), ${Object.keys(this.planifications).length} planification(s) — programmation/rattrapage via scheduleActivePlanifications()`);
+  }
+
+  /**
+   * ⭐ 24/09/2026 — programmation des planifications actives + RATTRAPAGE de celles manquées
+   * pendant une coupure (≤ catchUpWindowSeconds, règle inchangée : la fenêtre court depuis l'heure
+   * prévue). Séparé de load() pour que PlanificateurService ne l'appelle qu'une fois HA synchronisé :
+   * un rattrapage déclenché avant le premier ha:ready était réinterprété par ia avec un référentiel
+   * vide — l'action rattrapée était perdue.
+   */
+  scheduleActivePlanifications(): void {
     for (const plan of Object.values(this.planifications)) {
       // Les triggers state_change sont repris séparément par StateWatcher (voir
       // PlanificateurService), pas par SchedulerRuntime. Une planification déjà `completed_at`
@@ -89,8 +101,7 @@ export class CommandHandler {
       // réexécuter puisque next_fire_at reste figé dans le passé une fois le trigger consommé.
       if (plan.active && !plan.completed_at && plan.trigger.type !== 'state_change') this.resumeOrSchedule(plan);
     }
-    this.cleanupCompletedPlanifications();
-    this.logger.info('CommandHandler', `Chargé: ${Object.keys(this.macros).length} macro(s), ${Object.keys(this.planifications).length} planification(s) (${this.schedulerRuntime.listScheduled().length} active(s))`);
+    this.logger.info('CommandHandler', `${this.schedulerRuntime.listScheduled().length} planification(s) programmée(s)`);
   }
 
   /** Prochain identifiant numérique stable à attribuer — max courant + 1, jamais réutilisé. */

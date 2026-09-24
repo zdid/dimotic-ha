@@ -588,7 +588,8 @@ describe('AppService', () => {
       const testResult = { success: true, error: undefined };
       
       // Émettre un événement config:save:result
-      mockEventBus.onGeneric.mock.calls[0][1](testResult);
+      // ⭐ 24/09/2026 : recherche par nom d'événement (l'ordre d'enregistrement des écouteurs n'est pas un contrat).
+      mockEventBus.onGeneric.mock.calls.find((call: unknown[]) => call[0] === 'config:save:result')![1](testResult);
 
       expect(mockLogger.debug).toHaveBeenCalledWith(
         'AppService',
@@ -611,7 +612,8 @@ describe('AppService', () => {
       const testResult = { success: false, error: 'Test error' };
       
       // Émettre un événement config:save:result avec échec
-      mockEventBus.onGeneric.mock.calls[0][1](testResult);
+      // ⭐ 24/09/2026 : recherche par nom d'événement (l'ordre d'enregistrement des écouteurs n'est pas un contrat).
+      mockEventBus.onGeneric.mock.calls.find((call: unknown[]) => call[0] === 'config:save:result')![1](testResult);
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
         'AppService',

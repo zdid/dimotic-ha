@@ -62,7 +62,15 @@ export class HaQueryBridge {
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
     private readonly getHaStructureRegistry: () => HaStructureRegistry | undefined,
-    private readonly getHaWsClient: () => HaWsClient | undefined
+    private readonly getHaWsClient: () => HaWsClient | undefined,
+    /**
+     * ⭐ 24/09/2026 — état HA vu par le core : `enabled` (ha.ws_enable) et `ready` (au moins un
+     * `ha:ready` reçu = référentiel chargé ET reconstruit). Le référentiel existe dès le démarrage,
+     * VIDE jusqu'au premier `ha:ready` : sans ce contrôle, une app qui interrogeait trop tôt recevait
+     * « OK, 0 entité » — HaBridgeClient.isAvailable() passait à vrai avec un cache vide et trompait
+     * tous les garde-fous des applications (ia, planificateur, haplan, arbreouquoi…).
+     */
+    private readonly getHaState: () => { enabled: boolean; ready: boolean } = () => ({ enabled: true, ready: true })
   ) {}
 
   start(): void {
@@ -74,6 +82,9 @@ export class HaQueryBridge {
   private async handleRequest(request: HaBridgeRequest): Promise<void> {
     const { correlation_id, method, args } = request;
     try {
+      const state = this.getHaState();
+      if (!state.enabled) throw new Error('HA désactivé (ha.ws_enable=false)');
+      if (!state.ready) throw new Error('HA pas encore synchronisé (attente du premier ha:ready)');
       const result = await this.dispatch(method, args);
       const reply: HaBridgeReply = { correlation_id, ok: true, result };
       this.eventBus.emitGeneric(REPLY_EVENT, reply);
@@ -139,7 +150,7 @@ export class HaQueryBridge {
   private requireRegistry(): HaStructureRegistry {
     const registry = this.getHaStructureRegistry();
     if (!registry) {
-      throw new Error('Référentiel HA indisponible (ha.ws_enable=false ?)');
+      throw new Error('Référentiel HA absent (HA désactivé : ha.ws_enable=false)');
     }
     return registry;
   }
@@ -147,7 +158,7 @@ export class HaQueryBridge {
   private requireWsClient(): HaWsClient {
     const client = this.getHaWsClient();
     if (!client) {
-      throw new Error('HaWsClient indisponible (ha.ws_enable=false ?)');
+      throw new Error('Client WebSocket HA absent (HA désactivé : ha.ws_enable=false)');
     }
     return client;
   }

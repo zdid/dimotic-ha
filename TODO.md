@@ -1,5 +1,30 @@
 # Liste des problèmes à résoudre
 
+## ✅ Vérification applications ↔ « HA prêt » / MQTT du core (24/09/2026) — corrigé
+- Fait : HaQueryBridge répond « HA pas encore synchronisé » avant le 1er ha:ready (wsRegistryReady
+  tenu à jour à chaque ha:ready) ; message « ha.ws_enable=false ? » réservé au vrai cas désactivé ;
+  planificateur : programmation + rattrapage (règle 300 s inchangée) différés au 1er ha:ready
+  (`scheduleActivePlanifications()`) ; arexx : republication de la découverte à chaque connexion du
+  bridge ; arbreouquoi : attend le rechargement du cache (refresh) avant de reconstruire sur ha:ready
+  (arbre à 0 entité diffusé auparavant) + initialisation complète différée si HA pas prêt au démarrage.
+  Vérifié en réel : arbreouquoi 740 entités, testcycle OK. NON éprouvés en réel : planificateur et
+  arexx (désactivées sur falbala) ; chemin « HA pas prêt au démarrage » (HA a toujours répondu vite).
+- Constats d'origine :
+- 🔴 **Core — `HaQueryBridge` répond « OK, 0 entité » avant la 1re synchronisation HA** : le référentiel
+  existe dès le démarrage (vide jusqu'au premier `ha:ready`), donc `HaBridgeClient.isAvailable()` passe
+  à vrai avec un cache VIDE — tous les garde-fous `if (!isAvailable())` des apps sont trompés (ia,
+  planificateur, haplan, arbreouquoi, scriptsha, testcycle). Les apps en process séparé démarrent sans
+  attendre `ha:ready` (seul l'ancien chemin in-process attendait) ; elles se recalent ensuite via le
+  `ha:ready` ponté (HaBridgeClient recharge son cache).
+- 🔴 **planificateur** : `handler.load()` au démarrage déclenche aussitôt le rattrapage (≤ 300 s) →
+  réinterprétation par ia avec un référentiel possiblement vide → action rattrapée perdue.
+- 🟠 **arexx** : publie sa découverte une seule fois au démarrage, ne réagit ni à
+  `bridge:connection` ni à `ha:online` (evoo7 republie à la connexion, rfxcom/nommage/testcycle sur
+  `ha:online`) — une découverte en attente plus de 30 s (broker absent au démarrage) est abandonnée
+  par le transport et jamais republiée.
+- 🟡 Message trompeur « Référentiel HA indisponible (ha.ws_enable=false ?) » alors que HA est activé
+  mais pas encore synchronisé.
+
 ## ✅ DÉCISION cycle de vie des applications (24/09/2026, à reporter dans la spec supervisor)
 - **Le core ne redémarre JAMAIS pour une application** : il la charge, elle annonce ce qu'elle
   fournit (menu, événements, config, bridges), chacun fait sa part — ajout, activation,

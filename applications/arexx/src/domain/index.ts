@@ -188,7 +188,8 @@ export const AREXX_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   // machine. Tout ponté automatiquement par AppService/SupervisorEventBridge (§7.1) : AREXX_ALL_EVENTS
   // (UI), integration:bridge:register/unregister (partagés, tout type: 'integration'), la famille
   // integration:arexx:* (command/bridge:connection/ha:online/passthrough:message émis vers arexx —
-  // sans effet ici, arexx n'écoute que ses capteurs, jamais de commande HA→device ; discovery/state
+  // arexx n'écoute que bridge:connection (⭐ 24/09/2026 : republication de la découverte à chaque
+  // connexion), jamais de commande HA→device ; discovery/state
   // émis PAR arexx, reçus par le pont générique côté MQTT→local, aucune déclaration nécessaire).
   runsAsSeparateProcess: true
 };
