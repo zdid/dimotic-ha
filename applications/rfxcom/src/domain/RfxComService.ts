@@ -932,9 +932,9 @@ export class RfxComService implements IRfxComService {
   }
 
   /**
-   * Au démarrage/reconnexion : republie l'état d'un récepteur commandable (light/switch) à HA,
-   * de façon strictement passive — ne commande JAMAIS le matériel. Scènes et volets non concernés :
-   * pas de notion d'état "off" déterministe pour un volet, et une scène n'a pas d'état propre.
+   * Au démarrage/reconnexion : republie l'état d'un récepteur commandable (light/switch, et volet
+   * dont la dernière position est connue — 24/09/2026) à HA, de façon strictement passive — ne
+   * commande JAMAIS le matériel. Scènes non concernées (pas d'état propre).
    *
    * ⚠️ Corrigé (15/08/2026) — incident réel constaté par l'utilisateur : quand `lastOn` était
    * inconnu (jamais persisté, ex: une bonne partie de l'inventaire reconstitué après la perte de
@@ -949,7 +949,14 @@ export class RfxComService implements IRfxComService {
    */
   private publishReceiverStateAtStartup(receiver: ReturnType<ReceiverManager['getReceiver']>): void {
     if (!receiver) return;
-    if (receiver.config.type !== 'light' && receiver.config.type !== 'switch') return;
+    // ⭐ 24/09/2026 (demande utilisateur) — volets aussi, mais SEULEMENT si leur dernière position
+    // est réellement connue (fichier des derniers états) : sinon ReceiverCover retombe sur 100
+    // (ouvert) par défaut, une position inventée qu'on ne publie pas. Toujours passif.
+    if (receiver.config.type === 'cover') {
+      if ((receiver.config as { lastPosition?: number }).lastPosition === undefined) return;
+    } else if (receiver.config.type !== 'light' && receiver.config.type !== 'switch') {
+      return;
+    }
 
     this.publishReceiverState(receiver);
   }
