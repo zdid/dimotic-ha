@@ -1,0 +1,9 @@
+id: build-all
+title: "Compiler toutes les applications dimotic-ha"
+description: >-
+  Compile le core puis chaque application du dossier applications/ (serveur + écrans), dans un
+  clone du dépôt, SANS rien retirer (contrairement à la compilation de l'image Docker, qui supprime
+  les outils de développement). S'arrête à la première application en échec et la nomme. À lancer
+  soi-même depuis un clone du dépôt, par exemple avant de construire une image.
+filename: build-all.sh
+requiresSudo: false

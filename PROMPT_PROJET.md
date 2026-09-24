@@ -1,9 +1,10 @@
 # PROMPT PROJET - Règles de Développement
 
-**Version : 1.12**
-**Date : 24 Septembre 2026**
-**Dernière mise à jour : Règles critiques de structure (activation/désactivation) — plus de répertoire `applications_desactivees/` (supprimé le 07/08/2026, simple liste `disabledApps`) ; activation/désactivation À CHAUD sans redémarrage du core ; application nouvelle désactivée par défaut ; détection sur deux racines `applications/` + `data/applications/` (voir `fonctionnelles-supervisor_specs_v2.10.md` §8). Ancienne version v1.11 archivée dans `specs/archives/PROMPT_PROJET_v1.11-20260816.md`.**
-**Mise à jour précédente (v1.11) : Table §11 "Pour Applications Spécifiques" — ligne "Supervision multi-machines (SUPERVISOR)" réécrite : passe de "conception, pas encore implémenté" à implémenté et vérifié en conditions réelles pour 7 applications (session du 16/08/2026, spec v2.6), IPC remplace MQTT pour le pont local. Aucun autre changement. Ancienne version v1.10 archivée dans `specs/archives/PROMPT_PROJET_v1.10-20260816.md`.**
+**Version : 1.13**
+**Date : 25 Septembre 2026**
+**Dernière mise à jour : Table §11 "Pour Applications Spécifiques" — ligne **Application OUTILS** ajoutée (`fonctionnelles-outils_specs`, première spec formelle v1.0). Aucun autre changement. Ancienne version v1.12 archivée dans `specs/archives/PROMPT_PROJET_v1.12-20260925.md`.**
+**Mise à jour précédente (v1.12) : Règles critiques de structure (activation/désactivation) — plus de répertoire `applications_desactivees/` (supprimé le 07/08/2026, simple liste `disabledApps`) ; activation/désactivation À CHAUD sans redémarrage du core ; application nouvelle désactivée par défaut ; détection sur deux racines `applications/` + `data/applications/` (voir `fonctionnelles-supervisor_specs_v2.10.md` §8). Ancienne version v1.11 archivée dans `specs/archives/PROMPT_PROJET_v1.11-20260816.md`.**
+**Mise à jour antérieure (v1.11) : Table §11 "Pour Applications Spécifiques" — ligne "Supervision multi-machines (SUPERVISOR)" réécrite : passe de "conception, pas encore implémenté" à implémenté et vérifié en conditions réelles pour 7 applications (session du 16/08/2026, spec v2.6), IPC remplace MQTT pour le pont local. Aucun autre changement. Ancienne version v1.10 archivée dans `specs/archives/PROMPT_PROJET_v1.10-20260816.md`.**
 
 ## 📚 Table des Matières
 1. [Règles Fondamentales](#-règles-fondamentales)
@@ -369,6 +370,7 @@ projet/
 | **Application TELEINFO** | `fonctionnelles-teleinfo_specs` | **Maintenance et développement** spécifique TELEINFO (compteurs EDF mode historique, agent RPi1 déployé par SSH+systemd) |
 | **Application SCRIPTSHA** | `fonctionnelles-scriptsha_specs` | **Maintenance et développement** spécifique SCRIPTSHA (gestion de scripts Home Assistant `script.*` — dépôt de fichier, diffusion/retrait à la demande via `HaRestBridge`, pont REST config HA générique côté core) |
 | **Application ESPDISPLAY** | `fonctionnelles-espdisplay_specs` + `inter-app-communication_specs` | **Maintenance et développement** spécifique ESPDISPLAY (orchestration du déploiement de firmware sur les écrans ESP/ESPHome, déclenchée par HAPLAN via EventBus générique — voir `fonctionnelles-haplan_specs` §3.6/§8.9) |
+| **Application OUTILS** | `fonctionnelles-outils_specs` | **Maintenance et développement** spécifique OUTILS (bibliothèque de scripts shell auto-descriptifs : variables `__NOM__` et directives `@outils:*`, génération/téléchargement, archives auto-extractibles, scripts de compilation/commit/tag/Docker) |
 | **Supervision multi-machines (SUPERVISOR)** | `fonctionnelles-supervisor_specs` + `techniques-socle-ha-mqtt_specs` §8.5 | Module du **socle** (`applications/core/src/supervisor/`, pas une application sous `applications/`) — **implémenté et vérifié en conditions réelles** pour 7 applications (`espdisplay`, `rpigpio`, `teleinfo`, `arexx`, `evoo7`, `nommage`, `rfxcom`, session du 16/08/2026, spec v2.6) : identité machine, chaque application en process OS séparé, communiquant avec `core` par **IPC** (pas MQTT, décision prise en cours d'implémentation — MQTT reste utilisé pour les cas génuinement distants), activation/désactivation en direct sans redémarrage du core, interface web unique préservée. Migration d'`ia`/`planificateur`/`haplan`/`arbreouquoi` différée (décision explicite, dépendance à des objets vivants HA non transportables) |
 | **UI Avancée** | `presentation_specs` | Applications avec interface complexe |
 | **Gestion d'erreurs fine** | `erreurs_specs` | Applications nécessitant une gestion d'erreur spécifique |
