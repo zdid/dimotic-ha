@@ -211,8 +211,15 @@ export class Evoo7Service implements IEvoo7Service {
    */
   private async reconnectBoxIfConfigChanged(): Promise<void> {
     const previousBox = this.config.box;
+    const previousBridgeInstance = this.config.bridgeInstance;
+    // ⭐ 24/09/2026 — relit le FICHIER : ce process séparé garde sinon la config chargée à son
+    // démarrage, et comparait l'ancienne config à elle-même (changement jamais appliqué).
+    this.configProvider.reload();
     this.config = this.loadConfig();
-    this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
+    // bridgeInstance (identité MQTT, topics déjà enregistrés) n'est PAS changé à chaud.
+    if (this.config.bridgeInstance !== previousBridgeInstance) {
+      this.logger.warn('Evoo7Service', `bridgeInstance modifié (${previousBridgeInstance} → ${this.config.bridgeInstance}) — pris en compte au prochain redémarrage de l'application EVOO7`);
+    }
 
     if (JSON.stringify(previousBox) === JSON.stringify(this.config.box)) {
       return;
@@ -666,7 +673,10 @@ export class Evoo7Service implements IEvoo7Service {
       this.thermostat = { enabled: data.enabled, allowCooling: data.allowCooling };
 
       // Activation : force la sélection des données dont dépend le thermostat — jamais l'inverse
-      // (désactiver le thermostat ne décoche rien automatiquement, voir plan).
+      // (désactiver le thermostat ne décoche rien automatiquement, voir plan). ⭐ 24/09/2026 : les
+      // découvertes ne sont publiées qu'APRÈS un enregistrement réussi (plus d'entité publiée pour
+      // une sélection ensuite annulée).
+      const newlySelected: Evoo7DataDefinition[] = [];
       if (this.thermostat.enabled) {
         for (const id of THERMOSTAT_DEPENDENT_IDS) {
           const donnee = this.donnees.get(id);
@@ -674,7 +684,7 @@ export class Evoo7Service implements IEvoo7Service {
           const wasSelected = donnee.consultation || donnee.miseAJour;
           donnee.consultation = true;
           if (donnee.updatable) donnee.miseAJour = true;
-          if (!wasSelected) this.publishDonneeDiscovery(donnee);
+          if (!wasSelected) newlySelected.push(donnee);
         }
       }
 
@@ -690,6 +700,7 @@ export class Evoo7Service implements IEvoo7Service {
         return;
       }
 
+      for (const donnee of newlySelected) this.publishDonneeDiscovery(donnee);
       if (this.thermostat.enabled) {
         this.publishThermostatDiscovery();
         this.publishThermostatState();

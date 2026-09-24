@@ -1,5 +1,27 @@
 # Liste des problèmes à résoudre
 
+## 🟡 EVOO7 + AREXX — revue de code (24/09/2026) — CORRIGÉ (specs evoo7 v1.4, arexx v1.6), à valider en réel
+- Fait : reload() dans les deux, bridgeInstance figé à chaud (journalisé), arexx : acquisition
+  relancée à chaud + entité retirée à la désélection/suppression, evoo7 : thermostat publié après
+  enregistrement. Vérifié hors ligne (faux bus, config changeante). Reste : image Docker + déploiement.
+- Constats d'origine :
+- 🟠 **evoo7 et arexx : config jamais relue après enregistrement** (même défaut que RFXCOM, process
+  séparés sans `configProvider.reload()`) — evoo7 : changement d'adresse/identifiants du boîtier
+  jamais appliqué à chaud ; arexx : cibles de déploiement restent périmées en mémoire (le
+  « correctif » du 25/08 recharge la config… sans relire le fichier).
+- 🟠 Les deux recalculent `effectiveBridgeInstance` à chaud sans ré-enregistrer le bridge →
+  si `bridgeInstance` change, les états partent vers une instance non enregistrée (et arexx filtre
+  ensuite `bridge:connection` sur la nouvelle valeur : plus aucune republication).
+- 🟠 **arexx : décocher « transmettre à HA » ou supprimer un capteur ne retire pas l'entité de
+  HA** (RFXCOM/evoo7 le font) → entité fantôme.
+- 🟡 arexx : changement de mode d'acquisition (push/poll/usb), port, adresse BS1000 non appliqué à
+  chaud (documenté hors périmètre) — aucune indication à l'utilisateur.
+- 🟡 evoo7 : activation du thermostat publie les découvertes des données forcées AVANT de savoir si
+  l'enregistrement a réussi (rollback mémoire, mais entités déjà publiées).
+- ℹ️ arexx : `lastValue` n'est écrit sur disque qu'à l'occasion d'un changement de paramétrage →
+  republication au démarrage quasi jamais utile (filtre 30 min) ; conforme au principe « états hors
+  config » décidé pour RFXCOM, sans usure.
+
 ## 🟡 RFXCOM — revue de code (24/09/2026) — CORRIGÉ (spec v6.1), à déployer/valider en réel
 - Fait (décisions utilisateur) : derniers états dans `rfxcom-derniers-etats.json` (écriture groupée
   ≤ 1/30 s + à l'arrêt, sans .bak), config réécrite seulement sur changement réel, migration auto

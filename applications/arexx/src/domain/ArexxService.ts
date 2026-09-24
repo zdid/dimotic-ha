@@ -120,10 +120,7 @@ export class ArexxService implements IArexxService {
 
   async stop(): Promise<void> {
     this.logger.info('ArexxService', 'Arrêt du service AREXX...');
-    this.running = false;
-    this.pushReceiver?.stop();
-    this.pollClient?.stop();
-    this.usbBridge?.stop();
+    this.stopAcquisition();
     this.eventBus.emitGeneric('integration:bridge:unregister', {
       moduleName: MODULE_NAME,
       bridgeInstance: this.effectiveBridgeInstance
@@ -134,6 +131,21 @@ export class ArexxService implements IArexxService {
   // ==========================================================================
   // Backends d'acquisition (push/poll/usb) — un seul actif à la fois
   // ==========================================================================
+
+  private stopAcquisition(): void {
+    this.running = false;
+    this.pushReceiver?.stop();
+    this.pollClient?.stop();
+    this.usbBridge?.stop();
+    this.pushReceiver = undefined;
+    this.pollClient = undefined;
+    this.usbBridge = undefined;
+  }
+
+  /** Champs de config dont dépend le backend d'acquisition en cours. */
+  private acquisitionKey(config: ArexxConfig): string {
+    return JSON.stringify([config.acquisitionMode, config.httpservPort, config.bs1000Address, config.bs1000Port, config.pollIntervalSeconds, config.usbDevicePath]);
+  }
 
   private async startAcquisition(): Promise<void> {
     const onReading = (reading: ArexxRawReading) => this.handleReading(reading);
@@ -247,6 +259,16 @@ export class ArexxService implements IArexxService {
     });
   }
 
+  /** Retire l'entité HA d'un capteur (désélection ou suppression) — même mécanisme socle que
+   *  RFXCOM/evoo7 (discovery.ts::unpublishDiscovery). */
+  private removeSensorDiscovery(uniqueId: string): void {
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, {
+      bridgeInstance: this.effectiveBridgeInstance,
+      component: 'sensor',
+      objectId: uniqueId
+    });
+  }
+
   private publishSensorState(sensor: ArexxSensorInfo, reading: ArexxRawReading): void {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.effectiveBridgeInstance,
@@ -307,10 +329,24 @@ export class ArexxService implements IArexxService {
     // n'avait pas fonctionné. Recharge simple (pas de reconnexion de backend d'acquisition ici,
     // contrairement à RfxComService::reconnectTransceiverIfConfigChanged — hors périmètre de ce
     // correctif, targets n'affecte pas l'acquisition en cours).
+    //
+    // ⭐ 24/09/2026 — ce correctif ne relisait pas le FICHIER : ce process séparé garde la config
+    // chargée à son démarrage, loadConfig() seul la relisait telle quelle (cibles toujours
+    // périmées). configProvider.reload() d'abord. bridgeInstance (identité MQTT, topics déjà
+    // enregistrés) n'est pas changé à chaud ; le backend d'acquisition est relancé s'il a changé.
     this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (event) => {
       if (event.moduleId !== MODULE_NAME || !event.success) return;
+      const previous = this.config;
+      this.configProvider.reload();
       this.config = this.loadConfig();
-      this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
+      if (this.config.bridgeInstance !== previous.bridgeInstance) {
+        this.logger.warn('ArexxService', `bridgeInstance modifié (${previous.bridgeInstance} → ${this.config.bridgeInstance}) — pris en compte au prochain redémarrage de l'application AREXX`);
+      }
+      if (this.acquisitionKey(this.config) !== this.acquisitionKey(previous)) {
+        this.logger.info('ArexxService', 'Paramètres d\'acquisition modifiés — relance de l\'acquisition à chaud');
+        this.stopAcquisition();
+        this.startAcquisition().catch((error) => this.logger.error('ArexxService', `Relance de l'acquisition impossible: ${error}`));
+      }
       this.emitStatus();
     });
 
@@ -324,15 +360,20 @@ export class ArexxService implements IArexxService {
     });
 
     this.eventBus.onGeneric<{ uniqueId: string; transmitToHa: boolean }>('arexx:sensor:set_transmit', (data) => {
+      const wasTransmitted = this.sensorRegistry.getSensor(data.uniqueId)?.transmitToHa;
       const sensor = this.sensorRegistry.setTransmitToHa(data.uniqueId, data.transmitToHa);
       this.persistSensors();
       this.emitSensorsList();
       if (sensor && sensor.transmitToHa) {
         this.publishSensorDiscovery(sensor);
+      } else if (sensor && wasTransmitted) {
+        // ⭐ 24/09/2026 — désélection : retire l'entité de HA (comme RFXCOM/evoo7), sinon fantôme.
+        this.removeSensorDiscovery(sensor.uniqueId);
       }
     });
 
     this.eventBus.onGeneric<{ uniqueId: string }>('arexx:sensor:delete', (data) => {
+      if (this.sensorRegistry.getSensor(data.uniqueId)?.transmitToHa) this.removeSensorDiscovery(data.uniqueId);
       this.sensorRegistry.deleteSensor(data.uniqueId);
       this.persistSensors();
       this.emitSensorsList();
