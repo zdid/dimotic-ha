@@ -20,7 +20,7 @@ import { planificateurConfigSchema, type PlanificateurConfig } from './config-sc
 import { macrosConfigSchema, planificationsConfigSchema, DEFAULT_MACROS_CONFIG, DEFAULT_PLANIFICATIONS_CONFIG, type MacrosConfigFile, type PlanificationsConfigFile } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { SchedulerRuntime } from './scheduler-runtime';
-import { createSunTimesProvider } from './sun-times';
+import { createSunTimesProvider, type SunTimesSource } from './sun-times';
 import { StateWatcher } from './state-watcher';
 import { ExecutionEngine } from './execution';
 import { CommandHandler } from './handler';
@@ -49,6 +49,7 @@ export class PlanificateurService implements IPlanificateurService {
   private readonly stateWatcher?: StateWatcher;
   private readonly executionEngine: ExecutionEngine;
   private readonly handler: CommandHandler;
+  private readonly sunTimes: SunTimesSource;
   private readonly recentActions: PlanificateurAction[] = [];
   // ⭐ Purge périodique des planifications terminées depuis plus de 2 jours (demande utilisateur,
   // 12/08/2026) — cleanupCompletedPlanifications() tourne déjà une fois au chargement (handler.load()),
@@ -79,13 +80,15 @@ export class PlanificateurService implements IPlanificateurService {
       'planifications'
     );
 
+    this.sunTimes = createSunTimesProvider(this.haBridgeClient, this.logger);
+
     this.schedulerRuntime = new SchedulerRuntime(
       this.logger,
       (plan) => {
         this.handler.handleTriggerFired(plan).catch((e) => this.logger.error('PlanificateurService', `Erreur de déploiement pour "${plan.name}": ${e}`));
       },
-      () => this.handler.persistPlanifications(),
-      createSunTimesProvider(this.haBridgeClient, this.logger)
+      () => { this.handler.persistPlanifications(); },
+      this.sunTimes.get
     );
 
     // Construit inconditionnellement (⭐ 24/08/2026) : HaBridgeClient existe toujours, même quand
@@ -99,11 +102,16 @@ export class PlanificateurService implements IPlanificateurService {
       () => this.handler.persistPlanifications()
     );
 
+    // ⭐ 24/09/2026 — plus de réinterprétation par ia au déclenchement : deployTimeoutMs sert
+    // désormais au seul échange restant, l'évaluation d'une condition en texte libre
+    // (planificateur:condition).
     this.executionEngine = new ExecutionEngine(
       this.eventBus,
       this.logger,
       this.haBridgeClient,
-      this.config.deployTimeoutMs
+      this.config.deployTimeoutMs,
+      (name) => this.handler.getMacro(name),
+      this.sunTimes.get
     );
 
     this.handler = new CommandHandler(
@@ -123,7 +131,6 @@ export class PlanificateurService implements IPlanificateurService {
     await this.haBridgeClient.start();
     this.handler.load();
     this.scheduleWhenHaReady();
-    this.stateWatcher?.start(this.handler.listPlanifications());
     this.wireEventBus();
     this.setupSocketEventListeners();
     this.emitStatus();
@@ -137,23 +144,35 @@ export class PlanificateurService implements IPlanificateurService {
   }
 
   /**
-   * ⭐ 24/09/2026 — programmation + rattrapage seulement une fois HA synchronisé (voir
-   * CommandHandler.scheduleActivePlanifications()). HA déjà prêt : tout de suite ; sinon au premier
-   * `ha:ready` (ponté par le core), après rechargement du cache HaBridgeClient. Une seule fois.
+   * ⭐ 24/09/2026 — programmation + rattrapage + reprise des state_change en attente seulement une
+   * fois HA synchronisé (voir CommandHandler.scheduleActivePlanifications()). HA déjà prêt : tout de
+   * suite ; sinon au premier `ha:ready` (ponté par le core), après rechargement du cache
+   * HaBridgeClient. Une seule fois. La position GPS (lever/coucher du soleil) est attendue avant de
+   * programmer : sinon une planification `sun` était rejetée au démarrage (calcul impossible).
    */
   private scheduleWhenHaReady(): void {
-    if (this.haBridgeClient.isAvailable()) {
-      this.handler.scheduleActivePlanifications();
-      return;
-    }
-    this.logger.info('PlanificateurService', 'HA pas encore synchronisé — programmation et rattrapage différés jusqu\'au premier ha:ready');
     let scheduled = false;
-    this.eventBus.onGeneric('ha:ready', () => {
+    const open = async (): Promise<void> => {
       if (scheduled) return;
       scheduled = true;
+      if (!(await this.sunTimes.ensurePosition())) {
+        this.logger.warn('PlanificateurService', 'Position GPS de HA inconnue — planifications « soleil » réessayées toutes les 10 min');
+      }
+      this.handler.scheduleActivePlanifications();
+      // Reprise des minuteries state_change en attente au moment de l'arrêt — AVEC un référentiel
+      // chargé (avant : relancées au démarrage, référentiel vide → action ignorée).
+      this.stateWatcher?.start(this.handler.listPlanifications());
+    };
+    if (this.haBridgeClient.isAvailable()) {
+      void open();
+      return;
+    }
+    this.logger.info('PlanificateurService', 'HA pas encore synchronisé — programmation, rattrapage et surveillance d\'états différés jusqu\'au premier ha:ready');
+    this.eventBus.onGeneric('ha:ready', () => {
+      if (scheduled) return;
       this.haBridgeClient.refresh()
         .catch((error) => this.logger.warn('PlanificateurService', `Rechargement du référentiel HA avant rattrapage: ${error}`))
-        .finally(() => this.handler.scheduleActivePlanifications());
+        .finally(() => { void open(); });
     });
   }
 

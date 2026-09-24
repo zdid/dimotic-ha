@@ -228,6 +228,12 @@ Les structures s'imbriquent librement et sans limite de profondeur.
 }
 
 // "lieux" est toujours un tableau, même pour un seul lieu visé.
+// verbe ET quoi sont OBLIGATOIRES dans toute action, à toute profondeur
+// (planification, macro, séquence, condition) : c'est cette structure,
+// décidée une fois ici, qui est exécutée à chaque déclenchement — la phrase
+// n'est jamais réinterprétée. Une action sans verbe/quoi est refusée.
+// Ajouter "valeur" pour un verbe à valeur (régler, baisser, augmenter,
+// mettre), ex: "valeur": 20.
 // Le verbe est systématiquement normalisé à l'infinitif dans ce champ,
 // quelle que soit sa forme dans la phrase originale (ex: "allume" → "allumer").
 
@@ -640,26 +646,29 @@ Phrase : "tous les soirs à 18h sauf week-end allume le salon si soleil couché"
   },
   "action": {
     "type": "condition",
-    "if": "soleil couché",
-    "then": { "type": "action", "order": "allume le salon" }
+    "if": { "phrase": "soleil couché", "quoi": "soleil", "lieux": [], "signe": "=", "valeur": "couché" },
+    "then": { "type": "action", "order": "allume le salon", "verbe": "allumer", "quoi": "lumière", "lieux": ["salon"] }
   }
 }
 
 ━━━ Exemple 2 — Macro avec attente aléatoire et macro imbriquée ━━━━━━━━━━━━━
 
-Phrase : "je vais me coucher c'est : baisse les volets, éteins tout sauf
-          chambre, attends entre 5 et 10 minutes, éteins la chambre,
+Phrase : "je vais me coucher c'est : ferme les volets, éteins le salon,
+          attends entre 5 et 10 minutes, éteins la chambre,
           puis sécurité nuit"
 
 {
   "type": "macro",
   "name": "je vais me coucher",
   "steps": [
-    { "type": "action",    "order": "baisse les volets" },
-    { "type": "action",    "order": "éteins tout sauf chambre" },
+    { "type": "action",    "order": "ferme les volets",
+                           "verbe": "fermer", "quoi": "volet roulant", "lieux": ["maison"] },
+    { "type": "action",    "order": "éteins le salon",
+                           "verbe": "éteindre", "quoi": "lumière", "lieux": ["salon"] },
     { "type": "wait",      "duration": "entre 5 et 10 minutes",
                            "seconds_min": 300, "seconds_max": 600 },
-    { "type": "action",    "order": "éteins la chambre" },
+    { "type": "action",    "order": "éteins la chambre",
+                           "verbe": "éteindre", "quoi": "lumière", "lieux": ["chambre"] },
     { "type": "macro_ref", "name": "sécurité nuit" }
   ]
 }
@@ -713,10 +722,12 @@ Phrase : "le dernier jour du mois à entre 8h et 9h allume la véranda
   "action": {
     "type": "sequence",
     "steps": [
-      { "type": "action", "order": "allume la véranda" },
+      { "type": "action", "order": "allume la véranda",
+                          "verbe": "allumer", "quoi": "lumière", "lieux": ["véranda"] },
       { "type": "wait",   "duration": "entre 10 et 20 minutes",
                           "seconds_min": 600, "seconds_max": 1200 },
-      { "type": "action", "order": "éteins la véranda" }
+      { "type": "action", "order": "éteins la véranda",
+                          "verbe": "éteindre", "quoi": "lumière", "lieux": ["véranda"] }
     ]
   }
 }

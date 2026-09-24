@@ -1,8 +1,8 @@
 /**
  * Vérifie que les références HA (couples quoi/lieux, entity_id de déclencheur state_change)
  * présentes dans une réponse JSON structurée correspondent bien à des entités réelles — peu
- * importe la provenance du JSON (conversation directe via IaService, réinterprétation à
- * l'exécution via DeployResponder).
+ * importe la provenance du JSON (conversation directe via IaService — la réinterprétation à
+ * l'exécution, DeployResponder, a été supprimée le 24/09/2026).
  *
  * Bug réel constaté (comparatif Claude/Mistral, 11/08/2026) : sur une planification à déclencheur
  * d'état ("quand la porte d'entrée s'ouvre...", "si la température dépasse..."), Mistral invente

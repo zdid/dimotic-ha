@@ -95,23 +95,38 @@ export function triggerToMs(trigger: Trigger, logger?: Logger, now: Date = new D
       return target ? target.getTime() - now.getTime() : null;
     }
 
+    // ⭐ 24/09/2026 — début de plage = récurrence quotidienne à `from`, AVEC le filtre de jours
+    // (days/except_days étaient ignorés). La fin (`to`) est gérée par CommandHandler (action
+    // inverse programmée après le début, voir windowEndMs()).
     case 'window': {
       if (!trigger.from) return null;
-      return msUntilTime(trigger.from, now);
+      return triggerToMs({ ...trigger, type: 'recurrence', at: trigger.from, at_min: undefined, at_max: undefined }, logger, now, getSunTimes);
     }
 
-    case 'duration': {
-      if (trigger.seconds !== undefined) return trigger.seconds * 1000;
-      if (trigger.seconds_min !== undefined && trigger.seconds_max !== undefined) {
-        return randInt(trigger.seconds_min, trigger.seconds_max) * 1000;
-      }
-      return null;
-    }
+    // ⭐ 24/09/2026 — « pendant 10 minutes allume… » : l'action démarre TOUT DE SUITE, la fin (action
+    // inverse) vient après la durée (durationEndMs(), CommandHandler) — avant, rien ne se passait
+    // pendant 10 minutes puis l'action démarrait, sans fin.
+    case 'duration':
+      return 0;
 
     default:
       logger?.warn('scheduler', `Type de déclencheur non géré: ${trigger.type}`);
       return null;
   }
+}
+
+/** ⭐ 24/09/2026 — délai jusqu'à la fin d'une plage `window` (prochain `to` après maintenant). */
+export function windowEndMs(trigger: Trigger, now: Date = new Date()): number | null {
+  return trigger.to ? msUntilTime(trigger.to, now) : null;
+}
+
+/** ⭐ 24/09/2026 — durée d'un trigger `duration` (aléatoire tiré à chaque exécution). */
+export function durationEndMs(trigger: Trigger): number | null {
+  if (trigger.seconds !== undefined) return trigger.seconds * 1000;
+  if (trigger.seconds_min !== undefined && trigger.seconds_max !== undefined) {
+    return randInt(trigger.seconds_min, trigger.seconds_max) * 1000;
+  }
+  return null;
 }
 
 function resolveComplexPattern(

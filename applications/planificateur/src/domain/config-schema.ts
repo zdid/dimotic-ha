@@ -11,9 +11,9 @@ export const planificateurConfigSchema = z.object({
   macrosFile: z.string().min(1).default('planificateur-macros-v1.0.yaml'),
   planificationsFile: z.string().min(1).default('planificateur-planifications-v1.0.yaml'),
 
-  // Délai d'attente pour les échanges de corrélation avec `ia` (ia:command, ia:tool:execute
-  // n'attendent pas de réponse de planificateur : c'est l'inverse ici, planificateur attend `ia`
-  // pour planificateur:deploy)
+  // Délai d'attente de la réponse de `ia` quand planificateur lui demande d'évaluer une condition
+  // en texte libre (planificateur:condition, ⭐ 24/09/2026 — seul échange restant dans ce sens ;
+  // nom conservé pour ne pas invalider les config.yaml existants)
   deployTimeoutMs: z.number().int().positive().default(15000),
 
   // Reprise après coupure (voir SchedulerRuntime/StateWatcher) : au-delà de cette fenêtre, un

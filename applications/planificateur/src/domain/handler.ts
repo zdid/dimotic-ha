@@ -18,9 +18,12 @@ import type {
 import type { ConfigFileManager } from './yaml/ConfigFileManager';
 import type { MacrosConfigFile, PlanificationsConfigFile } from './storage-schema';
 import type { SchedulerRuntime } from './scheduler-runtime';
-import { isRecurring } from './scheduler';
+import { isRecurring, triggerToMs, windowEndMs, durationEndMs } from './scheduler';
 import type { StateWatcher } from './state-watcher';
-import { AbortedExecutionError, type ExecutionEngine } from './execution';
+import { AbortedExecutionError, inverseOf, type ExecutionEngine, type RunResult } from './execution';
+import { macroDefinitionSchema, planificationDefinitionSchema } from './nodes-schema';
+import { isKnownVerb } from './resolution';
+import type { ZodError } from 'zod';
 
 // ⭐ Rétention des planifications terminées (demande utilisateur, 12/08/2026) — voir
 // CommandHandler.cleanupCompletedPlanifications().
@@ -29,6 +32,9 @@ const COMPLETED_RETENTION_MS = 2 * 24 * 60 * 60 * 1000;
 export class CommandHandler {
   private macros: Record<string, MacroDefinition>;
   private planifications: Record<string, PlanificationDefinition>;
+  /** ⭐ 24/09/2026 — fin programmée d'une plage `window` / d'une `duration` (action inverse), par
+   *  planification. En mémoire seulement : une fin en attente est perdue si le service redémarre. */
+  private readonly endTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly logger: Logger,
@@ -57,6 +63,8 @@ export class CommandHandler {
 
   /** Symétrique de armIfActive — désarme quel que soit le runtime concerné. */
   private disarm(plan: PlanificationDefinition): void {
+    const end = this.endTimers.get(plan.name);
+    if (end) { clearTimeout(end); this.endTimers.delete(plan.name); }
     if (plan.trigger.type === 'state_change') {
       this.stateWatcher?.unschedule(plan.name);
       this.stateWatcher?.setPlans(this.listPlanifications());
@@ -190,9 +198,8 @@ export class CommandHandler {
     return Object.values(this.planifications);
   }
 
-  findMacroByUtterance(text: string): MacroDefinition | undefined {
-    const normalized = text.trim().toLowerCase();
-    return Object.values(this.macros).find((m) => normalized.includes(m.name.toLowerCase()));
+  getMacro(name: string): MacroDefinition | undefined {
+    return this.macros[name];
   }
 
   /** Traite un ia:command (JSON structuré, jamais un ActionNode de premier niveau — specs ia §9). */
@@ -202,20 +209,39 @@ export class CommandHandler {
     try {
       switch (payload.type) {
         case 'macro': {
-          const macro = payload as MacroDefinition & { correlation_id: string };
-          this.macros[macro.name] = macro;
-          this.persistMacros();
-          return ok(corr, `Macro "${macro.name}" enregistrée avec ${macro.steps.length} étape(s).`);
+          // ⭐ 24/09/2026 — validée AVANT d'être acceptée (schéma de stockage + commandes
+          // exécutables) : une entrée refusée à l'écriture restait en mémoire et faisait échouer
+          // toutes les écritures suivantes, et la réponse disait quand même « enregistrée ».
+          const parsed = macroDefinitionSchema.safeParse(withoutCorrelation(payload));
+          if (!parsed.success) return err(corr, `Macro refusée — format invalide : ${zodDetails(parsed.error)}`);
+          const problems = commandProblems(parsed.data.steps);
+          if (problems.length) return err(corr, `Macro refusée — ${problems.join(' ; ')}`);
+          const previous = this.macros[parsed.data.name];
+          this.macros[parsed.data.name] = parsed.data;
+          if (!this.persistMacros()) {
+            if (previous) this.macros[parsed.data.name] = previous; else delete this.macros[parsed.data.name];
+            return err(corr, `Macro "${parsed.data.name}" non enregistrée (écriture du fichier en échec).`);
+          }
+          return ok(corr, `Macro "${parsed.data.name}" enregistrée avec ${parsed.data.steps.length} étape(s).`);
         }
 
         case 'planification': {
-          const plan = payload as PlanificationDefinition & { correlation_id: string };
+          const checked = this.checkPlanification(withoutCorrelation(payload));
+          if ('error' in checked) return err(corr, `Planification refusée — ${checked.error}`);
+          const plan = checked.plan;
+          // ⭐ 24/09/2026 — recréation sous un nom existant : l'ancienne est d'abord DÉSARMÉE (avant,
+          // son minuteur ou sa surveillance d'état continuait d'exécuter l'ancienne phrase).
+          const existing = this.planifications[plan.name];
+          if (existing) this.disarm(existing);
           // Conserve l'id existant si on recrée une planification sous le même nom (ex: "modifie
           // la planification X" reformulée en une nouvelle création complète par Mistral) — n'en
           // attribue un nouveau que pour un nom réellement inédit.
-          plan.id = this.planifications[plan.name]?.id ?? this.nextPlanificationId();
+          plan.id = existing?.id ?? this.nextPlanificationId();
           this.planifications[plan.name] = plan;
-          this.persistPlanifications();
+          if (!this.persistPlanifications()) {
+            if (existing) { this.planifications[plan.name] = existing; this.armIfActive(existing); } else delete this.planifications[plan.name];
+            return err(corr, `Planification "${plan.name}" non enregistrée (écriture du fichier en échec).`);
+          }
           this.armIfActive(plan);
           // ⭐ data.name (demande utilisateur, 12/08/2026) — l'UI "Modifier" (modale de création
           // réutilisée) doit savoir sous quel nom la version éditée a réellement été enregistrée :
@@ -229,11 +255,32 @@ export class CommandHandler {
 
         case 'execution': {
           const exec = payload as ExecutionPayload & { correlation_id: string };
+          const problems = commandProblems(exec.execution.steps.filter((st) => st.type === 'action').map((st) => ({ ...st, type: 'action' as const, order: st.order ?? '' })));
+          if (problems.length) return err(corr, `Exécution refusée — ${problems.join(' ; ')}`);
           this.logger.info('CommandHandler', `Exécution directe "${exec.execution.trigger_name}" — ${exec.execution.steps.length} étape(s)`);
-          this.executionEngine.executeSteps(exec.execution.steps, exec.execution.trigger_name).catch((e) =>
-            this.logger.error('CommandHandler', `Erreur d'exécution: ${e}`)
-          );
+          this.executionEngine.executeSteps(exec.execution.steps, exec.execution.trigger_name)
+            .then((r) => this.logRun(exec.execution.trigger_name, r))
+            .catch((e) => this.logger.error('CommandHandler', `Erreur d'exécution: ${e}`));
           return ok(corr, `Exécution de "${exec.execution.trigger_name}" lancée.`);
+        }
+
+        // ⭐ 24/09/2026 — commande immédiate structurée (ex. macro dite : « je vais me coucher » →
+        // {type:'macro_ref'} produit par l'interpréteur de ia) — auparavant refusée (« type non pris
+        // en charge »). Exécutée par le même moteur que les planifications.
+        case 'macro_ref':
+        case 'sequence':
+        case 'condition':
+        case 'action':
+        case 'wait': {
+          if (payload.type === 'macro_ref' && !this.macros[payload.name]) return err(corr, `Macro "${payload.name}" inconnue.`);
+          const node = withoutCorrelation(payload) as unknown as DomoticNode;
+          const problems = commandProblems(node);
+          if (problems.length) return err(corr, `Commande refusée — ${problems.join(' ; ')}`);
+          const label = payload.type === 'macro_ref' ? payload.name : 'commande_directe';
+          this.executionEngine.run(node, { trigger: label })
+            .then((r) => this.logRun(label, r))
+            .catch((e) => this.logger.error('CommandHandler', `Erreur d'exécution: ${e}`));
+          return ok(corr, payload.type === 'macro_ref' ? `Macro "${payload.name}" lancée.` : 'Commande lancée.');
         }
 
         default:
@@ -252,24 +299,12 @@ export class CommandHandler {
    */
   async handleToolExecute(params: ExecuterActionParams & { correlation_id: string }): Promise<CorrelatedReponse> {
     const corr = params.correlation_id;
-    const phrase = params.phrase_originale
-      || `${params.verbe} ${params.quoi}${params.lieux?.length ? ' ' + params.lieux.join(' ') : ''}`;
-
     try {
-      // ⭐ 25/08/2026, demande utilisateur : chemin rapide en premier — verbe/quoi/lieux/valeur sont
-      // déjà structurés par ia (executer_action), resolution.ts sait souvent les résoudre sans
-      // aucun appel Mistral supplémentaire (voir ExecutionEngine.executeImmediateAction). Repli sur
-      // deployAndExecute (réinterprétation Mistral complète) UNIQUEMENT si le verbe n'est pas
-      // couvert par la table déterministe — comportement inchangé pour ces cas-là.
-      const fast = await this.executionEngine.executeImmediateAction(params.verbe, params.quoi, params.lieux, params.valeur);
-      if (fast) {
-        return fast.success ? ok(corr, fast.message) : err(corr, fast.message);
-      }
-
-      const result = await this.executionEngine.deployAndExecute('action_immediate', phrase, this.listMacros());
-      return result.success
-        ? ok(corr, `Action "${phrase}" exécutée.`)
-        : err(corr, `Action "${phrase}" non exécutée: ${result.message}`);
+      // ⭐ 24/09/2026 — plus de repli « réinterprétation Mistral complète » (deployAndExecute) :
+      // verbe/quoi/lieux sont déjà structurés par ia ; une commande non résolue est refusée avec
+      // la raison exacte (verbe inconnu, aucune entité…), rien n'est envoyé à HA.
+      const r = await this.executionEngine.executeImmediateAction(params.verbe, params.quoi, params.lieux, params.valeur);
+      return r.success ? ok(corr, r.message) : err(corr, r.message);
     } catch (error) {
       this.logger.error('CommandHandler', `Erreur d'exécution de l'action immédiate: ${error}`);
       return err(corr, `Erreur interne: ${error}`);
@@ -277,67 +312,84 @@ export class CommandHandler {
   }
 
   /**
-   * Déploiement déclenché par un minuteur (specs §6, premier cas) — voir PlanificateurService.
-   * `triggeredEntityId`/`signal` : uniquement renseignés pour un déclenchement `state_change`
-   * (StateWatcher) — voir execution.ts::deployAndExecute.
+   * Déclenchement d'une planification (minuteur, ou changement d'état pour `triggeredEntityId`/
+   * `signal`, StateWatcher). ⭐ 24/09/2026 : exécute la structure `action` décidée à la création,
+   * recalculée en code (ExecutionEngine.run) — plus de réinterprétation de la phrase par Mistral,
+   * plus de cache de résolution (voir execution.ts).
    */
   async handleTriggerFired(plan: PlanificationDefinition, triggeredEntityId?: string, signal?: AbortSignal): Promise<void> {
+    this.scheduleEnd(plan);
+
+    let result: RunResult;
+    try {
+      result = await this.executionEngine.run(plan.action, { trigger: plan.name, signal, triggeredEntityId, nextFireAt: plan.next_fire_at });
+    } catch (error) {
+      // Redéclenchement "minuterie" (StateWatcher) pendant une attente — contrôle de flux normal.
+      if (error instanceof AbortedExecutionError) return;
+      throw error;
+    }
+    this.logRun(plan.name, result);
+
     let dirty = false;
-
-    // ⭐ Cache de résolution IA (demande utilisateur, 13/08/2026, voir types.ts::resolvedCache) —
-    // si une résolution précédente existe déjà, on rejoue directement ses étapes (resolution.ts
-    // reste appelé pour chacune, contre le référentiel HA COURANT — déterministe, s'adapte tout
-    // seul à un renommage d'entité, mais jamais à un changement de la phrase elle-même, effacé
-    // dans ce cas par handleGestion). Aucun aller-retour vers ia/Mistral dans ce chemin : plus
-    // aucune variabilité d'interprétation entre deux déclenchements de la même planification.
-    if (plan.resolvedCache) {
-      try {
-        await this.executionEngine.executeSteps(plan.resolvedCache.steps, plan.name, signal, triggeredEntityId, plan.next_fire_at);
-        if (plan.missed) { plan.missed = false; dirty = true; }
-        if (plan.anomalie) { plan.anomalie = undefined; dirty = true; }
-      } catch (error) {
-        // Redéclenchement "minuterie" (StateWatcher) pendant une attente — contrôle de flux normal,
-        // pas un échec de résolution : ne doit surtout pas invalider le cache ni relancer ia.
-        if (error instanceof AbortedExecutionError) return;
-        this.logger.warn('CommandHandler', `Rejeu du cache de résolution échoué pour "${plan.name}", repli sur une réinterprétation complète: ${error}`);
-        plan.resolvedCache = undefined;
-        await this.handleTriggerFired(plan, triggeredEntityId, signal);
-        return;
-      }
-      if (dirty) this.persistPlanifications();
-      return;
-    }
-
-    const result = await this.executionEngine.deployAndExecute(plan.name, plan.phrase_originale, this.listMacros(), triggeredEntityId, signal, plan.next_fire_at);
-    if (result.success && result.steps) {
-      plan.resolvedCache = { steps: result.steps, cachedAt: new Date().toISOString() };
+    // Déclenchement effectué : efface l'indicateur « manqué » laissé par un rattrapage abandonné.
+    if (plan.missed) { plan.missed = false; dirty = true; }
+    // Anomalie : commande non résolue, condition non évaluable, macro inconnue… — effacée à la
+    // prochaine exécution sans échec (même cycle de vie qu'avant).
+    if (result.failures.length > 0) {
+      plan.anomalie = { message: result.failures.join(' ; '), at: new Date().toISOString() };
       dirty = true;
-    }
-    // Une exécution RÉUSSIE efface l'indicateur "manqué" laissé par un rattrapage abandonné
-    // précédent (demande utilisateur : disparaît à la prochaine exécution, s'il y en a une).
-    if (result.success && plan.missed) {
-      plan.missed = false;
-      dirty = true;
-    }
-    // ⭐ Anomalie quoi/lieux/entity_id (demande utilisateur, 12/08/2026) — positionnée uniquement
-    // quand l'échec vient précisément de la vérification référentielle côté ia
-    // (referenceValidator.ts, DeployReply.invalidReferences), pas de n'importe quel échec de
-    // déploiement (timeout, JSON inexploitable) : ceux-là restent un simple log, pas un état
-    // persistant de la planification — même lifecycle que `missed`, effacée à la prochaine
-    // exécution réussie.
-    if (result.invalidReferences) {
-      plan.anomalie = { message: result.message, at: new Date().toISOString() };
-      dirty = true;
-    } else if (result.success && plan.anomalie) {
+    } else if (plan.anomalie) {
       plan.anomalie = undefined;
       dirty = true;
     }
     if (dirty) this.persistPlanifications();
   }
 
-  /** Déploiement déclenché par une macro dite directement (specs §6, deuxième cas). */
-  async handleMacroUtterance(macro: MacroDefinition, utterance: string): Promise<void> {
-    await this.executionEngine.deployAndExecute(macro.name, utterance, this.listMacros());
+  /** ⭐ 24/09/2026 — fin d'une plage `window` (à `to`) ou d'une `duration` (après la durée) :
+   *  exécute l'action inverse (inverseOf). Rien si aucune action n'a d'inverse évident. */
+  private scheduleEnd(plan: PlanificationDefinition): void {
+    const ms = plan.trigger.type === 'window' ? windowEndMs(plan.trigger)
+      : plan.trigger.type === 'duration' ? durationEndMs(plan.trigger)
+      : null;
+    if (ms === null) return;
+    const inverse = inverseOf(plan.action);
+    if (!inverse) {
+      this.logger.info('CommandHandler', `"${plan.name}" : aucune action à inverser en fin de ${plan.trigger.type === 'window' ? 'plage' : 'durée'}`);
+      return;
+    }
+    const previous = this.endTimers.get(plan.name);
+    if (previous) clearTimeout(previous);
+    this.logger.info('CommandHandler', `"${plan.name}" : action de fin programmée dans ${Math.round(ms / 1000)}s`);
+    this.endTimers.set(plan.name, setTimeout(() => {
+      this.endTimers.delete(plan.name);
+      this.executionEngine.run(inverse, { trigger: `${plan.name} (fin)` })
+        .then((r) => this.logRun(`${plan.name} (fin)`, r))
+        .catch((e) => this.logger.error('CommandHandler', `Erreur d'exécution de la fin de "${plan.name}": ${e}`));
+    }, ms));
+  }
+
+  private logRun(label: string, result: RunResult): void {
+    if (result.failures.length) this.logger.warn('CommandHandler', `"${label}" : ${result.actions} action(s), ${result.failures.length} échec(s) — ${result.failures.join(' ; ')}`);
+    else this.logger.info('CommandHandler', `"${label}" : ${result.actions} action(s) exécutée(s)`);
+  }
+
+  /** ⭐ 24/09/2026 — validation d'une planification reçue (création ou « modifier ») : schéma de
+   *  stockage, commandes exécutables (verbe connu + quoi), déclencheur calculable. Les champs
+   *  d'état runtime éventuellement fournis sont retirés (gérés par planificateur seul). */
+  private checkPlanification(candidate: unknown): { plan: PlanificationDefinition } | { error: string } {
+    const parsed = planificationDefinitionSchema.safeParse(candidate);
+    if (!parsed.success) return { error: `format invalide : ${zodDetails(parsed.error)}` };
+    const plan = parsed.data;
+    delete plan.next_fire_at; delete plan.pending; delete plan.missed; delete plan.anomalie; delete plan.completed_at;
+    const problems = commandProblems(plan.action);
+    if (problems.length) return { error: problems.join(' ; ') };
+    const t = plan.trigger;
+    if (t.type === 'state_change') {
+      if (!t.to_state || (!t.entity_id && !t.domain)) return { error: 'déclencheur state_change sans to_state ni entity_id/domain' };
+    } else if (t.type !== 'sun' && triggerToMs(t, this.logger) === null) {
+      return { error: `déclencheur « ${t.type} » incomplet ou non reconnu` };
+    }
+    return { plan };
   }
 
   // ─── Gestion (lister/activer/désactiver/supprimer/modifier) ──────────────────────────────
@@ -366,11 +418,17 @@ export class CommandHandler {
         if (g.cible !== 'planification') return err(corr, `Activation non supportée pour: ${g.cible}`);
         const plan = this.resolvePlan(g.name);
         if (!plan) return err(corr, `"${g.name}" introuvable.`);
+        if (plan.active && !plan.completed_at) return ok(corr, `Planification "${plan.name}" déjà active.`);
         plan.active = true;
         // ⭐ Réactivation explicite (demande utilisateur, 12/08/2026) — efface `completed_at` :
         // sans ça, un trigger non récurrent déjà consommé resterait inerte malgré l'activation
         // explicite (armIfActive/load() ne reprogramment jamais une planification terminée).
         plan.completed_at = undefined;
+        // ⭐ 24/09/2026 — repart d'une échéance RECALCULÉE : l'ancienne (d'avant la désactivation)
+        // la faisait passer pour « en retard » → marquée manquée, terminée sans s'exécuter
+        // (ponctuelle), ou exécutée tout de suite (< fenêtre de rattrapage).
+        plan.next_fire_at = undefined;
+        plan.missed = undefined;
         this.persistPlanifications();
         this.armIfActive(plan);
         return ok(corr, `Planification "${plan.name}" activée.`);
@@ -411,17 +469,23 @@ export class CommandHandler {
         if (g.cible !== 'planification') return err(corr, `Modification non supportée pour: ${g.cible}`);
         const plan = this.resolvePlan(g.name);
         if (!plan || !g.modifications) return err(corr, `"${g.name}" introuvable ou modifications manquantes.`);
+        // ⭐ 24/09/2026 — le nom est la clé de stockage : le changer ici désynchronisait l'entrée.
+        if (g.modifications.name !== undefined && g.modifications.name !== plan.name) {
+          return err(corr, `Le nom d'une planification ne se modifie pas (supprimer puis recréer).`);
+        }
+        // Validée comme une création AVANT d'être appliquée (même garde-fou, rien n'est touché si
+        // refusée) ; repart d'une échéance recalculée (l'ancienne ignorait la nouvelle heure).
+        const checked = this.checkPlanification({ ...plan, ...g.modifications, name: plan.name });
+        if ('error' in checked) return err(corr, `Modification refusée — ${checked.error}`);
+        const updated: PlanificationDefinition = { ...checked.plan, id: plan.id };
         this.disarm(plan);
-        Object.assign(plan, g.modifications);
-        // Modification explicite (demande utilisateur, 12/08/2026) : même raisonnement que
-        // "activer" ci-dessus — une planification modifiée doit pouvoir se redéclencher.
-        plan.completed_at = undefined;
-        // ⭐ 13/08/2026 : une phrase modifiée invalide le cache de résolution (voir
-        // types.ts::resolvedCache) — sans ça, le prochain déclenchement rejouerait les étapes de
-        // l'ANCIENNE phrase.
-        plan.resolvedCache = undefined;
-        this.persistPlanifications();
-        this.armIfActive(plan);
+        this.planifications[plan.name] = updated;
+        if (!this.persistPlanifications()) {
+          this.planifications[plan.name] = plan;
+          this.armIfActive(plan);
+          return err(corr, `Planification "${plan.name}" non modifiée (écriture du fichier en échec).`);
+        }
+        this.armIfActive(updated);
         return ok(corr, `Planification "${plan.name}" modifiée.`);
       }
 
@@ -430,14 +494,16 @@ export class CommandHandler {
     }
   }
 
-  private persistMacros(): void {
+  private persistMacros(): boolean {
     const result = this.macrosManager.save({ macros: this.macros });
     if (!result.success) this.logger.error('CommandHandler', `Échec de sauvegarde des macros: ${result.error}`);
+    return result.success;
   }
 
-  persistPlanifications(): void {
+  persistPlanifications(): boolean {
     const result = this.planificationsManager.save({ planifications: this.planifications });
     if (!result.success) this.logger.error('CommandHandler', `Échec de sauvegarde des planifications: ${result.error}`);
+    return result.success;
   }
 
   /** ⭐ Purge des planifications terminées depuis plus de 2 jours (demande utilisateur, 12/08/2026)
@@ -467,4 +533,34 @@ function ok(corr: string, message: string, data?: unknown): CorrelatedReponse {
 
 function err(corr: string, message: string): CorrelatedReponse {
   return { correlation_id: corr, success: false, message };
+}
+
+function withoutCorrelation(payload: object): Record<string, unknown> {
+  const { correlation_id: _c, ...rest } = payload as Record<string, unknown>;
+  return rest;
+}
+
+function zodDetails(error: ZodError): string {
+  return error.errors.slice(0, 3).map((e) => `${e.path.join('.') || 'racine'}: ${e.message}`).join('; ');
+}
+
+/** ⭐ 24/09/2026 — toute commande (nœud action, à toute profondeur) doit porter un verbe connu du
+ *  moteur et un quoi : sans eux, elle ne pourrait jamais être exécutée (plus de repli vers l'agent
+ *  de conversation de HA, qui est ia lui-même). */
+function commandProblems(node: unknown, found: string[] = []): string[] {
+  if (Array.isArray(node)) {
+    node.forEach((n) => commandProblems(n, found));
+    return found;
+  }
+  if (!node || typeof node !== 'object') return found;
+  const n = node as Record<string, unknown>;
+  if (n.type === 'action') {
+    const label = String(n.order || `${n.verbe ?? ''} ${n.quoi ?? ''}`).trim() || 'commande';
+    if (!n.verbe || !n.quoi) found.push(`« ${label} » : verbe/quoi manquant`);
+    else if (!isKnownVerb(String(n.verbe))) found.push(`« ${label} » : verbe « ${n.verbe} » inconnu du moteur`);
+  }
+  for (const key of ['then', 'else', 'steps', 'action']) {
+    if (n[key] !== undefined) commandProblems(n[key], found);
+  }
+  return found;
 }

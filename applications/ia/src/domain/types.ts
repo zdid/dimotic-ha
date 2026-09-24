@@ -103,23 +103,3 @@ export interface ExecutionStep {
   delay_before_seconds: number;
 }
 
-export interface DeployRequest {
-  correlation_id: string;
-  trigger_name: string;
-  phrase_originale: string;
-  macros: unknown[];
-  entities_snapshot: unknown[];
-  timestamp: string;
-  // Renseigné uniquement pour un déclenchement state_change (planificateur) — l'entité réellement
-  // à l'origine de ce déclenchement précis, pour qu'une action sans lieu explicite ("éteins-la")
-  // sache quoi cibler (voir applications/planificateur/src/domain/types.ts::DeployContext).
-  triggered_entity_id?: string;
-}
-
-export interface DeployReply extends CorrelatedReponse {
-  steps?: ExecutionStep[];
-  // ⭐ true si l'échec vient précisément de referenceValidator.ts (quoi/lieux/entity_id invalides)
-  // — distingue ce cas d'un échec générique (timeout, JSON inexploitable) pour que planificateur
-  // sache quand positionner un flag d'anomalie persistant (demande utilisateur, 12/08/2026).
-  invalidReferences?: boolean;
-}

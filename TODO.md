@@ -1,5 +1,127 @@
 # Liste des problèmes à résoudre
 
+## 🟡 Planificateur — revue de code (24/09/2026) — CORRIGÉ (spec v1.11 + ia v1.14), à valider en réel
+- Fait : refonte du déclenchement (structure exécutée et recalculée en code, plus de
+  réinterprétation ni de resolvedCache, conditions soleil/numérique/état en code sinon vrai/faux via
+  ia `ConditionEvaluator`, repli Assist supprimé) + tous les constats ci-dessous + macro dite
+  (`macro_ref`) exécutée (était refusée) + forme structurée des conditions acceptée + exemples de
+  `regles_mistral.txt` corrigés (verbe/quoi). Vérifié hors ligne (faux HA, 19 cas OK) ; les 3
+  planifications réelles restent valides. Reste : test réel avec ia+planificateur activés.
+- Limites connues : fin de plage/durée perdue si redémarrage pendant la plage ; section 4 de
+  `regles_mistral.txt` (format de déploiement) désormais inutilisée, à retirer si on allège le prompt.
+- **Décisions utilisateur (24/09)** : (1) au déclenchement, ne plus faire réinterpréter la phrase par
+  Mistral (variabilité : « dans 5 minutes » parfois oublié) — exécuter la structure décidée à la
+  création, recalculée en code à chaque tir ; `resolvedCache` supprimé (rien de figé) ; Mistral
+  seulement pour évaluer une condition en texte libre. (2) **Repli `conversation.process` (Assist HA)
+  supprimé** : l'agent de conversation de HA EST ia (émulation Ollama) → le repli bouclait
+  planificateur → HA → ia → planificateur ; commande sans verbe/quoi refusée dès la création.
+- 🔴 **Cache de résolution (`resolvedCache`) figé au 1er déclenchement, y compris ce qui doit varier** :
+  la séquence renvoyée par ia est « plate » (conditions déjà évaluées, aléatoires déjà tirés, entité
+  déclenchante déjà ciblée), puis rejouée telle quelle à chaque tir suivant. Conséquences : « … si
+  le soleil est couché » évalué une seule fois pour toujours ; « entre 10 et 20 minutes » tiré une
+  fois ; **règle de domaine state_change (« minuterie sur toutes les lumières », « éteins-la ») :
+  la 1re lumière est mise en cache → les suivantes font éteindre la PREMIÈRE**.
+- 🔴 **Planification reçue non validée, puis persistance empoisonnée** : ia:command `planification`
+  / `macro` stockée en mémoire et armée sans validation ; si l'écriture échoue (schéma : ex.
+  `phrase_originale` vide), la réponse dit quand même « enregistrée », et l'entrée invalide restée en
+  mémoire fait échouer TOUTES les écritures suivantes (next_fire_at, créations, suppressions)
+  jusqu'au redémarrage — qui perd tout ce qui n'a pas été écrit.
+- 🟠 **Réactiver une planification** garde l'ancien `next_fire_at` → traitée comme en retard :
+  marquée « manquée » (récurrente), ou **terminée sans jamais s'exécuter** (ponctuelle « dans
+  10 minutes »), ou exécutée immédiatement si < 300 s.
+- 🟠 **« modifier »** garde l'ancien `next_fire_at` → nouvelle heure ignorée (reprise sur l'ancien
+  délai) ; une modification du `name` désynchronise la clé du stockage.
+- 🟠 **Recréer une planification sous un nom existant** ne désarme pas l'ancienne : ancienne
+  state_change toujours surveillée, ou ancien minuteur (si la nouvelle est state_change) qui
+  exécute l'ancienne phrase.
+- 🟠 **state_change déclenché par un simple changement d'attribut** (luminosité, etc.) : le core
+  relaie tout `state_changed` HA sans l'état précédent → une minuterie « quand X s'allume »
+  repart de zéro à chaque variation d'attribut tant que X reste allumé.
+- 🟠 **Reprise des state_change en attente (`pending`) au démarrage avant HA prêt** (hors du
+  `scheduleWhenHaReady` du 24/09) → action ignorée (référentiel vide).
+- 🟠 `window` (« de 18h à 22h », « … en semaine ») : seul `from` déclenche — `to` (aucune action de fin)
+  et `days` (tous les jours) ignorés par `scheduler.ts`.
+- 🟡 UI : `escapeHtml` n'échappe pas `"` (injecté dans `data-name`/`data-phrase`/`title`).
+- 🟠 **Trigger `sun` jamais armé au démarrage** : la position GPS (getHaConfig) est demandée de façon
+  asynchrone, le 1er calcul renvoie `null` → « Déclencheur non supporté », aucun minuteur, aucun
+  nouvel essai ; même arrêt silencieux si `null` au réarmement d'une occurrence.
+- Décision utilisateur (24/09) : condition « soleil couché / levé » évaluée en code avec le même
+  calcul daté (suncalc, position HA), pas par Mistral.
+
+## 🟡 IA — revue de code (24/09/2026) — CORRIGÉ (spec v1.14), à valider en réel
+- Fait : les 5 corrections ci-dessous (build OK, corpus interpréteur 59/59, watcher vérifié :
+  5 enregistrements par rename → 5 rechargements, fichier créé après coup détecté). Reste à
+  vérifier en réel : planification créée par l'interpréteur puis déclenchée, commande HA répétée.
+- Ajouté (demande utilisateur) : `ia` ne s'ouvre qu'au premier `ha:ready` (serveur Ollama, test,
+  comparatif ; réinterprétations mises en attente) — avant : Mistral sans catalogue et vérification
+  des références sautée. À vérifier en réel : démarrage avec HA indisponible.
+- Constats d'origine :
+- 🔴 **Planification reconnue par l'interpréteur enregistrée avec `phrase_originale: ""`**
+  (`interpreter/index.ts` l.173, jamais complétée dans `IaService.executeOutcomes` sauf gabarit
+  événementiel) — vérifié : « tous les jours à midi allume le salon » → `phrase_originale:""`. Au
+  déclenchement, planificateur réinterprète `phrase_originale` (vide) → Mistral sans phrase → la
+  planification ne fait rien (ou n'importe quoi). Le schéma planificateur exige pourtant `min(1)`.
+- ℹ️ Un seul `PhraseCache` (100 phrases) partagé par les 3 entrées : phrases venant de HA
+  (`/api/chat`, entrée principale), test du tableau de bord, déclenchements (`DeployResponder`) —
+  les deux constats cache ci-dessous touchent donc d'abord les commandes vocales HA.
+- 🔴 **Collision du cache de phrases entre conversation et déclenchement** : `DeployResponder` range
+  sa séquence `execution` sous `phrase_originale` = la phrase complète dite par l'utilisateur
+  (« tous les jours à 2h30 éteins toutes les lumières »), écrasant l'entrée « planification ». Si
+  l'utilisateur redit cette phrase (ex. pour recréer la planification) → cache → **exécution
+  immédiate** (tout s'éteint) et aucune planification créée. (Planificateur a déjà son propre
+  `resolvedCache` par planification : le cache côté `ia` n'apporte rien sur ce chemin.)
+- 🟠 **Cache de décisions Mistral à date absolue** : « demain à 8h … » → trigger `date` absolu mis en
+  cache ; la même phrase dite la semaine suivante recrée une planification dans le passé.
+- 🟠 **Rechargement à chaud de `data/ia/config.yaml` mort après 1-2 enregistrements** : `fs.watch`
+  suit l'inode, ConfigWriter remplace le fichier (tmp → rename) — vérifié : 5 enregistrements →
+  3 événements puis plus rien. Clé API / fournisseur / exclusions changés depuis l'UI ensuite
+  ignorés jusqu'au redémarrage ; aucune surveillance si le fichier n'existait pas au démarrage.
+  Même défaut pour `vocabulaire_interpreteur.yaml`/`gabarits_interpreteur.yaml` (éditeurs qui
+  sauvegardent par rename) ; `RulesProvider` n'est pas touché (il se réarme à chaque rechargement).
+- 🟡 Action Mistral mise en cache même si `executer_action` a échoué (résultat de l'outil ignoré) →
+  la mauvaise décision est rejouée sans Mistral jusqu'à éviction.
+- 🟡 Chemin interpréteur/cache : `planificateurReply` = message texte (pas JSON) → une action en échec
+  ferme quand même la session d'assistance.
+- 🟡 Port Ollama occupé (EADDRINUSE) : pas de gestionnaire `error` sur le serveur → crash du process
+  → boucle de relances du superviseur au lieu d'un message clair.
+- 🟡 Chemins des modèles (`regles_mistral.txt`, YAML interpréteur) calculés depuis
+  `PROJECT_ROOT/applications/ia` → faux si `ia` tourne depuis la racine externe `data/applications/`.
+- 🟡 UI : `escapeHtml` n'échappe pas `"` (historique injecté dans `value="…"`).
+- ✅ Attente de HA : correcte (HaBridgeClient se recharge sur `ha:ready` ; interpréteur, catalogue et
+  vérification des références inactifs tant que le référentiel n'est pas chargé).
+
+## 🟡 ArbreOùQuoi — revue de code complète (24/09/2026) — CORRIGÉ (sauf filtres pièce/QUOI + spec), écran à valider
+- Fait : arbres indexés par chemin complet côté serveur (deux modes) — vérifié : QUOI → OÙ 316/316
+  entités visibles (20 avant), plafonniers séparés par pièce ; recherche + filtre « actives » en local
+  dans la page (par onglet, survivent aux rafraîchissements, serveur sans filtres) ; config fusionnée
+  par section + résultat vérifié ; états mis à jour sur `ha:entity:state_changed` (≤ 1 reconstruction
+  / 5 s) ; libellés QUOI depuis le catalogue ; HTML échappé. Restent : filtres par pièce / QUOI
+  (EF-016/017/018), nettoyage des événements morts, spec v2.0 à mettre à jour.
+- Constats d'origine :
+- 🔴 **Mode QUOI → OÙ : 20 entités affichées sur 324** — le serveur range `entitiesByOu` par chemin
+  complet (`salon/plafonnier`), la page les cherche par identifiant seul (`salon`) ; de plus
+  `updateOuHierarchyForQuoi()` n'ajoute une branche que si sa racine est absente (sous-branches perdues).
+- 🔴 **Mode OÙ → QUOI : lieux fusionnés** — nœuds indexés par identifiant seul ; 23 lieux sur 80
+  existent sous plusieurs parents (`plafonnier` dans 7 pièces → un seul nœud, rattaché à la 1re pièce,
+  compteurs faux).
+- 🟠 Recherche sans effet (le serveur ignore la requête et renvoie l'arbre complet — EF-015).
+- 🟠 Filtre « entités actives » : perdu à chaque rafraîchissement / ha:ready (arbre non filtré
+  réémis) ; arbres filtrés sans « non assignés » ; QUOI → OÙ filtré sans hiérarchie (groupes vides) ;
+  défaut incohérent (coché côté page, arbre initial non filtré).
+- 🟠 Filtres par pièce / par QUOI / cumulatifs (EF-016/017/018) jamais implémentés.
+- 🟠 Enregistrement de config : fusion superficielle — `{display:{viewMode}}` remplace tout `display`
+  (autres réglages remis à défaut) ; résultat d'écriture ignoré.
+- 🟡 `ha:entity:updated` jamais ponté vers le process → états affichés figés hors rafraîchissement
+  (et si ponté tel quel : reconstruction complète à chaque changement d'état → à limiter).
+- 🟡 Mode OÙ → QUOI : libellés QUOI des niveaux profonds pris dans la seule liste du 1er niveau
+  (identifiant brut affiché) ; HTML non échappé (état, appareil, pièce, clés d'attributs).
+- 🟡 Événements déclarés jamais traités (FILTER_RESET, CONFIG_GET, EXPAND/COLLAPSE, AREAS_LIST…) ;
+  spec v2.0 décrit Area HA → QUOI et `ha:structure:rebuilt` (l'implémentation suit la taxonomie).
+- ⚠️ En AMONT (données, pas ArbreOùQuoi) : `slug_precis` non-slugs (« Plan HAPLAN Rétroéclairage
+  écran ») venant de HAPLAN/espdisplay. (Un même lieu à des profondeurs différentes, ex. `salon` à la
+  racine ou sous `salle`, est NORMAL — confirmé par l'utilisateur le 24/09 : chaque chemin est affiché
+  à sa place, sans fusion.)
+
 ## ✅ Vérification applications ↔ « HA prêt » / MQTT du core (24/09/2026) — corrigé
 - Fait : HaQueryBridge répond « HA pas encore synchronisé » avant le 1er ha:ready (wsRegistryReady
   tenu à jour à chaque ha:ready) ; message « ha.ws_enable=false ? » réservé au vrai cas désactivé ;

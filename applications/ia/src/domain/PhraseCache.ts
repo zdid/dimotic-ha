@@ -1,15 +1,15 @@
 /**
  * Cache des 100 dernières phrases résolues (demande utilisateur, 26/08/2026) — permet d'envoyer
  * une commande directement, sans repasser par l'interpréteur déterministe NI par Mistral, quand la
- * MÊME phrase a déjà été résolue récemment. Alimenté par les trois origines possibles d'une
- * décision (`IaService.handleChat`/`handleTestCommand`, `DeployResponder`), partagé entre les
- * trois — une seule instance construite par `IaService`.
+ * MÊME phrase a déjà été résolue récemment. Alimenté par les phrases dites (`IaService.handleChat`
+ * — HA — et `handleTestCommand`) ; plus par `DeployResponder` depuis le 24/09/2026 (collision : une
+ * séquence de déclenchement rejouée comme commande immédiate). Une seule instance, dans `IaService`.
  *
  * Clé : texte normalisé (minuscules, sans accents — même normalisation que le moteur
  * d'interprétation, `tokenizer.ts::normalizeText`) pour que deux formulations qui ne diffèrent que
  * par la casse/les accents partagent la même entrée. Valeur : la décision déjà résolue, dans le
  * même format `DeterministicOutcome[]` que produit l'interpréteur — permet de la rejouer
- * (`executeOutcomes`/`outcomesToExecutionSteps`) sans savoir si elle vient de l'interpréteur ou de
+ * (`executeOutcomes`) sans savoir si elle vient de l'interpréteur ou de
  * Mistral à l'origine.
  *
  * LRU simple : `Map` préserve l'ordre d'insertion, une entrée relue est retirée puis réinsérée en

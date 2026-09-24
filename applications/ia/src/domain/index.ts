@@ -161,7 +161,9 @@ export const IA_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   // tableau de bord) mais jamais relayé jusqu'ici vers ia : nécessaire pour que l'interpréteur
   // déterministe (specs §16) puisse reconnaître un nom de macro en tête de phrase sans solliciter
   // planificateur à chaque tentative (voir interpreter/macros.ts).
-  bridgedEvents: ['ia:tool:execute:reply', 'ia:command:reply', 'planificateur:deploy', 'planificateur:macros:list']
+  // ⭐ 24/09/2026 — planificateur:deploy (réinterprétation complète au déclenchement) remplacé par
+  // planificateur:condition (évaluation d'une condition en texte libre, ConditionEvaluator.ts).
+  bridgedEvents: ['ia:tool:execute:reply', 'ia:command:reply', 'planificateur:condition', 'planificateur:macros:list']
 };
 
 // ============================================================================

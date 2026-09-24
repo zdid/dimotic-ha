@@ -29,6 +29,11 @@ export type PendingChangedCallback = (plan: PlanificationDefinition) => void;
 export class StateWatcher {
   private readonly pending = new Map<string, AbortController>(); // clé "planName::entityId"
   private plans: PlanificationDefinition[] = [];
+  /** ⭐ 24/09/2026 — dernier état connu par entité : le core relaie TOUT state_changed de HA (y
+   *  compris un simple changement d'attribut, luminosité…) sans l'état précédent ; sans ce suivi,
+   *  une minuterie « quand X s'allume » repartait de zéro à chaque variation tant que X restait
+   *  allumé. Amorcé depuis le référentiel au démarrage (start(), appelé une fois HA prêt). */
+  private readonly lastStates = new Map<string, string>();
 
   constructor(
     private readonly haBridgeClient: HaBridgeClient,
@@ -42,6 +47,9 @@ export class StateWatcher {
    *  limitation de précision documentée en tête de fichier). */
   start(plans: PlanificationDefinition[]): void {
     this.setPlans(plans);
+    for (const entity of this.haBridgeClient.getAllEntities()) {
+      if (entity.state !== undefined) this.lastStates.set(entity.entity_id, String(entity.state));
+    }
     this.haBridgeClient.onStateChanged((entity) => this.handleStateChanged(entity));
 
     for (const plan of plans) {
@@ -61,6 +69,11 @@ export class StateWatcher {
   }
 
   private handleStateChanged(entity: HaRawEntity): void {
+    const previous = this.lastStates.get(entity.entity_id);
+    this.lastStates.set(entity.entity_id, entity.state);
+    // Seul un vrai PASSAGE à l'état surveillé déclenche (pas un attribut qui bouge à état égal).
+    if (previous === entity.state) return;
+
     const domain = entity.entity_id.split('.')[0];
     const plan = this.resolvePlan(entity.entity_id, domain);
     if (!plan || entity.state !== plan.trigger.to_state) return;

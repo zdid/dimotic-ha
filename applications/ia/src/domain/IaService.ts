@@ -21,7 +21,7 @@ import { MistralClient, MISTRAL_PROMPT_CACHE_KEY } from './MistralClient';
 import { RulesProvider } from './rules';
 import { ToolExecutor } from './ToolExecutor';
 import { StructuredRouter } from './StructuredRouter';
-import { DeployResponder } from './DeployResponder';
+import { ConditionEvaluator } from './ConditionEvaluator';
 import { OllamaHttpServer } from './OllamaHttpServer';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
@@ -41,7 +41,13 @@ import { buildLiveCatalogs } from './liveCatalogs';
 import { PhraseCache } from './PhraseCache';
 import { InterpreterMetrics } from './InterpreterMetrics';
 
-const MAX_TOOL_ROUNDS = 5; // garde-fou — évite une boucle d'outils infinie en cas de réponse aberrante
+/** Dossier de l'application qui tourne (src/domain ou dist/domain → deux niveaux au-dessus) —
+ *  ⭐ 24/09/2026 : modèles intégrés trouvés aussi depuis la racine externe `data/applications/ia`. */
+const APP_TEMPLATES_DIR = path.resolve(__dirname, '..', '..');
+
+const MAX_TOOL_ROUNDS = 5;
+
+const HA_NOT_READY_MESSAGE = 'HA pas encore synchronisé — ia attend le premier ha:ready, réessayer dans un instant.'; // garde-fou — évite une boucle d'outils infinie en cas de réponse aberrante
 
 // ⭐ Assistance Q&R à la création de planification (demande utilisateur, 12/08/2026, option A des
 // propositions faites) — durée de vie d'une session de clarification en mémoire (jamais persistée,
@@ -57,6 +63,9 @@ type RunChatRoundsResult =
       // utilisateur, 12/08/2026 : distinguer "juste du premier coup" de "corrigé après relance" au
       // lieu de mélanger les deux sous un même verdict MATCH dans le comparatif.
       verificationRetried: boolean;
+      /** ⭐ 24/09/2026 — succès du DERNIER `executer_action` réellement exécuté (réponse de
+       *  planificateur), absent si aucun : une action en échec n'est jamais mise en cache. */
+      executerActionOk?: boolean;
     }
   | { ok: false; errorMessage: string };
 
@@ -107,7 +116,7 @@ export class IaService implements IIaService {
   private readonly rulesProvider: RulesProvider;
   private readonly toolExecutor: ToolExecutor;
   private readonly structuredRouter: StructuredRouter;
-  private readonly deployResponder: DeployResponder;
+  private readonly conditionEvaluator: ConditionEvaluator;
   // ⭐ Sessions d'assistance Q&R (voir ASSIST_SESSION_TTL_MS) — jamais alimentée par un appelant qui
   // ne passe pas `assist: true` (le formulaire générique "Tester une commande" du dashboard ia n'en
   // envoie jamais, comportement strictement inchangé pour lui).
@@ -127,9 +136,17 @@ export class IaService implements IIaService {
   private vocabulaireWatcher?: fs.FSWatcher;
   private gabaritsWatcher?: fs.FSWatcher;
   // ⭐ 26/08/2026, demande utilisateur — cache des 100 dernières phrases résolues + compteurs
-  // cache/interpréteur/Mistral, partagés avec DeployResponder (une seule instance de chaque).
+  // cache/interpréteur/Mistral — pour les phrases dites (HA, test). ⭐ 24/09/2026 : plus de
+  // réinterprétation au déclenchement (DeployResponder supprimé, voir ConditionEvaluator).
   private readonly phraseCache = new PhraseCache();
   private readonly metrics = new InterpreterMetrics();
+  // ⭐ 24/09/2026, demande utilisateur (« l'ia comme les autres ne peut pas démarrer sans ha
+  // ready ») — tant que le référentiel HA n'est pas chargé : pas de serveur Ollama (HA ne peut pas
+  // joindre ia), test/comparatif refusés, réinterprétations mises en attente. Sans ça, Mistral
+  // tournait sans catalogue et validateReferences() laissait tout passer (référentiel absent).
+  private haReady = false;
+  private resolveHaReady!: () => void;
+  private readonly haReadyPromise = new Promise<void>((resolve) => { this.resolveHaReady = resolve; });
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -142,22 +159,24 @@ export class IaService implements IIaService {
     this.rulesProvider = new RulesProvider(this.resolveRulesPath(), this.logger, this.haBridgeClient, () => this.config.excludedQuoiIds);
     this.toolExecutor = new ToolExecutor(this.eventBus, this.logger, this.haBridgeClient, this.config.toolExecuteTimeoutMs);
     this.structuredRouter = new StructuredRouter(this.eventBus, this.logger, this.config.commandTimeoutMs);
-    this.deployResponder = new DeployResponder(
-      this.eventBus, this.logger, this.mistralClient, this.rulesProvider, this.config.defaultMistralModel, this.haBridgeClient,
-      this.phraseCache, this.metrics,
-      () => this.interpreterVocabulaire, () => this.interpreterGabarits, () => this.interpreterMacros,
-      () => this.config.excludedQuoiIds
+    this.conditionEvaluator = new ConditionEvaluator(
+      this.eventBus, this.logger, this.mistralClient, this.toolExecutor,
+      () => this.config.defaultMistralModel,
+      () => this.haReadyPromise
     );
   }
 
   private resolveRulesPath(): string {
+    // `rulesFile` relatif reste résolu depuis `applications/ia` (convention documentée du champ,
+    // défaut `../../data/ia/...`) ; le MODÈLE intégré, lui, est pris là où tourne réellement le
+    // code (APP_TEMPLATES_DIR) — y compris depuis la racine externe `data/applications/ia`.
     const appRoot = path.join(process.env.PROJECT_ROOT || process.cwd(), 'applications', 'ia');
     const resolved = path.isAbsolute(this.config.rulesFile) ? this.config.rulesFile : path.join(appRoot, this.config.rulesFile);
     // Modèle intégré (toujours présent, fait partie du code applicatif) — sert uniquement
     // d'amorce si le fichier réellement utilisé (par défaut sous data/ia/, voir config-schema.ts)
     // n'existe pas encore, ex: premier démarrage sur une machine neuve (déploiement Docker,
     // data/ vide). N'écrase jamais un fichier déjà présent à l'emplacement cible.
-    this.ensureRulesFileSeeded(resolved, path.join(appRoot, 'rules', 'regles_mistral.txt'));
+    this.ensureRulesFileSeeded(resolved, path.join(APP_TEMPLATES_DIR, 'rules', 'regles_mistral.txt'));
     return resolved;
   }
 
@@ -165,10 +184,9 @@ export class IaService implements IIaService {
    *  ci-dessus (modèle intégré sous `applications/ia/interpreter/`, copié vers `data/ia/` au
    *  premier démarrage si absent, jamais écrasé ensuite). */
   private resolveInterpreterPath(dataFileName: string, templateFileName: string): string {
-    const appRoot = path.join(process.env.PROJECT_ROOT || process.cwd(), 'applications', 'ia');
     const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia');
     const resolved = path.join(dataDir, dataFileName);
-    ensureSeeded(resolved, path.join(appRoot, 'interpreter', templateFileName));
+    ensureSeeded(resolved, path.join(APP_TEMPLATES_DIR, 'interpreter', templateFileName));
     return resolved;
   }
 
@@ -204,35 +222,30 @@ export class IaService implements IIaService {
    */
   private watchConfigFile(): void {
     const configPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia', 'config.yaml');
-    if (!fs.existsSync(configPath)) return; // pas encore créé (jamais sauvegardé) — rien à surveiller
-
-    try {
-      this.configWatcher = fs.watch(configPath, () => {
-        try {
-          this.configProvider.reload();
-          this.config = iaConfigSchema.parse(this.configProvider.getAppConfig());
-          this.logger.info('IaService', `Configuration rechargée depuis ${configPath} (excludedQuoiIds: ${this.config.excludedQuoiIds.join(', ') || 'aucun'})`);
-          this.emitStatus(); // reflète tout changement de `provider` (comparatif Claude) sans attendre un GET_STATUS
-        } catch (error) {
-          this.logger.error('IaService', `Échec du rechargement de ${configPath}: ${error}`);
-        }
-      });
-    } catch (error) {
-      this.logger.warn('IaService', `Surveillance de ${configPath} indisponible: ${error}`);
-    }
+    // ⭐ 24/09/2026 — surveillance du DOSSIER (watchFile) : ConfigWriter remplace le fichier
+    // (tmp → rename), un fs.watch sur le fichier suivait l'ancien inode et devenait sourd après
+    // 1-2 enregistrements ; couvre aussi un config.yaml créé après le démarrage.
+    this.configWatcher = watchFile(configPath, () => {
+      try {
+        this.configProvider.reload();
+        this.config = iaConfigSchema.parse(this.configProvider.getAppConfig());
+        this.logger.info('IaService', `Configuration rechargée depuis ${configPath} (excludedQuoiIds: ${this.config.excludedQuoiIds.join(', ') || 'aucun'})`);
+        this.emitStatus(); // reflète tout changement de `provider` (comparatif Claude) sans attendre un GET_STATUS
+      } catch (error) {
+        this.logger.error('IaService', `Échec du rechargement de ${configPath}: ${error}`);
+      }
+    });
+    if (!this.configWatcher) this.logger.warn('IaService', `Surveillance de ${configPath} indisponible`);
   }
 
   async start(): Promise<void> {
     this.logger.info('IaService', 'Démarrage du service ia...');
 
     await this.haBridgeClient.start();
-    if (!this.haBridgeClient.isAvailable()) {
-      this.logger.warn('IaService', 'Référentiel HA indisponible — outils de lecture (lister_entites/obtenir_etat) désactivés.');
-    }
 
     this.rulesProvider.load();
     this.watchConfigFile();
-    this.deployResponder.wire();
+    this.conditionEvaluator.wire();
     this.setupSocketEventListeners();
 
     // ⭐ 26/08/2026 — interpréteur déterministe (specs §16).
@@ -251,8 +264,7 @@ export class IaService implements IIaService {
       this.interpreterMacros = (macros ?? []).map((m) => m.name);
     });
 
-    this.ollamaServer = new OllamaHttpServer(this.config, this.logger, (body, res) => this.handleChat(body, res));
-    this.ollamaServer.start();
+    this.openWhenHaReady();
 
     // Purge périodique des sessions d'assistance abandonnées (utilisateur qui ferme la modale sans
     // conclure) — la TTL est glissante (réarmée à chaque tour), donc une purge peu fréquente suffit.
@@ -260,6 +272,36 @@ export class IaService implements IIaService {
 
     this.emitStatus();
     this.logger.info('IaService', 'Service ia démarré');
+  }
+
+  /** ⭐ 24/09/2026 — même principe que PlanificateurService.scheduleWhenHaReady() : HA déjà prêt →
+   *  tout de suite ; sinon au premier `ha:ready` (ponté par le core), après rechargement du cache
+   *  HaBridgeClient. Une seule fois : une reconnexion ultérieure recharge le cache (HaBridgeClient)
+   *  sans refermer le service. */
+  private openWhenHaReady(): void {
+    const open = (): void => {
+      if (this.haReady) return;
+      this.haReady = true;
+      this.resolveHaReady();
+      this.ollamaServer = new OllamaHttpServer(this.config, this.logger, (body, res) => this.handleChat(body, res));
+      this.ollamaServer.start();
+      this.logger.info('IaService', 'Référentiel HA chargé — ia ouvert (serveur Ollama, test, réinterprétations)');
+      this.emitStatus();
+    };
+    if (this.haBridgeClient.isAvailable()) {
+      open();
+      return;
+    }
+    this.logger.info('IaService', 'HA pas encore synchronisé — serveur Ollama et traitements différés jusqu\'au premier ha:ready');
+    this.eventBus.onGeneric('ha:ready', () => {
+      if (this.haReady) return;
+      this.haBridgeClient.refresh()
+        .catch((error) => this.logger.warn('IaService', `Rechargement du référentiel HA: ${error}`))
+        .finally(() => {
+          if (this.haBridgeClient.isAvailable()) open();
+          else this.logger.warn('IaService', 'ha:ready reçu mais référentiel HA toujours indisponible — attente du suivant');
+        });
+    });
   }
 
   private cleanupAssistSessions(): void {
@@ -355,7 +397,7 @@ export class IaService implements IIaService {
 
     this.metrics.recordInterpreterHit();
     this.logger.info('IaService', `Interpréteur déterministe: "${question}" reconnu sans Mistral (${outcomes.length} énoncé(s))`);
-    this.phraseCache.set(question, outcomes);
+    if (isCacheable(outcomes)) this.phraseCache.set(question, outcomes);
     return this.executeOutcomes(outcomes, question);
   }
 
@@ -366,16 +408,19 @@ export class IaService implements IIaService {
    *  `handleTestCommand()` n'ait rien à savoir de ce court-circuit. */
   private async executeOutcomes(outcomes: DeterministicOutcome[], phraseOriginale: string): Promise<RunChatRoundsResult> {
     const messages: string[] = [];
-    let planificateurReply: string | undefined;
+    // ⭐ 24/09/2026 — réponses de planificateur conservées en objets (même forme JSON que le chemin
+    // Mistral) : handleTestCommand lit `success` pour décider si la session d'assistance est
+    // conclue — avec le seul message texte, une action en échec la fermait quand même.
+    const replies: Array<{ success: boolean; message: string }> = [];
     for (const outcome of outcomes) {
       if (outcome.kind === 'action') {
         const reply = await this.toolExecutor.executeDirect(outcome.params);
         messages.push(reply.message);
-        planificateurReply = reply.message;
+        replies.push(reply);
       } else if (outcome.kind === 'structured') {
-        const reply = await this.structuredRouter.route(outcome.data);
+        const reply = await this.structuredRouter.route(withPhraseOriginale(outcome.data, phraseOriginale));
         messages.push(reply ? reply.message : 'Planificateur ne répond pas — commande non transmise.');
-        if (reply) planificateurReply = reply.message;
+        if (reply) replies.push(reply);
       } else if (outcome.kind === 'evenement') {
         // entity_id résolu À CHAQUE EXÉCUTION, jamais mis en cache tel quel — seuls
         // trigger_quoi/trigger_lieu (des NOMS, pas un entity_id) sont cachés, cette résolution
@@ -398,7 +443,7 @@ export class IaService implements IIaService {
         };
         const reply = await this.structuredRouter.route(structured);
         messages.push(reply ? reply.message : 'Planificateur ne répond pas — commande non transmise.');
-        if (reply) planificateurReply = reply.message;
+        if (reply) replies.push(reply);
       } else {
         // request (gabarit "donne", §16.9) — même résolution que `obtenir_etat` (ToolExecutor.ts),
         // jamais un portage du formatage de `donnemoi.js`. Toujours résolu à l'exécution (état
@@ -425,7 +470,8 @@ export class IaService implements IIaService {
       bufferedChunks: [],
       wasStructured: true,
       intermediateJson: JSON.stringify(outcomes),
-      planificateurReply,
+      planificateurReply: replies.length === 0 ? undefined
+        : JSON.stringify(replies.length === 1 ? replies[0] : { success: replies.every((r) => r.success), replies }, null, 2),
       verificationRetried: false
     };
   }
@@ -435,7 +481,7 @@ export class IaService implements IIaService {
   private cacheMistralResult(question: string, result: RunChatRoundsResult): void {
     if (!result.ok) return;
     const outcomes = extractOutcomesFromMistralResult(result);
-    if (outcomes) this.phraseCache.set(question, outcomes);
+    if (outcomes && isCacheable(outcomes)) this.phraseCache.set(question, outcomes);
   }
 
   /**
@@ -465,6 +511,7 @@ export class IaService implements IIaService {
     // plus, pour ne pas boucler indéfiniment si Mistral persiste malgré tout.
     let verificationRetried = false;
     let forceToolChoice: 'any' | undefined;
+    let executerActionOk: boolean | undefined;
 
     for (let round = 1; round <= MAX_TOOL_ROUNDS; round++) {
       const result = await this.mistralClient.streamChat(currentMessages, mistralModel, options || {}, IA_TOOLS, forceToolChoice, MISTRAL_PROMPT_CACHE_KEY, runOpts?.providerOverride);
@@ -494,6 +541,9 @@ export class IaService implements IIaService {
         currentMessages = [...currentMessages, { role: 'assistant', content: assembled.text, tool_calls: assembled.toolCalls }];
         for (const call of assembled.toolCalls) {
           const toolResult = await this.toolExecutor.execute(call, runOpts?.dryRun);
+          if (call.function.name === 'executer_action' && !runOpts?.dryRun) {
+            try { executerActionOk = JSON.parse(toolResult).success === true; } catch { executerActionOk = false; }
+          }
           currentMessages = [...currentMessages, { role: 'tool', tool_call_id: call.id, content: toolResult }];
         }
         continue; // rappelle Mistral avec les résultats d'outils (specs §8, étape 4)
@@ -546,7 +596,8 @@ export class IaService implements IIaService {
             bufferedChunks,
             wasStructured: false,
             intermediateJson,
-            verificationRetried
+            verificationRetried,
+            executerActionOk
           };
         }
 
@@ -563,7 +614,8 @@ export class IaService implements IIaService {
           wasStructured: true,
           intermediateJson,
           planificateurReply: reply ? JSON.stringify(reply, null, 2) : undefined,
-          verificationRetried
+          verificationRetried,
+          executerActionOk
         };
       }
 
@@ -576,7 +628,8 @@ export class IaService implements IIaService {
         bufferedChunks,
         wasStructured: false,
         intermediateJson,
-        verificationRetried
+        verificationRetried,
+        executerActionOk
       };
     }
 
@@ -598,6 +651,10 @@ export class IaService implements IIaService {
    */
   private async handleTestCommand(message: string, sessionId?: string, assist?: boolean): Promise<void> {
     if (!message?.trim()) return;
+    if (!this.haReady) {
+      this.eventBus.emitGeneric('ia:test:reply', { success: false, response: HA_NOT_READY_MESSAGE, sessionId });
+      return;
+    }
 
     const mistralModel = this.mistralClient.resolveModel(this.config.defaultMistralModel);
     const existing = sessionId ? this.assistSessions.get(sessionId) : undefined;
@@ -676,6 +733,10 @@ export class IaService implements IIaService {
    */
   private async handleCompareCommand(message: string): Promise<void> {
     if (!message?.trim()) return;
+    if (!this.haReady) {
+      this.eventBus.emitGeneric('ia:compare:reply', { question: message, sides: [], match: false, anyCorrected: false, diffsPerSide: [], error: HA_NOT_READY_MESSAGE });
+      return;
+    }
 
     const messages = this.rulesProvider.inject([{ role: 'user', content: message }]);
 
@@ -779,6 +840,7 @@ export class IaService implements IIaService {
     this.eventBus.emitGeneric('ia:status', {
       mistralConfigured: !!this.config.mistralApiKey,
       ollamaHttpPort: this.config.ollamaHttpPort,
+      haReady: this.haReady,
       rulesLoaded: this.rulesProvider.getRules().length > 0,
       // ⭐ Fournisseur/modèle réellement actif (comparatif Claude, config-schema.ts::provider) —
       // demande utilisateur : le savoir en un coup d'œil dans l'UI plutôt que de le déduire d'un
@@ -853,13 +915,34 @@ function extractOutcomesFromMistralResult(result: RunChatRoundsResult): Determin
     const calls = JSON.parse(result.intermediateJson) as MistralToolCall[];
     if (!Array.isArray(calls)) return undefined;
     const actionCall = [...calls].reverse().find((c) => c?.function?.name === 'executer_action');
-    if (!actionCall) return undefined;
+    if (!actionCall || result.executerActionOk !== true) return undefined; // action en échec : jamais rejouée
     const args = typeof actionCall.function.arguments === 'string' ? JSON.parse(actionCall.function.arguments) : actionCall.function.arguments;
     if (!args?.verbe || !args?.quoi) return undefined;
     return [{ kind: 'action', params: { verbe: args.verbe, quoi: args.quoi, lieux: Array.isArray(args.lieux) ? args.lieux : [], valeur: args.valeur } }];
   } catch {
     return undefined;
   }
+}
+
+/** ⭐ 24/09/2026 — une planification reconnue par l'interpréteur sort avec `phrase_originale: ""`
+ *  (interpreter/index.ts) : planificateur réinterprète CE champ à chaque déclenchement (specs §10),
+ *  vide il ne produisait rien. Complété ici avec la phrase réellement dite, sur une copie (l'outcome
+ *  mis en cache reste inchangé). */
+function withPhraseOriginale(data: Record<string, unknown>, phrase: string): Record<string, unknown> {
+  if (data.type !== 'planification' || (typeof data.phrase_originale === 'string' && data.phrase_originale.trim())) return data;
+  return { ...data, phrase_originale: phrase };
+}
+
+/** ⭐ 24/09/2026 — une décision contenant un déclencheur `date` (jour absolu, souvent calculé depuis
+ *  « demain », « samedi »…) n'est jamais mise en cache : rejouée plus tard, elle recréerait une
+ *  planification à une date passée. */
+function isCacheable(outcomes: DeterministicOutcome[]): boolean {
+  const hasDate = (node: unknown): boolean => {
+    if (!node || typeof node !== 'object') return false;
+    if ((node as Record<string, unknown>).type === 'date') return true;
+    return Object.values(node as Record<string, unknown>).some(hasDate);
+  };
+  return !outcomes.some((o) => o.kind === 'structured' && hasDate(o.data));
 }
 
 function extractQuestion(messages: OllamaMessage[]): string {

@@ -37,7 +37,7 @@ function ollamaOptionsToMistral(options: MistralOptions = {}): Record<string, un
 // ⭐ Clé de cache de prompt Mistral (prompt_cache_key), commune à tous les appels de l'app — le
 // but est de faire matcher le préfixe partagé (regles_mistral.txt + catalogue quoi/lieux, voir
 // RulesProvider) entre TOUS les appels de `ia`, qu'ils viennent de IaService (conversation
-// directe) ou de DeployResponder (réinterprétation à l'exécution) : c'est le même contenu de
+// directe) ou, jusqu'au 24/09/2026, de DeployResponder (supprimé) : c'est le même contenu de
 // message system dans les deux cas, donc la même clé permet aux deux chemins de profiter du
 // même cache. Vérifié en direct (10/08/2026) contre l'API Mistral réelle : premier appel avec
 // cette clé → `cached_tokens: 0` ; second appel, même contenu, même clé → ~99% du prompt system
@@ -125,7 +125,7 @@ export class MistralClient {
 
   /** À appeler par l'appelant une fois le flux entièrement consommé et l'usage réel connu (Mistral
    *  ne le renvoie qu'à la fin de la réponse, jamais avant) — alimente le throttling préventif des
-   *  requêtes suivantes (RateLimiter.waitForSlot), pour CE modèle précis. Voir IaService/DeployResponder. */
+   *  requêtes suivantes (RateLimiter.waitForSlot), pour CE modèle précis. Voir IaService/ConditionEvaluator. */
   recordTokenUsage(mistralModel: string, promptTokens: number, completionTokens: number): void {
     this.getRateLimiter(mistralModel).recordUsage(promptTokens + completionTokens);
   }

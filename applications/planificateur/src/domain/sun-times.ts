@@ -24,43 +24,53 @@ export interface SunTimes {
 
 export type SunTimesProvider = (date: Date) => SunTimes | null;
 
+/** ⭐ 24/09/2026 — le calcul (`get`) + un moyen d'ATTENDRE la position avant de programmer. */
+export interface SunTimesSource {
+  get: SunTimesProvider;
+  /** Résout `true` dès que la position est connue (demande si besoin), `false` si la demande
+   *  échoue — ne rejette jamais. */
+  ensurePosition(): Promise<boolean>;
+}
+
 /**
  * Récupère la position GPS de HA une fois résolue, mise en cache définitivement ensuite (ne change
  * jamais en pratique) — mais RÉESSAYE à chaque appel tant que non résolue : vérifié en conditions
  * réelles (26/08/2026) qu'un premier essai au démarrage de `planificateur` peut échouer avec
- * "Cannot get config: not authenticated" (même course démarrage/authentification WS déjà
- * rencontrée côté `ExecutionEngine` — `core` vient de redémarrer, `planificateur` l'interroge avant
- * que sa connexion HA soit authentifiée). Sans nouvelle tentative, la position resterait bloquée
- * indéfiniment (contrairement à une commande HA classique qui s'auto-corrige au coup d'après) —
- * chaque appel de la fonction retournée est l'occasion de réessayer si besoin, sans minuteur dédié.
- * Tant que non résolue, retourne `null` — `scheduler.ts::triggerToMs` gère déjà ce cas proprement.
+ * "Cannot get config: not authenticated". Tant que non résolue, `get` retourne `null`.
+ *
+ * ⭐ 24/09/2026 — bug : `get` étant synchrone, le 1er calcul au démarrage renvoyait TOUJOURS
+ * `null` (demande partie mais pas encore revenue) → planification `sun` rejetée (« déclencheur non
+ * supporté ») sans nouvel essai. `ensurePosition()` permet à PlanificateurService d'attendre la
+ * position (après ha:ready) AVANT de programmer ; SchedulerRuntime réessaie en plus tout seul si
+ * le calcul reste impossible.
  */
-export function createSunTimesProvider(haBridgeClient: HaBridgeClient, logger: Logger): SunTimesProvider {
+export function createSunTimesProvider(haBridgeClient: HaBridgeClient, logger: Logger): SunTimesSource {
   let position: { latitude: number; longitude: number } | undefined;
-  let fetching = false;
+  let inFlight: Promise<boolean> | undefined;
 
-  const attemptFetch = (): void => {
-    if (fetching || position) return;
-    fetching = true;
-    haBridgeClient
+  const attemptFetch = (): Promise<boolean> => {
+    if (position) return Promise.resolve(true);
+    if (inFlight) return inFlight;
+    inFlight = haBridgeClient
       .getHaConfig()
       .then((config) => {
         position = config;
         logger.info('sun-times', `Position GPS HA résolue: ${config.latitude}, ${config.longitude}`);
+        return true;
       })
       .catch((error) => {
         logger.warn('sun-times', `Échec de récupération de la position GPS HA (nouvel essai au prochain besoin): ${error instanceof Error ? error.message : String(error)}`);
+        return false;
       })
       .finally(() => {
-        fetching = false;
+        inFlight = undefined;
       });
+    return inFlight;
   };
 
-  attemptFetch();
-
-  return (date: Date): SunTimes | null => {
+  const get = (date: Date): SunTimes | null => {
     if (!position) {
-      attemptFetch();
+      void attemptFetch();
       return null;
     }
     const anchored = new Date(date);
@@ -71,4 +81,6 @@ export function createSunTimesProvider(haBridgeClient: HaBridgeClient, logger: L
     if (!times.sunrise || !times.sunset) return null;
     return { sunrise: times.sunrise, sunset: times.sunset };
   };
+
+  return { get, ensurePosition: attemptFetch };
 }

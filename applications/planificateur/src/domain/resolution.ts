@@ -10,8 +10,9 @@
  *  - verbes avec valeur → service spécifique au domaine (light.turn_on+brightness_pct,
  *    climate.set_temperature, cover.set_cover_position...) — HA n'a pas d'équivalent générique
  *
- * Échec silencieux si le verbe est inconnu : resolved_service_call reste absent, le repli
- * (execution.ts, HaWsClient.processConversation) prend le relais.
+ * Verbe inconnu ou aucune entité : `undefined` — l'étape est tracée en échec (execution.ts). Plus
+ * de repli vers l'agent de conversation de HA depuis le 24/09/2026 : cet agent EST ia (émulation
+ * Ollama), le repli pouvait boucler planificateur → HA → ia → planificateur.
  */
 
 import type { HaBridgeClient } from '../../../core/dist/exports';
@@ -84,7 +85,36 @@ export async function resolveAction(
 ): Promise<ResolvedServiceCall | undefined> {
   const entityIds = await resolveEntityIds(registry, quoi, lieux);
   if (entityIds.length === 0) return undefined;
+  return buildServiceCall(verbe, entityIds, valeur);
+}
 
+/** ⭐ 24/09/2026 — verbe connu de la table ? (sert à refuser dès la création une commande que le
+ *  moteur ne saurait jamais exécuter — plus de repli vers l'agent de conversation de HA). */
+export function isKnownVerb(verbe: string): boolean {
+  const v = normalizeVerb(verbe);
+  return v in ON_OFF_TOGGLE_VERBS || VALUE_VERBS.has(v);
+}
+
+/** ⭐ 24/09/2026 — verbe inverse (fin d'une plage `window` / d'une `duration`), `undefined` si le
+ *  verbe n'a pas d'inverse évident (régler, baisser…). */
+const INVERSE_VERBS: Record<string, string> = {
+  allumer: 'éteindre', eteindre: 'allumer',
+  ouvrir: 'fermer', fermer: 'ouvrir',
+  activer: 'désactiver', desactiver: 'activer'
+};
+
+export function inverseVerb(verbe: string): string | undefined {
+  return INVERSE_VERBS[normalizeVerb(verbe)];
+}
+
+/** Construit l'appel de service pour des entités déjà connues — partagé entre la résolution par
+ *  quoi/lieux et le ciblage direct de l'entité déclenchante (« éteins-la », trigger state_change). */
+export function buildServiceCall(
+  verbe: string,
+  entityIds: string[],
+  valeur?: string | number
+): ResolvedServiceCall | undefined {
+  if (entityIds.length === 0) return undefined;
   const normalizedVerb = normalizeVerb(verbe);
 
   if (valeur !== undefined && VALUE_VERBS.has(normalizedVerb)) {

@@ -11,6 +11,8 @@ import type { PlanificationDefinition } from './types';
 import { triggerToMs, isRecurring } from './scheduler';
 import type { SunTimesProvider } from './sun-times';
 
+const SUN_RETRY_MS = 10 * 60 * 1000;
+
 export type FireCallback = (plan: PlanificationDefinition) => void;
 /** Appelé chaque fois qu'un nouveau next_fire_at est calculé (programmation initiale ET réarmement
  *  d'un trigger récurrent) — au appelant de le persister (voir CommandHandler.persistPlanifications). */
@@ -30,10 +32,27 @@ export class SchedulerRuntime {
   schedule(plan: PlanificationDefinition): void {
     const ms = triggerToMs(plan.trigger, this.logger, undefined, this.getSunTimes);
     if (ms === null) {
+      if (this.retryLater(plan)) return;
       this.logger.warn('SchedulerRuntime', `Déclencheur non supporté pour "${plan.name}": ${plan.trigger.type}`);
       return;
     }
     this.arm(plan, ms);
+  }
+
+  /**
+   * ⭐ 24/09/2026 — trigger `sun` non calculable (position GPS de HA pas encore connue, ou jour
+   * polaire) : nouvel essai dans SUN_RETRY_MS au lieu d'abandonner la planification pour de bon
+   * (avant : aucun minuteur, aucun nouvel essai — la planification restait muette).
+   */
+  private retryLater(plan: PlanificationDefinition): boolean {
+    if (plan.trigger.type !== 'sun') return false;
+    this.unschedule(plan.name);
+    this.logger.warn('SchedulerRuntime', `"${plan.name}" : lever/coucher du soleil non calculable pour l'instant — nouvel essai dans ${SUN_RETRY_MS / 60000} min`);
+    this.timers.set(plan.name, setTimeout(() => {
+      this.timers.delete(plan.name);
+      this.schedule(plan);
+    }, SUN_RETRY_MS));
+    return true;
   }
 
   /**
@@ -63,6 +82,9 @@ export class SchedulerRuntime {
           plan.next_fire_at = new Date(Date.now() + next).toISOString();
           this.onScheduled?.(plan);
           this.logger.info('SchedulerRuntime', `Prochain déclenchement "${plan.name}" dans ${Math.round(next / 1000)}s`);
+        } else if (!this.retryLater(plan)) {
+          this.timers.delete(plan.name);
+          this.logger.warn('SchedulerRuntime', `"${plan.name}" : prochaine occurrence non calculable — plus de réarmement`);
         }
       } else {
         this.timers.delete(plan.name);

@@ -14,6 +14,8 @@ function $(id: string): HTMLElement | null {
 interface IaStatus {
   mistralConfigured: boolean;
   ollamaHttpPort: number;
+  /** ⭐ 24/09/2026 — false tant que le premier ha:ready n'est pas arrivé (serveur Ollama fermé). */
+  haReady?: boolean;
   rulesLoaded: boolean;
   // ⭐ Comparatif Claude (config-schema.ts::provider, IaService.emitStatus()) — savoir en un coup
   // d'œil quel fournisseur traite réellement les commandes, plutôt qu'un badge toujours "Mistral".
@@ -45,6 +47,8 @@ interface CompareReply {
   match: boolean;
   anyCorrected: boolean;
   diffsPerSide: { label: string; diffs: string[] }[];
+  /** ⭐ 24/09/2026 — comparatif refusé (ex. HA pas encore synchronisé). */
+  error?: string;
 }
 
 interface Exchange {
@@ -227,6 +231,10 @@ function showCompareResult(reply: CompareReply): void {
 
   const resultEl = $('test-result');
   if (!resultEl) return;
+  if (reply.error) {
+    resultEl.innerHTML = `<div>⚠️ ${escapeHtml(reply.error)}</div>`;
+    return;
+  }
   const fmtSide = (s: ComparisonSide) =>
     `<div>🧪 <strong>${escapeHtml(s.label ?? s.model)}</strong> (${escapeHtml(s.model)}, ${s.latencyMs} ms)${s.corrected ? ' — <span style="color:var(--color-warning)">⚠️ corrigé après vérification</span>' : ''} — non exécuté (comparatif)</div>`
     + `<pre class="intermediate-json">${escapeHtml(JSON.stringify(s.decision, null, 2))}</pre>`;
@@ -265,7 +273,7 @@ function updateStatusDisplay(status: IaStatus): void {
     badgeEl.textContent = status.providerConfigured ? `Clé ${providerLabel} configurée` : `Clé ${providerLabel} manquante`;
     badgeEl.className = `status-badge ${status.providerConfigured ? 'connected' : 'disconnected'}`;
   }
-  if (portEl) portEl.textContent = String(status.ollamaHttpPort);
+  if (portEl) portEl.textContent = status.haReady === false ? `${status.ollamaHttpPort} (fermé — en attente de HA)` : String(status.ollamaHttpPort);
   if (rulesEl) rulesEl.textContent = status.rulesLoaded ? 'Chargées' : 'Absentes';
   if (providerEl) providerEl.textContent = `${providerLabel} (${status.activeModel})`;
 
@@ -312,10 +320,15 @@ function refreshStatus(): void {
   requestInitialStatus();
 }
 
-function escapeHtml(text: string): string {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+/** ⭐ 24/09/2026 — échappe aussi les guillemets : sert également dans des attributs
+ *  (`<option value="…">` de l'historique), où `div.innerHTML` les laissait passer. */
+function escapeHtml(text: unknown): string {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 declare global {

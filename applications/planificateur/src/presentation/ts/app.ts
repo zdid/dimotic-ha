@@ -50,18 +50,21 @@ interface HaCommandTrace {
   at: string;
   trigger: string;
   step: { verbe?: string; quoi?: string; lieux?: string[]; valeur?: string | number; order?: string };
-  outcome: 'resolved' | 'fallback_conversation' | 'ignored';
+  // ⭐ 24/09/2026 — plus de repli vers la conversation HA ; conditions évaluées tracées aussi.
+  outcome: 'resolved' | 'unresolved' | 'condition';
   resolved?: { domain: string; service: string; entity_id: string | string[]; data?: Record<string, unknown> };
   success?: boolean;
   error?: string;
+  conditionResult?: boolean;
+  detail?: string;
   triggeredByEntityId?: string;
   nextFireAt?: string;
 }
 
 const OUTCOME_LABELS: Record<HaCommandTrace['outcome'], string> = {
   resolved: 'Service HA appelé',
-  fallback_conversation: 'Repli conversation HA',
-  ignored: 'Ignoré (rien envoyé)'
+  unresolved: 'Non exécutée (rien envoyé)',
+  condition: 'Condition évaluée'
 };
 
 let socket: any | null = null;
@@ -431,20 +434,27 @@ function updateHaCommandsLog(commands: HaCommandTrace[]): void {
     <div class="action-row">
       <span class="at">${new Date(c.at).toLocaleString('fr-FR')}</span>
       <span class="source">${escapeHtml(stepLabel)}</span>
-      <span class="badge outcome-${c.outcome}">${OUTCOME_LABELS[c.outcome]}</span>
+      <span class="badge outcome-${c.outcome}">${OUTCOME_LABELS[c.outcome] ?? escapeHtml(c.outcome)}</span>
+      ${c.outcome === 'condition' && c.conditionResult !== undefined ? `<span class="badge">${c.conditionResult ? 'vraie' : 'fausse'}</span>` : ''}
       ${c.success === false ? '<span class="badge error">Échec</span>' : ''}
       <div class="meta">${metaParts.join(' · ')}</div>
       ${c.resolved ? `<pre>${escapeHtml(JSON.stringify(c.resolved, null, 2))}</pre>` : ''}
       ${c.error ? `<pre>${escapeHtml(c.error)}</pre>` : ''}
+      ${c.detail ? `<pre>${escapeHtml(c.detail)}</pre>` : ''}
     </div>
   `;
   }).join('');
 }
 
-function escapeHtml(text: string): string {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+/** ⭐ 24/09/2026 — échappe aussi les guillemets : sert dans des attributs (`data-name`,
+ *  `data-phrase`, `title`), où `div.innerHTML` les laissait passer. */
+function escapeHtml(text: unknown): string {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function showMainContent(): void {

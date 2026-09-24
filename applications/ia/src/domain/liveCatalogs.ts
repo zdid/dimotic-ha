@@ -1,8 +1,7 @@
 /**
  * Construit le `LiveCatalogs` (lieux/quois/macros vivants) que consomme l'interpréteur
- * déterministe — factorisé pour être identique côté `IaService` (conversation courante) et
- * `DeployResponder` (réinterprétation à l'exécution) : les deux ont besoin exactement de la même
- * dérivation depuis `HaBridgeClient`, jamais deux logiques différentes qui pourraient diverger.
+ * déterministe — utilisé par `IaService` (la réinterprétation au déclenchement, DeployResponder,
+ * qui le partageait, a été supprimée le 24/09/2026).
  */
 
 import type { HaBridgeClient } from '../../../core/dist/exports';

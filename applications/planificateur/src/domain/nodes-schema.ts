@@ -1,8 +1,8 @@
 /**
  * Schémas Zod des nœuds du domaine (miroir de types.ts), utilisés pour valider le contenu des
- * fichiers YAML de stockage (macros, planifications) — pas pour valider les messages EventBus
- * reçus de `ia`, volontairement moins stricts côté réception (voir handler.ts) pour ne pas
- * rejeter un JSON par ailleurs exploitable sur un champ optionnel manquant.
+ * fichiers YAML de stockage (macros, planifications) — ⭐ 24/09/2026 : ET désormais les
+ * planifications/macros reçues de `ia` (handler.ts::validateIncoming), AVANT de les accepter : une
+ * entrée refusée à l'écriture restait en mémoire et faisait échouer toutes les écritures suivantes.
  */
 
 import { z } from 'zod';
@@ -60,7 +60,15 @@ export const domoticNodeSchema: z.ZodType<DomoticNode> = z.lazy(() =>
 export const conditionNodeSchema: z.ZodType<ConditionNode> = z.lazy(() =>
   z.object({
     type: z.literal('condition'),
-    if: z.string(),
+    // ⭐ 24/09/2026 — texte libre OU forme structurée (regles_mistral.txt §2.3) : avant, la forme
+    // structurée prévue par les règles faisait échouer toute écriture du fichier.
+    if: z.union([z.string(), z.object({
+      phrase: z.string().optional(),
+      quoi: z.string().optional(),
+      lieux: z.array(z.string()).nullable().optional(),
+      signe: z.string().optional(),
+      valeur: z.union([z.string(), z.number(), z.boolean()]).optional()
+    })]),
     then: domoticNodeSchema,
     else: domoticNodeSchema.optional()
   })

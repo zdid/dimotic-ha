@@ -1,7 +1,7 @@
 /**
  * Comptage de ce qui traite réellement une phrase (demande utilisateur, 26/08/2026) — cache
  * (`PhraseCache`), interpréteur déterministe (`interpreter/`), ou Mistral/Claude — partagé entre
- * `IaService` et `DeployResponder` (une seule instance, passée par référence). Objectif de
+ * les points d'entrée d'`IaService` (une seule instance ; DeployResponder supprimé le 24/09/2026). Objectif de
  * l'utilisateur : voir concrètement combien de charge Mistral quitte réellement au fil du temps.
  * En mémoire seulement, remis à zéro à chaque redémarrage — comme le reste des compteurs de ce
  * service (tokens, échanges récents).

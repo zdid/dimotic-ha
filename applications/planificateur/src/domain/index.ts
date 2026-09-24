@@ -128,7 +128,11 @@ export const PLANIFICATEUR_APP: ApplicationModule & { menu?: ApplicationMenuConf
   // canal de corrélation (ExecutionEngine.deployRequester → DeployResponder.ts côté ia), sens
   // INVERSE des deux premiers : c'est ici, côté planificateur, que la réponse doit être pontée
   // (voir ia/domain/index.ts pour l'émission de la requête planificateur:deploy elle-même).
-  bridgedEvents: ['ia:tool:execute', 'ia:command', 'planificateur:deploy:reply']
+  //
+  // ⭐ 24/09/2026 — planificateur:deploy:reply remplacé par planificateur:condition:reply (plus de
+  // réinterprétation de la phrase au déclenchement, seulement l'évaluation d'une condition en texte
+  // libre, voir execution.ts).
+  bridgedEvents: ['ia:tool:execute', 'ia:command', 'planificateur:condition:reply']
 };
 
 // ============================================================================

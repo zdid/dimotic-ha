@@ -31,9 +31,19 @@ export interface WaitNode {
   seconds_max?: number;
 }
 
+/** ⭐ 24/09/2026 — forme structurée de `regles_mistral.txt` §2.3 (évaluable en code : soleil,
+ *  comparaison numérique, état simple) ; la forme texte libre reste acceptée (évaluée par `ia`). */
+export interface ConditionSpec {
+  phrase?: string;
+  quoi?: string;
+  lieux?: string[] | null;
+  signe?: string;
+  valeur?: string | number | boolean;
+}
+
 export interface ConditionNode {
   type: 'condition';
-  if: string;
+  if: string | ConditionSpec;
   then: DomoticNode;
   else?: DomoticNode;
 }
@@ -124,18 +134,11 @@ export interface PlanificationDefinition {
   // explicitement la planification (gestion "activer"/"modifier") — signal explicite qu'elle doit
   // pouvoir se redéclencher.
   completed_at?: string;
-  // ⭐ Cache de résolution IA (demande utilisateur, 13/08/2026) — même phrase, même contexte HA,
-  // mais Mistral peut produire un verbe/quoi/lieux légèrement différent d'un déclenchement à
-  // l'autre (non-déterminisme du modèle) : source d'incertitude identifiée par l'utilisateur pour
-  // une planification récurrente censée toujours faire la même chose. Peuplé par
-  // handler.ts::handleTriggerFired après la PREMIÈRE réinterprétation IA réussie ; les
-  // déclenchements suivants rejouent directement `steps` (resolution.ts reste appelé à chaque
-  // fois — déterministe, contre le référentiel HA courant, donc toujours à jour même si une
-  // entité a été renommée) sans repasser par ia/Mistral. Effacé sur "modifier" (gestion en langage
-  // naturel, voir handleGestion) — une phrase modifiée doit être réinterprétée à neuf. La
-  // modification via l'IHM (bouton "Modifier") ne pose pas ce problème : elle crée un nouvel objet
-  // planification, sans resolvedCache hérité.
-  resolvedCache?: { steps: ExecutionStep[]; cachedAt: string };
+  // ⭐ 24/09/2026 — `resolvedCache` (cache de la séquence renvoyée par ia au 1er déclenchement,
+  // 13/08/2026) SUPPRIMÉ : il figeait conditions, aléatoires et entité déclenchante. La structure
+  // `action` décidée à la création est désormais exécutée et recalculée en code à chaque tir
+  // (execution.ts::runNode), sans réinterprétation de la phrase. Un ancien champ présent sur disque
+  // est ignoré au chargement (schéma Zod) et disparaît à la sauvegarde suivante.
 }
 
 export interface GestionNode {
@@ -149,7 +152,7 @@ export interface GestionNode {
 export interface ExecutionStep {
   step: number;
   type: 'action' | 'wait';
-  order?: string;             // texte en langage naturel, conservé pour le repli processConversation
+  order?: string;             // texte en langage naturel, conservé pour trace
   verbe?: string;              // vocabulaire QUOI/OÙ structuré — nécessaire à resolution.ts pour
   quoi?: string;                // peupler resolved_service_call ; ia le fournit systématiquement
   lieux?: string[];              // pour chaque étape 'action' (specs planificateur §7)
@@ -198,15 +201,17 @@ export interface ExecuterActionParams {
   phrase_originale?: string;
 }
 
-/** Contexte de déploiement envoyé à `ia` pour réinterprétation (specs planificateur §6). */
-export interface DeployContext {
+/** ⭐ 24/09/2026 — demande d'évaluation d'une condition en texte libre à `ia`
+ *  (planificateur:condition / :reply) — seul appel restant à `ia` au déclenchement. */
+export interface ConditionRequest {
+  condition: string | ConditionSpec;
   trigger_name: string;
-  phrase_originale: string;
-  macros: MacroDefinition[];
-  entities_snapshot: unknown[];
-  timestamp: string;
-  // Renseigné uniquement pour un déclenchement state_change — l'entité réellement à l'origine de
-  // CE déclenchement précis, pour qu'une action sans lieu explicite ("éteins-la") sache quoi
-  // cibler, en particulier pour une règle par défaut sur tout un domaine (voir StateWatcher).
   triggered_entity_id?: string;
+}
+
+export interface ConditionReply {
+  correlation_id: string;
+  success: boolean;
+  result?: boolean;
+  message: string;
 }

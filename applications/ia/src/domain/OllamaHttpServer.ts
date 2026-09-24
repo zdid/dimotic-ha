@@ -96,7 +96,16 @@ export class OllamaHttpServer {
 
   start(): void {
     const port = this.config.ollamaHttpPort;
-    this.server = http.createServer(this.app).listen(port, () => {
+    this.server = http.createServer(this.app);
+    // ⭐ 24/09/2026 — sans gestionnaire, un port déjà pris (EADDRINUSE) levait une exception non
+    // rattrapée : crash du process, puis boucle de relances du superviseur. Le reste d'ia (tableau
+    // de bord, déclenchements planifiés) continue sans le serveur Ollama.
+    this.server.on('error', (error: NodeJS.ErrnoException) => {
+      this.logger.error('OllamaHttpServer', error.code === 'EADDRINUSE'
+        ? `Port ${port} déjà utilisé — serveur Ollama émulé NON démarré (HA ne pourra pas joindre ia). Changer ollamaHttpPort ou libérer le port, puis relancer ia.`
+        : `Serveur Ollama émulé en erreur: ${error.message}`);
+    });
+    this.server.listen(port, () => {
       this.logger.info('OllamaHttpServer', `Serveur Ollama émulé en écoute sur le port ${port}`);
     });
   }
