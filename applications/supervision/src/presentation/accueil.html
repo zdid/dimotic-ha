@@ -1,0 +1,37 @@
+<!-- Derniere modification: 2026-09-25 11:40:00 - Creation : fragment de la page d'accueil (supervision v1.2 §6) -->
+<!-- Fragment chargé par le core (HomeView.ts) à la place de « Applications sur les autres machines » ;
+     rendu par presentation/ts/accueil.js (window.supervisionAccueil.init). -->
+<style>
+  .sup-section { margin-bottom: 2rem; }
+  .sup-head { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+  .sup-head h3 { margin: 0; }
+  .sup-backups-state { color: #888; font-size: 0.85em; }
+  .sup-machine { border: 1px solid rgba(128,128,128,0.35); border-radius: 6px; padding: 0.6rem 0.8rem; margin: 0.6rem 0; }
+  .sup-machine.sup-off { opacity: 0.6; }
+  .sup-mhead { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .sup-meta { color: #888; font-size: 0.85em; }
+  .sup-badge { font-size: 0.8em; padding: 0.05rem 0.45rem; border-radius: 999px; background: rgba(128,128,128,0.18); white-space: nowrap; }
+  .sup-ok { background: rgba(46,160,67,0.2); }
+  .sup-warn { background: rgba(210,153,34,0.25); }
+  .sup-error, .sup-none { background: rgba(218,54,51,0.22); }
+  .sup-apps { list-style: none; padding-left: 1.4rem; margin: 0.4rem 0 0; }
+  .sup-apps li { display: flex; align-items: center; gap: 0.4rem; margin: 0.15rem 0; flex-wrap: wrap; }
+  .sup-backup { margin: 0.5rem 0 0 1.4rem; font-size: 0.9em; }
+  .sup-backup ul { margin: 0.2rem 0 0; padding-left: 1rem; }
+  .sup-line-error, .sup-line-none { color: #d9534f; }
+  .sup-line-warn { color: #c98a00; }
+  .sup-line-info { color: #888; }
+  .sup-others summary { cursor: pointer; color: #888; margin-top: 0.5rem; }
+</style>
+<section class="sup-section">
+  <div class="sup-head">
+    <h3>Machines du site</h3>
+    <button type="button" data-sup-refresh>🔄 Rafraîchir les sauvegardes</button>
+    <span class="sup-backups-state" data-sup-backups-state></span>
+  </div>
+  <div data-sup-selected><p>Chargement…</p></div>
+  <details class="sup-others" data-sup-others-wrap>
+    <summary data-sup-others-title>Autres machines</summary>
+    <div data-sup-others></div>
+  </details>
+</section>

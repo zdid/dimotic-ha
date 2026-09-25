@@ -1,0 +1,26 @@
+{
+  "name": "supervision",
+  "version": "1.0.0",
+  "description": "Supervision du site : machines et applications (gossip des cores), sélection diffusée, état des sauvegardes — affichée sur la page d'accueil. Activée d'office.",
+  "main": "dist/domain/index.js",
+  "license": "MIT",
+  "dimotic": {
+    "enabledByDefault": true
+  },
+  "scripts": {
+    "build": "tsc -b && tsc -p src/presentation/tsconfig.ui.json",
+    "build:ui": "tsc -p src/presentation/tsconfig.ui.json",
+    "watch": "tsc -w"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
