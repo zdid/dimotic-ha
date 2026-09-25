@@ -1,6 +1,12 @@
 # Liste des problèmes à résoudre
 
 
+
+## 🔲 TASMOTA — étude préalable (demande utilisateur 25/09/2026)
+- Tasmota va bientôt entrer dans le périmètre de la domotique : étude plus poussée à faire AVANT tout
+  développement (intégration, nommage QUOI/OÙ, supervision). Supervision de zigbee2mqtt et de HA
+  (HA par l'accès WS du core) prévue dans les prochaines versions de SUPERVISION.
+
 ## ⏸️ OUTILS — sécurité de l'exécution par SSH (décision utilisateur 25/09/2026 : « à noter, pour l'instant on fait »)
 - L'exécution d'un script depuis la page Outils donne un accès root à distance depuis une page web
   sans mot de passe, ouverte au réseau local. À faire plus tard : confirmation affichant script +
