@@ -45,6 +45,7 @@ interface AnnouncedApp {
 
 interface Announcement {
   address?: string;
+  addresses?: string[];
   webPort?: number;
   runningInDocker?: boolean;
   apps?: AnnouncedApp[];
@@ -58,6 +59,8 @@ export interface MachineView {
   selected: boolean;
   inGossip: boolean;
   address?: string;
+  /** Toutes les adresses annoncées (ethernet, wifi…) — `address` seule pour un core ancien. */
+  addresses: string[];
   webPort?: number;
   runningInDocker?: boolean;
   presence: 'online' | 'lost' | 'unknown';
@@ -321,13 +324,14 @@ export class SupervisionService implements ISupervisionService {
     this.scheduleEmit();
   }
 
-  /** Correspondance par adresse IP (§5) — jamais par nom : un même nom peut désigner deux machines
-   *  successives (ex: ha2 remplacé le 24/09/2026). */
-  private backupFor(address: string | undefined): MachineView['backup'] {
+  /** Correspondance par adresse IP (§5) — n'importe laquelle des adresses de la machine (ethernet,
+   *  wifi… : ha2 s'annonçait par son wifi .106, Sauvegarde le connaît en .51), jamais par nom : un
+   *  même nom peut désigner deux machines successives (ex: ha2 remplacé le 24/09/2026). */
+  private backupFor(addresses: string[]): MachineView['backup'] {
     if (!this.backupReports) return undefined;
-    if (!address) return { level: 'unconfigured', reason: "adresse de la machine inconnue (aucune annonce)" };
-    const report = this.backupReports.find((r) => r.host === address);
-    return report ? evaluateBackup(report) : { level: 'unconfigured', reason: `aucune machine ${address} dans Sauvegarde` };
+    if (addresses.length === 0) return { level: 'unconfigured', reason: "adresse de la machine inconnue (aucune annonce)" };
+    const report = this.backupReports.find((r) => addresses.includes(r.host));
+    return report ? evaluateBackup(report) : { level: 'unconfigured', reason: `aucune machine ${addresses.join(' / ')} dans Sauvegarde` };
   }
 
   // ==========================================================================
@@ -362,6 +366,7 @@ export class SupervisionService implements ISupervisionService {
       ];
       const lwt = this.presence.get(machineId);
       const publishedMs = a?.publishedAt ? Date.parse(a.publishedAt) : NaN;
+      const addresses = [...new Set([...(a?.address ? [a.address] : []), ...(a?.addresses ?? [])])];
       return {
         machineId,
         label: sel?.label,
@@ -369,13 +374,14 @@ export class SupervisionService implements ISupervisionService {
         selected: Boolean(sel),
         inGossip: Boolean(a),
         address: a?.address,
+        addresses,
         webPort: a?.webPort,
         runningInDocker: a?.runningInDocker,
         presence: lwt === 'online' ? 'online' : lwt === 'offline' ? 'lost' : 'unknown',
         publishedAt: a?.publishedAt,
         stale: Number.isNaN(publishedMs) ? null : now - publishedMs > staleAfterSeconds * 1000,
         apps,
-        backup: sel ? this.backupFor(a?.address) : undefined
+        backup: sel ? this.backupFor(addresses) : undefined
       };
     });
     machines.sort((x, y) => Number(y.selected) - Number(x.selected) || x.machineId.localeCompare(y.machineId));

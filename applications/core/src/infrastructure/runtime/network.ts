@@ -9,13 +9,34 @@
 
 import * as os from 'node:os';
 
-/** Première IPv4 non-interne trouvée, ou `undefined` si aucune (ex: machine hors réseau). */
-export function getPrimaryIPv4Address(): string | undefined {
-  const interfaces = os.networkInterfaces();
-  for (const addresses of Object.values(interfaces)) {
+/** Interfaces virtuelles de Docker (réseaux bridge) : jamais une adresse de la machine sur le LAN. */
+const VIRTUAL_IFACE_RE = /^(docker\d*|br-|veth|virbr)/;
+/** Rang de préférence : ethernet d'abord, puis le reste, wifi en dernier. */
+function ifaceRank(name: string): number {
+  if (/^(eth|en)/.test(name)) return 0;
+  if (/^(wlan|wl)/.test(name)) return 2;
+  return 1;
+}
+
+/**
+ * ⭐ 25/09/2026 (fonctionnelles-supervision_specs v1.4) — toutes les IPv4 non-internes de la machine,
+ * ethernet d'abord, wifi en dernier, interfaces Docker exclues. Constaté sur ha2 : .51 (ethernet)
+ * et .106 (wifi) — la supervision doit pouvoir la reconnaître par l'une ou l'autre.
+ */
+export function getIPv4Addresses(): string[] {
+  const found: Array<{ address: string; rank: number }> = [];
+  for (const [name, addresses] of Object.entries(os.networkInterfaces())) {
+    if (VIRTUAL_IFACE_RE.test(name)) continue;
     for (const addr of addresses ?? []) {
-      if (addr.family === 'IPv4' && !addr.internal) return addr.address;
+      if (addr.family === 'IPv4' && !addr.internal) found.push({ address: addr.address, rank: ifaceRank(name) });
     }
   }
-  return undefined;
+  // Tri stable : à rang égal, l'ordre du système est conservé.
+  return found.sort((a, b) => a.rank - b.rank).map((f) => f.address);
+}
+
+/** Adresse principale : la première de getIPv4Addresses() (ethernet préféré au wifi depuis le
+ *  25/09/2026 — avant : première IPv4 trouvée, le wifi sur ha2), ou `undefined` si aucune. */
+export function getPrimaryIPv4Address(): string | undefined {
+  return getIPv4Addresses()[0];
 }

@@ -14,6 +14,7 @@
 ## 🟡 SUPERVISION — implémentée (spec v1.3), vérifiée en local seulement (25/09/2026)
 
 - Reste l'étape 5 (réel multi-machines) : sélection faite sur une machine retrouvée sur une autre, application arrêtée visible en quelques secondes, machine débranchée « perdue » en ~90 s — nécessite une image Docker publiée.
+- ✅ Adresses multiples (ha2 .51 ethernet / .106 wifi) : corrigé en v1.4.
 - Constats : **stfort** et **orangepizero2** publient leur LWT mais **aucune annonce `known-apps` retenue** (core ancien ?) → listées « absentes du gossip », sans adresse ni applications. **ha2_811876** s'annonce en **192.168.1.106**, alors que Sauvegarde vise ha2 en .51 → pas de correspondance des sauvegardes (vérifier quelle machine est .106 et l'adresse que ha2 annonce).
 
 ## 🔲 TASMOTA — étude préalable (demande utilisateur 25/09/2026)

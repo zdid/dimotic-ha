@@ -9,7 +9,7 @@ interface SupApp { id: string; name: string; icon: string; state?: string; selec
 interface SupBackupLine { level: string; text: string; date?: string }
 interface SupMachine {
   machineId: string; label?: string; local: boolean; selected: boolean; inGossip: boolean;
-  address?: string; webPort?: number; runningInDocker?: boolean;
+  address?: string; addresses?: string[]; webPort?: number; runningInDocker?: boolean;
   presence: 'online' | 'lost' | 'unknown'; publishedAt?: string; stale: boolean | null;
   apps: SupApp[];
   backup?: { level: string; target?: string; reason?: string; lines?: SupBackupLine[] };
@@ -79,7 +79,7 @@ interface SupState {
       : m.presence === 'lost' ? '<span class="sup-badge sup-error">perdue</span>'
       : '<span class="sup-badge">présence inconnue</span>';
     const meta = [
-      m.address ? esc(m.address) : 'adresse inconnue',
+      m.addresses && m.addresses.length ? m.addresses.map(esc).join(' / ') : m.address ? esc(m.address) : 'adresse inconnue',
       m.runningInDocker === undefined ? '' : m.runningInDocker ? 'Docker' : 'hôte',
       m.local ? 'cette machine' : ''
     ].filter(Boolean).join(' · ');

@@ -26,7 +26,7 @@ import type { IEventBus } from './IEventBus';
 import type { Logger } from '../infrastructure/logger';
 import type { ApplicationModule } from '../types/config';
 import { isRunningInDocker } from '../infrastructure/runtime/docker';
-import { getPrimaryIPv4Address } from '../infrastructure/runtime/network';
+import { getPrimaryIPv4Address, getIPv4Addresses } from '../infrastructure/runtime/network';
 
 const TOPIC_PREFIX = 'dimotic/core';
 
@@ -44,6 +44,9 @@ export interface RemoteAppEntry {
 export interface MachineAppsAnnouncement {
   machineId: string;
   address?: string;
+  /** ⭐ 25/09/2026 — toutes les IPv4 de la machine (ethernet + wifi…), `address` en tête. Absent :
+   *  machine pas encore à jour. */
+  addresses?: string[];
   webPort: number;
   runningInDocker: boolean;
   apps: RemoteAppEntry[];
@@ -145,6 +148,7 @@ export class AppGossipService {
     if (!this.transport) return;
     const payload: AppsGossipPayload = {
       address: getPrimaryIPv4Address(),
+      addresses: getIPv4Addresses(),
       webPort: this.configService.getConfig().web.port,
       runningInDocker: isRunningInDocker(),
       apps: modules
