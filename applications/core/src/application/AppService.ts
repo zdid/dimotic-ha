@@ -206,7 +206,7 @@ export class AppService {
     this.haplanLovelaceDeployService = new HaplanLovelaceDeployService(logger);
     this.zigbee2mqttDeployService = new Zigbee2mqttDeployService(logger);
     this.targetGossipService = new TargetGossipService(configService, eventBus, logger);
-    this.appGossipService = new AppGossipService(configService, eventBus, logger);
+    this.appGossipService = new AppGossipService(configService, eventBus, logger, (appId) => this.processSupervisor.getState(appId));
     this.haPostInstallService = new HaPostInstallService(configService, logger);
     this.haQueryBridge = new HaQueryBridge(eventBus, logger, () => this.haStructureRegistry, () => this.haWsClient,
       () => ({ enabled: this.wsEnabled, ready: this.wsRegistryReady }));

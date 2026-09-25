@@ -35,6 +35,10 @@ export interface RemoteAppEntry {
   name: string;
   icon: string;
   audience?: 'inspection' | 'configuration' | 'end-user';
+  /** ⭐ 25/09/2026 (fonctionnelles-supervision_specs §3bis) — état du process de l'application
+   *  (états ProcessSupervisor), `in-process` si elle tourne dans le core. Absent : machine pas
+   *  encore à jour. */
+  state?: 'stopped' | 'starting' | 'running' | 'restarting' | 'crashed' | 'in-process';
 }
 
 export interface MachineAppsAnnouncement {
@@ -43,6 +47,9 @@ export interface MachineAppsAnnouncement {
   webPort: number;
   runningInDocker: boolean;
   apps: RemoteAppEntry[];
+  /** ⭐ 25/09/2026 — heure de publication (ISO) : l'annonce est republiée à chaque changement
+   *  d'état d'une application ET périodiquement ; une annonce trop ancienne = core bloqué. */
+  publishedAt?: string;
 }
 
 /** Payload publié sur le topic — mêmes champs que `MachineAppsAnnouncement` moins `machineId`
@@ -54,11 +61,18 @@ export class AppGossipService {
   private readonly machineId: string;
   /** Registre agrégé des AUTRES machines — ne contient jamais sa propre annonce. */
   private readonly registry = new Map<string, MachineAppsAnnouncement>();
+  /** Derniers modules actifs connus — republiés périodiquement et à chaque changement d'état. */
+  private lastModules: ApplicationModule[] | null = null;
+  private periodicTimer?: ReturnType<typeof setInterval>;
+  private stateChangeTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly eventBus: IEventBus,
-    private readonly logger: Logger
+    private readonly logger: Logger,
+    /** État du process d'une application séparée (ProcessSupervisor) ; `undefined` = pas un
+     *  process supervisé (application dans le core). */
+    private readonly getProcessState: (appId: string) => string | undefined = () => undefined
   ) {
     this.machineId = configService.getConfig().core.machineId;
   }
@@ -92,13 +106,32 @@ export class AppGossipService {
     // même source que app:modules:list côté frontend (voir SocketBridge.ts), pas de nouvelle
     // dérivation à construire.
     this.eventBus.on('app:modules:registered', ({ modules }: { modules: ApplicationModule[] }) => {
+      this.lastModules = modules;
       this.republish(modules);
     });
+
+    // ⭐ 25/09/2026 (fonctionnelles-supervision_specs §3bis) — republication à chaque changement
+    // d'état d'un process (regroupée sur 1 s : un redémarrage enchaîne plusieurs états)…
+    this.eventBus.onGeneric('app:process:state', () => {
+      if (this.stateChangeTimer) return;
+      this.stateChangeTimer = setTimeout(() => {
+        this.stateChangeTimer = undefined;
+        if (this.lastModules) this.republish(this.lastModules);
+      }, 1000);
+    });
+    // … et périodiquement (demande utilisateur : une information périodique en plus des
+    // événements et du LWT) — une annonce qui ne se renouvelle plus = core bloqué.
+    const intervalSeconds = this.configService.getConfig().core.appGossipIntervalSeconds;
+    this.periodicTimer = setInterval(() => {
+      if (this.lastModules) this.republish(this.lastModules);
+    }, intervalSeconds * 1000);
 
     this.logger.info('AppGossip', `Registre d'applications inter-machines actif (machineId: ${this.machineId})`);
   }
 
   stop(): void {
+    if (this.periodicTimer) clearInterval(this.periodicTimer);
+    if (this.stateChangeTimer) clearTimeout(this.stateChangeTimer);
     this.transport?.disconnect();
   }
 
@@ -116,7 +149,13 @@ export class AppGossipService {
       runningInDocker: isRunningInDocker(),
       apps: modules
         .filter((m) => m.id !== 'core')
-        .map((m) => ({ id: m.id, name: m.name, icon: m.icon, audience: m.audience }))
+        .map((m) => ({
+          id: m.id, name: m.name, icon: m.icon, audience: m.audience,
+          state: (m.runsAsSeparateProcess
+            ? (this.getProcessState(m.id) ?? 'stopped')
+            : 'in-process') as RemoteAppEntry['state']
+        })),
+      publishedAt: new Date().toISOString()
     };
     this.transport.publish(`${TOPIC_PREFIX}/${this.machineId}/known-apps`, JSON.stringify(payload), 1, true);
   }

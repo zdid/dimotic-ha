@@ -61,7 +61,10 @@ const coreSchema = z.object({
   // d'autres apps (sauvegarde notamment) puissent regrouper automatiquement les machines par site
   // sans que l'utilisateur ait à le ressaisir à la main pour chaque cible importée. Vide par
   // défaut — aucune valeur ne serait correcte à deviner.
-  site: z.string().default('')
+  site: z.string().default(''),
+  // ⭐ 25/09/2026 (fonctionnelles-supervision_specs §3bis) — période de republication de l'annonce
+  // des applications (AppGossipService), en plus des republications sur événement.
+  appGossipIntervalSeconds: z.number().int().min(30).default(300)
 });
 
 const authSchema = z.object({

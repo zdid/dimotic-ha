@@ -10,7 +10,8 @@ import { AppConfig, configSchema, generateRandomMachineId } from './schema';
 const DEFAULT_CONFIG: AppConfig = {
   core: {
     machineId: generateRandomMachineId(),
-    site: ''
+    site: '',
+    appGossipIntervalSeconds: 300
   },
   disabledApps: [],
   targets: [],
