@@ -225,7 +225,9 @@ export const SAUVEGARDE_APP: ApplicationModule & { menu?: ApplicationMenuConfig 
   socketEvents: SAUVEGARDE_SOCKET_EVENTS,
 
   // Process séparé, comme arexx/teleinfo/rpigpio — voir fonctionnelles-supervisor_specs.
-  runsAsSeparateProcess: true
+  runsAsSeparateProcess: true,
+  // ⭐ 25/09/2026 — requête corrélée venant de l'application supervision (spec §5quater).
+  bridgedEvents: ['sauvegarde:supervision:status']
 };
 
 // ============================================================================

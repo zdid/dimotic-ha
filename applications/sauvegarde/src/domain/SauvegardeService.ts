@@ -13,7 +13,7 @@ import { sauvegardeConfigSchema, sauvegardeNextcloudSchema, SECRET_FILE_PATH, de
 import type { SauvegardeStatus } from './types';
 import { SecretPushService } from './SecretPushService';
 import { ScriptPushService } from './ScriptPushService';
-import { BACKUP_SCRIPT_REMOTE_PATH } from './BackupScript';
+import { BACKUP_SCRIPT_REMOTE_PATH, BACKUP_DIR } from './BackupScript';
 import { NextcloudWebDavClient, NextcloudHttpError, type NextcloudCredentials } from './NextcloudWebDavClient';
 import { RestoreService } from './RestoreService';
 
@@ -131,7 +131,55 @@ export class SauvegardeService implements ISauvegardeService {
     this.eventBus.emitGeneric('sauvegarde:status', this.getStatus());
   }
 
+  // ==========================================================================
+  // ⭐ 25/09/2026 — état des sauvegardes pour la supervision (spec §5quater)
+  // ==========================================================================
+
+  /** Lit par SSH, sur chaque machine couverte, script/cron installés, status.json et marqueurs
+   *  last-<dossier>-<cadence> — jamais Nextcloud (pas de mot de passe dans dimotic-ha). */
+  private async handleSupervisionStatus(correlationId: string): Promise<void> {
+    const sshKeyPath = ensureGlobalSshKey();
+    const sep = '__DIMOTIC_SEP__';
+    const command = [
+      `test -x ${BACKUP_SCRIPT_REMOTE_PATH} && echo script || echo noscript`,
+      `crontab -l 2>/dev/null | grep -qF ${BACKUP_SCRIPT_REMOTE_PATH} && echo cron || echo nocron`,
+      `echo ${sep}`,
+      `cat ${BACKUP_DIR}/status.json 2>/dev/null`,
+      `echo ${sep}`,
+      `for f in ${BACKUP_DIR}/last-*; do [ -f "$f" ] && echo "$(basename "$f") $(cat "$f")"; done; true`
+    ].join('; ');
+
+    const machines = await Promise.all(this.config.targets.map(async (t) => {
+      const base = { id: t.id, site: t.site, machine: t.machine, host: t.host };
+      const result = await runSsh({ host: t.host, sshKeyPath }, command, undefined, 20_000);
+      if (!result.success) {
+        return { ...base, reachable: false, error: result.error || result.output.trim().slice(-200), scriptInstalled: false, cronInstalled: false, status: null, lastSuccess: {} };
+      }
+      const [head = '', statusText = '', lastText = ''] = result.output.split(sep);
+      let status: unknown = null;
+      try { status = statusText.trim() ? JSON.parse(statusText) : null; } catch { status = null; }
+      const lastSuccess: Record<string, Record<string, string>> = {};
+      for (const line of lastText.split('\n')) {
+        const m = /^last-(.+)-(journalier|hebdomadaire)\s+(\S+)/.exec(line.trim());
+        if (m) (lastSuccess[m[1]] ??= {})[m[2]] = m[3];
+      }
+      return {
+        ...base, reachable: true,
+        scriptInstalled: /\bscript\b/.test(head), cronInstalled: /\bcron\b/.test(head),
+        status, lastSuccess
+      };
+    }));
+    this.eventBus.emitGeneric('sauvegarde:supervision:status:reply', { correlation_id: correlationId, success: true, machines });
+  }
+
   private setupSocketEventListeners(): void {
+    this.eventBus.onGeneric<{ correlation_id: string }>('sauvegarde:supervision:status', (req) => {
+      this.handleSupervisionStatus(req.correlation_id).catch((error) => {
+        this.eventBus.emitGeneric('sauvegarde:supervision:status:reply', {
+          correlation_id: req.correlation_id, success: false, error: error instanceof Error ? error.message : String(error)
+        });
+      });
+    });
     this.eventBus.onGeneric('sauvegarde:status:get', () => this.emitStatus());
 
     // Même correctif que teleinfo/rpigpio (pas la version d'arexx, qui omet ce reload()) : sans

@@ -2,6 +2,15 @@
 
 
 
+
+## 🔴 HA2 (orangepi4pro, .51) N'EST PLUS SAUVEGARDÉ depuis son remplacement (constaté 25/09/2026)
+- Ni /dimotic-backup/nextcloud-backup.sh, ni cron, ni /dimotic-secrets/ sur la machine restaurée : la
+  restauration remet /docker mais pas le script de sauvegarde (hors /docker). stfort, lui, sauvegarde
+  bien (status.json du 25/09 03:05, succès).
+- À faire tout de suite : Sauvegarde/Restauration → ligne ha2 → « 📤 Pousser » (mot de passe Nextcloud).
+- À corriger ensuite : l'assistant de restauration doit rappeler (ou faire) cette poussée après
+  l'étape 2 — sinon toute machine restaurée cesse d'être sauvegardée sans que rien ne le signale.
+
 ## 🔲 TASMOTA — étude préalable (demande utilisateur 25/09/2026)
 - Tasmota va bientôt entrer dans le périmètre de la domotique : étude plus poussée à faire AVANT tout
   développement (intégration, nommage QUOI/OÙ, supervision). Supervision de zigbee2mqtt et de HA
