@@ -1,5 +1,13 @@
 # Liste des problèmes à résoudre
 
+
+## ⏸️ OUTILS — sécurité de l'exécution par SSH (décision utilisateur 25/09/2026 : « à noter, pour l'instant on fait »)
+- L'exécution d'un script depuis la page Outils donne un accès root à distance depuis une page web
+  sans mot de passe, ouverte au réseau local. À faire plus tard : confirmation affichant script +
+  machine + utilisateur avant lancement ; journal de chaque exécution (qui, quand, où, code de
+  retour) dans data/outils/ ; éventuellement exécution autorisée seulement depuis localhost ou
+  derrière un mot de passe.
+
 ## 🔴 ESPDISPLAY — revue de code (24/09/2026) — constats, rien corrigé
 - 🟠 Config jamais relue (process séparé, ni `reload()` ni écoute de l'enregistrement) → changer
   l'hôte distant / le conteneur esphome depuis l'écran n'a aucun effet avant redémarrage.

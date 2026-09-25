@@ -102,6 +102,16 @@
     .checklist-item { display: flex; align-items: center; gap: 6px; font-size: 0.9em; font-weight: normal; }
     .no-variables { color: var(--color-text-muted); font-size: 0.9em; font-style: italic; }
 
+    /* ⭐ 25/09/2026 — exécution par SSH (spec §5.5) */
+    .exec-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--color-border, #444); }
+    .exec-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 10px; }
+    .exec-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9em; }
+    .exec-terminal { margin-top: 12px; }
+    .exec-output { background: #111; color: #ddd; font-family: monospace; font-size: 0.85em; padding: 10px; max-height: 420px; overflow: auto; white-space: pre-wrap; border-radius: 4px; min-height: 80px; }
+    .exec-input-row { display: flex; gap: 8px; margin-top: 8px; }
+    .exec-input-row input { flex: 1; font-family: monospace; }
+    .exec-status { margin-top: 6px; font-size: 0.9em; }
+    .exec-status.ok { color: #6c6; } .exec-status.ko { color: #e66; }
     .command-box {
       display: flex; align-items: center; gap: 10px; margin-top: 15px; padding: 12px;
       background: var(--color-background); border-radius: var(--radius); border: 1px solid var(--color-primary);
@@ -183,6 +193,36 @@
           <button class="copy-btn" id="btn-copy-command" title="Copier">📋</button>
           <span class="copy-feedback" id="copy-feedback">Copié !</span>
         </div>
+
+        <!-- ⭐ 25/09/2026 — exécution par SSH (fonctionnelles-outils_specs §5.5) -->
+        <div class="exec-section" id="exec-section">
+          <h3>▶️ Exécuter par SSH</h3>
+          <div class="exec-form">
+            <label>Machine
+              <select id="exec-machine"></select>
+            </label>
+            <label id="exec-host-label" style="display: none;">Hôte (autre machine)
+              <input type="text" id="exec-host" placeholder="192.168.1.xx">
+            </label>
+            <label>Utilisateur
+              <input type="text" id="exec-user" value="root">
+            </label>
+            <label>Dossier de travail
+              <input type="text" id="exec-dossier" placeholder="(dossier personnel)">
+            </label>
+          </div>
+          <div id="exec-ssh-prep"></div>
+          <button class="btn btn-primary" id="btn-exec">▶️ Exécuter par SSH</button>
+          <div class="exec-terminal" id="exec-terminal" style="display: none;">
+            <pre class="exec-output" id="exec-output"></pre>
+            <div class="exec-input-row">
+              <input type="text" id="exec-input" placeholder="Réponse au script (Entrée pour envoyer)">
+              <button class="btn btn-secondary" id="btn-exec-send">Envoyer</button>
+              <button class="btn btn-secondary" id="btn-exec-cancel">⏹ Arrêter</button>
+            </div>
+            <div class="exec-status" id="exec-status"></div>
+          </div>
+        </div>
       </div>
 
       <div class="loading" id="loading">Chargement de l'application Outils</div>
@@ -191,6 +231,6 @@
 
   <script type="module" src="/applications/outils/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-09-20 - Scripts intégrés (reposcripts) + export/import zip + 3 zones de dépôt -->
+  <!-- Derniere modification: 2026-09-25 10:47:43 - Exécution par SSH (machine, utilisateur, dossier, sortie en direct, réponses tapées) -->
 </body>
 </html>

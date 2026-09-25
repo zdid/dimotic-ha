@@ -2,6 +2,8 @@
  * Script TypeScript pour le tableau de bord Outils (bibliothèque de scripts shell paramétrables).
  */
 
+import { renderSshPrepSection } from '/js/ts/components/TargetCards.js';
+
 function moduleRoot(): ParentNode {
   return (window as any).__moduleContainerRoot || document;
 }
@@ -21,6 +23,9 @@ interface OutilScriptSummary {
 
 interface OutilsStatus {
   scripts: OutilScriptSummary[];
+  localMachine?: { machineId: string; address?: string };
+  isRunningInDocker?: boolean;
+  projectRoot?: string;
 }
 
 type VariableHint =
@@ -39,6 +44,8 @@ interface OutilScriptDetail extends OutilScriptSummary {
   savedValues: Record<string, string>;
   // ⭐ 20/09/2026 — contenu brut du <id>.yaml (voir bouton "Télécharger en .zip").
   yamlContent: string;
+  // ⭐ 25/09/2026 — présélection de l'exécution par SSH (champ `execution` du yaml).
+  execution?: { machine?: string; utilisateur?: string; dossier?: string };
 }
 
 interface AddScriptResult {
@@ -69,6 +76,11 @@ let socket: any | null = null;
 let listenersReady = false;
 let currentScripts: OutilScriptSummary[] = [];
 let currentDetail: OutilScriptDetail | null = null;
+let currentStatus: OutilsStatus | null = null;
+/** Exécution par SSH en cours (spec §5.5) — `pending` entre la demande et l'identifiant reçu. */
+let currentRunId: string | null = null;
+let execPending = false;
+const OTHER_MACHINE = '__autre__';
 
 function init(): void {
   try {
@@ -89,6 +101,7 @@ function setupEventListeners(): void {
   if (!socket) return;
 
   socket.on('outils:status', (status: OutilsStatus) => {
+    currentStatus = status;
     currentScripts = status.scripts;
     renderScriptList();
     showMainContent();
@@ -134,6 +147,18 @@ function setupEventListeners(): void {
   socket.on('outils:bundle:result', (result: BundleResult) => { onBundleResult(result); });
   socket.on('outils:zip:result', (result: ZipResult) => { onZipResult(result); });
 
+  // ⭐ 25/09/2026 — exécution par SSH (spec §5.5)
+  socket.on('outils:exec:started', (data: { runId: string }) => { if (execPending) currentRunId = data.runId; });
+  socket.on('outils:exec:output', (data: { runId: string; chunk: string }) => {
+    if (execPending && !currentRunId) currentRunId = data.runId; // la sortie peut précéder 'started'
+    if (data.runId === currentRunId) appendExecOutput(data.chunk);
+  });
+  socket.on('outils:exec:end', (data: { runId: string | null; code: number | null; error?: string }) => {
+    if (data.runId !== null && data.runId !== currentRunId && !(execPending && !currentRunId)) return;
+    onExecEnd(data.code, data.error);
+  });
+  window.addEventListener('app:remote-apps', () => { if (currentDetail) renderExecMachines(false); });
+
   socket.on('connect', () => {
     console.log('[Outils UI] Connecté au serveur Socket.io');
     requestInitialStatus();
@@ -148,6 +173,13 @@ function setupEventListeners(): void {
   $('btn-generate')?.addEventListener('click', () => generateAndDownload());
   $('btn-generate-zip')?.addEventListener('click', () => { void generateZip(); });
   $('btn-copy-command')?.addEventListener('click', () => { void copyCommand(); });
+  $('exec-machine')?.addEventListener('change', () => updateExecTarget());
+  $('exec-host')?.addEventListener('input', () => updateExecTarget());
+  $('exec-user')?.addEventListener('input', () => updateExecTarget());
+  $('btn-exec')?.addEventListener('click', () => startExec());
+  $('btn-exec-send')?.addEventListener('click', () => sendExecInput());
+  $('exec-input')?.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') sendExecInput(); });
+  $('btn-exec-cancel')?.addEventListener('click', () => { if (currentRunId) socket?.emit('outils:exec:cancel', { runId: currentRunId }); });
 }
 
 function requestInitialStatus(): void {
@@ -227,8 +259,155 @@ function renderDetail(): void {
     }
   }
 
+  renderExecMachines(true);
+
   if (card) card.style.display = 'block';
   card?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ============================================================================
+// ⭐ 25/09/2026 — exécution par SSH (fonctionnelles-outils_specs §5.5)
+// ============================================================================
+
+interface ExecMachine { value: string; label: string; host: string; machineId?: string }
+
+function execMachines(): ExecMachine[] {
+  const list: ExecMachine[] = [];
+  const local = currentStatus?.localMachine;
+  if (local?.address) list.push({ value: local.address, host: local.address, machineId: local.machineId, label: `Cette machine — ${local.machineId || '?'} (${local.address})` });
+  for (const m of window.app.remoteApps ?? []) {
+    if (!m.address || list.some((x) => x.host === m.address)) continue;
+    list.push({ value: m.address, host: m.address, machineId: m.machineId, label: `${m.machineId} (${m.address})` });
+  }
+  return list;
+}
+
+/** Remplit la liste des machines ; `applyPreset` : présélection depuis le champ `execution` du yaml
+ *  (à l'affichage d'un script — pas lors d'une simple mise à jour du gossip). */
+function renderExecMachines(applyPreset: boolean): void {
+  const select = $('exec-machine') as HTMLSelectElement | null;
+  if (!select || !currentDetail) return;
+  const previous = select.value;
+  const machines = execMachines();
+  select.innerHTML = machines.map((m) => `<option value="${escapeHtml(m.value)}">${escapeHtml(m.label)}</option>`).join('')
+    + `<option value="${OTHER_MACHINE}">Autre machine…</option>`;
+
+  if (applyPreset) {
+    const preset = currentDetail.execution?.machine;
+    const match = preset ? machines.find((m) => m.machineId === preset || m.host === preset) : undefined;
+    const hostInput = $('exec-host') as HTMLInputElement | null;
+    if (match) select.value = match.value;
+    else if (preset) { select.value = OTHER_MACHINE; if (hostInput) hostInput.value = preset; }
+    const dossier = $('exec-dossier') as HTMLInputElement | null;
+    if (dossier) dossier.value = currentDetail.execution?.dossier ?? '';
+    const user = $('exec-user') as HTMLInputElement | null;
+    if (user) user.value = currentDetail.execution?.utilisateur || 'root';
+  } else if (previous) {
+    select.value = previous;
+  }
+  updateExecTarget();
+}
+
+function execHost(): string {
+  const select = $('exec-machine') as HTMLSelectElement | null;
+  if (!select) return '';
+  if (select.value === OTHER_MACHINE) return (($('exec-host') as HTMLInputElement | null)?.value ?? '').trim();
+  return select.value;
+}
+
+/** Affiche le champ « Hôte » pour « Autre machine… » et le bloc ssh-copy-id avec l'hôte choisi —
+ *  même bloc commun que les autres applications (TargetCards.renderSshPrepSection). */
+function updateExecTarget(): void {
+  const select = $('exec-machine') as HTMLSelectElement | null;
+  const hostLabel = $('exec-host-label');
+  if (hostLabel) hostLabel.style.display = select?.value === OTHER_MACHINE ? 'flex' : 'none';
+  const prep = $('exec-ssh-prep');
+  const host = execHost();
+  if (prep) {
+    renderSshPrepSection(prep, {
+      isRunningInDocker: !!currentStatus?.isRunningInDocker,
+      projectRoot: currentStatus?.projectRoot ?? '',
+      targets: host ? [{ id: 'exec', host }] : [],
+      user: (($('exec-user') as HTMLInputElement | null)?.value ?? '').trim() || 'root'
+    });
+  }
+}
+
+/** Contenu du script avec les valeurs saisies (même substitution que le téléchargement). */
+function substitutedContent(): { content: string; values: Record<string, string>; missing: string[] } {
+  let content = currentDetail?.content ?? '';
+  const values: Record<string, string> = {};
+  const missing: string[] = [];
+  for (const v of currentDetail?.variables ?? []) {
+    const value = readVariableValue(v);
+    values[v] = value;
+    if (!value) missing.push(v);
+    content = content.split(`__${v}__`).join(value);
+  }
+  return { content, values, missing };
+}
+
+function startExec(): void {
+  if (!socket || !currentDetail || execPending) return;
+  const host = execHost();
+  const user = (($('exec-user') as HTMLInputElement | null)?.value ?? '').trim() || 'root';
+  const dossier = (($('exec-dossier') as HTMLInputElement | null)?.value ?? '').trim();
+  if (!host) { setExecStatus('Choisir une machine (ou saisir un hôte).', 'ko'); return; }
+
+  const { content, values, missing } = substitutedContent();
+  socket.emit('outils:values:save', { id: currentDetail.id, values });
+  if (missing.length > 0 && !confirm(`Ces variables sont vides : ${missing.join(', ')}. Exécuter quand même ?`)) return;
+
+  const output = $('exec-output');
+  if (output) output.textContent = '';
+  const terminal = $('exec-terminal');
+  if (terminal) terminal.style.display = 'block';
+  currentRunId = null;
+  execPending = true;
+  setExecRunning(true);
+  setExecStatus(`⏳ Exécution sur ${user}@${host}…`, '');
+  socket.emit('outils:exec:start', { id: currentDetail.id, content, host, user, dossier });
+  ($('exec-input') as HTMLInputElement | null)?.focus();
+}
+
+function sendExecInput(): void {
+  const input = $('exec-input') as HTMLInputElement | null;
+  if (!input || !currentRunId) return;
+  socket?.emit('outils:exec:input', { runId: currentRunId, text: input.value });
+  input.value = '';
+}
+
+/** Sortie brute d'un pseudo-terminal : retire les séquences d'échappement (couleurs, curseur) et
+ *  les retours chariot — affichage texte simple. */
+function appendExecOutput(chunk: string): void {
+  const output = $('exec-output');
+  if (!output) return;
+  output.textContent += chunk.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/\r/g, '');
+  output.scrollTop = output.scrollHeight;
+}
+
+function onExecEnd(code: number | null, error?: string): void {
+  execPending = false;
+  setExecRunning(false);
+  if (error) setExecStatus(`❌ ${error}`, 'ko');
+  else setExecStatus(code === 0 ? '✅ Terminé (code 0)' : `❌ Terminé avec le code ${code ?? '?'}`, code === 0 ? 'ok' : 'ko');
+  currentRunId = null;
+}
+
+function setExecRunning(running: boolean): void {
+  const btn = $('btn-exec') as HTMLButtonElement | null;
+  if (btn) { btn.disabled = running; btn.textContent = running ? '⏳ Exécution en cours…' : '▶️ Exécuter par SSH'; }
+  for (const id of ['btn-exec-send', 'btn-exec-cancel', 'exec-input']) {
+    const el = $(id) as HTMLButtonElement | HTMLInputElement | null;
+    if (el) el.disabled = !running;
+  }
+}
+
+function setExecStatus(text: string, kind: '' | 'ok' | 'ko'): void {
+  const el = $('exec-status');
+  if (!el) return;
+  el.textContent = text;
+  el.className = `exec-status ${kind}`;
 }
 
 function humanizeLabel(token: string): string {

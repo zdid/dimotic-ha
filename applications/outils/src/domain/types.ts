@@ -17,11 +17,18 @@ export interface OutilScriptSummary {
 
 export interface OutilsStatus {
   scripts: OutilScriptSummary[];
+  /** ⭐ 25/09/2026 — pour l'exécution par SSH (spec §5.5) : machine locale (proposée dans la liste
+   *  avec celles du gossip) et contexte du bloc de préparation `ssh-copy-id`. */
+  localMachine: { machineId: string; address?: string };
+  isRunningInDocker: boolean;
+  projectRoot: string;
 }
 
 /** Réponse à `outils:script:get` — contenu complet + variables détectées, tout envoyé en une fois
  *  (pas de round-trip supplémentaire pour générer : la substitution se fait côté navigateur). */
 export interface OutilScriptDetail extends OutilScriptSummary {
+  /** ⭐ 25/09/2026 — présélection de l'exécution par SSH (champ `execution` du yaml). */
+  execution?: { machine?: string; utilisateur?: string; dossier?: string };
   content: string;
   variables: string[];
   // Directives `# @outils:select|checklist|hint|default` détectées — voir ScriptTemplate.ts.

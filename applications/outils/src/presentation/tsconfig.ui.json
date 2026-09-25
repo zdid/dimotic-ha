@@ -11,7 +11,10 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "paths": {
+      "/js/ts/components/TargetCards.js": ["../../../core/dist/presentation/ui/js/ts/components/TargetCards.d.ts"]
+    }
   },
   "include": ["ts/**/*.ts"],
   "exclude": ["node_modules", "dist"]

@@ -185,6 +185,9 @@ export interface RenderSshPrepSectionOptions {
    *  Cibles sans hôte encore renseigné (nouvelle cible tout juste créée) ou tableau absent/vide :
    *  repli sur l'unique bloc générique avec placeholder, comme avant. */
   targets?: { id: string; host: string }[];
+  /** ⭐ 25/09/2026 — utilisateur SSH de la commande affichée (défaut `root`, inchangé pour
+   *  rpigpio/teleinfo/arexx) — Outils exécute aussi sous un autre compte (ex. `didier`). */
+  user?: string;
 }
 
 /**
@@ -201,6 +204,7 @@ export interface RenderSshPrepSectionOptions {
  */
 export function renderSshPrepSection(container: HTMLElement, options: RenderSshPrepSectionOptions): void {
   const { isRunningInDocker, projectRoot, targets = [] } = options;
+  const user = escapeHtml(options.user || 'root');
 
   const dockerHint = isRunningInDocker
     ? `<div class="target-docker-hint">⚠️ Cette instance tourne dans un conteneur Docker — la clé (déjà générée automatiquement) doit être lisible par ce conteneur. Ouvrir d'abord un terminal <strong>dans</strong> le conteneur :<pre>docker exec -it &lt;nom du conteneur&gt; bash</pre></div>`
@@ -210,9 +214,9 @@ export function renderSshPrepSection(container: HTMLElement, options: RenderSshP
   const knownHosts = Array.from(new Set(targets.map((t) => t.host).filter((host) => !!host)));
   const commandBlock = knownHosts.length > 0
     ? knownHosts
-        .map((host) => `${cdCommand}\nmkdir -p ~/.ssh\nssh-copy-id -i data/core/ssh/id_ed25519.pub root@${escapeHtml(host)}`)
+        .map((host) => `${cdCommand}\nmkdir -p ~/.ssh\nssh-copy-id -i data/core/ssh/id_ed25519.pub ${user}@${escapeHtml(host)}`)
         .join('\n\n')
-    : `${cdCommand}\nmkdir -p ~/.ssh\nssh-copy-id -i data/core/ssh/id_ed25519.pub root@&lt;hôte-de-la-cible&gt;`;
+    : `${cdCommand}\nmkdir -p ~/.ssh\nssh-copy-id -i data/core/ssh/id_ed25519.pub ${user}@&lt;hôte-de-la-cible&gt;`;
 
   container.innerHTML = `
     <div class="ssh-prep-section">

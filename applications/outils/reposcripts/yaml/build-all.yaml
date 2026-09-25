@@ -7,3 +7,7 @@ description: >-
   soi-même depuis un clone du dépôt, par exemple avant de construire une image.
 filename: build-all.sh
 requiresSudo: false
+execution:
+  machine: falbala_817412
+  utilisateur: didier
+  dossier: /home/didier/ownCloud/dimotic-ha

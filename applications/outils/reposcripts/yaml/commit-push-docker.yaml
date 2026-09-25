@@ -10,3 +10,7 @@ description: >-
   depuis un clone du dépôt.
 filename: commit-push-docker.sh
 requiresSudo: false
+execution:
+  machine: falbala_817412
+  utilisateur: didier
+  dossier: /home/didier/ownCloud/dimotic-ha

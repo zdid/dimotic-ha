@@ -49,7 +49,16 @@ export const outilScriptSchema = z.object({
   filename: z.string().refine(isSafeFilename, 'nom de fichier invalide (lettres, chiffres, « . », « - », « _ », sans « / » ni « .. »)'),
   // Beaucoup de scripts de cette bibliothèque touchent au système (montage, écriture disque,
   // paquets...) — affiché dans la commande proposée (`sudo bash <filename>` vs `bash <filename>`).
-  requiresSudo: z.boolean().default(false)
+  requiresSudo: z.boolean().default(false),
+  // ⭐ 25/09/2026 (spec §5.5) — présélection de l'exécution par SSH : machine (identifiant du gossip
+  // ou adresse) et dossier de travail distant, tous deux modifiables dans la page.
+  execution: z.object({
+    machine: z.string().optional(),
+    // Utilisateur SSH (défaut root) — ex. didier pour un script qui travaille dans un clone git
+    // (sous root, git refuse le dépôt d'un autre utilisateur et les fichiers créés appartiendraient à root).
+    utilisateur: z.string().optional(),
+    dossier: z.string().optional()
+  }).optional()
 });
 
 export type OutilScriptConfig = z.infer<typeof outilScriptSchema>;

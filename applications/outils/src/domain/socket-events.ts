@@ -16,7 +16,11 @@ export const OUTILS_SOCKET_EVENTS = {
   BUNDLE_RESULT: 'outils:bundle:result',
   // ⭐ 20/09/2026 — ZipResult, même forme/route que BUNDLE_RESULT, fichier .zip au lieu d'une
   // archive auto-extractible.
-  ZIP_RESULT: 'outils:zip:result'
+  ZIP_RESULT: 'outils:zip:result',
+  // ⭐ 25/09/2026 — exécution par SSH (spec §5.5)
+  EXEC_STARTED: 'outils:exec:started',
+  EXEC_OUTPUT: 'outils:exec:output',
+  EXEC_END: 'outils:exec:end'
 } as const;
 
 export const OUTILS_CLIENT_EVENTS = {
@@ -35,7 +39,12 @@ export const OUTILS_CLIENT_EVENTS = {
   BUILD_ZIP: 'outils:zip:build',
   // ⭐ 19/09/2026 — { id, values: Record<string,string> } : sauvegarde les valeurs saisies (voir
   // ScriptValues.ts), aucun résultat renvoyé (fire-and-forget, simple confort).
-  SAVE_VALUES: 'outils:values:save'
+  SAVE_VALUES: 'outils:values:save',
+  // ⭐ 25/09/2026 — exécution par SSH (spec §5.5) : { id, content, host, user, dossier } ; réponse
+  // tapée { runId, text } ; arrêt { runId }.
+  EXEC_START: 'outils:exec:start',
+  EXEC_INPUT: 'outils:exec:input',
+  EXEC_CANCEL: 'outils:exec:cancel'
 } as const;
 
 export const OUTILS_ALL_EVENTS = {

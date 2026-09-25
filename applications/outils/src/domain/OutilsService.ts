@@ -10,7 +10,9 @@
 
 import AdmZip from 'adm-zip';
 import * as yamlLib from 'js-yaml';
+import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
+import { isRunningInDocker, getPrimaryIPv4Address } from '../../../core/dist/exports';
 import { outilScriptSchema, isSafeId, isSafeFilename, type OutilsConfig, type OutilScriptConfig } from './config-schema';
 import type { OutilsStatus, OutilScriptDetail, AddScriptResult, BundleResult, ZipResult } from './types';
 import {
@@ -18,7 +20,8 @@ import {
   writeYamlEntry, readYamlContent, deleteScriptFiles, writeEngineFile,
   detectVariables, detectVariableHints, detectBundlePaths
 } from './ScriptTemplate';
-import { buildBundle, buildZip } from './BundleBuilder';
+import { buildBundle, buildZip, downloadsDir } from './BundleBuilder';
+import { ExecRunner, validateTarget, writeTempScript, type ExecTarget } from './ExecRunner';
 import { readSavedValues, saveValues } from './ScriptValues';
 
 const MODULE_NAME = 'outils';
@@ -46,6 +49,7 @@ export interface IOutilsService {
 
 export class OutilsService implements IOutilsService {
   private readonly pendingUploads = new Map<string, PendingUploadBatch>();
+  private readonly execRunner: ExecRunner;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -53,7 +57,9 @@ export class OutilsService implements IOutilsService {
     // ⭐ 20/09/2026 — plus utilisé pour les scripts (voir config-schema.ts), conservé pour la
     // signature standard de factory attendue par AppService.
     private readonly configProvider: IAppConfigProvider<OutilsConfig>
-  ) {}
+  ) {
+    this.execRunner = new ExecRunner(logger);
+  }
 
   async start(): Promise<void> {
     this.logger.info('OutilsService', 'Démarrage du service Outils...');
@@ -64,6 +70,7 @@ export class OutilsService implements IOutilsService {
 
   async stop(): Promise<void> {
     this.logger.info('OutilsService', 'Arrêt du service Outils...');
+    this.execRunner.stopAll();
   }
 
   /** Fusionne scripts intégrés (applications/outils/reposcripts/, dans l'image Docker) et scripts
@@ -83,7 +90,10 @@ export class OutilsService implements IOutilsService {
       scripts: this.loadMergedScripts().map((s) => ({
         id: s.id, title: s.title, description: s.description, filename: s.filename,
         requiresSudo: s.requiresSudo, builtin: s.builtin
-      }))
+      })),
+      localMachine: { machineId: process.env.DIMOTIC_MACHINE_ID || '', address: getPrimaryIPv4Address() ?? undefined },
+      isRunningInDocker: isRunningInDocker(),
+      projectRoot: process.env.PROJECT_ROOT || process.cwd()
     };
   }
 
@@ -99,6 +109,13 @@ export class OutilsService implements IOutilsService {
     this.eventBus.onGeneric<UploadEventPayload>('outils:internal:upload', (data) => this.handleUpload(data));
     this.eventBus.onGeneric<{ id: string; content: string }>('outils:bundle:build', (data) => this.handleBuildBundle(data.id, data.content));
     this.eventBus.onGeneric<{ id: string; content: string }>('outils:zip:build', (data) => this.handleBuildZip(data.id, data.content));
+    this.eventBus.onGeneric<{ id: string; content: string } & ExecTarget>('outils:exec:start', (data) => this.handleExecStart(data));
+    this.eventBus.onGeneric<{ runId: string; text: string }>('outils:exec:input', (data) => {
+      if (!this.execRunner.input(data?.runId, String(data?.text ?? ''))) {
+        this.eventBus.emitGeneric('outils:exec:output', { runId: data?.runId, chunk: '\n[aucune exécution en cours]\n' });
+      }
+    });
+    this.eventBus.onGeneric<{ runId: string }>('outils:exec:cancel', (data) => { this.execRunner.cancel(data?.runId); });
     this.eventBus.onGeneric<{ id: string; values: Record<string, string> }>('outils:values:save', (data) => {
       // ⭐ 24/09/2026 — id contrôlé (chemin <id>.json) : seulement un script réellement connu.
       if (!isSafeId(data?.id) || !this.loadMergedScripts().some((s) => s.id === data.id)) {
@@ -124,6 +141,7 @@ export class OutilsService implements IOutilsService {
         filename: script.filename,
         requiresSudo: script.requiresSudo,
         builtin: script.builtin,
+        execution: script.execution,
         content,
         variables: detectVariables(content),
         variableHints: detectVariableHints(content),
@@ -165,6 +183,43 @@ export class OutilsService implements IOutilsService {
     } catch (error) {
       this.emitBundleResult({ success: false, error: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  /**
+   * ⭐ 25/09/2026 — exécution par SSH (spec §5.5) : `content` = script déjà substitué par le
+   * navigateur (mêmes valeurs qu'un téléchargement). Script `@outils:bundle` : archive
+   * auto-extractible construite comme pour le téléchargement, puis exécutée.
+   */
+  private handleExecStart(data: { id: string; content: string } & ExecTarget): void {
+    const target: ExecTarget = { host: String(data?.host ?? '').trim(), user: String(data?.user ?? 'root').trim() || 'root', dossier: String(data?.dossier ?? '').trim() || undefined };
+    const fail = (error: string): void => { this.eventBus.emitGeneric('outils:exec:end', { runId: null, code: null, error }); };
+    const script = this.loadMergedScripts().find((s) => s.id === data?.id);
+    if (!script) return fail(`Script introuvable: ${data?.id}`);
+    const invalid = validateTarget(target);
+    if (invalid) return fail(invalid);
+
+    let localPath: string;
+    const cleanup: string[] = [];
+    try {
+      const bundlePaths = detectBundlePaths(readWrapperContent(script.root, script.id));
+      if (bundlePaths.length > 0) {
+        const { token } = buildBundle(String(data.content ?? ''), bundlePaths, script.filename);
+        localPath = path.join(downloadsDir(), token);
+        cleanup.push(localPath, `${localPath}.meta.json`);
+      } else {
+        localPath = writeTempScript(String(data.content ?? ''));
+        cleanup.push(localPath);
+      }
+    } catch (error) {
+      return fail(`Préparation du script impossible : ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    const runId = this.execRunner.start(localPath, target, {
+      onOutput: (id, chunk) => { this.eventBus.emitGeneric('outils:exec:output', { runId: id, chunk }); },
+      onEnd: (id, code, error) => { this.eventBus.emitGeneric('outils:exec:end', { runId: id, code, error }); }
+    }, cleanup);
+    this.logger.info('OutilsService', `Exécution de « ${script.id} » sur ${target.user}@${target.host} (run ${runId})`);
+    this.eventBus.emitGeneric('outils:exec:started', { runId, id: script.id, host: target.host, user: target.user });
   }
 
   private emitBundleResult(result: BundleResult): void {
