@@ -2,7 +2,7 @@
 
 **Version : 1.13**
 **Date : 25 Septembre 2026**
-**Dernière mise à jour : Table §11 "Pour Applications Spécifiques" — ligne **Application OUTILS** ajoutée (`fonctionnelles-outils_specs`, première spec formelle v1.0). Aucun autre changement. Ancienne version v1.12 archivée dans `specs/archives/PROMPT_PROJET_v1.12-20260925.md`.**
+**Dernière mise à jour : Table §11 "Pour Applications Spécifiques" — lignes **Application OUTILS** (`fonctionnelles-outils_specs`, première spec formelle v1.0), **Application SAUVEGARDE** et **SUPERVISION-EXTERNE** ajoutées ; lignes NOMMAGE/ARBREOUQUOI (specs `implementation-*` fusionnées le 19/09), ESPDISPLAY et « Communication Inter-Applications » (`inter-app-communication_specs` retirée → `techniques-socle-ha-mqtt_specs` §9bis) et RFXCOM (nom de fichier versionné) corrigées ; ordre de lecture (§4.5) et arborescence de `specs/current/` remis à jour. Ancienne version v1.12 archivée dans `specs/archives/PROMPT_PROJET_v1.12-20260925.md`.**
 **Mise à jour précédente (v1.12) : Règles critiques de structure (activation/désactivation) — plus de répertoire `applications_desactivees/` (supprimé le 07/08/2026, simple liste `disabledApps`) ; activation/désactivation À CHAUD sans redémarrage du core ; application nouvelle désactivée par défaut ; détection sur deux racines `applications/` + `data/applications/` (voir `fonctionnelles-supervisor_specs_v2.10.md` §8). Ancienne version v1.11 archivée dans `specs/archives/PROMPT_PROJET_v1.11-20260816.md`.**
 **Mise à jour antérieure (v1.11) : Table §11 "Pour Applications Spécifiques" — ligne "Supervision multi-machines (SUPERVISOR)" réécrite : passe de "conception, pas encore implémenté" à implémenté et vérifié en conditions réelles pour 7 applications (session du 16/08/2026, spec v2.6), IPC remplace MQTT pour le pont local. Aucun autre changement. Ancienne version v1.10 archivée dans `specs/archives/PROMPT_PROJET_v1.10-20260816.md`.**
 
@@ -208,22 +208,29 @@ diff -r original/ backups/original_backup_2026-07-12/
 projet/
 ├── specs/                  # Spécifications (toujours conservées)
 │   ├── current/            # Version actuelle
-│   │   ├── architectural-patterns_specs.md      # + suffixe de version, ex: _v1.0.md
-│   │   ├── classification-rfxcom_specs.md
+│   │   ├── alpinejs-implementation_specs.md
+│   │   ├── architectural-patterns_specs.md
 │   │   ├── erreurs_specs.md
 │   │   ├── fonctionnelles-arbreouquoi_specs.md
+│   │   ├── fonctionnelles-arexx_specs.md
+│   │   ├── fonctionnelles-espdisplay_specs.md
 │   │   ├── fonctionnelles-evoo7_specs.md
+│   │   ├── fonctionnelles-haplan_specs.md
+│   │   ├── fonctionnelles-ia_specs.md
 │   │   ├── fonctionnelles-nommage_specs.md
+│   │   ├── fonctionnelles-outils_specs.md
+│   │   ├── fonctionnelles-planificateur_specs.md
 │   │   ├── fonctionnelles-rfxcom_specs.md
+│   │   ├── fonctionnelles-rpigpio_specs.md
+│   │   ├── fonctionnelles-sauvegarde_specs.md
+│   │   ├── fonctionnelles-scriptsha_specs.md
+│   │   ├── fonctionnelles-supervision-externe_specs.md
+│   │   ├── fonctionnelles-supervisor_specs.md
+│   │   ├── fonctionnelles-teleinfo_specs.md
 │   │   ├── guide-nouvelle-application_specs.md
-│   │   ├── implementation-arbreouquoi_specs.md
-│   │   ├── implementation-nommage_specs.md
-│   │   ├── implementation-rfxcom_specs.md
 │   │   ├── integrationbridge-mqtt-auto_specs.md
-│   │   ├── inter-app-communication_specs.md
 │   │   ├── nommage_specs.md
 │   │   ├── presentation_specs.md
-│   │   ├── recepteurs-emetteurs-rfxcom_specs.md
 │   │   └── techniques-socle-ha-mqtt_specs.md
 │   │       # ⚠️ Chaque fichier réel porte un suffixe de version (ex: techniques-socle-ha-mqtt_specs_v4.9.md).
 │   │       # Voir specs/current/ pour la version exacte actuellement en vigueur.
@@ -358,10 +365,10 @@ projet/
 | **Type d'Application** | **Spécifications Additionnelles** | **Cas d'Usage** |
 |------------------------|----------------------------------|-----------------|
 | **Intégration MQTT** (RFXCOM, Zigbee2MQTT, etc.) | `integrationbridge-mqtt-auto_specs` | Applications intégrant du matériel via MQTT |
-| **Application RFXCOM** | `fonctionnelles-rfxcom_specs` (fusion Fonctionnel+Implémentation+Récepteurs/Émetteurs depuis le 19/09/2026, v6.0 — un seul fichier, 3 parties §/§T/§R) ; `classification-rfxcom_specs` archivé le 19/09/2026 comme conception jamais construite (non conforme au code réel), voir l'avertissement en tête de `fonctionnelles-rfxcom_specs_v6.0.md` | **Maintenance et développement** spécifique RFXCOM |
+| **Application RFXCOM** | `fonctionnelles-rfxcom_specs` (fusion Fonctionnel+Implémentation+Récepteurs/Émetteurs depuis le 19/09/2026, v6.0 — un seul fichier, 3 parties §/§T/§R) ; `classification-rfxcom_specs` archivé le 19/09/2026 comme conception jamais construite (non conforme au code réel), voir l'avertissement en tête de `fonctionnelles-rfxcom_specs` (version courante dans `specs/current/`) | **Maintenance et développement** spécifique RFXCOM |
 | **Application EVOO7** | `fonctionnelles-evoo7_specs` | **Maintenance et développement** spécifique EVOO7 (régulateur de chauffage/PAC VR Electronique) |
-| **Application NOMMAGE** | `fonctionnelles-nommage_specs` + `implementation-nommage_specs` | **Maintenance et développement** spécifique NOMMAGE (au-delà des conventions de nommage génériques déjà couvertes par `nommage_specs` §Pour TOUTE Nouvelle Application) |
-| **Application ARBREOUQUOI** | `fonctionnelles-arbreouquoi_specs` + `implementation-arbreouquoi_specs` | **Maintenance et développement** spécifique ARBREOUQUOI |
+| **Application NOMMAGE** | `fonctionnelles-nommage_specs` (Fonctionnel + Technique fusionnés en un seul fichier depuis le 19/09/2026, v2.0) | **Maintenance et développement** spécifique NOMMAGE (au-delà des conventions de nommage génériques déjà couvertes par `nommage_specs` §Pour TOUTE Nouvelle Application) |
+| **Application ARBREOUQUOI** | `fonctionnelles-arbreouquoi_specs` (Fonctionnel + Technique fusionnés en un seul fichier depuis le 19/09/2026, v2.0) | **Maintenance et développement** spécifique ARBREOUQUOI |
 | **Application IA** | `fonctionnelles-ia_specs` | **Maintenance et développement** spécifique IA (émulation Ollama, routage multi-IA, appel d'outils) — à lire avec `fonctionnelles-planificateur_specs` |
 | **Application PLANIFICATEUR** | `fonctionnelles-planificateur_specs` | **Maintenance et développement** spécifique PLANIFICATEUR (macros/planifications, déclencheurs, résolution vers un service HA) — à lire avec `fonctionnelles-ia_specs` |
 | **Application AREXX** | `fonctionnelles-arexx_specs` | **Maintenance et développement** spécifique AREXX (capteurs température/humidité BS1000/BS500) |
@@ -369,13 +376,15 @@ projet/
 | **Application RPIGPIO** | `fonctionnelles-rpigpio_specs` | **Maintenance et développement** spécifique RPIGPIO (paramétrage de pins GPIO via mqtt-io, déploiement Docker) |
 | **Application TELEINFO** | `fonctionnelles-teleinfo_specs` | **Maintenance et développement** spécifique TELEINFO (compteurs EDF mode historique, agent RPi1 déployé par SSH+systemd) |
 | **Application SCRIPTSHA** | `fonctionnelles-scriptsha_specs` | **Maintenance et développement** spécifique SCRIPTSHA (gestion de scripts Home Assistant `script.*` — dépôt de fichier, diffusion/retrait à la demande via `HaRestBridge`, pont REST config HA générique côté core) |
-| **Application ESPDISPLAY** | `fonctionnelles-espdisplay_specs` + `inter-app-communication_specs` | **Maintenance et développement** spécifique ESPDISPLAY (orchestration du déploiement de firmware sur les écrans ESP/ESPHome, déclenchée par HAPLAN via EventBus générique — voir `fonctionnelles-haplan_specs` §3.6/§8.9) |
+| **Application ESPDISPLAY** | `fonctionnelles-espdisplay_specs` + `techniques-socle-ha-mqtt_specs` §9bis | **Maintenance et développement** spécifique ESPDISPLAY (orchestration du déploiement de firmware sur les écrans ESP/ESPHome, déclenchée par HAPLAN via EventBus générique — voir `fonctionnelles-haplan_specs` §3.6/§8.9) |
 | **Application OUTILS** | `fonctionnelles-outils_specs` | **Maintenance et développement** spécifique OUTILS (bibliothèque de scripts shell auto-descriptifs : variables `__NOM__` et directives `@outils:*`, génération/téléchargement, archives auto-extractibles, scripts de compilation/commit/tag/Docker) |
+| **Application SAUVEGARDE** | `fonctionnelles-sauvegarde_specs` | **Maintenance et développement** spécifique SAUVEGARDE (sauvegarde des machines vers Nextcloud, script + cron déposés par SSH, assistant de restauration en 2 étapes vers n'importe quelle machine) |
 | **Supervision multi-machines (SUPERVISOR)** | `fonctionnelles-supervisor_specs` + `techniques-socle-ha-mqtt_specs` §8.5 | Module du **socle** (`applications/core/src/supervisor/`, pas une application sous `applications/`) — **implémenté et vérifié en conditions réelles** pour 7 applications (`espdisplay`, `rpigpio`, `teleinfo`, `arexx`, `evoo7`, `nommage`, `rfxcom`, session du 16/08/2026, spec v2.6) : identité machine, chaque application en process OS séparé, communiquant avec `core` par **IPC** (pas MQTT, décision prise en cours d'implémentation — MQTT reste utilisé pour les cas génuinement distants), activation/désactivation en direct sans redémarrage du core, interface web unique préservée. Migration d'`ia`/`planificateur`/`haplan`/`arbreouquoi` différée (décision explicite, dépendance à des objets vivants HA non transportables) |
+| **Supervision externe + alerte (SUPERVISION-EXTERNE)** | `fonctionnelles-supervision-externe_specs` | **Conception seulement, aucun code** — supervision multi-sites indépendante de HA et alerte hors HA ; ne pas confondre avec SUPERVISOR (qui en est une brique) |
 | **UI Avancée** | `presentation_specs` | Applications avec interface complexe |
 | **Gestion d'erreurs fine** | `erreurs_specs` | Applications nécessitant une gestion d'erreur spécifique |
 | **Patterns Architecturaux** | `architectural-patterns_specs` | Pour comprendre les patterns MQTT/WS globaux |
-| **Communication Inter-Applications** | `inter-app-communication_specs` | Toute application (sauf core) exposant ou consommant des capacités d'une autre application |
+| **Communication Inter-Applications** | `techniques-socle-ha-mqtt_specs` §9bis (Fire & Forget + Request/Reply sur l'EventBus) — `inter-app-communication_specs` retirée le 19/09/2026 (conception jamais construite) | Toute application (sauf core) exposant ou consommant des capacités d'une autre application |
 
 #### ⚡ Ordre de Lecture Recommandé
 
@@ -388,7 +397,7 @@ projet/
      ↓
 4️⃣  guide-nouvelle-application_specs → Guide pratique
      ↓
-4️⃣.5  inter-app-communication_specs → Communication inter-applications (obligatoire sauf core)
+4️⃣.5  techniques-socle-ha-mqtt_specs §9bis → Communication inter-applications (obligatoire sauf core)
      ↓
 5️⃣  [Spécs Spécifiques] → Selon type d'application
 ```
