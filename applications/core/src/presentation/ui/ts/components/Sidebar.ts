@@ -734,7 +734,7 @@ export class Sidebar extends HTMLElement {
     };
     
     // Filtrer pour ne pas afficher 'core' ici (il sera géré dans le contenu principal)
-    const displayModules = this.modules.filter(m => m.id !== 'core');
+    const displayModules = this.modules.filter(m => m.id !== 'core' && !(m as { noMenu?: boolean }).noMenu);
     
     console.log('[Sidebar] renderModules - Modules à afficher:', displayModules.map(m => `${m.id}(${m.name})`));
 

@@ -46,7 +46,8 @@ echo "=== Construction des applications métier ==="
 # le dist/ compilé sur la machine de dev passait dans l'image (.dockerignore n'excluait que le dist/
 # racine — désormais `**/dist/`, voir .dockerignore) : toute application présente dans le dépôt est
 # maintenant construite (build serveur + build:ui de sa présentation), core en premier (ci-dessus).
-# Une application nouvelle y arrive DÉSACTIVÉE (ApplicationManager.reconcile()), testcycle comprise.
+# Une application nouvelle y arrive DÉSACTIVÉE (ApplicationManager.reconcile()), testcycle comprise —
+# sauf "dimotic.enabledByDefault" dans son package.json (supervision, activée d'office).
 for dir in applications/*/; do
   app="$(basename "${dir}")"
   [ "${app}" = "core" ] && continue

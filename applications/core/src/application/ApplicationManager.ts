@@ -8,7 +8,7 @@ import { Logger } from '../infrastructure/logger';
 import type { RestartManager } from './RestartManager';
 import type { ConfigService } from '../infrastructure/config/ConfigService';
 import type { ProcessSupervisor } from '../supervisor';
-import { scanApplications, resolveAppDir, isValidAppId, ensureExternalRoot, type AppOrigin } from './appRoots';
+import { scanApplications, resolveAppDir, isValidAppId, ensureExternalRoot, isEnabledByDefault, type AppOrigin } from './appRoots';
 
 /**
  * ApplicationManager - Gère l'activation et la désactivation dynamique des applications
@@ -146,7 +146,14 @@ export class ApplicationManager {
    *   « nouvelle », donc désactivée.
    */
   reconcile(): { added: string[]; removed: string[] } {
-    const present = [...scanApplications().keys()];
+    const scanned = scanApplications();
+    const present = [...scanned.keys()];
+    // ⭐ 25/09/2026 — applications « activées d'office » (package.json, voir isEnabledByDefault) :
+    // exception à la règle, jamais ajoutées à disabledApps à leur première apparition.
+    const toDisable = (ids: string[]) => ids.filter((id) => {
+      const dir = scanned.get(id)?.dir;
+      return !(dir && isEnabledByDefault(dir));
+    });
     const known = this.configService.getKnownApps();
     let disabled = this.configService.getDisabledApps();
     let added: string[] = [];
@@ -154,7 +161,7 @@ export class ApplicationManager {
 
     if (known === undefined) {
       if (this.configService.isFreshInstall()) {
-        disabled = [...new Set([...disabled, ...present])];
+        disabled = [...new Set([...disabled, ...toDisable(present)])];
         added = present;
         this.logger.info('ApplicationManager', `Installation neuve : toutes les applications arrivent désactivées (${present.join(', ')})`);
       } else {
@@ -164,8 +171,15 @@ export class ApplicationManager {
       added = present.filter((id) => !known.includes(id));
       removed = known.filter((id) => !present.includes(id));
       if (added.length > 0) {
-        disabled = [...new Set([...disabled, ...added])];
-        this.logger.info('ApplicationManager', `Application(s) nouvelle(s), désactivée(s) en attendant d'être activée(s) : ${added.join(', ')}`);
+        const newlyDisabled = toDisable(added);
+        disabled = [...new Set([...disabled, ...newlyDisabled])];
+        if (newlyDisabled.length > 0) {
+          this.logger.info('ApplicationManager', `Application(s) nouvelle(s), désactivée(s) en attendant d'être activée(s) : ${newlyDisabled.join(', ')}`);
+        }
+        const enabledByDefault = added.filter((id) => !newlyDisabled.includes(id));
+        if (enabledByDefault.length > 0) {
+          this.logger.info('ApplicationManager', `Application(s) nouvelle(s) activée(s) d'office (enabledByDefault) : ${enabledByDefault.join(', ')}`);
+        }
       }
       if (removed.length > 0) {
         this.logger.info('ApplicationManager', `Application(s) disparue(s) du disque : ${removed.join(', ')}`);

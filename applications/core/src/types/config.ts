@@ -161,6 +161,9 @@ export interface ApplicationModule {
    *  de `app:menu:register`, toujours ponté automatiquement pour ces apps) — ex: espdisplay déclare
    *  ici `espdisplay:deploy-floorplan`/`espdisplay:deploy-result` (ESPDISPLAY_EVENTS). */
   bridgedEvents?: string[];
+  /** ⭐ 25/09/2026 — application sans entrée dans le menu latéral (ex: supervision, affichée
+   *  seulement sur la page d'accueil — fonctionnelles-supervision_specs §6.2). */
+  noMenu?: boolean;
 }
 
 /** Résultat de sauvegarde de la config */

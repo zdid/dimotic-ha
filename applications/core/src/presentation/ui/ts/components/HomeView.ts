@@ -49,7 +49,9 @@ export function buildAccueilHtml(): string {
         </form>
       </section>
 
-      <section>
+      <div id="accueil-supervision"></div>
+
+      <section id="accueil-remote-section">
         <h3>Applications sur les autres machines</h3>
         <ul id="accueil-remote-apps" style="list-style:none; padding:0;">
           <li>Aucune autre machine détectée pour l'instant.</li>
@@ -130,6 +132,57 @@ function renderRemoteApps(root: ParentNode, machines: MachineAppsAnnouncement[])
     .join('');
 }
 
+/**
+ * ⭐ 25/09/2026 — emplacement « supervision » (fonctionnelles-supervision_specs §4) : quand
+ * l'application `supervision` tourne, son fragment remplace la liste brute « Applications sur les
+ * autres machines ». Le core ne contient AUCUNE logique de supervision (décision utilisateur) : il
+ * charge seulement `presentation/accueil.html` (balisage) et `presentation/ts/accueil.js` (une seule
+ * fois, doit définir `window.supervisionAccueil.init(slot)`), puis appelle `init` à chaque visite.
+ */
+const SUPERVISION_ID = 'supervision';
+let supervisionHtml: string | undefined;
+let supervisionScript: Promise<void> | undefined;
+
+function loadSupervisionScript(): Promise<void> {
+  supervisionScript ??= new Promise<void>((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = `/applications/${SUPERVISION_ID}/presentation/ts/accueil.js`;
+    script.onload = () => resolve();
+    script.onerror = () => { supervisionScript = undefined; reject(new Error('accueil.js introuvable')); };
+    document.head.appendChild(script);
+  });
+  return supervisionScript;
+}
+
+async function updateSupervisionSlot(root: ParentNode): Promise<void> {
+  const slot = root.querySelector<HTMLElement>('#accueil-supervision');
+  const remote = root.querySelector<HTMLElement>('#accueil-remote-section');
+  if (!slot || !remote) return;
+  const active = window.app.moduleManager.getModules().some((m) => m.id === SUPERVISION_ID);
+  if (!active) {
+    slot.innerHTML = '';
+    remote.style.display = '';
+    return;
+  }
+  if (slot.dataset.loaded === 'true') return;
+  try {
+    if (supervisionHtml === undefined) {
+      const response = await fetch(`/applications/${SUPERVISION_ID}/presentation/accueil.html`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      supervisionHtml = await response.text();
+    }
+    await loadSupervisionScript();
+    slot.innerHTML = supervisionHtml;
+    slot.dataset.loaded = 'true';
+    remote.style.display = 'none';
+    (window as unknown as { supervisionAccueil?: { init: (el: HTMLElement) => void } }).supervisionAccueil?.init(slot);
+  } catch (error) {
+    // Repli : la liste brute du gossip reste affichée.
+    console.error('[Accueil] Fragment supervision indisponible:', error);
+    remote.style.display = '';
+  }
+}
+
 export function initAccueilApp(): void {
   const root = (window as unknown as { __moduleContainerRoot?: ParentNode }).__moduleContainerRoot;
   if (!root) return;
@@ -146,6 +199,12 @@ export function initAccueilApp(): void {
   window.addEventListener('app:ha-address', (e) => renderHaLink(root, (e as CustomEvent).detail));
   window.addEventListener('core:external-sites:list', (e) => renderExternalSites(root, (e as CustomEvent).detail.sites, socket));
   window.addEventListener('app:remote-apps', (e) => renderRemoteApps(root, (e as CustomEvent).detail));
+  void updateSupervisionSlot(root);
+  window.addEventListener('modules:loaded', () => {
+    const slot = root.querySelector<HTMLElement>('#accueil-supervision');
+    if (slot) delete slot.dataset.loaded;
+    void updateSupervisionSlot(root);
+  });
 
   const form = root.querySelector<HTMLFormElement>('#accueil-external-site-form');
   form?.addEventListener('submit', (ev) => {

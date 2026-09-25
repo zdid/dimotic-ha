@@ -778,7 +778,18 @@ export class AppService {
     this.logger.info('AppService', 'Demande de liste des applications reçue');
     // ⭐ 24/09/2026 — relecture du disque à chaque ouverture de Gestion des applications : une
     // application apparue arrive désactivée (repère « nouvelle »), une disparue est arrêtée.
-    const { removed } = this.applicationManager.reconcile();
+    const { added, removed } = this.applicationManager.reconcile();
+    // ⭐ 25/09/2026 — application apparue pendant que le core tourne et « activée d'office »
+    // (package.json dimotic.enabledByDefault, voir appRoots.isEnabledByDefault) : activée à chaud.
+    const disabledNow = new Set(this.configService.getDisabledApps());
+    for (const appId of added) {
+      const dir = this.applicationManager.resolveAppDir(appId);
+      if (!disabledNow.has(appId) && dir && !this.modules.some((m) => m.id === appId)) {
+        this.logger.info('AppService', `Application ${appId} apparue, activée d'office — démarrage`);
+        void Promise.resolve(this.activateApp(appId, dir)).catch((error) =>
+          this.logger.error('AppService', `Activation d'office de ${appId} impossible: ${error}`));
+      }
+    }
     for (const appId of removed) {
       if (this.modules.some((m) => m.id === appId) || this.processSupervisor.isRegistered(appId)) {
         this.logger.info('AppService', `Application ${appId} retirée du disque — arrêt`);

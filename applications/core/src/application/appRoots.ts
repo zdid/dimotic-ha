@@ -105,6 +105,22 @@ export function clearLoadedAppDir(appId: string): void {
   loadedAppDirs.delete(appId);
 }
 
+/**
+ * ⭐ 25/09/2026 (fonctionnelles-supervision_specs §7.1) — une application peut déclarer dans son
+ * `package.json` `"dimotic": { "enabledByDefault": true }` : elle est alors ACTIVÉE à sa première
+ * apparition, au lieu de la règle générale « une application nouvelle arrive désactivée ». Lu dans
+ * package.json (pas dans la déclaration TypeScript) : le rapprochement disque/config ne charge
+ * jamais le code des applications.
+ */
+export function isEnabledByDefault(dir: string): boolean {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as { dimotic?: { enabledByDefault?: unknown } };
+    return pkg.dimotic?.enabledByDefault === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Dossier de la version chargée si l'application l'est, sinon résolution sur disque. */
 export function servedAppDir(appId: string, projectRoot = projectRootDir()): string | undefined {
   return loadedAppDirs.get(appId) ?? resolveAppDir(appId, projectRoot);
