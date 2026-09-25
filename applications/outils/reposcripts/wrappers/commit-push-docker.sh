@@ -138,7 +138,8 @@ if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
   exit 1
 fi
 
-read -rp "Créer/pousser le tag $VERSION puis construire+publier l'image Docker (--build-only, pas de déploiement) ? [o/N] " CONFIRM2
+echo "Attention: Aucune machine ne sera mise à jour."
+read -rp "Publier la version ${VERSION#v} (tag + image Docker) ? [o/N] " CONFIRM2
 if [ "$CONFIRM2" != "o" ] && [ "$CONFIRM2" != "O" ]; then
   echo "Tag/Docker annulés — le commit est déjà poussé."
   exit 0
