@@ -1,178 +1,171 @@
 #!/usr/bin/env bash
 #
-# prepare-sd-card.sh — pré-provisionne une carte SD Raspberry Pi OS fraîchement flashée, AVANT le
-# premier boot, quel que soit le modèle de Pi (1/2/3/4/5) et son architecture (armhf ARMv6/v7 ou
-# arm64) : agrandissement de rootfs à la taille réelle de la carte, accès SSH root (clé dimotic-ha +
-# clé(s) personnelle(s)), optionnellement le WiFi de la machine cible et une liste de paquets/apps
-# additionnels — via chroot + émulation QEMU (qemu-user-static), même technique que pi-gen (l'outil
-# officiel de fabrication d'images Raspberry Pi OS). Voir aussi
-# PROCEDURE_preprovisioning-ssh-root-carte-sd_2026-09-05.md (version manuelle, pas-à-pas, non-git,
-# écrite le même jour) pour le détail de chaque étape.
+# prepare-sd-card.sh — travaille sur un FICHIER IMAGE Raspberry Pi OS (jamais sur la carte
+# physique), via un périphérique loop + chroot/émulation QEMU (qemu-user-static, même technique que
+# pi-gen). Appelé par flash-sd-card.js (fonctionnelles-outils_specs v1.2 §7.2), deux modes :
 #
-# ⭐ 18/09/2026 (demande utilisateur) — SYSTÉMATIQUE sur CHAQUE carte, sans option ni case à cocher
-# (même traitement que "SSH root" ci-dessus) :
-#   - Docker CE officiel (script get.docker.com, PAS le paquet apt docker.io, trop ancien).
-#   - Répertoire /docker/dimotic-ha/ pré-rempli (compose.yaml + data/ + logs/ vides) — copié tel quel,
-#     mais SANS lancer `docker compose up` (juste le fichier en place, prêt pour le premier boot).
-#   - Node.js + npm + les paquets npm globaux `serialport`+`mqtt` (voir mémoire "conception app
-#     provisioning" du 08/09 — dépendances "minimum" confirmées par l'utilisateur pour tout script
-#     Node écrit à la main sur une carte, indépendamment des apps dimotic-ha listées via --apps).
-#   - Paquet apt `mosquitto-clients` (mosquitto_pub/mosquitto_sub, utile pour tout diagnostic MQTT
-#     manuel, ce projet tournant entièrement dessus).
-# Ces installs systématiques nécessitent TOUJOURS le chroot+QEMU (voir plus bas), qu'il y ait ou non
-# --packages/--apps/--wifi-ssid.
+#   base <image.img> [--packages p1,p2] [--apps a1,a2] [--extra-mb N]
+#     Image de BASE, commune à toutes les machines de même modèle/distribution/paquets/apps —
+#     gardée en cache par flash-sd-card.js. Agrandit l'image de N Mo, puis installe DANS l'image
+#     (vitesse de CETTE machine, pas celle du Pi) : paquets apt, Node.js+npm, npm globaux
+#     serialport+mqtt, Docker CE (get.docker.com), /docker/dimotic-ha/ (compose.yaml, NON démarré),
+#     device-agent des apps (+ npm install --production), accès SSH root avec la clé dimotic-ha,
+#     console série désactivée pour les apps qui ont besoin de l'UART. Termine par un NETTOYAGE
+#     indispensable avant de cloner l'image sur plusieurs machines : clés d'hôte SSH, machine-id,
+#     état cloud-init, cache apt, binaire QEMU copié.
 #
-# ⭐ 16/09/2026 — WiFi : réutilise `/usr/lib/raspberrypi-sys-mods/imager_custom set_wlan` (déjà
-# présent dans l'image, c'est lui qu'utilise Raspberry Pi Imager pour son option "Configurer le
-# WiFi") — écrit un fichier NetworkManager (`/etc/NetworkManager/system-connections/
-# preconfigured.nmconnection`) et configure le pays régulateur. Vérifié en inspectant l'image réelle
-# (bookworm-lite) : NetworkManager est le stack actif sur cette génération, pas dhcpcd/wpa_supplicant
-# autonome — un simple wpa_supplicant.conf déposé sur bootfs (mécanisme des générations précédentes
-# de Raspberry Pi OS) n'aurait pas été repris.
+#   legacy-machine <image.img> [--hostname H] [--user U] [--key k.pub]... [--wifi-ssid S
+#     --wifi-pass P --wifi-country FR]
+#     Personnalisation propre à UNE machine, pour bookworm uniquement (pas de cloud-init) : nom
+#     d'hôte, clés personnelles (root + utilisateur), WiFi via imager_custom (mécanisme officiel
+#     Raspberry Pi Imager, NetworkManager). Sur Trixie, tout ceci passe par cloud-init
+#     (user-data/network-config, écrits par flash-sd-card.js sur bootfs) — ce mode n'est pas appelé.
 #
-# Usage :
-#   sudo ./scripts/prepare-sd-card.sh <device ex: /dev/sda> [--key <clé_publique.pub>]... \
-#     [--packages pkg1,pkg2,...] [--hostname <nom>] [--apps app1,app2,...] \
-#     [--wifi-ssid <ssid> --wifi-pass <mot_de_passe> [--wifi-country <FR>]]
+# Prérequis (une fois, sur cette machine) :
+#   sudo apt install qemu-user-static binfmt-support parted e2fsprogs file
 #
-# Exemple (RPi1 teleinfo, device-agent + node_modules pré-installés — Node.js lui-même est
-# systématique désormais, plus besoin de le lister dans --packages) :
-#   sudo ./scripts/prepare-sd-card.sh /dev/sda --key ~/.ssh/id_rsa.pub --apps teleinfo
-#
-# ⭐ 05/09/2026 (demande utilisateur, après avoir constaté en conditions réelles que `npm install`
-# (rpio/serialport, compilation native) pouvait dépasser plusieurs minutes ET le timeout d'inactivité
-# du vrai déploiement en ligne, laissant un process orphelin sur le RPi1 à chaque fois) — `--apps`
-# copie le device-agent de la ou des app(s) listée(s) DANS L'IMAGE et y lance `npm install
-# --production` dans le chroot (donc à la vitesse de CETTE machine, pas celle du Pi). Le vrai
-# déploiement en ligne (DeployService.ts::ensureNodeModules) détecte alors que node_modules existe
-# déjà et saute directement à l'écriture/démarrage du service — quasi instantané.
-#
-# Toujours au moins 2 clés dans authorized_keys :
-#  - la clé unique dimotic-ha (data/core/ssh/id_ed25519.pub, générée automatiquement au démarrage,
-#    voir core/infrastructure/remote/SshClient.ts) — déploiement automatique depuis l'IHM
-#  - la/les clé(s) personnelle(s) passée(s) via --key — accès manuel de secours
-#
-# Pas de mot de passe root créé — cohérent avec le mécanisme existant (jamais de mot de passe,
-# uniquement des clés).
-#
-# ⭐ L'agrandissement de rootfs est une optimisation, pas une correction : Raspberry Pi OS le fait
-# déjà tout seul au premier démarrage (service firstboot/resize2fs_once). Le faire ici évite juste
-# cette étape (potentiellement lente sur du matériel faible, même thème que l'installation npm — voir
-# TODO.md) au moment critique du tout premier boot.
-#
-# Prérequis (une fois, sur cette machine hôte) :
-#   sudo apt install qemu-user-static binfmt-support parted e2fsprogs
+# ⭐ 26/09/2026 — refonte (demande utilisateur) : avant, tout le lourd (Docker, Node, paquets, apps,
+# WiFi) se faisait APRÈS l'écriture, sur la carte physique elle-même (lent, à refaire pour chaque
+# carte). Désormais dans l'image de base, une fois, puis cache. Ancienne version :
+# backups/applications/outils/reposcripts/scripts/prepare-sd-card_backup_2026-09-26_refonte-carte-sd.sh
 
 set -euo pipefail
 
 if [ "$EUID" -ne 0 ]; then
-  echo "Ce script doit être lancé avec sudo (partitionnement + écriture de fichiers root)." >&2
+  echo "Ce script doit être lancé avec sudo (périphérique loop + montages)." >&2
   exit 1
 fi
 
 usage() {
-  echo "Usage: $0 <device ex: /dev/sda> [--key <clé_publique.pub>]... [--packages pkg1,pkg2,...] [--hostname <nom>] [--apps app1,app2,...] [--wifi-ssid <ssid> --wifi-pass <mot_de_passe> [--wifi-country <FR>]] [--user <nom_utilisateur>]" >&2
+  echo "Usage:" >&2
+  echo "  $0 base <image.img> [--packages p1,p2] [--apps a1,a2] [--extra-mb N]" >&2
+  echo "  $0 legacy-machine <image.img> [--hostname H] [--user U] [--key k.pub]... [--wifi-ssid S --wifi-pass P --wifi-country FR]" >&2
   exit 1
 }
 
-DEVICE="${1:-}"
-[ -n "$DEVICE" ] || usage
-shift
+MODE="${1:-}"
+IMAGE="${2:-}"
+[ -n "$MODE" ] && [ -n "$IMAGE" ] || usage
+shift 2
+[ -f "$IMAGE" ] || { echo "Image introuvable : $IMAGE" >&2; exit 1; }
 
 PERSONAL_KEYS=()
 PACKAGES=""
-HOSTNAME_ARG=""
 APPS=""
+EXTRA_MB=2048
+HOSTNAME_ARG=""
+USER_ARG=""
 WIFI_SSID=""
 WIFI_PASS=""
 WIFI_COUNTRY=""
-USER_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --key)
-      PERSONAL_KEYS+=("$2")
-      shift 2
-      ;;
-    --packages)
-      PACKAGES="$2"
-      shift 2
-      ;;
-    --hostname)
-      HOSTNAME_ARG="$2"
-      shift 2
-      ;;
-    --apps)
-      APPS="$2"
-      shift 2
-      ;;
-    --wifi-ssid)
-      WIFI_SSID="$2"
-      shift 2
-      ;;
-    --wifi-pass)
-      WIFI_PASS="$2"
-      shift 2
-      ;;
-    --wifi-country)
-      WIFI_COUNTRY="$2"
-      shift 2
-      ;;
-    --user)
-      USER_ARG="$2"
-      shift 2
-      ;;
-    *)
-      echo "Argument inconnu: $1" >&2
-      usage
-      ;;
+    --packages) PACKAGES="$2"; shift 2 ;;
+    --apps) APPS="$2"; shift 2 ;;
+    --extra-mb) EXTRA_MB="$2"; shift 2 ;;
+    --hostname) HOSTNAME_ARG="$2"; shift 2 ;;
+    --user) USER_ARG="$2"; shift 2 ;;
+    --key) PERSONAL_KEYS+=("$2"); shift 2 ;;
+    --wifi-ssid) WIFI_SSID="$2"; shift 2 ;;
+    --wifi-pass) WIFI_PASS="$2"; shift 2 ;;
+    --wifi-country) WIFI_COUNTRY="$2"; shift 2 ;;
+    *) echo "Argument inconnu : $1" >&2; usage ;;
   esac
 done
 
-[ -z "$WIFI_PASS" ] || [ -n "$WIFI_SSID" ] || { echo "--wifi-pass fourni sans --wifi-ssid." >&2; usage; }
-
-# --- Table app -> (répertoire local device-agent, répertoire distant) — voir --apps ci-dessus.
-# ⭐ Seul `teleinfo` est câblé pour l'instant : seule app vérifiée avec ce patron exact (agent copié
-# tel quel + npm install --production, PAS de config.yaml généré ici — écrit par le vrai déploiement
-# en ligne, qui connaît les compteurs/réglages réels). Pour ajouter une app future avec le même
-# patron (ex: arexx), ajouter une entrée ici ET s'assurer que son remoteDir par défaut
-# (config-schema.ts de cette app) correspond exactement à la valeur utilisée ci-dessous.
-app_local_dir() {
-  case "$1" in
-    teleinfo) echo "$SCRIPT_DIR/../applications/teleinfo/device-agent" ;;
-    *) echo "" ;;
-  esac
-}
-app_remote_dir() {
-  case "$1" in
-    # ⭐ 16/09/2026 — synchronisé avec le nouveau défaut de teleinfo/src/domain/config-schema.ts
-    # (remoteDir), voir fonctionnelles-sauvegarde_specs_v1.0.md §4ter.
-    teleinfo) echo "/dimotic-ha-addons/teleinfo" ;;
-    *) echo "" ;;
-  esac
-}
-# ⭐ 06/09/2026, bug réel corrigé en conditions réelles — sur une image Raspberry Pi OS non
-# personnalisée, /dev/ttyAMA0 sert AUSSI de console série de login (serial-getty@ttyAMA0.service +
-# `console=serial0,115200` dans cmdline.txt sur bootfs, modifié séparément côté
-# flash-sd-card.js::customizeBootfs). teleinfo a besoin de l'UART en exclusivité (protocole 1200
-# bauds) : partagé avec le getty, quasi tous les octets sont perdus/corrompus (constaté : 0 à
-# quelques octets reçus par cycle de 25s au lieu d'une trame complète, alors que le même matériel
-# fonctionnait très bien sur l'ancienne carte SD, où ce réglage avait été fait manuellement il y a
-# longtemps). Masquage par symlink direct (équivalent de `systemctl mask`), sans dépendre d'un
-# systemd actif dans le chroot.
-app_needs_serial_console_disabled() {
-  case "$1" in
-    teleinfo) echo "yes" ;;
-    *) echo "" ;;
-  esac
-}
-
-[ -b "$DEVICE" ] || { echo "$DEVICE n'est pas un périphérique bloc valide." >&2; exit 1; }
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DIMOTIC_KEY_PATH="$SCRIPT_DIR/../data/core/ssh/id_ed25519.pub"
-[ -f "$DIMOTIC_KEY_PATH" ] || { echo "Clé dimotic-ha introuvable: $DIMOTIC_KEY_PATH (l'app a-t-elle déjà démarré au moins une fois ?)" >&2; exit 1; }
+# Racine du bundle (archive auto-extractible) ou du dépôt : scripts/ est juste en dessous dans le
+# bundle, applications/outils/reposcripts/scripts/ dans un clone.
+if [ -f "$SCRIPT_DIR/../data/core/ssh/id_ed25519.pub" ] || [ -f "$SCRIPT_DIR/../compose.deploy.yaml" ]; then
+  BUNDLE_ROOT="$SCRIPT_DIR/.."
+else
+  BUNDLE_ROOT="$SCRIPT_DIR/../../../.."
+fi
 
-# Ajoute un paquet apt à $PACKAGES s'il n'y est pas déjà (dédoublonnage simple par nom exact).
+# --- Table app -> (device-agent local, répertoire distant, besoin de l'UART en exclusivité).
+# Seul `teleinfo` est câblé (seule app vérifiée avec ce patron : agent copié + npm install
+# --production ; config.yaml écrit ensuite par le vrai déploiement en ligne). ---
+app_local_dir() { case "$1" in teleinfo) echo "$BUNDLE_ROOT/applications/teleinfo/device-agent" ;; *) echo "" ;; esac; }
+app_remote_dir() { case "$1" in teleinfo) echo "/dimotic-ha-addons/teleinfo" ;; *) echo "" ;; esac; }
+# ⭐ 06/09/2026, bug réel — teleinfo a besoin de /dev/ttyAMA0 en exclusivité (1200 bauds) : console
+# série du noyau (cmdline.txt) et login série (getty) désactivés, sinon quasi tous les octets sont
+# perdus.
+app_needs_serial_console_disabled() { case "$1" in teleinfo) echo "yes" ;; *) echo "" ;; esac; }
+
+# ==========================================================================
+# Loop + montages communs
+# ==========================================================================
+
+LOOP_DEV=""
+ROOTFS=""
+BOOTFS=""
+cleanup() {
+  if [ -n "$ROOTFS" ]; then
+    for d in sys proc dev/pts dev; do
+      mountpoint -q "$ROOTFS/$d" 2>/dev/null && umount "$ROOTFS/$d" || true
+    done
+    mountpoint -q "$ROOTFS" 2>/dev/null && umount "$ROOTFS" || true
+    rmdir "$ROOTFS" 2>/dev/null || true
+  fi
+  if [ -n "$BOOTFS" ]; then
+    mountpoint -q "$BOOTFS" 2>/dev/null && umount "$BOOTFS" || true
+    rmdir "$BOOTFS" 2>/dev/null || true
+  fi
+  [ -n "$LOOP_DEV" ] && losetup -d "$LOOP_DEV" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+attach_and_mount() {
+  LOOP_DEV="$(losetup -fP --show "$IMAGE")"
+  echo "Image attachée : $LOOP_DEV"
+  ROOTFS="$(mktemp -d /tmp/sd-rootfs.XXXXXX)"
+  BOOTFS="$(mktemp -d /tmp/sd-bootfs.XXXXXX)"
+  mount "${LOOP_DEV}p2" "$ROOTFS"
+  mount "${LOOP_DEV}p1" "$BOOTFS"
+}
+
+setup_chroot() {
+  echo "Détection de l'architecture cible (en-tête ELF, sans exécution)..."
+  local probe="$ROOTFS/usr/bin/dpkg"
+  [ -f "$probe" ] || probe="$ROOTFS/bin/bash"
+  local info
+  info="$(file -bL "$probe")"
+  case "$info" in
+    *aarch64*) QEMU_BIN=qemu-aarch64-static ;;
+    *ARM,*)    QEMU_BIN=qemu-arm-static ;;
+    *) echo "Architecture non reconnue : $info" >&2; exit 1 ;;
+  esac
+  [ -x "/usr/bin/$QEMU_BIN" ] || { echo "/usr/bin/$QEMU_BIN introuvable — sudo apt install qemu-user-static binfmt-support" >&2; exit 1; }
+  echo "Architecture : $QEMU_BIN"
+  cp "/usr/bin/$QEMU_BIN" "$ROOTFS/usr/bin/$QEMU_BIN"
+  for d in dev dev/pts proc sys; do
+    mountpoint -q "$ROOTFS/$d" || mount --bind "/$d" "$ROOTFS/$d"
+  done
+  # Résolution DNS dans le chroot (apt, curl) : celle de CETTE machine, le temps de l'installation.
+  if [ -e "$ROOTFS/etc/resolv.conf" ] || [ -L "$ROOTFS/etc/resolv.conf" ]; then
+    mv "$ROOTFS/etc/resolv.conf" "$ROOTFS/etc/resolv.conf.sd-card-orig"
+  fi
+  cp -L /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
+}
+
+# ⭐ bug réel corrigé (05/09/2026) : QEMU en mode utilisateur ne résout pas $PATH — toujours passer
+# par /bin/bash -c "...".
+# LC_ALL=C : la langue de CETTE machine (fr_FR) n'existe pas dans l'image — sans ça, apt/perl
+# inondent le journal d'avertissements « Setting locale failed ».
+in_chroot() { LC_ALL=C LANG=C LANGUAGE= chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "$1"; }
+
+teardown_chroot() {
+  rm -f "$ROOTFS/etc/resolv.conf"
+  if [ -e "$ROOTFS/etc/resolv.conf.sd-card-orig" ] || [ -L "$ROOTFS/etc/resolv.conf.sd-card-orig" ]; then
+    mv "$ROOTFS/etc/resolv.conf.sd-card-orig" "$ROOTFS/etc/resolv.conf"
+  fi
+  rm -f "$ROOTFS/usr/bin/$QEMU_BIN"
+}
+
+# ==========================================================================
+# Mode base
+# ==========================================================================
+
 add_package_if_missing() {
   case ",$PACKAGES," in
     *",$1,"*) ;;
@@ -180,256 +173,146 @@ add_package_if_missing() {
   esac
 }
 
-if [ -n "$APPS" ]; then
-  IFS=',' read -ra APPS_ARR <<< "$APPS"
-  for app in "${APPS_ARR[@]}"; do
-    local_dir="$(app_local_dir "$app")"
-    [ -n "$local_dir" ] || { echo "App inconnue de --apps: $app (seule 'teleinfo' est câblée pour l'instant — voir app_local_dir/app_remote_dir en tête de script)" >&2; exit 1; }
-    [ -d "$local_dir" ] || { echo "Répertoire device-agent introuvable pour $app: $local_dir" >&2; exit 1; }
-  done
-fi
+run_base() {
+  local dimotic_key="$BUNDLE_ROOT/data/core/ssh/id_ed25519.pub"
+  local compose="$BUNDLE_ROOT/compose.deploy.yaml"
+  [ -f "$dimotic_key" ] || { echo "Clé dimotic-ha introuvable : $dimotic_key" >&2; exit 1; }
+  [ -f "$compose" ] || { echo "compose.deploy.yaml introuvable : $compose" >&2; exit 1; }
 
-# ⭐ 18/09/2026 (demande utilisateur) — systématique sur CHAQUE carte, voir en-tête du script.
-# build-essential : node-gyp (rpio/serialport) a besoin d'un compilateur, absent d'une image Lite de
-# base — toujours nécessaire maintenant que serialport est installé globalement (voir plus bas).
-add_package_if_missing build-essential
-add_package_if_missing nodejs
-add_package_if_missing mosquitto-clients
-
-# --- Nom des 2 partitions (bootfs/rootfs) — gère les 2 conventions de nommage (/dev/sda1 vs
-# /dev/mmcblk0p1 pour un lecteur intégré). ---
-if [[ "$DEVICE" =~ [0-9]$ ]]; then
-  PART_SUFFIX="p"
-else
-  PART_SUFFIX=""
-fi
-BOOTFS_PART="${DEVICE}${PART_SUFFIX}1"
-ROOTFS_PART="${DEVICE}${PART_SUFFIX}2"
-[ -b "$BOOTFS_PART" ] && [ -b "$ROOTFS_PART" ] || { echo "Partitions attendues introuvables ($BOOTFS_PART / $ROOTFS_PART) — carte pas au format Raspberry Pi OS standard ?" >&2; exit 1; }
-
-echo "Périphérique : $DEVICE (bootfs=$BOOTFS_PART, rootfs=$ROOTFS_PART)"
-
-# --- Démonter si déjà monté (l'environnement de bureau monte souvent automatiquement à l'insertion) ---
-echo "Vérification des montages existants..."
-for p in "$BOOTFS_PART" "$ROOTFS_PART"; do
-  mp="$(findmnt -n -o TARGET "$p" 2>/dev/null || true)"
-  if [ -n "$mp" ]; then
-    echo "Démontage de $p ($mp)..."
-    umount "$mp"
+  local apps_arr=()
+  if [ -n "$APPS" ]; then
+    IFS=',' read -ra apps_arr <<< "$APPS"
+    for app in "${apps_arr[@]}"; do
+      local d
+      d="$(app_local_dir "$app")"
+      [ -n "$d" ] || { echo "App inconnue : $app (seule 'teleinfo' est câblée)" >&2; exit 1; }
+      [ -d "$d" ] || { echo "device-agent introuvable pour $app : $d" >&2; exit 1; }
+    done
   fi
-done
 
-# --- Agrandissement de rootfs à la taille réelle de la carte (voir note en en-tête — optimisation,
-# pas une correction). resizepart doit s'appliquer sur le périphérique ENTIER, pas la partition. ---
-echo "Agrandissement de la partition rootfs ($ROOTFS_PART) à la taille de la carte (parted)..."
-parted -s "$DEVICE" resizepart 2 100%
-echo "Vérification du système de fichiers avant redimensionnement (e2fsck)..."
-e2fsck -f -p "$ROOTFS_PART" || true   # -p: corrige automatiquement, code retour non-fatal attendu si déjà propre
-echo "Redimensionnement du système de fichiers ext4 (resize2fs, peut prendre un moment sur une grande carte)..."
-resize2fs "$ROOTFS_PART"
-echo "rootfs agrandi."
+  # Systématiques (voir en-tête) — build-essential pour la compilation native de serialport.
+  add_package_if_missing build-essential
+  add_package_if_missing nodejs
+  add_package_if_missing mosquitto-clients
+  add_package_if_missing curl
 
-# --- Montage contrôlé (pas de dépendance à un montage automatique de bureau) ---
-echo "Montage de rootfs pour la suite (SSH root, paquets, apps)..."
-MOUNT_DIR="$(mktemp -d /tmp/prepare-sd-card.XXXXXX)"
-mount "$ROOTFS_PART" "$MOUNT_DIR"
-ROOTFS="$MOUNT_DIR"
+  echo "Agrandissement de l'image de ${EXTRA_MB} Mo (place pour Docker, Node, paquets)..."
+  truncate -s "+${EXTRA_MB}M" "$IMAGE"
+  parted -s "$IMAGE" resizepart 2 100%
+  LOOP_DEV="$(losetup -fP --show "$IMAGE")"
+  e2fsck -f -p "${LOOP_DEV}p2" || true
+  resize2fs "${LOOP_DEV}p2"
+  losetup -d "$LOOP_DEV"; LOOP_DEV=""
 
-cleanup() {
-  for d in sys proc dev; do
-    mountpoint -q "$ROOTFS/$d" 2>/dev/null && umount "$ROOTFS/$d" || true
-  done
-  mountpoint -q "$ROOTFS" 2>/dev/null && umount "$ROOTFS" || true
-  rmdir "$MOUNT_DIR" 2>/dev/null || true
-}
-trap cleanup EXIT
+  attach_and_mount
+  setup_chroot
 
-# --- Détection de l'architecture cible — lecture d'en-tête ELF, SANS exécution. ---
-echo "Détection de l'architecture cible (lecture d'en-tête ELF, sans exécution)..."
-ARCH_PROBE="$ROOTFS/bin/bash"
-[ -f "$ARCH_PROBE" ] || ARCH_PROBE="$ROOTFS/usr/bin/dpkg"
-[ -f "$ARCH_PROBE" ] || { echo "Impossible de détecter l'architecture (ni bin/bash ni usr/bin/dpkg trouvés dans rootfs)." >&2; exit 1; }
-ARCH_INFO="$(file -b "$ARCH_PROBE")"
-case "$ARCH_INFO" in
-  *aarch64*) QEMU_BIN=qemu-aarch64-static ;;
-  *ARM,*)    QEMU_BIN=qemu-arm-static ;;
-  *)
-    echo "Architecture non reconnue pour $ARCH_PROBE: $ARCH_INFO" >&2
-    exit 1
-    ;;
-esac
-QEMU_SRC="/usr/bin/$QEMU_BIN"
-[ -x "$QEMU_SRC" ] || { echo "$QEMU_SRC introuvable — installer d'abord: sudo apt install qemu-user-static binfmt-support" >&2; exit 1; }
-echo "Architecture détectée : $ARCH_INFO -> $QEMU_BIN"
+  echo "Installation des paquets : $PACKAGES"
+  # Acquire::Retries : les miroirs Raspbian redirigent vers des serveurs tiers parfois
+  # injoignables (constaté le 26/09/2026 : échec sur mirror.netzwerge.de) — nouvelles tentatives.
+  in_chroot "export DEBIAN_FRONTEND=noninteractive; apt-get -o Acquire::Retries=5 update && apt-get -o Acquire::Retries=5 install -y $(echo "$PACKAGES" | tr ',' ' ')"
 
-# --- Nom d'hôte (optionnel) — bug réel corrigé (05/09/2026) : la personnalisation du premier boot
-# faite côté flash-sd-card.js (userconf.txt + fichier ssh, sur bootfs) crée bien l'utilisateur et
-# active SSH, mais NE touche PAS au nom d'hôte — mécanisme complètement différent côté Raspberry Pi
-# OS (le script firstrun.sh de l'Imager officiel, jamais reproduit ici). Plus simple et plus fiable
-# d'écrire directement /etc/hostname + /etc/hosts sur rootfs, déjà monté ici pour l'agrandissement. ---
-if [ -n "$HOSTNAME_ARG" ]; then
-  echo "$HOSTNAME_ARG" > "$ROOTFS/etc/hostname"
-  # Convention Raspbian : 127.0.1.1 <hostname> — remplace la ligne existante si présente (image de
-  # base livrée avec 127.0.1.1 raspberrypi), l'ajoute sinon.
-  if grep -q '^127\.0\.1\.1' "$ROOTFS/etc/hosts" 2>/dev/null; then
-    sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$HOSTNAME_ARG/" "$ROOTFS/etc/hosts"
-  else
-    echo -e "127.0.1.1\t$HOSTNAME_ARG" >> "$ROOTFS/etc/hosts"
-  fi
-  echo "Nom d'hôte configuré : $HOSTNAME_ARG"
-fi
+  # npm : tarball autonome (pas le paquet Debian, ~400 paquets sans rapport) — version tenue
+  # synchronisée avec NPM_STANDALONE_VERSION de applications/teleinfo/src/domain/DeployService.ts.
+  local npm_version="10.8.2"
+  in_chroot "node -v" >/dev/null 2>&1 || { echo "node introuvable dans l'image après apt-get install nodejs" >&2; exit 1; }
+  in_chroot "npm -v" >/dev/null 2>&1 || {
+    echo "npm absent — installation autonome (tarball)..."
+    in_chroot "mkdir -p /usr/lib/node_modules/npm && curl -fsSL https://registry.npmjs.org/npm/-/npm-${npm_version}.tgz | tar -xz -C /usr/lib/node_modules/npm --strip-components=1 && chmod +x /usr/lib/node_modules/npm/bin/npm-cli.js && ln -sf /usr/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm"
+  }
+  echo "npm globaux : serialport, mqtt..."
+  in_chroot "npm install -g serialport mqtt"
 
-# --- SSH root : drop-in + clés autorisées (aucune exécution nécessaire pour cette partie). ---
-mkdir -p "$ROOTFS/etc/ssh/sshd_config.d"
-echo "PermitRootLogin yes" > "$ROOTFS/etc/ssh/sshd_config.d/permit-root-login.conf"
+  echo "Docker CE (script officiel get.docker.com)..."
+  in_chroot "curl -fsSL https://get.docker.com | sh"
 
-mkdir -p "$ROOTFS/root/.ssh"
-cat "$DIMOTIC_KEY_PATH" > "$ROOTFS/root/.ssh/authorized_keys"
-for k in "${PERSONAL_KEYS[@]}"; do
-  if [ -f "$k" ]; then
-    cat "$k" >> "$ROOTFS/root/.ssh/authorized_keys"
-  else
-    echo "Clé personnelle introuvable, ignorée: $k" >&2
-  fi
-done
-chmod 700 "$ROOTFS/root/.ssh"
-chmod 600 "$ROOTFS/root/.ssh/authorized_keys"
-chown -R 0:0 "$ROOTFS/root/.ssh"
-echo "SSH root prêt. Clés dans authorized_keys :"
-cat "$ROOTFS/root/.ssh/authorized_keys"
+  echo "/docker/dimotic-ha/ (compose.yaml, NON démarré)..."
+  mkdir -p "$ROOTFS/docker/dimotic-ha/data" "$ROOTFS/docker/dimotic-ha/logs"
+  cp "$compose" "$ROOTFS/docker/dimotic-ha/compose.yaml"
 
-# --- SSH utilisateur (⭐ 16/09/2026, demande utilisateur — manquait jusqu'ici, seul root recevait
-# des clés) : clés PERSONNELLES uniquement, jamais la clé dimotic-ha (l'automatisation reste
-# exclusivement en root direct, voir les commentaires "Toujours en root direct" des config-schema.ts
-# de teleinfo/arexx/rpigpio — pas de raison de la donner aussi à l'utilisateur humain).
-#
-# Pas de user/groupe "$USER_ARG" dans /etc/passwd de ce rootfs à ce stade : le compte n'est créé
-# qu'au vrai premier boot du Pi (userconfig.service, à partir de userconf.txt déposé sur bootfs par
-# flash-sd-card.js::customizeBootfs — mécanisme séparé, pas encore appliqué ici). `chown` numérique
-# sur l'UID/GID 1000 plutôt que par nom : c'est la convention Raspberry Pi OS pour le premier
-# utilisateur créé via ce mécanisme (même hypothèse que imager_custom lui-même, qui résout
-# `getent passwd 1000` pour ce même premier utilisateur). ---
-if [ -n "$USER_ARG" ]; then
-  USER_HOME="$ROOTFS/home/$USER_ARG"
-  mkdir -p "$USER_HOME/.ssh"
-  : > "$USER_HOME/.ssh/authorized_keys"
-  for k in "${PERSONAL_KEYS[@]}"; do
-    if [ -f "$k" ]; then
-      cat "$k" >> "$USER_HOME/.ssh/authorized_keys"
-    else
-      echo "Clé personnelle introuvable, ignorée: $k" >&2
-    fi
-  done
-  chmod 700 "$USER_HOME/.ssh"
-  chmod 600 "$USER_HOME/.ssh/authorized_keys"
-  chown -R 1000:1000 "$USER_HOME/.ssh"
-  echo "SSH utilisateur ($USER_ARG) prêt. Clés dans authorized_keys :"
-  cat "$USER_HOME/.ssh/authorized_keys"
-fi
-
-# --- Désactivation du login série (getty) pour les apps qui ont besoin de l'UART en exclusivité
-# (voir app_needs_serial_console_disabled ci-dessus). ---
-if [ -n "$APPS" ]; then
-  for app in "${APPS_ARR[@]}"; do
-    if [ "$(app_needs_serial_console_disabled "$app")" = "yes" ]; then
-      echo "Désactivation du login série sur ttyAMA0 (app $app a besoin de l'UART en exclusivité)..."
-      mkdir -p "$ROOTFS/etc/systemd/system"
-      ln -sf /dev/null "$ROOTFS/etc/systemd/system/serial-getty@ttyAMA0.service"
-      break
-    fi
-  done
-fi
-
-# --- Paquets apt + apps + Docker CE + Node.js — nécessitent le chroot+QEMU, exécutés sur CETTE
-# machine (rapide), pas sur le Pi cible (voir TODO.md : apt/npm sur un RPi1 ARMv6 peuvent être
-# extrêmement lents — jusqu'à laisser un process orphelin sur la cible si le timeout d'inactivité du
-# vrai déploiement en ligne est dépassé, constaté en conditions réelles le 05/09/2026).
-# ⭐ 18/09/2026 — désormais TOUJOURS nécessaire (plus conditionné à --packages/--apps/--wifi-ssid) :
-# Docker CE + Node.js/serialport/mqtt sont systématiques (voir en-tête du script). Montages communs à
-# toutes les étapes suivantes, faits une seule fois. ---
-echo "Préparation de l'environnement d'émulation ($QEMU_BIN) — copie dans rootfs et montage de /dev, /proc, /sys..."
-cp "$QEMU_SRC" "$ROOTFS/usr/bin/$QEMU_BIN"
-for d in dev proc sys; do
-  mountpoint -q "$ROOTFS/$d" || mount --bind "/$d" "$ROOTFS/$d"
-done
-echo "Environnement d'émulation prêt — entrée dans le chroot pour les étapes suivantes."
-
-# --- WiFi : réutilise le script OFFICIEL Raspberry Pi imager_custom (déjà présent dans l'image,
-# c'est lui qu'utilise Raspberry Pi Imager pour son option "Configurer le WiFi") plutôt que de
-# reconstruire le format NetworkManager nous-mêmes — écrit /etc/NetworkManager/system-connections/
-# preconfigured.nmconnection (chmod 600) + configure le pays régulateur via raspi-config. ⭐
-# 16/09/2026, vérifié en inspectant l'image réelle (bookworm-lite) : cette image utilise déjà
-# NetworkManager (pas dhcpcd/wpa_supplicant autonome) — un simple wpa_supplicant.conf déposé sur
-# bootfs, envisagé initialement, n'aurait pas été repris. ---
-if [ -n "$WIFI_SSID" ]; then
-  echo "Configuration WiFi (SSID: $WIFI_SSID) via imager_custom (mécanisme officiel Raspberry Pi Imager)..."
-  chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c \
-    "/usr/lib/raspberrypi-sys-mods/imager_custom set_wlan $(printf '%q' "$WIFI_SSID") $(printf '%q' "$WIFI_PASS") $(printf '%q' "$WIFI_COUNTRY")"
-  echo "WiFi configuré."
-fi
-
-if [ -n "$PACKAGES" ]; then
-  echo "Installation de paquets via chroot : $PACKAGES"
-  PACKAGES_SPACED="$(echo "$PACKAGES" | tr ',' ' ')"
-  chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c \
-    "export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y $PACKAGES_SPACED"
-fi
-
-# ⭐ 18/09/2026 — Node.js/npm désormais systématiques (nodejs ajouté d'office à $PACKAGES ci-dessus,
-# donc déjà installé par l'apt-get install juste au-dessus). npm PAS installé via apt — même tarball
-# autonome que DeployService.ts::ensureNode (voir son commentaire détaillé), pour ne pas gonfler
-# l'image avec les ~400 paquets Debian sans rapport (eslint/webpack/git/X11...). Version tenue
-# synchronisée à la main avec NPM_STANDALONE_VERSION dans
-# applications/teleinfo/src/domain/DeployService.ts.
-NPM_STANDALONE_VERSION="10.8.2"
-# ⭐ bug réel corrigé en conditions réelles (05/09/2026) : `chroot rootfs qemu-arm-static node -v`
-# échouait ("node introuvable") même juste après un `apt-get install nodejs` réussi — QEMU en mode
-# utilisateur n'exécute pas de shell, donc ne fait AUCUNE résolution de $PATH ; il attend un CHEMIN
-# (relatif au chroot) vers l'exécutable. `node -v` sans /bin/bash -c cherchait donc littéralement
-# "./node" depuis "/", pas "/usr/bin/node". Toutes les commandes chroot+QEMU de ce script DOIVENT
-# passer par `/bin/bash -c "..."` (comme déjà fait pour apt-get et npm install ci-dessous) — cette
-# vérification était la seule exception, oubliée.
-chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "node -v" >/dev/null 2>&1 || { echo "node introuvable dans le chroot après apt-get install nodejs — image sans dépôt Node ?" >&2; exit 1; }
-chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "npm -v" >/dev/null 2>&1 || {
-  echo "npm absent du chroot — installation autonome (tarball, pas le paquet Debian)..."
-  chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c \
-    "mkdir -p /usr/lib/node_modules/npm && curl -fsSL https://registry.npmjs.org/npm/-/npm-${NPM_STANDALONE_VERSION}.tgz | tar -xz -C /usr/lib/node_modules/npm --strip-components=1 && chmod +x /usr/lib/node_modules/npm/bin/npm-cli.js && ln -sf /usr/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm"
-}
-
-# ⭐ 18/09/2026 (demande utilisateur) — dépendances npm "minimum" installées globalement, pour que
-# tout script Node écrit à la main sur la carte (pas forcément une app dimotic-ha listée via --apps)
-# puisse `require('serialport')`/`require('mqtt')` sans accès réseau depuis le Pi lui-même. Compilées
-# ici via QEMU sur CETTE machine (rapide), pas sur le Pi cible — même raison de fond que les
-# node_modules pré-installés des apps ci-dessous.
-echo "Installation globale npm : serialport, mqtt..."
-chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "npm install -g serialport mqtt"
-
-# ⭐ 18/09/2026 (demande utilisateur) — Docker CE officiel systématique, PAS le paquet apt docker.io
-# (trop ancien/incomplet). Script officiel get.docker.com, exécuté dans le chroot (donc à la vitesse
-# de CETTE machine).
-echo "Installation de Docker CE (script officiel get.docker.com)..."
-chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "curl -fsSL https://get.docker.com | sh"
-
-# ⭐ 18/09/2026 (demande utilisateur) — /docker/dimotic-ha/ pré-rempli systématiquement (compose.yaml
-# + data/+logs/ vides), copié tel quel depuis compose.deploy.yaml (fichier canonique du dépôt, déjà
-# vérifié identique à la copie en production sur ha2). Simple copie de fichiers sur rootfs, AUCUNE
-# exécution (pas de chroot nécessaire ici) — surtout PAS de `docker compose up` : l'utilisateur
-# démarre lui-même au premier boot, une fois la carte insérée dans le Pi cible.
-echo "Provisionnement de /docker/dimotic-ha/ (compose.yaml, non démarré)..."
-mkdir -p "$ROOTFS/docker/dimotic-ha/data" "$ROOTFS/docker/dimotic-ha/logs"
-cp "$SCRIPT_DIR/../compose.deploy.yaml" "$ROOTFS/docker/dimotic-ha/compose.yaml"
-
-if [ -n "$APPS" ]; then
-  for app in "${APPS_ARR[@]}"; do
+  for app in "${apps_arr[@]}"; do
+    local local_dir remote_dir
     local_dir="$(app_local_dir "$app")"
     remote_dir="$(app_remote_dir "$app")"
-    echo "App $app : copie de $local_dir vers rootfs$remote_dir, puis npm install --production dans le chroot..."
+    echo "App $app : $remote_dir + npm install --production..."
     mkdir -p "$ROOTFS$remote_dir"
     cp -r "$local_dir"/. "$ROOTFS$remote_dir"/
-    chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "cd '$remote_dir' && npm install --production"
-    echo "App $app : node_modules pré-installé ($(chroot "$ROOTFS" "/usr/bin/$QEMU_BIN" /bin/bash -c "ls '$remote_dir/node_modules' | wc -l") paquets)."
+    in_chroot "cd '$remote_dir' && npm install --production"
+    if [ "$(app_needs_serial_console_disabled "$app")" = "yes" ]; then
+      echo "App $app : console série désactivée (cmdline.txt + login série) — UART en exclusivité."
+      sed -i -E 's/console=(serial0|ttyAMA0),115200 ?//g' "$BOOTFS/cmdline.txt"
+      mkdir -p "$ROOTFS/etc/systemd/system"
+      ln -sf /dev/null "$ROOTFS/etc/systemd/system/serial-getty@ttyAMA0.service"
+    fi
   done
-fi
 
-sync
-echo "Terminé — carte prête (rootfs agrandi, SSH root configuré, Docker CE installé, /docker/dimotic-ha/ provisionné (non démarré), Node.js+serialport+mqtt installés, paquets: $PACKAGES$( [ -n "$APPS" ] && echo ", apps pré-installées: $APPS" )$( [ -n "$WIFI_SSID" ] && echo ", WiFi configuré ($WIFI_SSID)" )). Démontage automatique en sortie de script, puis insérer la carte dans le Pi cible."
+  echo "Accès SSH root : clé dimotic-ha (les clés personnelles sont ajoutées par machine)..."
+  mkdir -p "$ROOTFS/etc/ssh/sshd_config.d" "$ROOTFS/root/.ssh"
+  echo "PermitRootLogin yes" > "$ROOTFS/etc/ssh/sshd_config.d/permit-root-login.conf"
+  cat "$dimotic_key" > "$ROOTFS/root/.ssh/authorized_keys"
+  chmod 700 "$ROOTFS/root/.ssh"; chmod 600 "$ROOTFS/root/.ssh/authorized_keys"; chown -R 0:0 "$ROOTFS/root/.ssh"
+
+  # --- Nettoyage : l'image sera clonée sur plusieurs machines. ---
+  echo "Nettoyage avant clonage : cache apt, clés d'hôte SSH, machine-id, état cloud-init..."
+  in_chroot "apt-get clean" || true
+  rm -rf "$ROOTFS/var/lib/apt/lists/"* 2>/dev/null || true
+  rm -f "$ROOTFS"/etc/ssh/ssh_host_*
+  printf 'uninitialized\n' > "$ROOTFS/etc/machine-id"
+  if [ -f "$ROOTFS/var/lib/dbus/machine-id" ] && [ ! -L "$ROOTFS/var/lib/dbus/machine-id" ]; then
+    rm -f "$ROOTFS/var/lib/dbus/machine-id"
+  fi
+  rm -rf "$ROOTFS/var/lib/cloud" 2>/dev/null || true
+  teardown_chroot
+
+  echo "Place restante dans l'image : $(df -h --output=avail "$ROOTFS" | tail -1 | tr -d ' ')"
+  sync
+  echo "Image de base prête."
+}
+
+# ==========================================================================
+# Mode legacy-machine (bookworm, pas de cloud-init)
+# ==========================================================================
+
+run_legacy_machine() {
+  attach_and_mount
+
+  if [ -n "$HOSTNAME_ARG" ]; then
+    echo "$HOSTNAME_ARG" > "$ROOTFS/etc/hostname"
+    if grep -q '^127\.0\.1\.1' "$ROOTFS/etc/hosts" 2>/dev/null; then
+      sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$HOSTNAME_ARG/" "$ROOTFS/etc/hosts"
+    else
+      echo -e "127.0.1.1\t$HOSTNAME_ARG" >> "$ROOTFS/etc/hosts"
+    fi
+    echo "Nom d'hôte : $HOSTNAME_ARG"
+  fi
+
+  for k in "${PERSONAL_KEYS[@]}"; do
+    if [ -f "$k" ]; then cat "$k" >> "$ROOTFS/root/.ssh/authorized_keys"; else echo "Clé personnelle introuvable, ignorée : $k" >&2; fi
+  done
+
+  # Utilisateur : créé au premier démarrage à partir de userconf.txt (bootfs) — UID 1000 par
+  # convention Raspberry Pi OS, d'où le chown numérique.
+  if [ -n "$USER_ARG" ] && [ ${#PERSONAL_KEYS[@]} -gt 0 ]; then
+    local home="$ROOTFS/home/$USER_ARG"
+    mkdir -p "$home/.ssh"
+    : > "$home/.ssh/authorized_keys"
+    for k in "${PERSONAL_KEYS[@]}"; do [ -f "$k" ] && cat "$k" >> "$home/.ssh/authorized_keys"; done
+    chmod 700 "$home/.ssh"; chmod 600 "$home/.ssh/authorized_keys"; chown -R 1000:1000 "$home/.ssh"
+    echo "Clés personnelles installées pour root et $USER_ARG."
+  fi
+
+  if [ -n "$WIFI_SSID" ]; then
+    setup_chroot
+    echo "WiFi (SSID : $WIFI_SSID) via imager_custom (mécanisme officiel Raspberry Pi Imager)..."
+    in_chroot "/usr/lib/raspberrypi-sys-mods/imager_custom set_wlan $(printf '%q' "$WIFI_SSID") $(printf '%q' "$WIFI_PASS") $(printf '%q' "$WIFI_COUNTRY")"
+    teardown_chroot
+  fi
+  sync
+  echo "Personnalisation machine (bookworm) terminée."
+}
+
+case "$MODE" in
+  base) run_base ;;
+  legacy-machine) run_legacy_machine ;;
+  *) usage ;;
+esac

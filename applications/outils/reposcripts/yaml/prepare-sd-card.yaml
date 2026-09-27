@@ -1,9 +1,11 @@
 id: prepare-sd-card
-title: "1/2 — Préparer une image carte SD/clé USB Raspberry Pi"
+title: "Préparer et écrire une carte SD/clé USB Raspberry Pi"
 description: >-
-  Emballe scripts/flash-sd-card.js --prepare (déjà dans le dépôt) : télécharge l'image
-  officielle, la personnalise (SSH + utilisateur) SANS écrire sur une carte/clé physique —
-  aucun périphérique requis. À lancer avant le script de flashage (2/2), qui installera
-  ensuite systématiquement Docker CE, dimotic-ha, Node.js+serialport+mqtt et mosquitto-clients.
+  Toutes les questions au départ (WiFi compris), puis une seule pause pour choisir la carte —
+  « q » pour s'arrêter là (image gardée, reprise directe au choix de la carte en relançant avec
+  les mêmes réponses). Installés SYSTÉMATIQUEMENT dans une image de base préparée une fois dans
+  qemu puis gardée en cache : Docker CE, /docker/dimotic-ha/ (non démarré), Node.js+npm+serialport+mqtt,
+  mosquitto-clients, build-essential, SSH root (clé dimotic-ha). trixie-lite (cloud-init) par
+  défaut, bookworm-lite possible.
 filename: prepare-sd-card.sh
 requiresSudo: true
