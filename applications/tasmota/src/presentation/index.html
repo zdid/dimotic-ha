@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tasmota</title>
+  <link rel="stylesheet" href="/styles/main.css">
+  <style>
+    .tas-container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    .tas-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
+    .tas-header h1 { color: var(--color-accent); margin: 0; font-size: 1.8em; }
+    .card { background: var(--color-surface); border-radius: var(--radius); padding: 18px; margin-bottom: 18px; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+    .card h2 { margin-top: 0; border-bottom: 1px solid var(--color-primary); padding-bottom: 8px; font-size: 1.2em; }
+    .card h3 { font-size: 1em; margin: 16px 0 8px; color: var(--color-accent); }
+    .muted { color: var(--color-text-muted); font-size: .88em; }
+    .modes { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .mode-btn { padding: 6px 12px; border-radius: 16px; border: 1px solid var(--color-primary); background: transparent; color: var(--color-text); cursor: pointer; }
+    .mode-btn.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
+    table.devices { width: 100%; border-collapse: collapse; font-size: .92em; }
+    table.devices th, table.devices td { padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,.08); text-align: left; vertical-align: top; }
+    table.devices tr.selected { background: rgba(255,255,255,.06); }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #888; }
+    .dot.on { background: #3c3; } .dot.off { background: #c33; }
+    .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: .8em; background: #b85c00; color: #fff; }
+    .badge.ok { background: #2e7d32; }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 14px; }
+    .form-grid label { display: flex; flex-direction: column; gap: 4px; font-size: .88em; }
+    .form-grid input, .form-grid select { padding: 6px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+    .preview { font-family: monospace; font-size: .9em; margin-top: 8px; word-break: break-all; }
+    .rule-slot { border: 1px solid rgba(255,255,255,.12); border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+    .rule-slot .modes-check { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; font-size: .88em; }
+    .log { max-height: 280px; overflow: auto; font-family: monospace; font-size: .85em; white-space: pre-wrap; }
+    .log .error { color: #f66; } .log .ok { color: #6c6; }
+    .ap-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+    .ap-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .danger { background: #a33 !important; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="tas-container">
+      <div class="tas-header">
+        <div>
+          <h1>🔌 Tasmota</h1>
+          <p class="muted" id="conn-status">Connexion…</p>
+        </div>
+        <div>
+          <div class="muted">Mode de la maison (aussi dans HA) :</div>
+          <div class="modes" id="modes"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Appareils</h2>
+        <p class="muted">Liste tenue à jour par la découverte des Tasmota. « À nommer » : nom hors convention QUOI---LIEU, non publié dans Home Assistant tant qu'il n'est pas nommé.</p>
+        <table class="devices">
+          <thead><tr><th></th><th>Nom</th><th>QUOI</th><th>Lieu</th><th>Site / topic</th><th>IP</th><th>Modèle / version</th><th>Contenu</th><th>HA</th><th></th></tr></thead>
+          <tbody id="device-rows"></tbody>
+        </table>
+        <p class="muted" id="no-device">Aucun Tasmota vu sur le broker pour l'instant.</p>
+      </div>
+
+      <div class="card hidden" id="fiche">
+        <h2 id="fiche-title">Fiche</h2>
+        <p class="muted" id="fiche-sub"></p>
+
+        <h3>Nom (convention QUOI---LIEU)</h3>
+        <div class="form-grid">
+          <label>QUOI <input list="dl-quoi" id="f-quoi" placeholder="lumière, prise, volet…"></label>
+          <label>Lieu précis <input list="dl-lieux" id="f-precis" placeholder="plafonnier (facultatif)"></label>
+          <label>Lieu (pièce) <input list="dl-lieux" id="f-lieu" placeholder="cuisine d'été"></label>
+          <label>Lieu père (étage) <input list="dl-lieux" id="f-pere" placeholder="rez de chaussée"></label>
+          <label>Lieu grand-père <input list="dl-lieux" id="f-gp" placeholder="maison"></label>
+        </div>
+        <div class="preview" id="f-name-preview"></div>
+        <datalist id="dl-quoi"></datalist>
+        <datalist id="dl-lieux"></datalist>
+
+        <h3>Réseau / MQTT</h3>
+        <div class="form-grid">
+          <label>Site <select id="f-site"></select></label>
+          <label>Nom technique (topic) <input id="f-topic" placeholder="sans accents, 32 max"></label>
+        </div>
+        <p class="muted" id="f-topic-hint"></p>
+
+        <h3>Modèle et Magic Switch</h3>
+        <div class="form-grid">
+          <label>Modèle <select id="f-model"></select></label>
+          <label>Sensibilité Magic Switch (µs, 4000 = standard) <input id="f-pulse" type="number" min="1000" max="100000" placeholder="ne pas changer"></label>
+        </div>
+
+        <h3>Volet roulant</h3>
+        <div class="form-grid">
+          <label><span><input type="checkbox" id="f-shutter"> Mode volet (2 relais)</span></label>
+          <label>Durée d'ouverture (s) <input id="f-open" type="number" min="1" max="600" step="0.1"></label>
+          <label>Durée de fermeture (s) <input id="f-close" type="number" min="1" max="600" step="0.1"></label>
+          <label><span><input type="checkbox" id="f-invert"> Sens inversé</span></label>
+        </div>
+
+        <div class="actions">
+          <button class="btn btn-primary" id="btn-apply">✅ Appliquer à l'appareil</button>
+          <button class="btn btn-secondary" id="btn-read">🔄 Relire</button>
+          <button class="btn btn-secondary" id="btn-identify">💡 Identifier</button>
+          <button class="btn btn-secondary" id="btn-upgrade">⬆️ Mettre à jour (OTA)</button>
+          <button class="btn btn-secondary danger" id="btn-reset">↺ Remise d'usine</button>
+          <button class="btn btn-secondary danger" id="btn-forget">🗑 Oublier</button>
+        </div>
+
+        <h3>Règles (Rule1 à Rule3, stockées dans l'appareil)</h3>
+        <p class="muted">Une règle par emplacement ; active dans les modes cochés (aucun coché = tous les modes).</p>
+        <div id="rules"></div>
+        <div class="actions"><button class="btn btn-primary" id="btn-rules">💾 Enregistrer les règles dans l'appareil</button></div>
+      </div>
+
+      <div class="card">
+        <h2>Mise en service d'un Tasmota neuf</h2>
+        <p class="muted">Depuis la machine par laquelle vous accédez à cette page : son Wi-Fi rejoint le point d'accès du Tasmota neuf (sorti d'usine), lui donne le Wi-Fi et le broker, puis est remis dans son état d'origine. L'Ethernet (domotique) n'est pas touché.</p>
+        <div id="prov-check" class="muted"></div>
+        <div class="actions"><button class="btn btn-secondary" id="btn-scan">📡 Rechercher les Tasmota neufs</button></div>
+        <div class="ap-list" id="ap-list"></div>
+      </div>
+
+      <div class="card">
+        <h2>Paramètres</h2>
+        <div class="form-grid">
+          <label>Wi-Fi (nom) <input id="c-ssid"></label>
+          <label>Wi-Fi (mot de passe, en clair) <input id="c-pass" type="text" autocomplete="off"></label>
+          <label>Broker MQTT <input id="c-host"></label>
+          <label>Port MQTT <input id="c-port" type="number"></label>
+          <label>Sites (séparés par des virgules) <input id="c-sites"></label>
+          <label>Modes (séparés par des virgules) <input id="c-modes"></label>
+          <label>Latitude <input id="c-lat" type="number" step="0.0001"></label>
+          <label>Longitude <input id="c-lon" type="number" step="0.0001"></label>
+          <label><span><input type="checkbox" id="c-publish"> Publier vers Home Assistant</span></label>
+        </div>
+        <div class="actions"><button class="btn btn-primary" id="btn-config">💾 Enregistrer</button></div>
+      </div>
+
+      <div class="card">
+        <h2>Journal</h2>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/applications/tasmota/presentation/ts/app.js"></script>
+
+  <!-- Derniere modification: 2026-09-28 15:59:02 - Création de la page de l'application Tasmota -->
+</body>
+</html>

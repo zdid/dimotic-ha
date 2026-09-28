@@ -69,6 +69,209 @@
 - Tasmota va bientôt entrer dans le périmètre de la domotique : étude plus poussée à faire AVANT tout
   développement (intégration, nommage QUOI/OÙ, supervision). Supervision de zigbee2mqtt et de HA
   (HA par l'accès WS du core) prévue dans les prochaines versions de SUPERVISION.
+- **27/09/2026 — périmètre précisé (utilisateur)**, étude À FAIRE AVANT la mise en œuvre du garage :
+  - **Sites Tasmota** : garage (Pi 3, voir GARAGE3) et **cuisine d'été** (déjà couverte par le Wi-Fi, bientôt
+    en filaire) — surtout des **Sonoff Basic R4** avec leur **« Magic Switch »** (commande par l'interrupteur
+    mural existant). Tasmota le gère nativement (GPIO5 = MagicSwitch, `MagicSwitchPulse`, défaut 4000 µs ;
+    anomalie connue : le relais peut revenir à l'état précédent quand on le commande par MQTT/web —
+    issue arendst/Tasmota#22535, à vérifier sur la version installée).
+  - **Découverte — DÉCIDÉ (27/09/2026), un seul endroit : nommage** : les Tasmota gardent `tasmota/discovery/…`
+    (préfixe NON modifiable côté Tasmota, codé en dur) ; nommage capte ce flux standard, réécrit `dn`/`fn` selon
+    QUOI---LIEU, republie **par MQTT** sous le préfixe réglé dans l'**intégration Tasmota de HA** (ex.
+    `tasmota-ha/discovery`, réglable seulement en ajoutant l'intégration À LA MAIN — vérifié dans
+    `homeassistant/components/tasmota/config_flow.py` ; intégration existante = à supprimer puis rajouter ;
+    ignorer la proposition « ajouter Tasmota » que HA fera sur les messages bruts), puis **affecte la pièce en
+    décalé par WS** (registre des appareils). Valable garage ET cuisine d'été ; le pont Mosquitto du garage ne
+    renomme plus rien. Évolution de nommage (nouvelle source).
+  - **Règles — moteur de règles (idée validée par l'utilisateur 27/09/2026)** : un **modèle commun** YAML
+    (déclencheur → conditions → actions, repris de l'extension zigbee2mqtt existante : `trigger`
+    state/action/numeric_state + `for`, `condition` time/state/numeric_state, `action` turn_on/off/toggle/custom/mqtt,
+    `attribute` pour les voies). L'**IA** (app ia / planificateur) rédige la règle depuis une phrase, **jamais la
+    syntaxe cible** ; le code **valide** (schéma strict, appareils vérifiés par nommage/référentiel HA), **aperçu +
+    confirmation** ; le moteur **stocke, choisit la cible et traduit** de façon déterministe : même ESP → `Rule1..3`
+    Tasmota (≤ 511 car., minuterie pour `for`), Zigbee → `automations.yaml` de zigbee2mqtt, plusieurs appareils du
+    garage → Pi du garage, le reste → automatisation HA ; **redéploiement** au remplacement/renommage d'un appareil.
+    Règles envoyées par MQTT sans reflasher (Berry possible sur les R4 en ESP32). À trancher : où vit le moteur
+    (nouvelle app ou extension de scriptsha).
+  - **Application dimotic-ha `tasmota` (demande utilisateur 28/09/2026, spec à écrire)** :
+    - **Liste tenue à jour** automatiquement (découverte, disponibilité, état) ; les appareils dont le `DeviceName`
+      ne suit pas la convention sont **signalés « nouveaux »** ; bouton **« Identifier »** (fait clignoter/basculer le
+      module pour le repérer physiquement).
+    - **Fiche appareil à libellés clairs**, chaque réglage modifié est **réinjecté dans le Tasmota par MQTT** puis relu
+      (nom, site/FullTopic, Topic, broker, sensibilité Magic Switch, délai anti-rebond LED Berry, version/OTA…).
+    - **Saisie du `DeviceName` en morceaux** : QUOI / lieu précis / lieu / étage / bâtiment, avec listes de choix
+      (pièces HA, catalogue QUOI du référentiel) ; l'application assemble la chaîne de la convention.
+    - **Tout se lance depuis l'application `tasmota`** (précision utilisateur 28/09/2026), pas depuis Outils :
+      les 2 étapes ci-dessous sont des actions de l'application. La 1re (HTTP sur le point d'accès) **s'exécute
+      sur la machine par laquelle on accède à l'application** (falbala, ha2, stfort…), à condition que l'Ethernet
+      porte la domotique et que le Wi-Fi puisse être basculé : Wi-Fi basculé sur le point d'accès du Tasmota, puis
+      **à la fin (succès, échec ou abandon) la connexion Wi-Fi d'origine (non Tasmota) est remise**. Machine sans
+      Ethernet actif ou sans Wi-Fi → action indisponible, avec la raison affichée. À étudier : pilotage de
+      NetworkManager depuis le conteneur Docker (D-Bus de l'hôte, droits). Le script Outils `tasmota-config`
+      (non commité) devient provisoire / à retirer une fois l'application livrée.
+    - **Tasmota neuf, en 2 étapes séparées, lancées indépendamment** : (1) par **HTTP** sur son point d'accès
+      (192.168.4.1) depuis **falbala** (Ethernet pour le réseau normal, sa carte Wi-Fi connectée au point d'accès du
+      Tasmota) → Wi-Fi + MQTT ; (2) le reste **par MQTT** une fois le Tasmota redémarré sur le bon Wi-Fi (script
+      « Configurer un appareil Tasmota » existant, puis l'application). Mot de passe Wi-Fi : **ne pas le mémoriser en
+      clair** dans Outils.
+    - **Règles** : **catalogue de règles préétablies** (minuterie, thermostat…) ; choisir une règle, **régler ses
+      paramètres** (ex. durée), **l'activer / la désactiver** ; **modes** (présence/absence, confort pour les
+      thermostats…) qui activent/désactivent des groupes de règles. Contraintes Tasmota : 3 règles × 511 caractères,
+      Berry sur ESP32. (= sujet 4, dans cette même application.)
+    - **Essais réels du 28/09/2026 (R4 de table, falbala)** : remise d'usine (bouton 40 s) → point d'accès ouvert
+      `tasmota-<MAC6>-<n>`, `/cm` accepté sans mot de passe → `Backlog SSID1; Password1; MqttHost; MqttPort` en HTTP
+      → Tasmota en ligne sur ha2 en ~30 s. **Depuis un conteneur Docker** : `nmcli` pilote le NetworkManager de
+      l'hôte avec `--network host` + `-v /run/dbus/system_bus_socket:/run/dbus/system_bus_socket` +
+      **`--security-opt apparmor=unconfined`** (sinon refus AppArmor sur D-Bus). Pièges constatés :
+      (1) supprimer la connexion temporaire ne suffit pas : NetworkManager **reconnecte tout seul** un profil Wi-Fi
+      existant (`zdid2 1` sur falbala) → restaurer l'état « déconnecté » par `nmcli device disconnect` ;
+      (2) en mode **`WifiConfig 2`** (gestionnaire Wi-Fi), Tasmota affiche son menu mais **refuse `/cm`** → la voie
+      HTTP `/cm` ne vaut que pour un appareil sorti d'usine (formulaire `/wi` à essayer pour l'autre cas) ;
+      (3) `ipv4.never-default yes` indispensable pour ne pas voler la route par défaut.
+    - **Le nommage des Tasmota est fait par l'application `tasmota` elle-même** (décision utilisateur 28/09/2026) —
+      mêmes règles QUOI---LIEU que nommage, mais intervention différente (réécriture de découverte + pièce/étiquette
+      par WS, pas un simple relais MQTT) → **remplace le « sujet 1 » prévu dans nommage** (nommage non modifiée).
+    - **Manques identifiés avant la spec (28/09/2026)** : core sans commande WS pour affecter une pièce à un appareil
+      (`config/device_registry/update`) ni pour les étiquettes (`config/label_registry/*`) ; `TaxonomyHaClassifier` ne
+      lit pas d'étiquette `quoi:` ; parseur QUOI---LIEU et `buildDisplayName` dupliqués par app (nommage, rfxcom,
+      arexx) — à factoriser dans le core ou recopier ; aucun mécanisme générique de données répliquées entre
+      instances ; conteneur Docker : `nmcli` + D-Bus + AppArmor à ajouter à l'image/compose (nouvelle version Docker).
+    - **Décisions utilisateur sur les manques (28/09/2026)** :
+      1. affectation de pièce par WS dans le core : **à faire** ;
+      2./3. étiquettes : jamais utilisées pour zigbee/rfxcom — **regarder ce que fait nommage** : le QUOI y part en
+         `attributs_taxonomie` sur un topic `…/attributs` (`json_attributes_topic`) + `suggested_area`, lus par
+         `TaxonomyHaClassifier` (constat : impossible avec l'intégration Tasmota de HA, qui n'accepte pas ces clés →
+         piste : publier les entités Tasmota en **découverte MQTT standard** `homeassistant/…` comme rfxcom, sans
+         l'intégration Tasmota — à trancher par l'utilisateur) ;
+      4. parseur/`buildDisplayName` : **recopiés** dans l'application pour l'instant ;
+      5. partage des fichiers de paramétrage/données entre machines : **déjà prévu** (sauf fichiers propres à la
+         machine) — l'application range ses fichiers en conséquence ;
+      6. **image Docker complétée** (network-manager + iproute2, volume D-Bus dans les 2 compose) — FAIT 28/09 ;
+         ha2 : `network_mode: host` + `privileged` ✅, AppArmor inactif, NetworkManager (`end0` Ethernet,
+         `wlan0` sur zdid2 → état d'origine à rétablir = reconnexion zdid2) ; **stfort : Raspbian buster sans
+         NetworkManager** (dhcpcd + wpa_supplicant) → nmcli inutilisable, variante `wpa_cli` à prévoir si besoin ;
+         depuis ha2, un Tasmota neuf « derrière le garage » est hors de portée Wi-Fi → mise en service depuis la
+         machine du garage ;
+      7. **mot de passe Wi-Fi en clair** dans l'application pour l'instant, saisi en clair à l'écran ;
+      8. **modes** (présence/absence, confort…) déclenchables **depuis HA** → l'état du mode doit **remonter dans
+         HA** (entité publiée par l'application) ;
+      9. nettoyage de l'essai : **FAIT 28/09** (appareil « Essai » retiré de HA, `autoexec.be` supprimé,
+         `Rule1` vide, `MqttLog 0` après la remise d'usine).
+    - **DÉCIDÉ (utilisateur 28/09/2026) : intégration identique à rfxcom** — l'application `tasmota` publie
+      elle-même des **découvertes MQTT HA standard** (`homeassistant/<composant>/<id>/config`) : composant selon le
+      QUOI (lumière → `light`, sinon `switch`…), `name: null`, `device.name` = `buildDisplayName`,
+      `suggested_area` = lieu, `attributs_taxonomie` sur un topic d'attributs (`json_attributes_topic`),
+      `state_topic`/`command_topic`/`availability_topic` = topics Tasmota (`stat/…/POWER`, `cmnd/…/POWER`,
+      `tele/…/LWT`). Source : `tasmota/discovery/<MAC>/config` (+ `sensors`), écoutée par l'application.
+      **Volets roulants** : Tasmota a un mode volet (`ShutterRelay1 1` ; `SetOption80` supprimé depuis Tasmota
+      9.0.0.4 ; étalonnage des temps de course) — **visible dans la découverte native** : `rl[i]` = type de chaque
+      relais (0 aucun, 1 relais, 2 lumière, 3 volet, constantes `RL_*` de `hatasmota`), `sho` options (inversion),
+      `sht` inclinaison ; position/sens dans `Shutter1: {Position, Direction}` sur modules à 2 relais (Shelly 2.5 / Plus 2PM, Sonoff Dual R3…) → QUOI « volet » = composant `cover`
+      (`device_class: shutter`) : ouvrir/fermer/stop (`ShutterOpen1`/`ShutterClose1`/`ShutterStop1`), position
+      (`stat/…/SHUTTER1`, `cmnd/…/ShutterPosition1`) — topics exacts à vérifier sur un vrai module.
+      **Conséquences** : intégration Tasmota de HA à RETIRER (plus rien sous `tasmota-ha/discovery`) ; plus
+      besoin d'étiquettes ni d'affectation de pièce par WS pour Tasmota (le point 1 n'est plus nécessaire pour
+      cette application) ; `so.30` sans objet.
+    - **Décisions utilisateur sur les points en suspens (28/09/2026)** :
+      1. **modes** remontés dans HA sous forme d'entité (type à préciser dans la spec, ex. `select`) ;
+      2. l'application **ne gère PAS les automatismes zigbee2mqtt** ; règles Tasmota **stockées selon le
+         standard** (`Rule1-3`, il y aura des **ESP8266** → pas de Berry comme base) ;
+      3. **ia → tasmota** : messages avec réponse pour définir les règles (**acceptée / refusée + raison**) ;
+      4. **capteurs** Tasmota publiés vers HA, entités **déduites d'elles-mêmes** de la découverte native
+         (`tasmota/discovery/<MAC>/sensors`) ;
+      5. **volets** : paramétrage (mode volet, temps de course, sens…) **dans l'application** ;
+      6. **stfort / buster** : rien de prévu (pas de variante `wpa_cli`) ;
+      7. **intégration Tasmota de HA à retirer** — oui ;
+      8. `DeviceName` : **60 caractères max** ;
+      9. masquage Magic Switch : si reflashage (firmware à fenêtre plus longue) on s'en passe, sinon **durée
+         de masquage = paramètre de l'appareil dans l'application** ;
+      10. Pi du garage (GARAGE3) **après** l'application ;
+      11. commits / sort du script Outils `tasmota-config` : **plus tard**.
+    - **Données dupliquées d'office entre toutes les instances dimotic-ha** (précision 28/09/2026) : liste, fiches,
+      règles et modes accessibles depuis n'importe quelle machine (mécanisme de réplication à définir dans la spec).
+    - Tourne sur **ha2**, par la connexion MQTT du core (pas de client MQTT propre) ; voit aussi le garage via le pont.
+  - **Existant zigbee2mqtt (ha2, analysé le 27/09/2026)** : 17 règles dans `/docker/zigbee2mqtt/data/automations.yaml`
+    (extension externe `AutomationsExtension`, z2m 2.6.3) — cuisine (vitrine → plan de travail), chambre de Jo
+    (interrupteur de scènes noir), toilettes du haut (détecteur), salle de bain du haut (VMC 15 min, bouton),
+    salle à manger (bouton bureau), `test_mqtt` (essai oublié ?). À nettoyer : 2 fichiers d'extension identiques
+    (`my_automation.js`, `AutomatisationsExtension.js`), 13 copies `.tmp-…`, `.invalid`/`.disabled` ;
+    `automationsV2.yaml` (minuterie escalier 60 s) lu par aucune extension active. Règles fragiles au renommage
+    (nom z2m en dur ; condition sur appareil introuvable = considérée VRAIE). **Pile du bouton bureau (salle à
+    manger) à 1 %.**
+  - Et tout ce qui touche la flotte Tasmota (réglages communs, versions, supervision).
+  - **Décisions utilisateur 28/09/2026** : cuisine d'été → broker **ha2 directement** ; **OTA oui** ; Mosquitto du
+    garage **ouvert** pour l'instant ; moteur de règles = **une application dimotic-ha**, avec laquelle **ia**
+    communique. **Traitement sujet par sujet, dans cet ordre** :
+    1. **nommage** pour Tasmota — nommage intervient **par WS après que la découverte est enregistrée dans HA** ;
+    2. **installation Tasmota standard** — ✅ script Outils « Configurer un appareil Tasmota (à distance) » écrit le 28/09
+       (spec outils v1.3 §7.3, testé contre un faux Tasmota) ; **à essayer sur le vrai Basic R4** ;
+    3. **mise en œuvre du Pi 3 du garage** par un **script intégré à Outils** ;
+    4. **gestion centralisée dans dimotic-ha** de la génération d'automatismes pour Tasmota et zigbee2mqtt.
+  - **Sujet 1 — nommage pour Tasmota, précisions (28/09/2026)** :
+    - Flux confirmé : Tasmota standard → `tasmota/discovery/…` → **nommage** réécrit `dn`/`fn` → republie
+      `tasmota-ha/discovery/…` (préfixe réglé dans l'intégration Tasmota de HA, seule exception à l'installation
+      standard) → puis **pièce affectée par WS** une fois l'appareil enregistré dans HA.
+    - **Convention dans `DeviceName`** (champ `dn` de la découverte) ; `FriendlyName` limité à 32 caractères, `Topic`
+      et `Hostname` courts sans accents. **À vérifier sur un vrai R4** : longueur max acceptée par `DeviceName`.
+    - **Type forcé par nommage (option 1 retenue)** : si QUOI = lumière, nommage met `"so": {"30": 1}` dans la
+      découverte réécrite → HA crée une `light` (vérifié : `hatasmota` lit `so.30`). **Rien à redescendre dans
+      l'appareil** (SetOption30 n'influe que sur ce champ ; commande toujours `POWER`). Limite : vaut pour tous les
+      relais d'un même appareil. Tasmota republie à chaque redémarrage avec `30: 0` → nommage réécrit à chaque fois ;
+      HA garde la dernière version réécrite (retenue) ; un appareil neuf n'apparaît dans HA qu'après nommage (voulu).
+    - **Intégration Tasmota INSTALLÉE dans HA (ha2) le 28/09/2026, préfixe `tasmota-ha/discovery`** (entrée
+      01M3JFS1CGPK47AQ6GQSK1JJYC). Nommage par `hatasmota` (lu dans le code) : nom d'appareil = `dn` ; nom
+      d'entité du relais = `fn[0]`, **sauf si `fn[0] == dn` → l'entité prend le nom de l'appareil** (équivalent du
+      `name: null` de rfxcom) → nommage écrira le même nom dans `dn` et `fn[0]`. Essai sur table avec un vrai Basic
+      R4 (Magic Switch câblé) : nommage simulé à la main (republication réécrite sous `tasmota-ha/discovery`).
+    - **Essai sur table 28/09/2026 (Basic R4 192.168.1.104, topic `essai_r4`, site `cuisine_ete`, Tasmota 15.6.0)** :
+      config à distance par MQTT ✅ (mot de passe web volontaire) ; DeviceName 47 caractères accentués ✅ ;
+      découverte réécrite à la main sous `tasmota-ha/discovery` → appareil « Essai », `light.essai` (so.30 ✅,
+      nom d'entité = nom d'appareil ✅), pièce « Cuisine d'été » par WS ✅ ; **Magic Switch** : 8 manœuvres
+      rapides, toutes vues par Tasmota et HA ✅. **Commande depuis HA** : 1 rebond sur 3 allumages (ON puis
+      OFF tout seul 0,92 s après), puis 2 allumages sans rebond. Anomalie Tasmota #22535 corrigée par PR #22539
+      (fenêtre de masquage 250 ms étendue à toute commutation, incluse dans 15.6.0, durée réglable seulement en
+      recompilant) — notre rebond est AU-DELÀ des 250 ms. **98 % des lumières sont des LED** (utilisateur) :
+      appel de courant des drivers = cause plausible → **essais à refaire avec une vraie lampe LED**, série de 10
+      en écoutant aussi `Switch1` ; parade 1 `MagicSwitchPulse` (liste dans le script Outils, 4000 standard par
+      défaut, valeur conseillée à ajouter si trouvée), parade 2 règle de masquage (~1 s) si besoin.
+      **Cause PROUVÉE le 28/09 (journal `MqttLog 3`, sur `stat/…/LOGGING`)** : 0,6 à 0,9 s après une commutation,
+      le Magic Switch détecte une fausse coupure (`MSW: length:29734…35213`) → `SRC: Switch` → rebond (3 à 5 sur
+      20). Vraies manœuvres murales : 12 809 à 40 791 µs → **même plage que les fausses : `MagicSwitchPulse` ne
+      peut pas les séparer** (8000 essayé, sans effet ; remis à 4000 standard). **Parade 2 validée** : règle Rule1
+      `ON Power1#State DO Backlog Var1 1; RuleTimer1 2 ENDON ON Rules#Timer=1 DO Var1 0 ENDON ON Switch1#State DO
+      IF (Var1==0) Power1 TOGGLE ENDIF ENDON` → **0 rebond sur 20**, 3 fausses coupures ignorées ; inconvénient :
+      3 à 4 s d'attente entre deux manœuvres murales (minuteur des règles à la seconde). Amélioration proposée :
+      masquage Berry au ms (~1,2 s). `MqttLog 3` encore actif sur l'appareil d'essai (à remettre à 0).
+      **Suite 28/09 — ARRÊTÉ par l'utilisateur, appareil LAISSÉ EN L'ÉTAT** : `Rule1` réduite au filtre
+      `ON Switch1#State DO IF (Var1==0) Power1 TOGGLE ENDIF ENDON` + script Berry `autoexec.be` (masquage
+      `Var1` au ms, **1,5 s** après chaque commutation, `tasmota.set_timer(1500…)`, rechargé à chaque démarrage).
+      Commandes HA : 0 rebond sur 20 (mais aucune fausse coupure survenue pendant la série → non concluant).
+      Interrupteur mural : l'utilisateur a vu des rebonds ; journal : avec l'interrupteur mural, fausses coupures
+      jusqu'à **+1,35 s** et jusqu'à **118 ms** de long (indiscernables d'une vraie manœuvre) → 1,5 s insuffisant.
+      **Conclusions** : charge LED + Magic Switch = perturbations > 1 s ; pistes non tranchées : masquage ~2,5 s
+      (confort réduit) ou module à vraie entrée interrupteur (S1/S2, ex. Sonoff MINIR4) — **MINIR4 ÉCARTÉ par
+      l'utilisateur** (fil supplémentaire : neutre derrière l'interrupteur, ou phase près de la lumière ; le Basic R4
+      n'en demande aucun). **Voie retenue : masquage logiciel (Berry)**, ~2 s d'après les mesures sur la loupe
+      (perturbations jusqu'à 1,35 s) — la durée dépend de l'alimentation LED de chaque lampe : **à mesurer avec la
+      vraie lampe à l'installation** (journal `MqttLog 3`, lignes `MSW: length` après chaque commutation). Toujours à nettoyer :
+      `MqttLog 3`, appareil « Essai » dans HA + découverte retenue `tasmota-ha/discovery/94A99077B62C/…`.
+      Appareil d'essai encore présent dans HA (« Essai », `light.essai`) et découverte retenue sous
+      `tasmota-ha/discovery/94A99077B62C/…` — à nettoyer après les essais.
+    - **Règle générale (utilisateur 28/09/2026) : « faire comme rfxcom »** →
+      - **nom affiché** = `buildDisplayName` de rfxcom (lieu précis capitalisé, ou le QUOI si le lieu précis se
+        confond avec la pièce ; boutons : « Quoi Précis Lieu ») écrit dans `dn`/`fn` — à vérifier en réel comment
+        `hatasmota` compose le nom d'entité à partir de `dn`/`fn` (objectif : nom d'entité = nom d'appareil, comme
+        `name: null` de rfxcom) ;
+      - **pièce** affectée par WS **une seule fois**, à l'apparition de l'appareil sans pièce (équivalent de
+        `suggested_area`, jamais réappliquée) → **changements manuels respectés** ;
+      - **QUOI** : lumières par `so.30` ; autres types par **étiquette HA `quoi:…`** posée une fois par WS + lecture
+        par le référentiel (TaxonomyHaClassifier) — équivalent le plus proche de `attributs_taxonomie`, impossible
+        avec l'intégration Tasmota.
+
+## 🔲 GARAGE3 — DÉCIDÉ (27/09/2026) : mise en œuvre et suivi DANS CE DÉPÔT — relais Mosquitto confirmé, radio en réserve
+- Pi 3 au garage : clé Wi-Fi à antenne en client de « zdid2 », Wi-Fi intégré en point d'accès (+ NAT), **Mosquitto
+  local** avec pont filtré vers ha2, **dimotic-ha local** (supervisé comme les autres machines), **découvertes Tasmota via nommage**
+  (voir TASMOTA ci-dessus, pas de renommage dans le pont). **Après** l'étude Tasmota.
 
 ## ⏸️ OUTILS — sécurité de l'exécution par SSH (décision utilisateur 25/09/2026 : « à noter, pour l'instant on fait »)
 - L'exécution d'un script depuis la page Outils donne un accès root à distance depuis une page web

@@ -1,0 +1,23 @@
+{
+  "name": "tasmota",
+  "version": "1.0.0",
+  "description": "Flotte Tasmota : liste tenue à jour, nommage QUOI---LIEU et publication vers HA (comme RFXCOM), fiche réinjectée par MQTT, mise en service d'un neuf, règles préétablies et modes.",
+  "main": "dist/domain/index.js",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -b && tsc -p src/presentation/tsconfig.ui.json",
+    "build:ui": "tsc -p src/presentation/tsconfig.ui.json",
+    "watch": "tsc -w"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
