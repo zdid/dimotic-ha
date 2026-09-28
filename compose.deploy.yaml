@@ -83,3 +83,9 @@ services:
       - ./logs:/app/logs
       # RFXCOM — voir le commentaire `privileged` ci-dessus.
       - /dev:/dev
+      # Tasmota (mise en service d'un appareil neuf) — nmcli du conteneur pilote le
+      # NetworkManager de l'HÔTE par son D-Bus système pour basculer le Wi-Fi sur le point
+      # d'accès du Tasmota. `privileged: true` lève déjà le profil AppArmor (sinon ajouter
+      # `security_opt: [apparmor=unconfined]`, refus D-Bus constaté sans). Hôte sans
+      # NetworkManager (ex. stfort, dhcpcd/wpa_supplicant) : action indisponible, sans gêne.
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket

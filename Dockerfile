@@ -93,8 +93,14 @@ ARG APP_VERSION=dev
 # python3 ni le conteneur Docker esphome — Pi4, RAM insuffisante pour ESP-IDF, voir
 # fonctionnelles-espdisplay_specs §6.2) — découvert absent en testant en conditions réelles le
 # 14/08/2026 (OCI runtime exec failed: "ssh": executable file not found in $PATH).
+#
+# network-manager (pour nmcli) + iproute2 : requis par applications/tasmota pour la mise en service d'un
+# Tasmota neuf — le Wi-Fi de l'HÔTE est basculé sur le point d'accès du Tasmota (192.168.4.1) puis
+# remis dans son état d'origine. nmcli pilote le NetworkManager de l'hôte par son D-Bus système
+# (volume /run/dbus/system_bus_socket dans compose, + network_mode: host) — aucun démon lancé dans
+# le conteneur. Validé en réel sur falbala le 28/09/2026 (conteneur de test équivalent).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates openssh-client \
+    && apt-get install -y --no-install-recommends ca-certificates openssh-client network-manager iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
