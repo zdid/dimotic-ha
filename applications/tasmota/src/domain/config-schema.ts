@@ -1,6 +1,7 @@
 /**
  * Configuration et règles de TASMOTA (fonctionnelles-tasmota_specs §9).
- * config.yaml (section `tasmota`) + rules.yaml, dans data/tasmota/ — partageables entre machines (D7).
+ * config.yaml (section `tasmota`) + rules.yaml, dans data/tasmota/ — sans préfixe `machine_`, donc reproduits
+ * sur toutes les machines quand la diffusion du core existera (D7, pas encore implémentée : locaux d'ici là).
  */
 
 import { z } from 'zod';

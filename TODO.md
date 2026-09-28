@@ -187,6 +187,17 @@
          de masquage = paramètre de l'appareil dans l'application** ;
       10. Pi du garage (GARAGE3) **après** l'application ;
       11. commits / sort du script Outils `tasmota-config` : **plus tard**.
+    - **⚠️ Diffusion des données entre machines : NI SPÉCIFIÉE NI IMPLÉMENTÉE (constat 28/09/2026)** — conception
+      du 06/09/2026 (mémoire « duplication config multi-machines ») : 2 fichiers par app (`machine_config.yaml` jamais
+      diffusé / `config.yaml` diffusé), envoi par la machine où l'app est active à chaque modification + resynchro
+      à la demande, destinataires = registre gossip — mis en pause par l'utilisateur, aucun code, aucune spec, rôle
+      = **core**. Pour tasmota aujourd'hui : liste des appareils et mode courant partagés de fait (retenus MQTT) ;
+      `data/tasmota/config.yaml` et `rules.yaml` restent LOCAUX à chaque machine (spec tasmota v1.1, D7 corrigée).
+      **Décision utilisateur 28/09/2026** : le nom du fichier dit s'il est partagé — préfixe **`machine_`** = jamais
+      reproduit, **tous les autres fichiers de `data/` reproduits**. Partage effectif quand la conception + le
+      développement (core) seront faits. Points à trancher dans la spec core : `data/core/config.yaml` (machineId,
+      disabledApps…) à scinder, répertoires `tmp/`, `data/applications/` (code externe), fichiers déjà existants à
+      renommer en `machine_…` (ex. espdisplay).
     - **Données dupliquées d'office entre toutes les instances dimotic-ha** (précision 28/09/2026) : liste, fiches,
       règles et modes accessibles depuis n'importe quelle machine (mécanisme de réplication à définir dans la spec).
     - Tourne sur **ha2**, par la connexion MQTT du core (pas de client MQTT propre) ; voit aussi le garage via le pont.
