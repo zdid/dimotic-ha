@@ -71,7 +71,8 @@ export const DATA_RENAMES: Array<[string, string]> = [
   ['core/ha-structure-changes.yaml', 'core/machine_ha-structure-changes.yaml'],
   ['ia/comparatif.log', 'ia/machine_comparatif.log'],
   ['arexx/drivers', 'arexx/machine_drivers'],
-  ['rfxcom/config-rfxcom-devices-v1.0.yaml', 'rfxcom/machine_config-rfxcom-devices-v1.0.yaml']
+  ['rfxcom/config-rfxcom-devices-v1.0.yaml', 'rfxcom/machine_config-rfxcom-devices-v1.0.yaml'],
+  ['rfxcom/rfxcom-derniers-etats.json', 'rfxcom/machine_rfxcom-derniers-etats.json']
 ];
 
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);

@@ -190,7 +190,9 @@
     - **Diffusion des données (spec `techniques-diffusion-data_specs` v1.2, 29/09/2026)** : temps 1 (core, trois
       fichiers de configuration) ✅ ; temps 2 ✅ pour toutes les applications ; **rfxcom migré sur falbala le 29/09**
       (`port`/`baudRate` → machine, fichier des appareils → `machine_config-rfxcom-devices-v1.0.yaml`, désactivé) et
-      fichier des appareils + états **copié depuis stfort** (identique, validé par le schéma) — **reste à l'utilisateur** :
+      fichier des appareils + états **copié depuis stfort** (identique, validé par le schéma ; stfort tourne avec une image
+      antérieure au 24/09 : états encore dans le YAML — séparés automatiquement au 1er démarrage sur falbala vers
+      `machine_rfxcom-derniers-etats.json`) — **reste à l'utilisateur** :
       désactiver rfxcom sur stfort, brancher le boîtier sur falbala, régler le port (falbala : `/dev/ttyUSB1` hérité,
       préférer `/dev/serial/by-id/…`), activer rfxcom sur falbala ; **point de vigilance** : les découvertes HA de stfort
       (`bridgeInstance` rfx_bridge_stfort_…) — même unique_id, topics d'état/commande différents — à purger au basculement ;

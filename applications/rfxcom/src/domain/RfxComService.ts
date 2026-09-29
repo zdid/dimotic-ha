@@ -148,7 +148,8 @@ export class RfxComService implements IRfxComService {
     this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
     this.configFileManager = new ConfigFileManager(this.resolveDevicesConfigPath(), this.logger);
     this.lastStatesStore = new LastStatesStore(
-      path.join(path.dirname(this.resolveDevicesConfigPath()), 'rfxcom-derniers-etats.json'),
+      // ⭐ 29/09/2026 : préfixe machine_ (états captés par la clé de CETTE machine, jamais reproduits).
+      path.join(path.dirname(this.resolveDevicesConfigPath()), 'machine_rfxcom-derniers-etats.json'),
       this.logger
     );
     this.devicesConfig = { rfxcom_devices: {}, rfxcom_receivers: {} };
@@ -198,7 +199,7 @@ export class RfxComService implements IRfxComService {
     if (legacyStates) {
       if (this.lastStatesStore.saveNow(this.buildLastStatesSnapshot())) {
         this.persistConfig();
-        this.logger.info('RfxComService', 'Derniers états déplacés hors de la configuration (rfxcom-derniers-etats.json) — config réécrite sans eux');
+        this.logger.info('RfxComService', 'Derniers états déplacés hors de la configuration (machine_rfxcom-derniers-etats.json) — config réécrite sans eux');
       }
     }
 

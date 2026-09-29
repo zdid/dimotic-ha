@@ -7,7 +7,7 @@
  * chaque trame RF reçue — mesuré sur stfort : ~3 600 réécritures/jour du fichier de config, avec
  * le risque qu'une écriture interrompue abîme la config elle-même.
  *
- * Maintenant : fichier dédié `rfxcom-derniers-etats.json`, écriture REGROUPÉE (une seule écriture
+ * Maintenant : fichier dédié `machine_rfxcom-derniers-etats.json` (préfixe machine_ depuis le 29/09/2026), écriture REGROUPÉE (une seule écriture
  * `delayMs` après la première modification en attente, quel que soit le nombre de trames reçues
  * entre-temps) + écriture immédiate à l'arrêt (`flush`). Écriture atomique (tmp → rename), pas de
  * `.bak` : un fichier perdu ou illisible = on repart sans derniers états, rien d'autre.
