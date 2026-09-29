@@ -41,7 +41,8 @@ import type {
 import { technicalConfigSchema, getRequiredMissing } from '../types/config';
 import { AppConfigProvider } from '../infrastructure/config/AppConfigProvider';
 import { SOCLE_SOCKET_EVENTS } from '../types/events';
-import { setLoadedAppDir, clearLoadedAppDir, loadAppModule } from './appRoots';
+import { setLoadedAppDir, clearLoadedAppDir, loadAppModule, scanApplications, resolveAppDir } from './appRoots';
+import { ExternalAppPreparer } from './ExternalAppPreparer';
 import { redactForLog } from '../infrastructure/logger/redact';
 
 /**
@@ -86,6 +87,9 @@ export class AppService {
   private targetGossipService: TargetGossipService;
   private appGossipService: AppGossipService;
   private diffusionService: DiffusionService;
+  /** ⭐ 29/09/2026 — applications externes : dépendances + compilation sur place (spec diffusion §8bis). */
+  private readonly externalPreparer: ExternalAppPreparer;
+  private readonly externalRebuildTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // Services post-installation HA (MQTT/Whisper/Piper/openWakeWord/Ollama), ⭐ 24/08/2026
   private haPostInstallService: HaPostInstallService;
   // Découplage HaStructureRegistry/HaWsClient pour les apps en process séparé (⭐ 24/08/2026, voir
@@ -209,6 +213,7 @@ export class AppService {
     this.targetGossipService = new TargetGossipService(configService, eventBus, logger);
     this.appGossipService = new AppGossipService(configService, eventBus, logger, (appId) => this.processSupervisor.getState(appId));
     // ⭐ 29/09/2026 — diffusion des fichiers de data/ entre machines (techniques-diffusion-data_specs v1.3).
+    this.externalPreparer = new ExternalAppPreparer(logger);
     this.diffusionService = new DiffusionService(configService, eventBus, logger, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data'));
     this.haPostInstallService = new HaPostInstallService(configService, logger);
     this.haQueryBridge = new HaQueryBridge(eventBus, logger, () => this.haStructureRegistry, () => this.haWsClient,
@@ -270,6 +275,24 @@ export class AppService {
     this.eventBus.on('app:applications:restart-now', () => this.applicationManager.restartNowIfPending());
     // ⭐ 24/09/2026 — « Relancer » une application en état 'crashed' (abandon après 5 crashs rapprochés).
     this.eventBus.onGeneric<{ appId: string }>('app:applications:restart', (data) => this.handleApplicationRestart(data));
+    // ⭐ 29/09/2026 — application externe : réinstaller les dépendances et recompiler (bouton), puis
+    // relancer si elle tourne.
+    this.eventBus.onGeneric<{ appId: string }>('app:applications:prepare', (data) => {
+      const dir = data?.appId ? resolveAppDir(data.appId) : undefined;
+      if (dir) this.startExternalPreparation(data.appId, dir, true);
+    });
+    // ⭐ 29/09/2026 — sources d'une application externe reçues par la diffusion : recompilée (regroupé
+    // sur 5 s) puis relancée si elle tourne — le code, contrairement aux données, ne se relit pas à chaud.
+    this.eventBus.onGeneric<{ app: string; path: string }>('core:data:file:changed', (e) => {
+      if (!e?.path?.startsWith('applications/') || !e.app) return;
+      const pending = this.externalRebuildTimers.get(e.app);
+      if (pending) clearTimeout(pending);
+      this.externalRebuildTimers.set(e.app, setTimeout(() => {
+        this.externalRebuildTimers.delete(e.app);
+        const dir = resolveAppDir(e.app);
+        if (dir && this.modules.some((m) => m.id === e.app)) this.startExternalPreparation(e.app, dir, false);
+      }, 5000));
+    });
 
     // Sites externes (⭐ 27/08/2026, voir schema.ts::externalSiteSchema) — liste personnelle,
     // jamais gossipée, même patron CRUD que les cibles de déploiement ci-dessous.
@@ -470,6 +493,14 @@ export class AppService {
       for (const appId of activated) {
         const appDir = this.applicationManager.resolveAppDir(appId);
         if (!appDir) continue;
+        // ⭐ 29/09/2026 — application externe pas prête (sources seules, dépendances/dist absents ou
+        // périmés) : préparée en arrière-plan, puis activée à chaud à la fin (startExternalPreparation).
+        const location = scanApplications().get(appId);
+        if (location && location.origin !== 'interne' && this.externalPreparer.needsPreparation(appDir)) {
+          this.logger.info('AppService', `Application externe ${appId} : préparation (dépendances + compilation) avant activation`);
+          this.startExternalPreparation(appId, appDir, false);
+          continue;
+        }
         const error = this.registerApp(appId, appDir);
         if (error) this.logger.warn('AppService', `Application ${appId} non chargée : ${error}`);
       }
@@ -540,6 +571,13 @@ export class AppService {
    * Jamais de redémarrage du core. Renvoie un message d'erreur, `undefined` si l'application tourne.
    */
   private activateApp(appId: string, appDir: string): string | undefined {
+    // ⭐ 29/09/2026 — application externe pas encore prête (sources seules, dépendances ou dist/
+    // manquants ou périmés) : préparée d'abord, activation relancée automatiquement à la fin.
+    const location = scanApplications().get(appId);
+    if (location && location.origin !== 'interne' && (this.externalPreparer.isRunning(appId) || this.externalPreparer.needsPreparation(appDir))) {
+      this.startExternalPreparation(appId, appDir, false);
+      return 'préparation en cours (installation des dépendances + compilation) — activation automatique à la fin, suivre Gestion des applications';
+    }
     const error = this.registerApp(appId, appDir);
     if (error) return error;
     const appModule = this.modules.find((m) => m.id === appId)!;
@@ -556,6 +594,42 @@ export class AppService {
       this.eventBus.emit('app:module:ui:register', { moduleId: appId, metadata: appModule.configUi });
     }
     return undefined;
+  }
+
+  /**
+   * ⭐ 29/09/2026 — prépare une application externe puis l'active : demande d'activation en attente
+   * (encore dans disabledApps) → ApplicationManager.enable() ; déjà activée → (ré)activation à chaud,
+   * précédée d'un arrêt si elle tournait (nouvelles sources).
+   */
+  private startExternalPreparation(appId: string, appDir: string, force: boolean): void {
+    const running = this.externalPreparer.isRunning(appId);
+    void this.externalPreparer.prepare(appId, appDir, force).then((ok) => {
+      if (running) return; // une préparation déjà lancée s'occupe de la suite
+      if (ok) {
+        if (this.configService.getDisabledApps().includes(appId)) {
+          if (!force) {
+            const result = this.applicationManager.enable(appId);
+            this.eventBus.emit('app:applications:enable:result', { appId, success: result.success, error: result.error, restarting: result.restarting });
+          }
+        } else {
+          const loaded = this.modules.find((m) => m.id === appId);
+          if (loaded?.runsAsSeparateProcess && this.processSupervisor.isRegistered(appId)) {
+            // Déjà en service : déclaration rechargée depuis le nouveau dist/, puis redémarrage par le
+            // superviseur, qui attend la fin de l'arrêt (arrêt + activation immédiate : « déjà démarré »,
+            // l'application restait arrêtée — constaté le 29/09/2026).
+            const error = this.registerApp(appId, appDir);
+            if (error) this.logger.error('AppService', `Rechargement de ${appId} après préparation impossible : ${error}`);
+            else this.processSupervisor.restart(appId);
+          } else {
+            if (loaded) this.deactivateApp(appId);
+            const error = this.activateApp(appId, appDir);
+            if (error) this.logger.error('AppService', `Activation de ${appId} après préparation impossible : ${error}`);
+          }
+        }
+      }
+      this.handleApplicationsList();
+    });
+    this.handleApplicationsList();
   }
 
   /**
@@ -801,7 +875,12 @@ export class AppService {
     this.eventBus.emit('app:applications:list:result', {
       activated,
       disabled,
-      details: details.map((d) => ({ ...d, state: activated.includes(d.appId) ? (states[d.appId] ?? 'stopped') : 'stopped' }))
+      details: details.map((d) => ({
+        ...d,
+        state: activated.includes(d.appId) ? (states[d.appId] ?? 'stopped') : 'stopped',
+        // ⭐ 29/09/2026 — préparation d'une application externe (dépendances + compilation).
+        preparation: this.externalPreparer.getState(d.appId)
+      }))
     });
   }
 

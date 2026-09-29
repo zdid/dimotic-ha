@@ -219,8 +219,10 @@
       `rfxcom/rfx_bridge_stfort_stfort_578666/registered-devices` (sinon falbala croit les appareils revendiqués par
       stfort et relaie au lieu de publier) et `.../status` ; 4) brancher le boîtier, régler `port` (machine_config) ;
       5) activer rfxcom sur falbala (mêmes unique_id → entités HA conservées). Autre instance annoncée sur le broker :
-      `rfx_bridge_0001_orangepizero2_453502` (online, liste vide) — à identifier. **temps 3 (diffusion) à faire** — **décidé 29/09/2026 : relecture des fichiers reçus DANS CHAQUE APPLICATION, sans
-      coupure** (écouteur `core:data:file:changed`, pas de redémarrage — l'utilisateur retestera presque toutes les applications). Déploiement Docker sur ha2/stfort : la migration se fera au premier
+      `rfx_bridge_0001_orangepizero2_453502` (online, liste vide) — à identifier. **temps 3 ✅ FAIT le 29/09/2026** (spec v1.4 : service de diffusion, relecture dans chaque application, page Diffusion
+      des données, applications externes préparées sur place ; vérifié en réel sur falbala — toutes les machines en mode
+      « arrêtée » par défaut, à activer machine par machine après le déploiement Docker). Décidé : relecture DANS CHAQUE APPLICATION, sans
+      coupure (écouteur `core:data:file:changed`, pas de redémarrage — l'utilisateur retestera presque toutes les applications). Déploiement Docker sur ha2/stfort : la migration se fera au premier
       démarrage de la nouvelle version (sauvegarde de l'ancien config.yaml dans data/core/machine_diffusion/).
     - (historique) **⚠️ Diffusion des données entre machines : NI SPÉCIFIÉE NI IMPLÉMENTÉE (constat 28/09/2026)** — conception
       du 06/09/2026 (mémoire « duplication config multi-machines ») : 2 fichiers par app (`machine_config.yaml` jamais

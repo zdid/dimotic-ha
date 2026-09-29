@@ -396,6 +396,10 @@ export class ApplicationsManager extends HTMLElement {
     if (d.isNew) badges.push('<span class="app-badge new" title="Jamais vue par ce core : arrivée désactivée">Nouvelle</span>');
     if (d.origin === 'externe') badges.push('<span class="app-badge origin" title="data/applications/">externe</span>');
     if (d.origin === 'externe-remplace') badges.push('<span class="app-badge origin" title="data/applications/ remplace applications/">externe (remplace l\'interne)</span>');
+    // ⭐ 29/09/2026 — préparation d'une application externe (dépendances + compilation sur place).
+    const p = d.preparation;
+    if (p?.state === 'en cours') badges.push(`<span class="app-badge state-starting" title="npm install / npm run build">Préparation : ${p.step ?? '…'}</span>`);
+    if (p?.state === 'échec') badges.push(`<span class="app-badge state-crashed" title="${(p.output ?? '').replace(/"/g, '&quot;').slice(-1500)}">Échec : ${p.step ?? ''} — ${(p.error ?? '').replace(/</g, '&lt;')}</span>`);
     return badges.join('');
   }
 
@@ -441,6 +445,9 @@ export class ApplicationsManager extends HTMLElement {
           ${this.stateBadge(app)}${this.extraBadges(app)}
         </div>
         <div class="app-actions">
+          ${this.detail(app)?.origin && this.detail(app)?.origin !== 'interne' ? `<button
+            onclick="if(window.app && window.app.appManager) { window.app.appManager.prepareApplication('${app}'); }"
+            class="btn btn-secondary" title="npm install + npm run build dans data/applications/${app}/">Réinstaller / recompiler</button>` : ''}
           ${this.detail(app)?.state === 'crashed' ? `<button
             onclick="if(window.app && window.app.appManager) { window.app.appManager.restartApplication('${app}'); }"
             class="btn btn-success">Relancer</button>` : ''}

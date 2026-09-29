@@ -11,6 +11,8 @@ export interface ApplicationDetail {
   isNew: boolean;
   /** État du process (ProcessSupervisor) : stopped, starting, running, restarting, crashed. */
   state: string;
+  /** ⭐ 29/09/2026 — préparation d'une application externe (dépendances + compilation). */
+  preparation?: { state: 'prête' | 'en cours' | 'échec'; step?: string; error?: string; output?: string; at: string };
 }
 
 export interface ApplicationStatus {
@@ -174,6 +176,11 @@ export class ApplicationManager {
   /** ⭐ 24/09/2026 — relance une application en état 'crashed' (abandon après 5 crashs rapprochés). */
   restartApplication(appId: string): void {
     this.socket.emit('app:applications:restart', { appId });
+  }
+
+  /** ⭐ 29/09/2026 — application externe : réinstaller les dépendances et recompiler (relancée si active). */
+  prepareApplication(appId: string): void {
+    this.socket.emit('app:applications:prepare', { appId });
   }
 
   /**

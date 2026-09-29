@@ -504,6 +504,14 @@ export class SocketBridge {
         this.eventBus.emitGeneric('app:applications:restart', data);
       });
 
+      // ⭐ 29/09/2026 — application externe : réinstaller les dépendances et recompiler.
+      // @ts-ignore
+      socket.on('app:applications:prepare', (data: { appId: string }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: app:applications:prepare de ${socket.id}, appId: ${data?.appId}`);
+        this.eventBus.emitGeneric('app:applications:prepare', data);
+      });
+
+      // @ts-ignore
       socket.on('app:applications:restart-now', () => {
         this.logger.info('SocketBridge', `Socket.io → EventBus: app:applications:restart-now de ${socket.id}`);
         this.eventBus.emit('app:applications:restart-now', undefined as void);
