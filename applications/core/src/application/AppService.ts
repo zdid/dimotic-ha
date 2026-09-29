@@ -2,7 +2,6 @@
 // Service d'orchestration de l'application
 // Conforme à specs-techniques-socle-ha-mqtt-v4.3.md §10.1 et specs-presentation-v2.0.md §4.2
 
-import { existsSync, realpathSync } from 'node:fs';
 import * as path from 'node:path';
 import { EventBus } from './EventBus';
 import { ApplicationManager } from './ApplicationManager';
@@ -41,7 +40,7 @@ import type {
 import { technicalConfigSchema, getRequiredMissing } from '../types/config';
 import { AppConfigProvider } from '../infrastructure/config/AppConfigProvider';
 import { SOCLE_SOCKET_EVENTS } from '../types/events';
-import { setLoadedAppDir, clearLoadedAppDir } from './appRoots';
+import { setLoadedAppDir, clearLoadedAppDir, loadAppModule } from './appRoots';
 import { redactForLog } from '../infrastructure/logger/redact';
 
 /**
@@ -466,27 +465,9 @@ export class AppService {
     }
   }
 
-  /**
-   * Charge le module de domaine d'une application depuis SON dossier (racine interne ou externe) —
-   * `require()` dans tous les cas : `dist/domain/index.js` (production) en priorité, sinon la source
-   * `.ts` (dev, uniquement sous tsx qui enregistre son loader pour tout le process). Le cache Node
-   * des fichiers de CE dossier est vidé d'abord : une application remplacée sur disque (racine
-   * externe) est relue, pas servie depuis une version précédente.
-   * Historique conservé : `dist` DOIT passer avant `src` (sous `node` pur, un `.ts` ne se charge pas
-   * — bug découvert au premier déploiement Docker le 03/08/2026) ; et ne jamais mélanger `import()`
-   * puis `require()` sur un même fichier CommonJS (résolveur Node incohérent ensuite, même date).
-   */
+  /** Module de domaine d'une application — voir appRoots.loadAppModule (commun avec isEnabledByDefault). */
   private loadAppModule(appDir: string): Record<string, unknown> {
-    const candidates = ['dist/domain/index.js', 'src/domain/index.ts', 'src/domain/index.js']
-      .map((entry) => path.join(appDir, entry));
-    const entry = candidates.find((candidate) => existsSync(candidate));
-    if (!entry) throw new Error(`aucun domain/index dans ${appDir}`);
-    let realDir = appDir;
-    try { realDir = realpathSync(appDir); } catch { /* garde appDir */ }
-    for (const key of Object.keys(require.cache)) {
-      if (key.startsWith(realDir + path.sep)) delete require.cache[key];
-    }
-    return require(path.resolve(entry)) as Record<string, unknown>;
+    return loadAppModule(appDir);
   }
 
   /**
@@ -780,7 +761,7 @@ export class AppService {
     // application apparue arrive désactivée (repère « nouvelle »), une disparue est arrêtée.
     const { added, removed } = this.applicationManager.reconcile();
     // ⭐ 25/09/2026 — application apparue pendant que le core tourne et « activée d'office »
-    // (package.json dimotic.enabledByDefault, voir appRoots.isEnabledByDefault) : activée à chaud.
+    // (`enabledByDefault` du module, voir appRoots.isEnabledByDefault) : activée à chaud.
     const disabledNow = new Set(this.configService.getDisabledApps());
     for (const appId of added) {
       const dir = this.applicationManager.resolveAppDir(appId);

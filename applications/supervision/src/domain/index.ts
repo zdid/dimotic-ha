@@ -2,8 +2,8 @@
  * Module principal de l'application SUPERVISION (fonctionnelles-supervision_specs v1.2) — machines
  * et applications du site (gossip des cores), sélection diffusée, état des sauvegardes. Pas de menu
  * ni de page propre : affichage sur la page d'accueil du core (fragment presentation/accueil.html +
- * presentation/ts/accueil.js, chargés par HomeView.ts). Activée d'office (package.json
- * `dimotic.enabledByDefault`, §7.1).
+ * presentation/ts/accueil.js, chargés par HomeView.ts). Activée d'office (`enabledByDefault` ci-dessous,
+ * §7.1).
  */
 
 import {
@@ -34,6 +34,8 @@ export const SUPERVISION_APP: ApplicationModule = {
   runsAsSeparateProcess: true,
   // Pas d'entrée de menu : affichage sur la page d'accueil seulement (§6.2).
   noMenu: true,
+  // Activée d'office à sa première apparition (§7.1) — déclaré ici, plus dans package.json (29/09/2026).
+  enabledByDefault: true,
   // Réponse de l'application sauvegarde à la requête corrélée (spec §5).
   bridgedEvents: ['sauvegarde:supervision:status:reply']
 };

@@ -164,6 +164,10 @@ export interface ApplicationModule {
   /** ⭐ 25/09/2026 — application sans entrée dans le menu latéral (ex: supervision, affichée
    *  seulement sur la page d'accueil — fonctionnelles-supervision_specs §6.2). */
   noMenu?: boolean;
+  /** ⭐ 25/09/2026, déplacé ici de package.json le 29/09/2026 — application ACTIVÉE à sa première
+   *  apparition (exception à « une application nouvelle arrive désactivée » ; seule supervision —
+   *  fonctionnelles-supervision_specs §7.1). Lu par appRoots.isEnabledByDefault. */
+  enabledByDefault?: boolean;
 }
 
 /** Résultat de sauvegarde de la config */

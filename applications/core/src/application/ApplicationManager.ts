@@ -148,7 +148,7 @@ export class ApplicationManager {
   reconcile(): { added: string[]; removed: string[] } {
     const scanned = scanApplications();
     const present = [...scanned.keys()];
-    // ⭐ 25/09/2026 — applications « activées d'office » (package.json, voir isEnabledByDefault) :
+    // ⭐ 25/09/2026 — applications « activées d'office » (`enabledByDefault` du module, voir isEnabledByDefault) :
     // exception à la règle, jamais ajoutées à disabledApps à leur première apparition.
     const toDisable = (ids: string[]) => ids.filter((id) => {
       const dir = scanned.get(id)?.dir;

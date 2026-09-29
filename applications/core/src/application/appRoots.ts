@@ -106,16 +106,44 @@ export function clearLoadedAppDir(appId: string): void {
 }
 
 /**
- * ⭐ 25/09/2026 (fonctionnelles-supervision_specs §7.1) — une application peut déclarer dans son
- * `package.json` `"dimotic": { "enabledByDefault": true }` : elle est alors ACTIVÉE à sa première
- * apparition, au lieu de la règle générale « une application nouvelle arrive désactivée ». Lu dans
- * package.json (pas dans la déclaration TypeScript) : le rapprochement disque/config ne charge
- * jamais le code des applications.
+ * Charge le module de domaine d'une application depuis SON dossier (racine interne ou externe) —
+ * `require()` dans tous les cas : `dist/domain/index.js` (production) en priorité, sinon la source
+ * `.ts` (dev, uniquement sous tsx qui enregistre son loader pour tout le process). Le cache Node
+ * des fichiers de CE dossier est vidé d'abord : une application remplacée sur disque (racine
+ * externe) est relue, pas servie depuis une version précédente.
+ * Historique conservé : `dist` DOIT passer avant `src` (sous `node` pur, un `.ts` ne se charge pas
+ * — bug découvert au premier déploiement Docker le 03/08/2026) ; et ne jamais mélanger `import()`
+ * puis `require()` sur un même fichier CommonJS (résolveur Node incohérent ensuite, même date).
+ * (Déplacé d'AppService le 29/09/2026 : aussi utilisé par isEnabledByDefault.)
+ */
+export function loadAppModule(appDir: string): Record<string, unknown> {
+  const candidates = ['dist/domain/index.js', 'src/domain/index.ts', 'src/domain/index.js']
+    .map((entry) => path.join(appDir, entry));
+  const entry = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!entry) throw new Error(`aucun domain/index dans ${appDir}`);
+  let realDir = appDir;
+  try { realDir = fs.realpathSync(appDir); } catch { /* garde appDir */ }
+  for (const key of Object.keys(require.cache)) {
+    if (key.startsWith(realDir + path.sep)) delete require.cache[key];
+  }
+  return require(path.resolve(entry)) as Record<string, unknown>;
+}
+
+/**
+ * ⭐ 25/09/2026 (fonctionnelles-supervision_specs §7.1) — une application peut se déclarer
+ * « activée d'office » : elle est alors ACTIVÉE à sa première apparition, au lieu de la règle
+ * générale « une application nouvelle arrive désactivée ».
+ * ⭐ 29/09/2026 — déclaré dans le module lui-même (`enabledByDefault: true` sur la constante
+ * `*_APP` de `domain/index`), plus dans `package.json` (décision utilisateur : pas de logique dans
+ * package.json). Le module n'est chargé ici que pour une application NOUVELLE (appelant :
+ * ApplicationManager.reconcile) ; une application illisible est considérée non activée d'office.
  */
 export function isEnabledByDefault(dir: string): boolean {
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as { dimotic?: { enabledByDefault?: unknown } };
-    return pkg.dimotic?.enabledByDefault === true;
+    const module = loadAppModule(dir);
+    const key = Object.keys(module).find((k) => k.endsWith('_APP'));
+    const declaration = key ? (module[key] as { enabledByDefault?: unknown }) : undefined;
+    return declaration?.enabledByDefault === true;
   } catch {
     return false;
   }
