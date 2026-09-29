@@ -45,7 +45,7 @@ export const CORE_DECLARATION: LayerDeclaration = {
 
 /**
  * Inventaire des applications (spec §8.3) — temps 2, rempli le 29/09/2026 pour toutes les
- * applications sauf rfxcom (process particulier : déplacement du boîtier RFXCOM). Applications sans
+ * applications, rfxcom à part (process particulier : déplacement du boîtier RFXCOM). Applications sans
  * réglage propre à la machine ni secret : absentes (arbreouquoi, haplan, nommage — son ancien
  * `sources[].mqtt.password` est vide et abandonné à la prochaine sauvegarde —, outils, planificateur,
  * sauvegarde, scriptsha, supervision, testcycle, arexx).
@@ -56,7 +56,9 @@ export const APP_DECLARATIONS: Record<string, LayerDeclaration> = {
   evoo7: { secrets: ['box.password'] },
   rpigpio: { secrets: ['mqtt.password'] },
   teleinfo: { secrets: ['mqtt.password'] },
-  espdisplay: { machine: ['esphomeContainer', 'esphomeConfigDir', 'pipelineScriptPath', 'pythonBin', 'remote'] }
+  espdisplay: { machine: ['esphomeContainer', 'esphomeConfigDir', 'pipelineScriptPath', 'pythonBin', 'remote'] },
+  // 29/09/2026 : rfxcom migré à part (déplacement du boîtier de stfort vers falbala).
+  rfxcom: { machine: ['port', 'baudRate'] }
 };
 
 /**
@@ -68,7 +70,8 @@ export const DATA_RENAMES: Array<[string, string]> = [
   ['core/ha-structure-debug.yaml', 'core/machine_ha-structure-debug.yaml'],
   ['core/ha-structure-changes.yaml', 'core/machine_ha-structure-changes.yaml'],
   ['ia/comparatif.log', 'ia/machine_comparatif.log'],
-  ['arexx/drivers', 'arexx/machine_drivers']
+  ['arexx/drivers', 'arexx/machine_drivers'],
+  ['rfxcom/config-rfxcom-devices-v1.0.yaml', 'rfxcom/machine_config-rfxcom-devices-v1.0.yaml']
 ];
 
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);

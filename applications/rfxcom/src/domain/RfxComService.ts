@@ -161,7 +161,11 @@ export class RfxComService implements IRfxComService {
 
   private resolveDevicesConfigPath(): string {
     const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'rfxcom');
-    return path.join(dataDir, this.config.devicesConfigFile);
+    // ⭐ 29/09/2026 (techniques-diffusion-data_specs §8.3) — appareils captés par LA clé RFXCOM de cette
+    // machine : fichier toujours préfixé `machine_` (jamais reproduit sur les autres machines), quel
+    // que soit le nom configuré ; l'ancien fichier est renommé par la migration du core.
+    const name = path.basename(this.config.devicesConfigFile);
+    return path.join(dataDir, name.startsWith('machine_') ? name : `machine_${name}`);
   }
 
   /**

@@ -188,9 +188,13 @@
       10. Pi du garage (GARAGE3) **après** l'application ;
       11. commits / sort du script Outils `tasmota-config` : **plus tard**.
     - **Diffusion des données (spec `techniques-diffusion-data_specs` v1.2, 29/09/2026)** : temps 1 (core, trois
-      fichiers de configuration) ✅ ; temps 2 ✅ pour toutes les applications **sauf rfxcom** (process particulier à
-      prévoir : déplacement du boîtier RFXCOM sur la machine, `port`/`baudRate` → machine, fichier des appareils →
-      `machine_…`) ; **temps 3 (diffusion) à faire** — trancher d'abord la relecture des fichiers reçus (proposition :
+      fichiers de configuration) ✅ ; temps 2 ✅ pour toutes les applications ; **rfxcom migré sur falbala le 29/09**
+      (`port`/`baudRate` → machine, fichier des appareils → `machine_config-rfxcom-devices-v1.0.yaml`, désactivé) et
+      fichier des appareils + états **copié depuis stfort** (identique, validé par le schéma) — **reste à l'utilisateur** :
+      désactiver rfxcom sur stfort, brancher le boîtier sur falbala, régler le port (falbala : `/dev/ttyUSB1` hérité,
+      préférer `/dev/serial/by-id/…`), activer rfxcom sur falbala ; **point de vigilance** : les découvertes HA de stfort
+      (`bridgeInstance` rfx_bridge_stfort_…) — même unique_id, topics d'état/commande différents — à purger au basculement ;
+      recopier le fichier juste avant le basculement (états modifiés entre-temps sur stfort) ; **temps 3 (diffusion) à faire** — trancher d'abord la relecture des fichiers reçus (proposition :
       redémarrage à chaud de l'application). Déploiement Docker sur ha2/stfort : la migration se fera au premier
       démarrage de la nouvelle version (sauvegarde de l'ancien config.yaml dans data/core/machine_diffusion/).
     - (historique) **⚠️ Diffusion des données entre machines : NI SPÉCIFIÉE NI IMPLÉMENTÉE (constat 28/09/2026)** — conception
