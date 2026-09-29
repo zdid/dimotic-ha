@@ -9,6 +9,8 @@
  * `applications/accueil/`.
  */
 
+import { renderSshPrepSection } from './TargetCards.js';
+
 interface RemoteAppEntry {
   id: string;
   name: string;
@@ -35,6 +37,11 @@ export function buildAccueilHtml(): string {
   return `
     <div id="accueil-view" style="padding: 1.5rem; max-width: 800px;">
       <h2>Accueil</h2>
+
+      <section style="margin-bottom: 2rem;">
+        <h3>Copie de la clé SSH vers une machine</h3>
+        <div id="accueil-ssh-prep"></div>
+      </section>
 
       <section style="margin-bottom: 2rem;">
         <h3>Cette machine</h3>
@@ -72,6 +79,7 @@ export function buildAccueilHtml(): string {
  *  (app:started, déjà émis/persistant côté core — voir TechnicalConfigManager.ts qui le relaie en
  *  CustomEvent). Les deux événements sont indépendants et peuvent arriver dans n'importe quel
  *  ordre : chacun ne réécrit que sa propre partie du texte. */
+let sshPrepHandler: ((data: { targets?: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => void) | undefined;
 let thisMachineId: string | undefined;
 let thisMachineVersion: string | undefined;
 
@@ -226,6 +234,19 @@ export function initAccueilApp(): void {
   renderRemoteApps(root, window.app.remoteApps || []);
   thisMachineId = window.app.machineId;
   renderThisMachine(root);
+
+  // ⭐ 29/09/2026 (demande utilisateur) — même pavé que les pages de déploiement, en tête de
+  // l'accueil : machines déjà connues = cibles de déploiement du core.
+  const sshPrep = root.querySelector<HTMLElement>('#accueil-ssh-prep');
+  if (sshPrep) {
+    // Un seul écouteur, remplacé à chaque visite (sinon ils s'accumuleraient).
+    if (sshPrepHandler) socket.off('core:deployment:targets:list', sshPrepHandler);
+    sshPrepHandler = (data: { targets?: { id: string; host: string }[]; isRunningInDocker: boolean; projectRoot: string }) => {
+      renderSshPrepSection(sshPrep, { isRunningInDocker: data.isRunningInDocker, projectRoot: data.projectRoot, targets: data.targets ?? [] });
+    };
+    socket.on('core:deployment:targets:list', sshPrepHandler);
+    socket.emit('core:deployment:targets:get');
+  }
 
   window.addEventListener('app:ha-address', (e) => renderHaLink(root, (e as CustomEvent).detail));
   window.addEventListener('core:external-sites:list', (e) => renderExternalSites(root, (e as CustomEvent).detail.sites, socket));

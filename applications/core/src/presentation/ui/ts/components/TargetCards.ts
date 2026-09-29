@@ -207,7 +207,9 @@ export function renderSshPrepSection(container: HTMLElement, options: RenderSshP
   const user = escapeHtml(options.user || 'root');
 
   const dockerHint = isRunningInDocker
-    ? `<div class="target-docker-hint">⚠️ Cette instance tourne dans un conteneur Docker — la clé (déjà générée automatiquement) doit être lisible par ce conteneur. Ouvrir d'abord un terminal <strong>dans</strong> le conteneur :<pre>docker exec -it &lt;nom du conteneur&gt; bash</pre></div>`
+    // ⭐ 29/09/2026 (demande utilisateur) : nom réel du conteneur, « terminal » en gras, et ce qui
+    // s'affiche une fois dedans — pour savoir qu'on est au bon endroit avant la suite.
+    ? `<div class="target-docker-hint">⚠️ Cette instance tourne dans un conteneur Docker — la clé (déjà générée automatiquement) doit être lisible par ce conteneur. Ouvrir d'abord un <strong>terminal</strong> dans le conteneur :<pre>docker exec -it dimotic-ha bash\n# s'affiche alors : node@NOM_MACHINE:/app$</pre></div>`
     : '';
   const cdCommand = isRunningInDocker ? 'cd /app' : `cd ${escapeHtml(projectRoot)}`;
 
