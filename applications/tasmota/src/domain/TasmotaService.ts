@@ -45,7 +45,15 @@ import {
   type NameParts
 } from './taxonomy';
 import { buildRuleText, describeTemplates, findTemplate, isRuleActive, RULE_MAX_LENGTH } from './rules';
-import { checkProvisioning, scanTasmotaAccessPoints, provisionNewDevice, type ProvisionCheck } from './provisioning';
+import {
+  checkProvisioning,
+  scanTasmotaAccessPoints,
+  provisionNewDevice,
+  scanNetworkForTasmota,
+  pointToBroker,
+  type ProvisionCheck,
+  type NetworkTasmota
+} from './provisioning';
 import { TASMOTA_SOCKET_EVENTS, TASMOTA_CLIENT_EVENTS, TASMOTA_REQUEST_EVENTS } from './socket-events';
 
 const MODULE_NAME = 'tasmota';
@@ -106,6 +114,10 @@ export class TasmotaService implements ITasmotaService {
   private accessPoints: Array<{ ssid: string; signal: number }> = [];
   private provisioning = false;
   private readonly busy = new Set<string>();
+  /** Résultat de la dernière recherche sur le réseau (§6bis) — Tasmota déjà connectés, non encore
+   *  vus par découverte MQTT (sinon déjà dans `devices`). */
+  private networkFound: NetworkTasmota[] = [];
+  private networkScanning = false;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -226,6 +238,8 @@ export class TasmotaService implements ITasmotaService {
     on<{ config: unknown }>(TASMOTA_CLIENT_EVENTS.CONFIG_SAVE, (d) => this.saveConfig(d?.config));
     on<{ scan?: boolean }>(TASMOTA_CLIENT_EVENTS.PROVISION_CHECK, (d) => this.refreshProvisionCheck(!!d?.scan));
     on<{ ssid: string }>(TASMOTA_CLIENT_EVENTS.PROVISION_START, (d) => this.startProvisioning(String(d?.ssid ?? '')));
+    on(TASMOTA_CLIENT_EVENTS.NETWORK_SCAN, () => this.scanNetwork());
+    on<{ ip: string }>(TASMOTA_CLIENT_EVENTS.NETWORK_POINT, (d) => this.pointDeviceToBroker(String(d?.ip ?? '')));
 
     // --- Requêtes corrélées (ia, §8) ---
     this.eventBus.onGeneric<{ correlation_id: string }>(TASMOTA_REQUEST_EVENTS.CATALOG_GET, (req) => {
@@ -421,6 +435,12 @@ export class TasmotaService implements ITasmotaService {
     this.devices.set(mac, device);
     if (this.connected) this.subscribeDevice(device);
     if (!existing) this.logger.info('TasmotaService', `Appareil ${mac} « ${cfg.dn ?? '?'} » (${cfg.ip ?? '?'})`);
+    // Sous gestion par découverte MQTT désormais : plus la peine de le montrer comme « trouvé sur
+    // le réseau » (§6bis).
+    if (this.networkFound.some((d) => d.mac === mac)) {
+      this.networkFound = this.networkFound.filter((d) => d.mac !== mac);
+      this.emitNetworkStatus();
+    }
     this.publishDevice(device);
     // Un waiter peut attendre la nouvelle découverte (changement de Topic/nom, §5).
     for (const waiter of [...this.waiters]) {
@@ -962,6 +982,50 @@ export class TasmotaService implements ITasmotaService {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
     return false;
+  }
+
+  // ==========================================================================
+  // Recherche des Tasmota déjà connectés au réseau (§6bis) — distinct de la mise en service d'un
+  // neuf ci-dessus (qui cherche un point d'accès Wi-Fi) : ici une requête HTTP active balaie le
+  // sous-réseau à la recherche d'appareils déjà rejoints au réseau normal.
+  // ==========================================================================
+
+  private async scanNetwork(): Promise<void> {
+    if (this.networkScanning) throw new Error('Une recherche est déjà en cours');
+    this.networkScanning = true;
+    this.emitNetworkStatus();
+    const log = (message: string, level: LogLevel = 'info'): void => this.log(message, level, 'réseau');
+    try {
+      const all = await scanNetworkForTasmota(log);
+      // Déjà connu par découverte MQTT (déjà visible dans la liste principale) : pas la peine de
+      // le remontrer ici, la recherche sert à retrouver ce qui n'est PAS encore sous gestion.
+      const known = new Set(this.devices.keys());
+      this.networkFound = all.filter((d) => !known.has(d.mac));
+    } catch (error) {
+      log(String(error instanceof Error ? error.message : error), 'error');
+    } finally {
+      this.networkScanning = false;
+      this.emitNetworkStatus();
+    }
+  }
+
+  private async pointDeviceToBroker(ip: string): Promise<void> {
+    const entry = this.networkFound.find((d) => d.ip === ip);
+    if (!entry) throw new Error("Appareil non trouvé dans la dernière recherche — relancer la recherche");
+    await pointToBroker(ip, this.config.mqtt.host, this.config.mqtt.port, (m, l) => this.log(m, l, entry.mac));
+    // Retiré de la liste : il devrait apparaître dans la liste principale dès qu'il se sera
+    // reconnecté et aura publié sa découverte (quelques secondes) — sinon relancer la recherche.
+    this.networkFound = this.networkFound.filter((d) => d.ip !== ip);
+    this.emitNetworkStatus();
+  }
+
+  private emitNetworkStatus(): void {
+    this.eventBus.emitGeneric(TASMOTA_SOCKET_EVENTS.NETWORK_STATUS, {
+      scanning: this.networkScanning,
+      found: this.networkFound,
+      ourMqttHost: this.config.mqtt.host,
+      ourMqttPort: this.config.mqtt.port
+    });
   }
 
   // ==========================================================================

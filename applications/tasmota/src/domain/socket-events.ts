@@ -10,7 +10,9 @@ export const TASMOTA_SOCKET_EVENTS = {
   /** Compte rendu pas à pas (application d'une fiche, action, mise en service). */
   LOG: 'tasmota:log',
   /** Résultat des vérifications / du scan de la mise en service. */
-  PROVISION_STATUS: 'tasmota:provision:status'
+  PROVISION_STATUS: 'tasmota:provision:status',
+  /** Résultat de la recherche des Tasmota déjà connectés au réseau (§6bis). */
+  NETWORK_STATUS: 'tasmota:network:status'
 } as const;
 
 export const TASMOTA_CLIENT_EVENTS = {
@@ -23,7 +25,9 @@ export const TASMOTA_CLIENT_EVENTS = {
   MODE_SET: 'tasmota:mode:set:ui',
   CONFIG_SAVE: 'tasmota:config:save',
   PROVISION_CHECK: 'tasmota:provision:check',
-  PROVISION_START: 'tasmota:provision:start'
+  PROVISION_START: 'tasmota:provision:start',
+  NETWORK_SCAN: 'tasmota:network:scan',
+  NETWORK_POINT: 'tasmota:network:point'
 } as const;
 
 /** Requêtes corrélées d'autres applications (ia) — §8. Réponse = même nom + ':reply'. */

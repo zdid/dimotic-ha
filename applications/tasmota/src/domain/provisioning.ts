@@ -5,6 +5,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { getIPv4Addresses } from '../../../core/dist/exports';
 
 const AP_ADDRESS = '192.168.4.1';
 const TEMP_CONNECTION = 'dimotic-tasmota-neuf';
@@ -74,10 +75,14 @@ export async function scanTasmotaAccessPoints(wifiInterface: string): Promise<Ar
   return [...seen.entries()].map(([ssid, signal]) => ({ ssid, signal })).sort((a, b) => b.signal - a.signal);
 }
 
-async function httpCommand(command: string, timeoutMs = 8000): Promise<string> {
-  const url = `http://${AP_ADDRESS}/cm?cmnd=${encodeURIComponent(command)}`;
+async function httpCommandAt(host: string, command: string, timeoutMs = 8000): Promise<string> {
+  const url = `http://${host}/cm?cmnd=${encodeURIComponent(command)}`;
   const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
   return await response.text();
+}
+
+async function httpCommand(command: string, timeoutMs = 8000): Promise<string> {
+  return httpCommandAt(AP_ADDRESS, command, timeoutMs);
 }
 
 async function waitForAddress(wifiInterface: string, log: ProvisionLog): Promise<void> {
@@ -134,6 +139,85 @@ export async function provisionNewDevice(apSsid: string, params: ProvisionParams
     await restoreWifi(ifname, origin, log);
   }
   return { mac };
+}
+
+// =============================================================================
+// Recherche des Tasmota déjà connectés au réseau (distincte de la mise en service d'un neuf
+// ci-dessus, qui cherche un POINT D'ACCÈS Wi-Fi — ici l'appareil a déjà rejoint le réseau normal,
+// on le trouve par une requête HTTP active sur chaque adresse du sous-réseau).
+// =============================================================================
+
+export interface NetworkTasmota {
+  mac: string;
+  ip: string;
+  deviceName?: string;
+  topic?: string;
+  mqttHost?: string;
+  mqttPort?: number;
+  firmware?: string;
+}
+
+const SCAN_TIMEOUT_MS = 700;
+const SCAN_CONCURRENCY = 32;
+
+/**
+ * Balaie le sous-réseau IPv4 principal de cette machine (adresse Ethernet préférée, /24 supposé —
+ * limite acceptée : un Tasmota joignable seulement par un autre sous-réseau ne sera pas trouvé) :
+ * une requête `Status 0` par adresse, courte et sans mot de passe. Un appareil déjà protégé par un
+ * mot de passe web ne répond pas en JSON exploitable et n'est donc pas détecté (limite acceptée).
+ */
+export async function scanNetworkForTasmota(log: ProvisionLog): Promise<NetworkTasmota[]> {
+  const local = getIPv4Addresses()[0];
+  if (!local || !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(local)) {
+    throw new Error('Aucune adresse IPv4 locale trouvée — recherche impossible');
+  }
+  const parts = local.split('.');
+  const base = parts.slice(0, 3).join('.');
+  const own = Number(parts[3]);
+  const hosts = Array.from({ length: 254 }, (_, i) => i + 1).filter((n) => n !== own).map((n) => `${base}.${n}`);
+  log(`Recherche sur ${base}.0/24 (${hosts.length} adresses, quelques secondes)…`);
+
+  const found: NetworkTasmota[] = [];
+  let index = 0;
+  const worker = async (): Promise<void> => {
+    while (index < hosts.length) {
+      const ip = hosts[index++];
+      try {
+        const text = await httpCommandAt(ip, 'Status 0', SCAN_TIMEOUT_MS);
+        const parsed = JSON.parse(text) as {
+          Status?: { DeviceName?: string; Topic?: string };
+          StatusNET?: { Mac?: string };
+          StatusFWR?: { Version?: string };
+          StatusMQT?: { MqttHost?: string; MqttPort?: number };
+        };
+        const mac = parsed.StatusNET?.Mac?.replace(/:/g, '').toUpperCase();
+        if (!mac || !parsed.StatusFWR?.Version) continue; // pas un Tasmota (ou réponse incomplète)
+        found.push({
+          mac,
+          ip,
+          deviceName: parsed.Status?.DeviceName,
+          topic: parsed.Status?.Topic,
+          mqttHost: parsed.StatusMQT?.MqttHost,
+          mqttPort: parsed.StatusMQT?.MqttPort,
+          firmware: parsed.StatusFWR.Version
+        });
+      } catch {
+        // Hôte injoignable, pas de serveur HTTP, pas du JSON exploitable (mot de passe web…) : ignoré.
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: SCAN_CONCURRENCY }, worker));
+  found.sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true }));
+  log(`Recherche terminée : ${found.length} Tasmota trouvé(s) sur le réseau.`, 'ok');
+  return found;
+}
+
+/** Pointe un Tasmota déjà sur le réseau vers notre broker, par HTTP direct — pas de bascule Wi-Fi
+ *  nécessaire puisqu'il y est déjà. */
+export async function pointToBroker(ip: string, mqttHost: string, mqttPort: number, log: ProvisionLog): Promise<void> {
+  log(`Envoi à ${ip} : MqttHost ${mqttHost}; MqttPort ${mqttPort}`);
+  const reply = await httpCommandAt(ip, `Backlog MqttHost ${mqttHost}; MqttPort ${mqttPort}`, 8000);
+  log(`Réponse : ${reply || '(vide)'}`, 'ok');
 }
 
 async function restoreWifi(ifname: string, origin: string, log: ProvisionLog): Promise<void> {

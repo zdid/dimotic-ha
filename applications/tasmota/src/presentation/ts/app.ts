@@ -68,6 +68,23 @@ interface ProvisionView {
   running: boolean;
 }
 
+interface NetworkFound {
+  mac: string;
+  ip: string;
+  deviceName?: string;
+  topic?: string;
+  mqttHost?: string;
+  mqttPort?: number;
+  firmware?: string;
+}
+
+interface NetworkStatusView {
+  scanning: boolean;
+  found: NetworkFound[];
+  ourMqttHost?: string;
+  ourMqttPort?: number;
+}
+
 interface StateView {
   connected: boolean;
   devices: DeviceView[];
@@ -320,6 +337,38 @@ function renderProvision(p: ProvisionView | undefined): void {
   }));
 }
 
+function renderNetworkFound(v: NetworkStatusView | undefined): void {
+  if (!v) return;
+  $('btn-network-scan').textContent = v.scanning ? '🔍 Recherche en cours…' : '🔍 Rechercher les Tasmota déjà sur le réseau';
+  ($('btn-network-scan') as HTMLButtonElement).disabled = v.scanning;
+  const list = $('network-list');
+  if (v.scanning && v.found.length === 0) {
+    list.innerHTML = '<div class="muted">Recherche en cours, quelques secondes…</div>';
+    return;
+  }
+  if (v.found.length === 0) {
+    list.innerHTML = '<div class="muted">Aucun Tasmota non géré trouvé sur le réseau (ceux déjà connus apparaissent dans la liste ci-dessus).</div>';
+    return;
+  }
+  list.innerHTML = v.found.map((d) => {
+    const alreadyOurs = d.mqttHost === v.ourMqttHost && (d.mqttPort ?? 1883) === (v.ourMqttPort ?? 1883);
+    const action = alreadyOurs
+      ? '<span class="muted">déjà pointé vers notre broker — apparaîtra ici sous peu s’il ne s’est pas encore reconnecté</span>'
+      : `<button class="btn btn-primary" data-network-point="${esc(d.ip)}">Pointer vers notre broker</button>`;
+    return `<div class="ap-item">
+      <span>💡 <strong>${esc(d.deviceName || d.topic || d.mac)}</strong>
+        <span class="muted">${esc(d.ip)} — ${esc(d.mac)} — firmware ${esc(d.firmware ?? '?')} — broker actuel : ${esc(d.mqttHost || 'aucun')}${d.mqttHost ? `:${d.mqttPort ?? 1883}` : ''}</span>
+      </span>
+      ${action}
+    </div>`;
+  }).join('');
+  moduleRoot().querySelectorAll<HTMLButtonElement>('[data-network-point]').forEach((b) => b.addEventListener('click', () => {
+    if (confirm(`Pointer ${b.dataset.networkPoint} vers notre broker (${state?.config.mqtt.host}:${state?.config.mqtt.port}) ?`)) {
+      socket.emit('tasmota:network:point', { ip: b.dataset.networkPoint });
+    }
+  }));
+}
+
 function fillConfig(): void {
   if (!state || configFilled) return;
   configFilled = true;
@@ -394,6 +443,7 @@ function bindActions(): void {
     $('prov-check').textContent = 'Recherche Wi-Fi en cours…';
     socket.emit('tasmota:provision:check', { scan: true });
   });
+  $('btn-network-scan').addEventListener('click', () => socket.emit('tasmota:network:scan'));
   $('btn-config').addEventListener('click', () => {
     const list = (id: string) => $<HTMLInputElement>(id).value.split(',').map((s) => s.trim()).filter(Boolean);
     socket.emit('tasmota:config:save', {
@@ -427,6 +477,7 @@ function init(): void {
     if (state) state.provision = p;
     renderProvision(p);
   });
+  socket.on('tasmota:network:status', renderNetworkFound);
   bindActions();
   socket.emit('tasmota:state:get');
   socket.emit('tasmota:provision:check', {});

@@ -123,6 +123,13 @@
       </div>
 
       <div class="card">
+        <h2>Rechercher les Tasmota déjà sur le réseau</h2>
+        <p class="muted">Différent de la recherche ci-dessus : pour un Tasmota qui a déjà rejoint le réseau normal (Wi-Fi déjà donné, en point d'accès ou par un autre moyen) mais ne s'est jamais annoncé sur notre broker. Une requête directe est envoyée à chaque adresse du réseau local — les appareils protégés par un mot de passe web ne sont pas trouvés.</p>
+        <div class="actions"><button class="btn btn-secondary" id="btn-network-scan">🔍 Rechercher les Tasmota déjà sur le réseau</button></div>
+        <div class="ap-list" id="network-list"></div>
+      </div>
+
+      <div class="card">
         <h2>Paramètres</h2>
         <div class="form-grid">
           <label>Wi-Fi (nom) <input id="c-ssid"></label>
@@ -147,6 +154,6 @@
 
   <script type="module" src="/applications/tasmota/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-09-29 07:48:48 - Appareil à nommer affiché sous son topic -->
+  <!-- Derniere modification: 2026-09-29 17:47:52 - Recherche des Tasmota déjà connectés au réseau (scan HTTP actif) -->
 </body>
 </html>
