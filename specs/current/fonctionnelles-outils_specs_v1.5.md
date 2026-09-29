@@ -1,8 +1,12 @@
 # Spécifications Fonctionnelles — Application OUTILS
 
-**Version :** 1.4
-**Date :** 29 Septembre 2026
+**Version :** 1.5
+**Date :** 30 Septembre 2026
 **Statut :** Document de référence pour l'application `applications/outils`
+
+> **v1.5 (30/09/2026)** — « Commit + push + tag + build Docker » : **un seul format de version, `X.Y.Z`**,
+> proposé, affiché et saisi (le script proposait `v3.3.4` mais annonçait « la version 3.3.4 » : taper
+> `3.4.0` était refusé). Le `v` saisi reste accepté ; le tag git garde son `v` (`vX.Y.Z`).
 
 > **v1.4 (29/09/2026)** — script **« Configurer un appareil Tasmota (à distance) » retiré** (ancien §7.3,
 > demande utilisateur) : entièrement repris par l'application `tasmota` (fiche « Appliquer », mise à jour
@@ -239,8 +243,9 @@ moteur partagé n'est pas supprimé (il peut servir à d'autres scripts).
      un échec arrête tout **avant** le tag (⭐ 25/09/2026 : sans elle, une application qui ne
      compile pas faisait échouer l'image après le push du tag) ;
    - tag proposé depuis le plus haut `vX.Y.Z` du dépôt **par numéro de version**, selon le type
-     choisi : **mineur** par défaut, patch ou majeur ; numéro modifiable ; refus d'un format
-     invalide ou d'un tag existant ;
+     choisi : **mineur** par défaut, patch ou majeur ; numéro proposé et saisi sous la forme **`X.Y.Z`**
+     (⭐ v1.5 : un `v` devant est accepté et ignoré, le tag git est `vX.Y.Z`) ; refus d'un format
+     invalide ou d'une version existante ;
    - tag annoté + push du tag, puis `./docker/rebuild-and-deploy.sh X.Y.Z --build-only`
      (construction multi-architecture et publication, **aucun déploiement** sur les machines).
 
@@ -345,6 +350,7 @@ l'historique git (commit d'avant le 29/09/2026).
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.5 | 30/09/2026 | Claude | Version de l'image : format unique `X.Y.Z` proposé/affiché/saisi (`v` accepté), tag git `vX.Y.Z` (§7.1). v1.4 archivée. |
 | 1.4 | 29/09/2026 | Claude | Script « Configurer un appareil Tasmota (à distance) » retiré (§7.3), repris par l'application `tasmota`. v1.3 archivée. |
 | 1.3 | 28/09/2026 | Claude | Script intégré « Configurer un appareil Tasmota (à distance) » (§7.3). v1.2 archivée. |
 | 1.2 | 26/09/2026 | Claude | **Carte SD Raspberry Pi en un seul script** (§7.2) : questions au départ (WiFi compris), image de base préparée dans qemu et gardée en cache (installations hors de la carte), nettoyage avant clonage (clés d'hôte SSH, machine-id, cloud-init), trixie-lite par cloud-init par défaut + bookworm-lite, pause unique pour choisir la carte avec arrêt possible et reprise directe ; `flash-sd-card` retiré. Progression du téléchargement allégée. v1.1 archivée. |

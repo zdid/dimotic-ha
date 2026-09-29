@@ -25,7 +25,7 @@
 # @outils:hint BUILD_DOCKER = Coché = après le commit/push, compile toutes les applications pour vérification, crée un tag de version et construit/publie l'image Docker Hub. Décoché = commit + push uniquement.
 # @outils:select VERSION_BUMP = mineur, patch, majeur
 # @outils:default VERSION_BUMP = mineur
-# @outils:hint VERSION_BUMP = Partie du numéro de version à incrémenter (v3.2.1 → mineur v3.3.0, patch v3.2.2, majeur v4.0.0) — le numéro reste modifiable à l'exécution.
+# @outils:hint VERSION_BUMP = Partie du numéro de version à incrémenter (3.2.1 → mineur 3.3.0, patch 3.2.2, majeur 4.0.0) — le numéro reste modifiable à l'exécution, saisi sous la forme X.Y.Z (le « v » est accepté).
 
 set -euo pipefail
 
@@ -117,29 +117,34 @@ LAST_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -E '^v[0
 if [ -n "$LAST_TAG" ]; then
   IFS=. read -r MAJOR MINOR PATCH <<< "${LAST_TAG#v}"
   case "$VERSION_BUMP" in
-    majeur) SUGGESTED="v$((MAJOR + 1)).0.0" ;;
-    patch)  SUGGESTED="v${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
-    *)      SUGGESTED="v${MAJOR}.$((MINOR + 1)).0" ;;
+    majeur) SUGGESTED="$((MAJOR + 1)).0.0" ;;
+    patch)  SUGGESTED="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+    *)      SUGGESTED="${MAJOR}.$((MINOR + 1)).0" ;;
   esac
 else
-  SUGGESTED="v0.1.0"
+  SUGGESTED="0.1.0"
 fi
 
+# ⭐ 30/09/2026 — UN SEUL format affiché et saisi : X.Y.Z (comme l'image Docker). Le script proposait
+# « v3.3.4 » puis annonçait « la version 3.3.4 » : taper 3.4.0 était refusé (« format attendu vX.Y.Z »).
+# Le « v » saisi est désormais accepté aussi ; le tag git garde son « v » (vX.Y.Z), ajouté ici.
 echo
-echo "Dernier tag : ${LAST_TAG:-aucun}"
-read -rp "Numéro du nouveau tag [$SUGGESTED] : " VERSION_INPUT
-VERSION="${VERSION_INPUT:-$SUGGESTED}"
-if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "ERREUR : format attendu vX.Y.Z (reçu : $VERSION)." >&2
+if [ -n "$LAST_TAG" ]; then echo "Dernière version : ${LAST_TAG#v}"; else echo "Dernière version : aucune"; fi
+read -rp "Numéro de la nouvelle version [$SUGGESTED] : " VERSION_INPUT
+NUMBER="${VERSION_INPUT:-$SUGGESTED}"
+NUMBER="${NUMBER#v}"; NUMBER="${NUMBER#V}"
+if ! [[ "$NUMBER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "ERREUR : format attendu X.Y.Z, par exemple $SUGGESTED (reçu : $NUMBER)." >&2
   exit 1
 fi
+VERSION="v${NUMBER}"
 if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
-  echo "ERREUR : le tag $VERSION existe déjà." >&2
+  echo "ERREUR : la version $NUMBER existe déjà (tag $VERSION)." >&2
   exit 1
 fi
 
 echo "Attention: Aucune machine ne sera mise à jour."
-read -rp "Publier la version ${VERSION#v} (tag + image Docker) ? [o/N] " CONFIRM2
+read -rp "Publier la version ${NUMBER} (tag ${VERSION} + image Docker) ? [o/N] " CONFIRM2
 if [ "$CONFIRM2" != "o" ] && [ "$CONFIRM2" != "O" ]; then
   echo "Tag/Docker annulés — le commit est déjà poussé."
   exit 0
