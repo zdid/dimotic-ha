@@ -16,6 +16,14 @@
  * instance qui redémarre, reçoit immédiatement l'annonce de CHAQUE machine déjà connue du broker)
  * — pas besoin de rediffusion en cascade.
  *
+ * ⭐ 29/09/2026 — LES CIBLES NE PASSENT PLUS PAR ICI (demande utilisateur : « la machine ha2 est la
+ * même vue depuis ha2, stfort ou orangepi2 », savoir d'où on l'a apprise n'a aucun sens) : elles
+ * circulent avec data/core/config.yaml par la diffusion des données (techniques-diffusion-data_specs
+ * §2ter), une machine = une ligne, sans préfixe (voir infrastructure/config/targetsCleanup.ts). Ce
+ * service ne garde que la présence des machines (LWT), leur suppression explicite et les scripts
+ * scriptsha. Le topic retenu `known-targets` de CETTE machine est vidé au démarrage. Les paragraphes
+ * ci-dessous sur la fusion des cibles décrivent l'ancien fonctionnement.
+ *
  * Utilise directement `ha.mqtt` (host/port), indépendamment de `ha.mqtt_enable` — ce flag régit la
  * découverte HA (IntegrationBridge), pas ce canal de plomberie interne au socle. Inactif si
  * `ha.mqtt.host` n'est pas configuré du tout (rien à joindre).
@@ -50,26 +58,13 @@
 
 import { MqttTransport, type MqttMessage, LWT_PAYLOAD_ONLINE } from '../infrastructure/transport/MqttTransport';
 import type { ConfigService } from '../infrastructure/config/ConfigService';
-import type { SaveResult } from '../infrastructure/config/writer';
 import type { IEventBus } from './IEventBus';
-import type { DeploymentTargetConfig, HaStackTargetConfig, Zigbee2mqttTargetConfig } from '../infrastructure/config/schema';
 import type { Logger } from '../infrastructure/logger';
 
 const TOPIC_PREFIX = 'dimotic/core';
 /** scriptsha peut ne pas être activé/démarré sur cette machine — ne jamais bloquer indéfiniment
  *  une republication déclenchée par un changement de cible si sa réponse ne vient jamais. */
 const SCRIPTSHA_GOSSIP_TIMEOUT_MS = 5000;
-
-interface TargetsGossipPayload {
-  core: DeploymentTargetConfig[];
-  haStack: HaStackTargetConfig[];
-  zigbee2mqtt: Zigbee2mqttTargetConfig[];
-  // ⭐ 17/09/2026 — site physique de la machine qui publie (core.site, voir schema.ts), diffusé au
-  // même endroit que ses cibles plutôt que sur un topic dédié : toujours republié en même temps,
-  // pas de risque de désynchronisation entre les deux. Optionnel : les pairs pas encore à jour
-  // n'en envoient pas, `peerSites` reste simplement vide pour eux (site inconnu, jamais deviné).
-  site?: string;
-}
 
 interface GossipableScript {
   id: string;
@@ -92,9 +87,6 @@ export class TargetGossipService {
    *  démarrage de CE service — un redémarrage local perd donc la mémoire du statut, mais le LWT
    *  retenu du pair la restaure dès l'abonnement, comme know-targets). */
   private readonly liveness: Map<string, boolean> = new Map();
-  /** sourceMachineId → dernier `site` annoncé par ce pair (voir TargetsGossipPayload.site) — pas
-   *  persisté, reconstruit au fil des messages retenus reçus après chaque redémarrage. */
-  private readonly peerSites: Map<string, string> = new Map();
 
   constructor(
     private readonly configService: ConfigService,
@@ -130,7 +122,6 @@ export class TargetGossipService {
 
     this.transport.onMessage((message) => this.handleMessage(message));
     this.transport.connect();
-    this.transport.subscribe(`${TOPIC_PREFIX}/+/known-targets`, 1);
     this.transport.subscribe(`${TOPIC_PREFIX}/+/known-scripts`, 1);
     this.transport.subscribe(`${TOPIC_PREFIX}/+/status`, 1);
     this.transport.subscribe(`${TOPIC_PREFIX}/+/removed`, 1);
@@ -154,29 +145,14 @@ export class TargetGossipService {
     // ⭐ 23/09/2026 — demande/réponse 'sauvegarde:gossip-targets:get' retirée avec le bouton
     // « Importer depuis le gossip » de l'app sauvegarde (demande explicite, test live).
 
-    this.republish();
+    // Ancienne annonce de cibles de CETTE machine effacée (les cibles circulent désormais par la
+    // diffusion de data/core/config.yaml).
+    this.transport.publish(`${TOPIC_PREFIX}/${this.machineId}/known-targets`, '', 1, true);
     this.logger.info('TargetGossip', `Synchronisation entre instances active (machineId: ${this.machineId})`);
   }
 
   stop(): void {
     this.transport?.disconnect();
-  }
-
-  /**
-   * À appeler après tout changement LOCAL (ajout/suppression depuis l'IHM de CETTE machine) des
-   * cibles core ou haStack — jamais après une fusion issue du gossip lui-même (voir l'en-tête :
-   * seules les cibles `origin !== 'gossip'` sont republiées, ce qui exclut structurellement tout
-   * écho).
-   */
-  republish(): void {
-    if (!this.transport) return;
-    const payload: TargetsGossipPayload = {
-      core: this.configService.getTargets().filter((t) => t.origin !== 'gossip'),
-      haStack: this.configService.getHaStackTargets().filter((t) => t.origin !== 'gossip'),
-      zigbee2mqtt: this.configService.getZigbee2mqttTargets().filter((t) => t.origin !== 'gossip'),
-      site: this.configService.getConfig().core.site || undefined
-    };
-    this.transport.publish(`${TOPIC_PREFIX}/${this.machineId}/known-targets`, JSON.stringify(payload), 1, true);
   }
 
   /** Demande à scriptsha (IPC) sa liste actuelle de scripts locaux, puis republie l'annonce MQTT
@@ -209,9 +185,7 @@ export class TargetGossipService {
     // topic malformé sans les segments attendus.
     if (!sourceMachineId || sourceMachineId === this.machineId) return;
 
-    if (kind === 'known-targets') {
-      this.handleTargetsMessage(sourceMachineId, message);
-    } else if (kind === 'known-scripts') {
+    if (kind === 'known-scripts') {
       this.handleScriptsMessage(sourceMachineId, message);
     } else if (kind === 'status') {
       this.handleStatusMessage(sourceMachineId, message);
@@ -242,23 +216,8 @@ export class TargetGossipService {
    *  start()) est ignoré : ce n'est pas un vrai tombstone. */
   private handleRemovedMessage(sourceMachineId: string, message: MqttMessage): void {
     if (message.payload.toString() === '') return;
-
-    const prefix = `${sourceMachineId}::`;
-    let changed = false;
-    for (const kind of ['core', 'haStack', 'zigbee2mqtt'] as const) {
-      const current = this.getTargetsFor(kind);
-      if (!current.some((t) => t.id.startsWith(prefix))) continue;
-      const result = this.setTargetsFor(kind, current.filter((t) => !t.id.startsWith(prefix)));
-      if (result.success) changed = true;
-      else this.logger.error('TargetGossip', `Échec de purge locale des cibles ${kind} de ${sourceMachineId}: ${result.error}`);
-    }
-
     this.liveness.delete(sourceMachineId);
     this.broadcastLiveness();
-    if (changed) {
-      this.eventBus.emitGeneric('core:deployment:gossip:changed', undefined);
-      this.logger.warn('TargetGossip', `Suppression confirmée de la machine ${sourceMachineId} reçue par gossip — cibles apprises d'elle retirées localement`);
-    }
   }
 
   /**
@@ -285,31 +244,6 @@ export class TargetGossipService {
     this.eventBus.emit('core:machine:status:list', { statuses });
   }
 
-  private handleTargetsMessage(sourceMachineId: string, message: MqttMessage): void {
-    let data: TargetsGossipPayload;
-    try {
-      data = JSON.parse(message.payload.toString());
-    } catch {
-      this.logger.warn('TargetGossip', `Annonce de cibles illisible reçue sur ${message.topic}, ignorée`);
-      return;
-    }
-
-    if (data.site) this.peerSites.set(sourceMachineId, data.site);
-
-    this.mergeTargets(sourceMachineId, data.core || [], 'core');
-    this.mergeTargets(sourceMachineId, data.haStack || [], 'haStack');
-    this.mergeTargets(sourceMachineId, data.zigbee2mqtt || [], 'zigbee2mqtt');
-  }
-
-  /** Site d'une cible connue (locale ou apprise par gossip) — voir TargetsGossipPayload.site.
-   *  Une cible `origin: 'gossip'` a un id `{sourceMachineId}::{original}` (voir mergeTargets) ;
-   *  une cible locale n'a pas ce préfixe, son site est simplement celui de CETTE machine. */
-  private resolveSiteFor(target: { id: string; origin: string }): string {
-    if (target.origin !== 'gossip') return this.configService.getConfig().core.site;
-    const sourceMachineId = target.id.split('::')[0] ?? target.id;
-    return this.peerSites.get(sourceMachineId) || '';
-  }
-
   private handleScriptsMessage(sourceMachineId: string, message: MqttMessage): void {
     let data: ScriptsGossipPayload;
     try {
@@ -322,97 +256,5 @@ export class TargetGossipService {
     // Fusion effective déléguée à scriptsha lui-même (fichiers/manifeste sous son propre
     // process) — ce service ne fait que relayer l'annonce reçue.
     this.eventBus.emitGeneric('scriptsha:gossip:learned', { sourceMachineId, scripts: data.scripts });
-  }
-
-  /**
-   * ⭐ 31/08/2026, réécrite en vraie réconciliation (voir en-tête de fichier) — le message reçu
-   * est un instantané COMPLET des cibles locales de `sourceMachineId`, pas un diff : tout ce qui y
-   * figure remplace ce qu'on savait déjà de cette source (ajout ou mise à jour d'hôte confondus),
-   * et tout ce qu'on avait appris d'elle mais qui n'y figure plus est retiré. Nos propres cibles
-   * locales et celles apprises d'AUTRES machines ne sont jamais touchées (filtrées par préfixe
-   * `{sourceMachineId}::`).
-   */
-  private mergeTargets(
-    sourceMachineId: string,
-    incoming: Array<DeploymentTargetConfig | HaStackTargetConfig | Zigbee2mqttTargetConfig>,
-    kind: 'core' | 'haStack' | 'zigbee2mqtt'
-  ): void {
-    const current = this.getTargetsFor(kind);
-    const prefix = `${sourceMachineId}::`;
-    const others = current.filter((t) => !t.id.startsWith(prefix));
-    const previousForSource = current.filter((t) => t.id.startsWith(prefix));
-
-    const incomingAsGossip = incoming
-      .filter((t) => t.host)
-      .map((t) => ({ ...t, id: `${prefix}${t.id}`, origin: 'gossip' as const }));
-
-    // Rejeu identique (ex: reconnexion du client gossip, réabonnement, rejeu du message retenu) —
-    // rien de neuf, on évite l'écriture disque et le bruit dans les logs.
-    if (this.sameGossipSet(previousForSource, incomingAsGossip)) return;
-
-    const merged = [...others, ...incomingAsGossip];
-    const result = this.setTargetsFor(kind, merged);
-
-    if (!result.success) {
-      this.logger.error('TargetGossip', `Échec d'enregistrement des cibles ${kind} apprises de ${sourceMachineId}: ${result.error}`);
-      return;
-    }
-
-    this.logGossipDiff(kind, sourceMachineId, previousForSource, incomingAsGossip);
-    this.eventBus.emitGeneric('core:deployment:gossip:changed', undefined);
-  }
-
-  private getTargetsFor(kind: 'core' | 'haStack' | 'zigbee2mqtt'): Array<DeploymentTargetConfig | HaStackTargetConfig | Zigbee2mqttTargetConfig> {
-    return kind === 'core' ? this.configService.getTargets()
-      : kind === 'haStack' ? this.configService.getHaStackTargets()
-      : this.configService.getZigbee2mqttTargets();
-  }
-
-  private setTargetsFor(
-    kind: 'core' | 'haStack' | 'zigbee2mqtt',
-    list: Array<DeploymentTargetConfig | HaStackTargetConfig | Zigbee2mqttTargetConfig>
-  ): SaveResult {
-    return kind === 'core' ? this.configService.setTargets(list as DeploymentTargetConfig[])
-      : kind === 'haStack' ? this.configService.setHaStackTargets(list as HaStackTargetConfig[])
-      : this.configService.setZigbee2mqttTargets(list as Zigbee2mqttTargetConfig[]);
-  }
-
-  /** Égalité structurelle, indifférente à l'ordre — un message retenu rejoué produit un payload
-   *  strictement identique, donc une comparaison triée par id suffit (pas besoin de deep-equal
-   *  sophistiqué : mêmes clés, mêmes valeurs primitives, JSON.stringify après tri est fiable ici). */
-  private sameGossipSet(
-    a: Array<{ id: string }>,
-    b: Array<{ id: string }>
-  ): boolean {
-    if (a.length !== b.length) return false;
-    const sortedA = [...a].sort((x, y) => x.id.localeCompare(y.id));
-    const sortedB = [...b].sort((x, y) => x.id.localeCompare(y.id));
-    return JSON.stringify(sortedA) === JSON.stringify(sortedB);
-  }
-
-  private logGossipDiff(
-    kind: 'core' | 'haStack' | 'zigbee2mqtt',
-    sourceMachineId: string,
-    previous: Array<{ id: string; host: string }>,
-    incoming: Array<{ id: string; host: string }>
-  ): void {
-    const previousById = new Map(previous.map((t) => [t.id, t]));
-    const incomingIds = new Set(incoming.map((t) => t.id));
-
-    const added = incoming.filter((t) => !previousById.has(t.id));
-    const updated = incoming.filter((t) => {
-      const before = previousById.get(t.id);
-      return before !== undefined && before.host !== t.host;
-    });
-    const removed = previous.filter((t) => !incomingIds.has(t.id));
-
-    const parts: string[] = [];
-    if (added.length > 0) parts.push(`${added.length} ajoutée(s) [${added.map((t) => t.host).join(', ')}]`);
-    if (updated.length > 0) parts.push(`${updated.length} mise(s) à jour [${updated.map((t) => `${t.id}→${t.host}`).join(', ')}]`);
-    if (removed.length > 0) parts.push(`${removed.length} retirée(s) [${removed.map((t) => t.id).join(', ')}]`);
-
-    if (parts.length > 0) {
-      this.logger.info('TargetGossip', `Cibles ${kind} de ${sourceMachineId} réconciliées : ${parts.join(', ')}`);
-    }
   }
 }

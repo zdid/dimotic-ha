@@ -6,7 +6,7 @@
   <meta name="description" content="HA WS/MQTT Application - Configuration Interface">
   <title>HA/MQTT</title>
   <link rel="icon" type="image/png" href="/images/maisonsouriante.png">
-  <!-- Derniere modification: 2026-09-29 18:31:15 - Accueil : pavé de copie de la clé SSH en tête (conteneur dimotic-ha) -->
+  <!-- Derniere modification: 2026-09-29 18:51:30 - Diffusion des données déplacée sur la page Site -->
   
   <!-- Styles - Chargés depuis des fichiers externes -->
   <link rel="stylesheet" href="/styles/general.css">
@@ -27,6 +27,8 @@
     <!-- Sections de contenu - masquées par défaut -->
     <div id="section-machine" class="content-section" style="display: none;">
       <app-config-form data-section="machine"></app-config-form>
+      <!-- ⭐ 29/09/2026 (demande utilisateur) : la diffusion des données se règle sur la page Site. -->
+      <app-diffusion-manager></app-diffusion-manager>
     </div>
 
     <div id="section-ha" class="content-section" style="display: none;">
@@ -54,9 +56,6 @@
     </div>
     <div id="section-post-install" class="content-section" style="display: none;">
       <app-post-install-manager></app-post-install-manager>
-    </div>
-    <div id="section-diffusion" class="content-section" style="display: none;">
-      <app-diffusion-manager></app-diffusion-manager>
     </div>
 
     <!-- Container pour les modules dynamiques -->

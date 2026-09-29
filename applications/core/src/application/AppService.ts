@@ -44,6 +44,7 @@ import { SOCLE_SOCKET_EVENTS } from '../types/events';
 import { setLoadedAppDir, clearLoadedAppDir, loadAppModule, scanApplications, resolveAppDir } from './appRoots';
 import { ExternalAppPreparer } from './ExternalAppPreparer';
 import { redactForLog } from '../infrastructure/logger/redact';
+import { cleanupTargets } from '../infrastructure/config/targetsCleanup';
 
 /**
  * ⭐ 24/08/2026, correctif d'un bug réel : une app requiredHaWs peut attendre `ha:ready`
@@ -342,10 +343,11 @@ export class AppService {
     // ⭐ 31/08/2026, suppression définitive d'une machine disparue (confirmée par un humain, voir
     // TargetGossipService en-tête) — couvre les 3 listes de cibles à la fois, pas une par une.
     this.eventBus.on('core:deployment:target:purge', (data) => this.handleDeploymentTargetPurge(data));
-    // Reflète en direct dans un tableau de bord déjà ouvert une réconciliation gossip (mise à jour
-    // d'hôte, suppression volontaire à la source, suppression confirmée) — sans ça, les 3 listes ne
-    // se rafraîchissent qu'au prochain `*:targets:get` explicite (rechargement de page).
-    this.eventBus.onGeneric('core:deployment:gossip:changed', () => {
+    // ⭐ 29/09/2026 — data/core/config.yaml reçu d'une autre machine (diffusion) : ses cibles sont
+    // nettoyées puis les 3 listes rafraîchies à l'écran.
+    this.eventBus.onGeneric<{ app: string; path: string }>('core:data:file:changed', (e) => {
+      if (e?.app !== 'core' || e.path !== 'core/config.yaml') return;
+      this.cleanupDeploymentTargets();
       this.handleDeploymentTargetsGet();
       this.handleHaStackTargetsGet();
       this.handleZigbee2mqttTargetsGet();
@@ -431,8 +433,10 @@ export class AppService {
     // pour toute l'application, partagée par toutes les cibles, voir SshClient.ts#ensureGlobalSshKey).
     ensureGlobalSshKey();
 
-    // 2.2. Démarre la synchronisation des cibles connues entre instances (⭐ 24/08/2026, voir
-    // TargetGossipService.ts) — indépendant de HA WS/des services applicatifs, peut démarrer tôt.
+    // 2.2. ⭐ 29/09/2026 — nettoyage automatique des cibles de déploiement (une machine = une ligne,
+    // plus de préfixe d'origine, voir targetsCleanup.ts), puis présence des machines + scripts
+    // (TargetGossipService — les cibles ne passent plus par MQTT, elles suivent data/core/config.yaml).
+    this.cleanupDeploymentTargets();
     this.targetGossipService.start();
 
     // 2.2bis. Démarre le registre d'applications inter-machines (⭐ 27/08/2026, voir
@@ -975,8 +979,6 @@ export class AppService {
     const result = this.configService.setTargets(targets);
     if (!result.success) {
       this.logger.error('AppService', `Échec de sauvegarde de la cible de déploiement ${target.id}: ${result.error}`);
-    } else {
-      this.targetGossipService.republish();
     }
     this.handleDeploymentTargetsGet();
   }
@@ -986,49 +988,34 @@ export class AppService {
     const result = this.configService.setTargets(targets);
     if (!result.success) {
       this.logger.error('AppService', `Échec de suppression de la cible de déploiement ${data.id}: ${result.error}`);
-    } else {
-      this.targetGossipService.republish();
     }
     this.handleDeploymentTargetsGet();
   }
 
   /**
-   * ⭐ 31/08/2026 : suppression définitive d'une machine disparue, confirmée par un humain (jamais
-   * automatique — voir TargetGossipService en-tête). Une seule purge retire les cibles gossipées
-   * de cette machine sur les 3 listes (core/haStack/zigbee2mqtt) à la fois — pas 3 flux séparés —
-   * puis délègue au réseau (annonce + nettoyage des topics retenus de la machine disparue) à
-   * TargetGossipService, propriétaire du canal MQTT gossip.
+   * Oubli d'une machine disparue (présence MQTT), confirmé par un humain. ⭐ 29/09/2026 : ne touche
+   * plus aux cibles — une cible se supprime comme une autre, et la suppression suit
+   * data/core/config.yaml sur toutes les machines (diffusion).
    */
   private handleDeploymentTargetPurge(data: { machineId: string }): void {
-    const prefix = `${data.machineId}::`;
-
-    const core = this.configService.getTargets();
-    const coreRemaining = core.filter((t) => !t.id.startsWith(prefix));
-    if (coreRemaining.length !== core.length) {
-      const result = this.configService.setTargets(coreRemaining);
-      if (!result.success) this.logger.error('AppService', `Échec de purge des cibles core de ${data.machineId}: ${result.error}`);
-    }
-
-    const haStack = this.configService.getHaStackTargets();
-    const haStackRemaining = haStack.filter((t) => !t.id.startsWith(prefix));
-    if (haStackRemaining.length !== haStack.length) {
-      const result = this.configService.setHaStackTargets(haStackRemaining);
-      if (!result.success) this.logger.error('AppService', `Échec de purge des cibles HA+Mosquitto de ${data.machineId}: ${result.error}`);
-    }
-
-    const zigbee2mqtt = this.configService.getZigbee2mqttTargets();
-    const zigbee2mqttRemaining = zigbee2mqtt.filter((t) => !t.id.startsWith(prefix));
-    if (zigbee2mqttRemaining.length !== zigbee2mqtt.length) {
-      const result = this.configService.setZigbee2mqttTargets(zigbee2mqttRemaining);
-      if (!result.success) this.logger.error('AppService', `Échec de purge des cibles zigbee2mqtt de ${data.machineId}: ${result.error}`);
-    }
-
     this.targetGossipService.purgeMachine(data.machineId);
-    this.logger.info('AppService', `Machine ${data.machineId} purgée — cibles gossipées retirées localement, suppression annoncée aux autres instances`);
+  }
 
-    this.handleDeploymentTargetsGet();
-    this.handleHaStackTargetsGet();
-    this.handleZigbee2mqttTargetsGet();
+  /** ⭐ 29/09/2026 — une machine = une ligne dans chacune des 3 listes (voir targetsCleanup.ts). */
+  private cleanupDeploymentTargets(): void {
+    const lists = [
+      ['dimotic-ha', () => this.configService.getTargets(), (l: never[]) => this.configService.setTargets(l)],
+      ['HA+Mosquitto', () => this.configService.getHaStackTargets(), (l: never[]) => this.configService.setHaStackTargets(l)],
+      ['zigbee2mqtt', () => this.configService.getZigbee2mqttTargets(), (l: never[]) => this.configService.setZigbee2mqttTargets(l)]
+    ] as const;
+    for (const [label, get, set] of lists) {
+      const before = get();
+      const { targets, changed, merged } = cleanupTargets(before as never[]);
+      if (!changed) continue;
+      const result = set(targets as never[]);
+      if (result.success) this.logger.info('AppService', `Cibles ${label} nettoyées : ${before.length} → ${targets.length} ligne(s) (${merged} doublon(s) fusionné(s))`);
+      else this.logger.error('AppService', `Nettoyage des cibles ${label} impossible : ${result.error}`);
+    }
   }
 
   /**
@@ -1093,8 +1080,6 @@ export class AppService {
     const result = this.configService.setHaStackTargets(targets);
     if (!result.success) {
       this.logger.error('AppService', `Échec de sauvegarde de la cible HA+Mosquitto ${target.id}: ${result.error}`);
-    } else {
-      this.targetGossipService.republish();
     }
     this.handleHaStackTargetsGet();
   }
@@ -1104,8 +1089,6 @@ export class AppService {
     const result = this.configService.setHaStackTargets(targets);
     if (!result.success) {
       this.logger.error('AppService', `Échec de suppression de la cible HA+Mosquitto ${data.id}: ${result.error}`);
-    } else {
-      this.targetGossipService.republish();
     }
     this.handleHaStackTargetsGet();
   }
@@ -1199,8 +1182,6 @@ export class AppService {
     const result = this.configService.setZigbee2mqttTargets(targets);
     if (!result.success) {
       this.logger.error('AppService', `Échec de sauvegarde de la cible zigbee2mqtt ${target.id}: ${result.error}`);
-    } else {
-      this.targetGossipService.republish();
     }
     this.handleZigbee2mqttTargetsGet();
   }
@@ -1210,8 +1191,6 @@ export class AppService {
     const result = this.configService.setZigbee2mqttTargets(targets);
     if (!result.success) {
       this.logger.error('AppService', `Échec de suppression de la cible zigbee2mqtt ${data.id}: ${result.error}`);
-    } else {
-      this.targetGossipService.republish();
     }
     this.handleZigbee2mqttTargetsGet();
   }

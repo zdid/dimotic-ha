@@ -235,6 +235,13 @@ export class DeploymentManager extends HTMLElement {
       this.renderZigbee2mqttTargets({ targets: this.lastZ2mTargets });
     });
 
+    // Nouvelles adresses connues → statut en ligne recalculé.
+    window.addEventListener('app:remote-apps', () => {
+      this.renderTargets({ targets: this.lastCoreTargets });
+      this.renderHaStackTargets({ targets: this.lastHaStackTargets });
+      this.renderZigbee2mqttTargets({ targets: this.lastZ2mTargets });
+    });
+
     this.socket.on('core:deployment:remote-op:result', (result: TargetActionResult) => {
       const container = this.shadowRoot!.getElementById('targets-container');
       if (container) showTargetActionResult(container, result);
@@ -301,13 +308,18 @@ export class DeploymentManager extends HTMLElement {
     });
   }
 
-  /** ⭐ 31/08/2026 : dérive `online` (uniquement pour les cibles gossipées) à partir de `liveness`,
-   *  côté appelant — TargetCards.ts n'a lui-même aucune idée de Socket.io/MQTT. */
+  /** ⭐ 29/09/2026 : `online` retrouvé par l'ADRESSE de la cible (plus de préfixe d'origine) —
+   *  adresse → machineId d'après le registre des applications des autres machines (app:remote-apps,
+   *  qui porte leurs adresses), puis présence de ce machineId. Machine locale ou inconnue : rien. */
   private withLiveness(targets: TargetsListData['targets']) {
-    return targets.map((t) => ({
-      ...t,
-      online: t.origin === 'gossip' ? this.liveness.get(t.id.split('::')[0]) : undefined
-    }));
+    const hostToMachine = new Map<string, string>();
+    for (const m of (window.app.remoteApps || []) as Array<{ machineId: string; address?: string; addresses?: string[] }>) {
+      for (const a of [m.address, ...(m.addresses || [])]) if (a) hostToMachine.set(a, m.machineId);
+    }
+    return targets.map((t) => {
+      const machineId = hostToMachine.get(t.host);
+      return { ...t, online: machineId ? this.liveness.get(machineId) : undefined };
+    });
   }
 
   private renderTargets(data: TargetsListData): void {
@@ -323,9 +335,6 @@ export class DeploymentManager extends HTMLElement {
       },
       onDelete: (targetId: string) => {
         this.socket.emit('core:deployment:target:delete', { id: targetId });
-      },
-      onPurge: (machineId: string) => {
-        this.socket.emit('core:deployment:target:purge', { machineId });
       }
     });
   }
@@ -356,9 +365,6 @@ export class DeploymentManager extends HTMLElement {
       },
       onDelete: (targetId: string) => {
         this.socket.emit('core:deployment:ha-stack:target:delete', { id: targetId });
-      },
-      onPurge: (machineId: string) => {
-        this.socket.emit('core:deployment:target:purge', { machineId });
       }
     });
   }
@@ -389,9 +395,6 @@ export class DeploymentManager extends HTMLElement {
       },
       onDelete: (targetId: string) => {
         this.socket.emit('core:deployment:zigbee2mqtt:target:delete', { id: targetId });
-      },
-      onPurge: (machineId: string) => {
-        this.socket.emit('core:deployment:target:purge', { machineId });
       }
     });
   }

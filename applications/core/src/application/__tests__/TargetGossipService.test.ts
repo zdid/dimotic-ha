@@ -72,67 +72,6 @@ describe('TargetGossipService', () => {
     (service as any).transport = mockTransport;
   });
 
-  describe('mergeTargets (réconciliation)', () => {
-    it('ajoute une cible d\'une nouvelle source', () => {
-      (service as any).mergeTargets('orangepi', [{ id: 'orangepi', host: '192.168.1.130', remoteDir: '/docker/dimotic-ha' }], 'core');
-
-      expect(configService.setTargets).toHaveBeenCalledWith([
-        target('ha2', '192.168.1.51'),
-        expect.objectContaining({ id: 'orangepi::orangepi', host: '192.168.1.130', origin: 'gossip' })
-      ]);
-    });
-
-    it('met à jour l\'hôte d\'une cible déjà apprise de la même source — le bug réel du 30-31/08/2026', () => {
-      coreTargets = [
-        target('ha2', '192.168.1.51'),
-        target('orangepi::orangepi', '192.168.1.32', 'gossip')
-      ];
-
-      (service as any).mergeTargets('orangepi', [{ id: 'orangepi', host: '192.168.1.130', remoteDir: '/docker/dimotic-ha' }], 'core');
-
-      expect(configService.setTargets).toHaveBeenCalledWith([
-        target('ha2', '192.168.1.51'),
-        expect.objectContaining({ id: 'orangepi::orangepi', host: '192.168.1.130', origin: 'gossip' })
-      ]);
-    });
-
-    it('retire une cible que la source a elle-même retirée de sa liste', () => {
-      coreTargets = [
-        target('ha2', '192.168.1.51'),
-        target('orangepi::orangepi', '192.168.1.130', 'gossip')
-      ];
-
-      (service as any).mergeTargets('orangepi', [], 'core');
-
-      expect(configService.setTargets).toHaveBeenCalledWith([target('ha2', '192.168.1.51')]);
-    });
-
-    it('ne touche pas aux cibles locales ni à celles apprises d\'une AUTRE source', () => {
-      coreTargets = [
-        target('ha2', '192.168.1.51'),
-        target('stfort::autre', '192.168.1.99', 'gossip')
-      ];
-
-      (service as any).mergeTargets('orangepi', [{ id: 'orangepi', host: '192.168.1.130', remoteDir: '/docker/dimotic-ha' }], 'core');
-
-      const merged = (configService.setTargets as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      expect(merged).toContainEqual(target('ha2', '192.168.1.51'));
-      expect(merged).toContainEqual(target('stfort::autre', '192.168.1.99', 'gossip'));
-    });
-
-    it('ne réécrit rien ni n\'émet de changement sur un rejeu identique (ex: reconnexion du client gossip)', () => {
-      coreTargets = [
-        target('ha2', '192.168.1.51'),
-        target('orangepi::orangepi', '192.168.1.130', 'gossip')
-      ];
-
-      (service as any).mergeTargets('orangepi', [{ id: 'orangepi', host: '192.168.1.130', remoteDir: '/docker/dimotic-ha' }], 'core');
-
-      expect(configService.setTargets).not.toHaveBeenCalled();
-      expect(eventBus.emitGeneric).not.toHaveBeenCalledWith('core:deployment:gossip:changed', undefined);
-    });
-  });
-
   describe('handleStatusMessage (présence)', () => {
     it('notifie sur une transition online → offline', () => {
       (service as any).handleStatusMessage('orangepi', { payload: Buffer.from('online') });
@@ -161,21 +100,6 @@ describe('TargetGossipService', () => {
   });
 
   describe('handleRemovedMessage (suppression confirmée reçue)', () => {
-    it('retire uniquement les cibles de la machine supprimée, laisse les autres intactes', () => {
-      coreTargets = [
-        target('ha2', '192.168.1.51'),
-        target('orangepi::orangepi', '192.168.1.130', 'gossip'),
-        target('stfort::autre', '192.168.1.99', 'gossip')
-      ];
-
-      (service as any).handleRemovedMessage('orangepi', { payload: Buffer.from('{"machineId":"orangepi"}') });
-
-      expect(configService.setTargets).toHaveBeenCalledWith([
-        target('ha2', '192.168.1.51'),
-        target('stfort::autre', '192.168.1.99', 'gossip')
-      ]);
-    });
-
     it('efface le statut de présence connu pour la machine supprimée', () => {
       (service as any).liveness.set('orangepi', true);
       coreTargets = [target('orangepi::orangepi', '192.168.1.130', 'gossip')];
