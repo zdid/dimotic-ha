@@ -3,6 +3,13 @@
 
 
 
+## ✅ ESPDISPLAY (page ESPHome) — réglages diffusés, machine ESPHome obligatoire — FAIT le 29/09/2026 (spec espdisplay v1.3)
+
+Réglages communs (`config.yaml`, diffusé), clé SSH de la machine qui appelle, script agent paramétré installé
+sur falbala (`~/bin/espdisplay-agent-run.sh`, essai réel par SSH). **Reste** : autoriser la clé de ha2 sur
+falbala (`ssh-copy-id`, une fois) et décider d'une restriction `command=` ; vérifier dans le navigateur la
+page « Écrans ESP » (champ Hôte obligatoire).
+
 ## 🔴 HA2 (orangepi4pro, .51) N'EST PLUS SAUVEGARDÉ depuis son remplacement (constaté 25/09/2026)
 - Ni /dimotic-backup/nextcloud-backup.sh, ni cron, ni /dimotic-secrets/ sur la machine restaurée : la
   restauration remet /docker mais pas le script de sauvegarde (hors /docker). stfort, lui, sauvegarde
@@ -108,7 +115,7 @@
       **à la fin (succès, échec ou abandon) la connexion Wi-Fi d'origine (non Tasmota) est remise**. Machine sans
       Ethernet actif ou sans Wi-Fi → action indisponible, avec la raison affichée. À étudier : pilotage de
       NetworkManager depuis le conteneur Docker (D-Bus de l'hôte, droits). Le script Outils `tasmota-config`
-      (non commité) devient provisoire / à retirer une fois l'application livrée.
+      a été **retiré le 29/09/2026** (spec outils v1.4) : repris par l'application.
     - **Tasmota neuf, en 2 étapes séparées, lancées indépendamment** : (1) par **HTTP** sur son point d'accès
       (192.168.4.1) depuis **falbala** (Ethernet pour le réseau normal, sa carte Wi-Fi connectée au point d'accès du
       Tasmota) → Wi-Fi + MQTT ; (2) le reste **par MQTT** une fois le Tasmota redémarré sur le bon Wi-Fi (script
@@ -186,7 +193,7 @@
       9. masquage Magic Switch : si reflashage (firmware à fenêtre plus longue) on s'en passe, sinon **durée
          de masquage = paramètre de l'appareil dans l'application** ;
       10. Pi du garage (GARAGE3) **après** l'application ;
-      11. commits / sort du script Outils `tasmota-config` : **plus tard**.
+      11. commits / sort du script Outils `tasmota-config` : **fait le 29/09/2026** (script retiré, spec outils v1.4).
     - **Diffusion des données (spec `techniques-diffusion-data_specs` v1.2, 29/09/2026)** : temps 1 (core, trois
       fichiers de configuration) ✅ ; temps 2 ✅ pour toutes les applications ; **rfxcom migré sur falbala le 29/09**
       (`port`/`baudRate` → machine, fichier des appareils → `machine_config-rfxcom-devices-v1.0.yaml`, désactivé) et

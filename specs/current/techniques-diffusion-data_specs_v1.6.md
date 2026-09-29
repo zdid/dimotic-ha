@@ -1,8 +1,8 @@
 # Spécifications — Diffusion des fichiers de `data/` entre machines (core)
 
-**Version :** 1.5
-**Date :** 29 Septembre 2026 (v1.5 : cibles de déploiement par la diffusion, une machine = une ligne ; réglage sur la page Site)
-**Version précédente :** 1.4 — 29 Septembre 2026 (temps 3 réalisé)
+**Version :** 1.6
+**Date :** 29 Septembre 2026 (v1.6 : deux cases Diffuser / Recevoir au lieu de trois modes, défaut selon Docker, une seule boîte avec le site)
+**Version précédente :** 1.5 — 29 Septembre 2026 (cibles de déploiement par la diffusion, réglage sur la page Site)
 **Statut :** **Temps 1, 2 et 3 réalisés et vérifiés le 29/09/2026** (falbala : migration réelle, deux cores réels en diffusion, application externe préparée et activée) — reste : déploiement Docker sur les machines, décision de l'utilisateur.
 du 06/09/2026 (mise en pause), précisée par les décisions de l'utilisateur du 28/09/2026.
 **Rôle :** mécanisme **du core** (aucune application ne le réimplémente).
@@ -37,7 +37,7 @@ cible a été apprise n'a aucun sens.
 - **Plus d'échange des cibles par MQTT** (`dimotic/core/<machine>/known-targets`, abandonné ; chaque
   core vide son ancien topic retenu au démarrage). Les trois listes (`targets`, `haStackTargets`,
   `zigbee2mqttTargets`) sont dans `data/core/config.yaml` et circulent avec lui par la diffusion :
-  même liste sur toutes les machines en mode `complet`. Une suppression suit le fichier : elle vaut
+  même liste sur toutes les machines qui diffusent et reçoivent. Une suppression suit le fichier : elle vaut
   partout (le plus récent gagne).
 - **Nettoyage automatique** (`infrastructure/config/targetsCleanup.ts`), au démarrage du core et à
   chaque réception de `core/config.yaml` : l'ancien préfixe `machineSource::` est retiré, deux
@@ -52,15 +52,25 @@ cible a été apprise n'a aucun sens.
 
 ## 2bis. Modes par machine et isolation (décisions du 29/09/2026)
 
-Réglage **propre à la machine** `diffusion.mode` (dans `data/core/machine_config.yaml`) :
+Réglage **propre à la machine**, **deux cases** (⭐ v1.6, demande utilisateur — auparavant un mode à
+trois valeurs `arretee` / `complet` / `reception`) : `diffusion.send` (**Diffuser**) et `diffusion.receive`
+(**Recevoir**), dans `data/core/machine_config.yaml`.
 
-| Mode | Envoie | Reçoit | Usage |
-|---|---|---|---|
-| `arretee` (**défaut**) | non | non | tant qu'on n'a pas décidé ; machine isolée |
-| `complet` | oui | oui | machines de production (ha2, stfort, noisy…) |
-| `reception` | non | oui | **machine de développement** (falbala) : copie à jour de la production, rien ne sort |
+| Diffuser | Recevoir | Usage |
+|---|---|---|
+| ☑ | ☑ | machines de production (ha2, stfort, noisy…) |
+| ☐ | ☑ | **machine de développement** (falbala) : copie à jour de la production, rien ne sort |
+| ☑ | ☐ | machine qui fait référence : envoie ses fichiers, ne prend rien des autres |
+| ☐ | ☐ | machine isolée |
 
-**Isolation automatique en mode `reception`** : toute application **active sur la machine** (core compris,
+**Défaut** (cases jamais réglées) : **les deux cochées, et enregistrées** dans `machine_config.yaml` au
+démarrage de la diffusion (demande utilisateur). Reprise de l'ancien réglage : `complet` → ☑☑,
+`reception` → ☐☑ ; `arretee` était la valeur de départ jamais choisie, elle vaut « non réglé » (donc ☑☑).
+
+**Interface** : *Paramètres Techniques › Site*, dans la même boîte que le site ; changement pris en compte
+aussitôt, après confirmation (sans le bouton Sauvegarder).
+
+**Isolation automatique en « Recevoir » sans « Diffuser »** : toute application **active sur la machine** (core compris,
 jamais désactivable) est isolée — ses fichiers ne sont ni envoyés ni remplacés. Une application testée
 seulement sur falbala (ex. rfxcom le 29/09) garde donc ses fichiers ; une application inactive reste
 alimentée par la production et démarre, une fois activée, avec les derniers fichiers reçus.
@@ -312,6 +322,7 @@ l'utilisateur le décide.
 
 | Version | Date | Auteur | Modifications |
 |---|---|---|---|
+| 1.6 | 29/09/2026 | Claude | Deux cases Diffuser / Recevoir au lieu de trois modes (« diffuser seulement » devient possible), défaut : les deux cochées et enregistrées ; réglage dans la même boîte que le site ; correction : la page n'affichait jamais les réglages (composant activé avant `window.app`). |
 | 1.5 | 29/09/2026 | Claude | Cibles de déploiement par la diffusion de `core/config.yaml` (plus d'échange MQTT `known-targets`), une machine = une ligne, nettoyage automatique (§2ter) ; réglage de la diffusion sur la page *Site*. |
 | 1.4 | 29/09/2026 | Claude | **Temps 3 réalisé** : DiffusionService (tests + essai réel entre deux cores sur falbala ; une machine en réception relance sa demande quand une autre machine apparaît), relecture dans chaque application (core:data:file:changed), page Diffusion des données, applications externes préparées sur place (`tsc -p`, pas `tsc -b`). |
 | 1.3 | 29/09/2026 | Claude | §2bis : modes par machine (`arretee` par défaut / `complet` / `reception`), isolation automatique des applications actives en mode `reception` (machine de développement), première synchronisation = règle normale (le plus récent gagne), relecture des fichiers reçus dans chaque application sans coupure. |
