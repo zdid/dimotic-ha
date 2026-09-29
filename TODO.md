@@ -197,7 +197,13 @@
       préférer `/dev/serial/by-id/…`), activer rfxcom sur falbala ; **point de vigilance** : les découvertes HA de stfort
       (`bridgeInstance` rfx_bridge_stfort_…) — même unique_id, topics d'état/commande différents — à purger au basculement ;
       recopier le fichier juste avant le basculement (états modifiés entre-temps sur stfort) ;
-      **Procédure de bascule stfort → falbala (constat 29/09/2026 sur le broker de ha2)** : 1) désactiver rfxcom sur
+      **Bascule — FAIT le 29/09/2026 vers 10:10** : rfxcom désactivé sur stfort (par l'utilisateur, statut offline) ;
+      fichier des appareils + états recopié (version finale écrite à l'arrêt, identique, valide) ; **purge complète** à la
+      demande de l'utilisateur : 173 messages retenus effacés (86 découvertes, 83 attributs, statut + registered-devices
+      de stfort ET de l'instance orangepizero2), sauvegarde dans `backups/mqtt/retenus-rfxcom_backup_2026-09-29_avant-purge.tsv` ;
+      vérifié : 0 message retenu « rfx » sur le broker, 0 appareil / 0 entité RFXCOM dans HA. **Reste** : boîtier sur
+      falbala, `port` (machine_config), activation — les entités seront recréées (réglages manuels HA perdus).
+      Procédure initiale : 1) désactiver rfxcom sur
       stfort ; 2) recopier `data/rfxcom/config-rfxcom-devices-v1.0.yaml` de stfort vers
       `data/rfxcom/machine_config-rfxcom-devices-v1.0.yaml` de falbala ; 3) effacer (retenu vide) les messages retenus
       de stfort : 86 découvertes `homeassistant/<type>/rfx_bridge_stfort_stfort_578666/<objet>/config`,
