@@ -28,6 +28,7 @@ const DEFAULT_CONFIG: AppConfig = {
   haStackTargets: [],
   zigbee2mqttTargets: [],
   externalSites: [],
+  diffusion: { mode: 'arretee' },
   ha: {
     ws_enable: false,
     mqtt_enable: false,

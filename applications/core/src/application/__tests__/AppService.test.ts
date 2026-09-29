@@ -96,6 +96,8 @@ const mockConfigService = {
   getZigbee2mqttTargets: vi.fn().mockReturnValue([]),
   getExternalSites: vi.fn().mockReturnValue([]),
   getKnownApps: vi.fn().mockReturnValue([]),
+  // ⭐ 29/09/2026 — DiffusionService (mode propre à la machine, arrêtée par défaut).
+  getDiffusionMode: vi.fn().mockReturnValue('arretee'),
   isFreshInstall: vi.fn().mockReturnValue(false),
   setAppLists: vi.fn().mockReturnValue({ success: true }),
   registerModuleSchema: vi.fn(),

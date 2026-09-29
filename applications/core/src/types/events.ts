@@ -107,6 +107,8 @@ export interface ServerToClientEvents {
   // Sites externes (⭐ 27/08/2026, voir AppGossipService.ts / schema.ts::externalSiteSchema) —
   // liste personnelle, jamais gossipée.
   'core:external-sites:list': (data: { sites: { id: string; label: string; dimoticUrl: string }[] }) => void;
+  // ⭐ 29/09/2026 — état de la diffusion des fichiers de data/ (DiffusionService.getStatus()).
+  'core:diffusion:status': (data: unknown) => void;
 }
 
 // ------ Événements Client → Server ------

@@ -217,6 +217,7 @@ export class ConfigService {
       haStackTargets: this.config.haStackTargets,
       zigbee2mqttTargets: this.config.zigbee2mqttTargets,
       externalSites: this.config.externalSites,
+      diffusion: this.config.diffusion,
       ...overrides
     } as AppConfig;
   }
@@ -241,6 +242,18 @@ export class ConfigService {
 
   reload(): void {
     this.config = this.loader.load();
+  }
+
+  /** ⭐ 29/09/2026 — mode de diffusion de CETTE machine (machine_config.yaml, voir DiffusionService). */
+  getDiffusionMode(): 'arretee' | 'complet' | 'reception' {
+    return this.config.diffusion?.mode ?? 'arretee';
+  }
+
+  setDiffusionMode(mode: 'arretee' | 'complet' | 'reception'): SaveResult {
+    const diffusion = { mode };
+    const result = this.writer.save(this.socle({ diffusion }));
+    if (result.success) this.config = { ...this.config, diffusion };
+    return result;
   }
 
   /**

@@ -309,6 +309,13 @@ export class SocketBridge {
     // SITES EXTERNES (⭐ 27/08/2026)
     // ======================================================================
 
+    // ⭐ 29/09/2026 — diffusion des fichiers de data/ entre machines (DiffusionService), persistant.
+    // @ts-ignore — événement générique (emitGeneric), hors du typage des événements du socle
+    this.eventBus.on('diffusion:status', (data: unknown) => {
+      this.persistentEvents.set('core:diffusion:status', { appId: 'core', eventName: 'core:diffusion:status', lastData: data });
+      this.broadcast('core:diffusion:status', data);
+    });
+
     this.eventBus.on('core:external-sites:list', (data: { sites: { id: string; label: string; dimoticUrl: string }[] }) => {
       this.logger.info('SocketBridge', 'EventBus → Socket.io: core:external-sites:list');
       this.broadcast('core:external-sites:list', data);
@@ -512,6 +519,17 @@ export class SocketBridge {
       // ===========================================================================
       // SITES EXTERNES (⭐ 27/08/2026)
       // ===========================================================================
+
+      // ⭐ 29/09/2026 — diffusion des fichiers de data/ (page Diffusion des données).
+      // @ts-ignore
+      socket.on('core:diffusion:status:get', () => this.eventBus.emitGeneric('core:diffusion:status:get', {}));
+      // @ts-ignore
+      socket.on('core:diffusion:mode:set', (data: { mode: string }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:diffusion:mode:set de ${socket.id} (${data?.mode})`);
+        this.eventBus.emitGeneric('core:diffusion:mode:set', data);
+      });
+      // @ts-ignore
+      socket.on('core:diffusion:resync', () => this.eventBus.emitGeneric('core:diffusion:resync', {}));
 
       // @ts-ignore
       socket.on('core:external-sites:get', () => {

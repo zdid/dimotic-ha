@@ -11,6 +11,7 @@ import { HaplanLovelaceDeployService } from './HaplanLovelaceDeployService';
 import { Zigbee2mqttDeployService } from './Zigbee2mqttDeployService';
 import { TargetGossipService } from './TargetGossipService';
 import { AppGossipService } from './AppGossipService';
+import { DiffusionService } from './diffusion/DiffusionService';
 import { HaPostInstallService, type PostInstallRequest } from './HaPostInstallService';
 import { HaQueryBridge } from './HaQueryBridge';
 import type { DeploymentTargetConfig, HaStackTargetConfig, Zigbee2mqttTargetConfig, ExternalSiteConfig } from '../infrastructure/config/schema';
@@ -84,6 +85,7 @@ export class AppService {
   // instances du foyer via MQTT retenu (⭐ 24/08/2026, voir TargetGossipService.ts)
   private targetGossipService: TargetGossipService;
   private appGossipService: AppGossipService;
+  private diffusionService: DiffusionService;
   // Services post-installation HA (MQTT/Whisper/Piper/openWakeWord/Ollama), ⭐ 24/08/2026
   private haPostInstallService: HaPostInstallService;
   // Découplage HaStructureRegistry/HaWsClient pour les apps en process séparé (⭐ 24/08/2026, voir
@@ -206,6 +208,8 @@ export class AppService {
     this.zigbee2mqttDeployService = new Zigbee2mqttDeployService(logger);
     this.targetGossipService = new TargetGossipService(configService, eventBus, logger);
     this.appGossipService = new AppGossipService(configService, eventBus, logger, (appId) => this.processSupervisor.getState(appId));
+    // ⭐ 29/09/2026 — diffusion des fichiers de data/ entre machines (techniques-diffusion-data_specs v1.3).
+    this.diffusionService = new DiffusionService(configService, eventBus, logger, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data'));
     this.haPostInstallService = new HaPostInstallService(configService, logger);
     this.haQueryBridge = new HaQueryBridge(eventBus, logger, () => this.haStructureRegistry, () => this.haWsClient,
       () => ({ enabled: this.wsEnabled, ready: this.wsRegistryReady }));
@@ -413,6 +417,15 @@ export class AppService {
     // le premier abonnement ne rate pas la toute première annonce locale.
     this.appGossipService.start();
 
+    // 2.2ter. Diffusion des fichiers de data/ (⭐ 29/09/2026) — mode propre à la machine, arrêtée par défaut.
+    this.diffusionService.start();
+    this.eventBus.onGeneric('core:diffusion:status:get', () => this.eventBus.emitGeneric('diffusion:status', this.diffusionService.getStatus()));
+    this.eventBus.onGeneric<{ mode: string }>('core:diffusion:mode:set', (data) => {
+      const mode = data?.mode;
+      if (mode === 'arretee' || mode === 'complet' || mode === 'reception') this.diffusionService.setMode(mode);
+    });
+    this.eventBus.onGeneric('core:diffusion:resync', () => this.diffusionService.resync());
+
     // 2.3. Démarre le pont générique de requêtes HA pour les apps en process séparé (⭐ 24/08/2026,
     // voir HaQueryBridge.ts) — indépendant de l'état HA WS, la vérification se fait par requête.
     this.haQueryBridge.start();
@@ -578,6 +591,9 @@ export class AppService {
     this.processSupervisor.register(appModule.id, appDir);
     this.supervisorBridge.autoBridgeSocketEvents(appModule.id);
     this.supervisorBridge.bridgeEvent(appModule.id, 'app:module:config:saved');
+    // ⭐ 29/09/2026 — fichier de data/ reçu d'une autre machine (DiffusionService) : chaque application
+    // le relit elle-même, sans redémarrer (techniques-diffusion-data_specs §2bis).
+    this.supervisorBridge.bridgeEvent(appModule.id, 'core:data:file:changed');
     this.supervisorBridge.bridgeEvent(appModule.id, 'ha:bridge:reply');
     this.supervisorBridge.bridgeEvent(appModule.id, 'ha:entity:state_changed');
     this.supervisorBridge.bridgeEvent(appModule.id, 'ha:ready');

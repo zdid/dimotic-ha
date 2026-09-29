@@ -195,6 +195,13 @@ export const configSchema = z.object({
   zigbee2mqttTargets: z.array(zigbee2mqttTargetSchema).default([]),
   // Sites externes (⭐ 27/08/2026) — voir externalSiteSchema. Liste personnelle, jamais gossipée.
   externalSites: z.array(externalSiteSchema).default([]),
+  // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — diffusion des fichiers de data/ entre
+  // machines : réglage PROPRE À LA MACHINE (machine_config.yaml, layers.CORE_DECLARATION).
+  // arretee (défaut) : rien ne part ni n'arrive ; complet : envoie et reçoit (production) ;
+  // reception : reçoit seulement, applications actives isolées (machine de développement).
+  diffusion: z.object({
+    mode: z.enum(['arretee', 'complet', 'reception']).default('arretee')
+  }).default({}),
   // Les sections spécifiques aux modules seront ajoutées dynamiquement
 }).passthrough()
   .refine(

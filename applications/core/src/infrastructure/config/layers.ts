@@ -39,7 +39,7 @@ const YAML_DUMP_OPTIONS = { indent: 2, sortKeys: false, lineWidth: -1 };
  * connexion ne l'utilise (chaque client MQTT du core se nomme d'après `core.machineId`).
  */
 export const CORE_DECLARATION: LayerDeclaration = {
-  machine: ['core.machineId', 'core.site', 'web', 'logging', 'disabledApps', 'knownApps'],
+  machine: ['core.machineId', 'core.site', 'web', 'logging', 'disabledApps', 'knownApps', 'diffusion'],
   secrets: ['ha.ws.token', 'ha.mqtt.password']
 };
 
