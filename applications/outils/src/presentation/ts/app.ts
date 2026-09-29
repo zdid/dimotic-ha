@@ -358,8 +358,7 @@ function startExec(): void {
   socket.emit('outils:values:save', { id: currentDetail.id, values });
   if (missing.length > 0 && !confirm(`Ces variables sont vides : ${missing.join(', ')}. Exécuter quand même ?`)) return;
 
-  const output = $('exec-output');
-  if (output) output.textContent = '';
+  resetExecOutput();
   const terminal = $('exec-terminal');
   if (terminal) terminal.style.display = 'block';
   currentRunId = null;
@@ -377,12 +376,37 @@ function sendExecInput(): void {
   input.value = '';
 }
 
-/** Sortie brute d'un pseudo-terminal : retire les séquences d'échappement (couleurs, curseur) et
- *  les retours chariot — affichage texte simple. */
-function appendExecOutput(chunk: string): void {
+// ⭐ 29/09/2026 — lignes de la sortie affichée, gérées à la main (voir appendExecOutput) : un \r
+// (retour chariot SANS saut de ligne, utilisé par les barres de progression — docker build, apt,
+// curl…) réécrit la ligne en cours au lieu de la conserver ; avant ce correctif, \r était juste
+// jeté et chaque réécriture de barre de progression s'empilait comme une nouvelle ligne — une
+// construction Docker multi-plateforme rendait ainsi l'onglet inutilisable (impression de script
+// bloqué alors qu'il continuait de tourner côté serveur — voir OutilsService.bufferExecOutput
+// pour le regroupement côté serveur, l'autre moitié du correctif).
+let execLines: string[] = [''];
+/** Une exécution verbeuse ne doit jamais rendre l'onglet inutilisable : ne retire que des lignes
+ *  déjà figées (jamais la dernière, encore en cours de réécriture). */
+const EXEC_OUTPUT_MAX_LINES = 2000;
+
+function resetExecOutput(): void {
+  execLines = [''];
+  const output = $('exec-output');
+  if (output) output.textContent = '';
+}
+
+/** Sortie brute d'un pseudo-terminal : retire les séquences d'échappement (couleurs, curseur),
+ *  interprète \r comme une réécriture de la ligne en cours et \n comme une nouvelle ligne. */
+function appendExecOutput(rawChunk: string): void {
   const output = $('exec-output');
   if (!output) return;
-  output.textContent += chunk.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/\r/g, '');
+  const chunk = rawChunk.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '');
+  for (const part of chunk.split(/(\r\n|\r|\n)/)) {
+    if (part === '\r\n' || part === '\n') { execLines.push(''); continue; }
+    if (part === '\r') { execLines[execLines.length - 1] = ''; continue; }
+    if (part) execLines[execLines.length - 1] += part;
+  }
+  if (execLines.length > EXEC_OUTPUT_MAX_LINES) execLines.splice(0, execLines.length - EXEC_OUTPUT_MAX_LINES);
+  output.textContent = execLines.join('\n');
   output.scrollTop = output.scrollHeight;
 }
 

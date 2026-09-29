@@ -50,6 +50,13 @@ export interface IOutilsService {
 export class OutilsService implements IOutilsService {
   private readonly pendingUploads = new Map<string, PendingUploadBatch>();
   private readonly execRunner: ExecRunner;
+  // ⭐ 29/09/2026 — sortie SSH regroupée avant envoi (par runId) : une sortie très verbeuse (ex.
+  // docker buildx multi-plateforme) envoyait un message Socket.io par fragment reçu de ssh (des
+  // dizaines par seconde), rendant l'onglet du navigateur inutilisable — impression de script
+  // bloqué alors qu'il continuait de tourner côté serveur.
+  private readonly execOutputBuffers = new Map<string, string>();
+  private readonly execOutputTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private static readonly EXEC_OUTPUT_FLUSH_MS = 150;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -222,11 +229,32 @@ export class OutilsService implements IOutilsService {
     }
 
     const runId = this.execRunner.start(localPath, target, {
-      onOutput: (id, chunk) => { this.eventBus.emitGeneric('outils:exec:output', { runId: id, chunk }); },
-      onEnd: (id, code, error) => { this.eventBus.emitGeneric('outils:exec:end', { runId: id, code, error }); }
+      onOutput: (id, chunk) => this.bufferExecOutput(id, chunk),
+      onEnd: (id, code, error) => {
+        this.flushExecOutput(id);
+        this.eventBus.emitGeneric('outils:exec:end', { runId: id, code, error });
+      }
     }, cleanup);
     this.logger.info('OutilsService', `Exécution de « ${script.id} » sur ${target.user}@${target.host} (run ${runId})`);
     this.eventBus.emitGeneric('outils:exec:started', { runId, id: script.id, host: target.host, user: target.user });
+  }
+
+  /** Accumule un fragment de sortie SSH ; un seul message Socket.io part au plus toutes les
+   *  EXEC_OUTPUT_FLUSH_MS ms (au lieu d'un message par fragment brut reçu de ssh). */
+  private bufferExecOutput(runId: string, chunk: string): void {
+    this.execOutputBuffers.set(runId, (this.execOutputBuffers.get(runId) ?? '') + chunk);
+    if (this.execOutputTimers.has(runId)) return;
+    this.execOutputTimers.set(runId, setTimeout(() => this.flushExecOutput(runId), OutilsService.EXEC_OUTPUT_FLUSH_MS));
+  }
+
+  private flushExecOutput(runId: string): void {
+    const timer = this.execOutputTimers.get(runId);
+    if (timer) clearTimeout(timer);
+    this.execOutputTimers.delete(runId);
+    const chunk = this.execOutputBuffers.get(runId);
+    if (chunk === undefined) return;
+    this.execOutputBuffers.delete(runId);
+    this.eventBus.emitGeneric('outils:exec:output', { runId, chunk });
   }
 
   private emitBundleResult(result: BundleResult): void {
