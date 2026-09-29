@@ -203,6 +203,15 @@
       de stfort ET de l'instance orangepizero2), sauvegarde dans `backups/mqtt/retenus-rfxcom_backup_2026-09-29_avant-purge.tsv` ;
       vérifié : 0 message retenu « rfx » sur le broker, 0 appareil / 0 entité RFXCOM dans HA. **Reste** : boîtier sur
       falbala, `port` (machine_config), activation — les entités seront recréées (réglages manuels HA perdus).
+      **RFXCOM EN SERVICE SUR FALBALA le 29/09/2026 10:15** : boîtier RFXtrx433XL (firmware ProXL 2 v1047) trouvé par la
+      **détection automatique** (`/dev/serial/by-id/…` → `/dev/ttyUSB0`, le `port` configuré `/dev/ttyUSB1` volontairement
+      faux n'est qu'un secours — test demandé par l'utilisateur, concluant) ; états sortis vers
+      `machine_rfxcom-derniers-etats.json` ; protocoles de stfort poussés ; 86 découvertes sous `rfx_bridge_falbala_817412`,
+      86 appareils / 83 entités dans HA, tous dans une pièce ; aucune référence cassée dans automations/scripts/tableaux HA
+      ni dans le plan HAPLAN de ha2. **Défaut constaté** : au tout premier démarrage (découvertes neuves), les états partent
+      AVANT que HA ait créé les entités (non retenus) → lumières « unknown » jusqu'à un redémarrage de rfxcom (fait :
+      21 lumières off, 2 prises off) — à corriger (réémettre les états quelques secondes après une découverte neuve,
+      ou au message de naissance de HA).
       Procédure initiale : 1) désactiver rfxcom sur
       stfort ; 2) recopier `data/rfxcom/config-rfxcom-devices-v1.0.yaml` de stfort vers
       `data/rfxcom/machine_config-rfxcom-devices-v1.0.yaml` de falbala ; 3) effacer (retenu vide) les messages retenus
