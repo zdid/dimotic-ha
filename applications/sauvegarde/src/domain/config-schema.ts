@@ -26,9 +26,11 @@ export const sauvegardeNextcloudSchema = z.object({
   // `serverUrl` + `user`, jamais saisi à la main.
   serverUrl: z.string().default(''),
   user: z.string().default(''),
-  // Sous-dossier optionnel sous la racine du compte, ex. "dimotic-backups" — préfixe avant
-  // <site>/<machine>/<répertoire> (§4).
-  rootPath: z.string().default('')
+  // Sous-dossier sous la racine du compte, préfixe avant <site>/<machine>/<répertoire> (§4) — même
+  // convention sur toutes les machines de ce compte Nextcloud (déjà en production : stfort/ha2,
+  // stfort/stfort — voir data/sauvegarde/config.yaml) : préalimenté pour ne pas le ressaisir à
+  // chaque nouvelle installation (demande utilisateur 29/09/2026).
+  rootPath: z.string().default('backups-dimotic')
   // ⭐ 17/09/2026 — appPasswordFile retiré : chemin désormais fixe, voir SECRET_FILE_PATH ci-dessus.
 });
 
@@ -105,7 +107,7 @@ export const DEFAULT_SAUVEGARDE_CONFIG: SauvegardeConfig = {
   nextcloud: {
     serverUrl: '',
     user: '',
-    rootPath: ''
+    rootPath: 'backups-dimotic'
   },
   targets: []
 };

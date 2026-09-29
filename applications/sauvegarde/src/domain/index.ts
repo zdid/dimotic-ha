@@ -82,9 +82,12 @@ export const SAUVEGARDE_UI_METADATA: ModuleUiMetadata = {
         },
         {
           name: 'nextcloud.rootPath',
-          label: 'Sous-dossier racine (optionnel)',
+          label: 'Sous-dossier racine',
           type: 'text',
-          default: 'dimotic-backups'
+          // ⭐ 29/09/2026 — corrigé (« dimotic-backups » ne correspondait pas à la vraie valeur en
+          // production, « backups-dimotic ») ; préalimenté via config-schema.ts (ConfigForm ne lit
+          // pas cette propriété `default` sur un champ texte, elle ne documentait rien de réel).
+          default: 'backups-dimotic'
         }
       ]
     },
