@@ -43,6 +43,10 @@ export interface RemoteAppEntry {
 
 export interface MachineAppsAnnouncement {
   machineId: string;
+  /** ⭐ 29/09/2026 (demande utilisateur : visibilité des versions sur l'accueil) — APP_VERSION de
+   *  CETTE machine (voir index.ts, injecté au build Docker) ; 'dev' hors Docker. Absent : machine
+   *  pas encore à jour. */
+  dimoticVersion?: string;
   address?: string;
   /** ⭐ 25/09/2026 — toutes les IPv4 de la machine (ethernet + wifi…), `address` en tête. Absent :
    *  machine pas encore à jour. */
@@ -150,6 +154,7 @@ export class AppGossipService {
       address: getPrimaryIPv4Address(),
       addresses: getIPv4Addresses(),
       webPort: this.configService.getConfig().web.port,
+      dimoticVersion: process.env.APP_VERSION || 'dev',
       runningInDocker: isRunningInDocker(),
       apps: modules
         .filter((m) => m.id !== 'core')

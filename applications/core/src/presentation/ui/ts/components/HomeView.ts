@@ -17,6 +17,8 @@ interface RemoteAppEntry {
 
 interface MachineAppsAnnouncement {
   machineId: string;
+  /** ⭐ 29/09/2026 — version dimotic-ha (APP_VERSION) de CETTE machine, voir AppGossipService.ts. */
+  dimoticVersion?: string;
   address?: string;
   webPort: number;
   runningInDocker: boolean;
@@ -33,6 +35,11 @@ export function buildAccueilHtml(): string {
   return `
     <div id="accueil-view" style="padding: 1.5rem; max-width: 800px;">
       <h2>Accueil</h2>
+
+      <section style="margin-bottom: 2rem;">
+        <h3>Cette machine</h3>
+        <p id="accueil-this-machine">…</p>
+      </section>
 
       <section style="margin-bottom: 2rem;">
         <h3>Home Assistant</h3>
@@ -59,6 +66,24 @@ export function buildAccueilHtml(): string {
       </section>
     </div>
   `;
+}
+
+/** ⭐ 29/09/2026 — bloc « Cette machine » : identifiant (app:machine-id) + version dimotic-ha
+ *  (app:started, déjà émis/persistant côté core — voir TechnicalConfigManager.ts qui le relaie en
+ *  CustomEvent). Les deux événements sont indépendants et peuvent arriver dans n'importe quel
+ *  ordre : chacun ne réécrit que sa propre partie du texte. */
+let thisMachineId: string | undefined;
+let thisMachineVersion: string | undefined;
+
+function renderThisMachine(root: ParentNode): void {
+  const el = root.querySelector('#accueil-this-machine');
+  if (!el) return;
+  if (!thisMachineId) {
+    el.textContent = '…';
+    return;
+  }
+  const versionText = thisMachineVersion ? ` — dimotic-ha ${thisMachineVersion}` : '';
+  el.textContent = `${thisMachineId}${versionText}`;
 }
 
 function escapeHtml(value: string): string {
@@ -122,9 +147,13 @@ function renderRemoteApps(root: ParentNode, machines: MachineAppsAnnouncement[])
           return `<li><a href="${escapeHtml(href)}" target="_blank" rel="noopener">${label}</a></li>`;
         })
         .join('');
+      const versionHtml = m.dimoticVersion
+        ? `<span style="color:#888; font-size:0.85em;">dimotic-ha ${escapeHtml(m.dimoticVersion)}</span>`
+        : '';
       return `
         <li style="margin-bottom:1rem;">
           <strong>${escapeHtml(m.machineId)}</strong> <span style="color:#888;">(${tag})</span>
+          ${versionHtml}
           <ul style="list-style:none; padding-left:1rem;">${appsHtml}</ul>
         </li>
       `;
@@ -195,10 +224,14 @@ export function initAccueilApp(): void {
   renderHaLink(root, window.app.haAddress);
   renderExternalSites(root, window.app.externalSites || [], socket);
   renderRemoteApps(root, window.app.remoteApps || []);
+  thisMachineId = window.app.machineId;
+  renderThisMachine(root);
 
   window.addEventListener('app:ha-address', (e) => renderHaLink(root, (e as CustomEvent).detail));
   window.addEventListener('core:external-sites:list', (e) => renderExternalSites(root, (e as CustomEvent).detail.sites, socket));
   window.addEventListener('app:remote-apps', (e) => renderRemoteApps(root, (e as CustomEvent).detail));
+  window.addEventListener('app:machine-id', (e) => { thisMachineId = (e as CustomEvent).detail.machineId; renderThisMachine(root); });
+  window.addEventListener('app:started', (e) => { thisMachineVersion = (e as CustomEvent).detail.version; renderThisMachine(root); });
   void updateSupervisionSlot(root);
   window.addEventListener('modules:loaded', () => {
     const slot = root.querySelector<HTMLElement>('#accueil-supervision');
