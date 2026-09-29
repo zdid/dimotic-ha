@@ -16,6 +16,7 @@ import './components/ModuleContainer';
 import './components/ApplicationsManager';
 import './components/DeploymentManager';
 import './components/PostInstallManager';
+import './components/DiffusionManager';
 import './components/LogsModal';
 import './components/HomeView';
 

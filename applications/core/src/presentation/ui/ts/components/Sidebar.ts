@@ -411,6 +411,12 @@ const createTemplate = (): HTMLTemplateElement => {
                   <span class="nav-label">Services post-installation</span>
                 </a>
               </li>
+              <li class="nav-item">
+                <a href="#diffusion" class="nav-link" data-section="diffusion">
+                  <span class="nav-icon">🔁</span>
+                  <span class="nav-label">Diffusion des données</span>
+                </a>
+              </li>
               <!-- Sous-menus générés pour chaque application -->
               <div id="app-params-submenu"></div>
             </ul>
@@ -673,7 +679,8 @@ export class Sidebar extends HTMLElement {
       'logging': 'section-logging',
       'applications-manager': 'section-applications-manager',
       'deployment': 'section-deployment',
-      'post-install': 'section-post-install'
+      'post-install': 'section-post-install',
+      'diffusion': 'section-diffusion'
     };
     
     // Page d'accueil (⭐ 27/08/2026, voir HomeView.ts) — même reveal que les modules dynamiques

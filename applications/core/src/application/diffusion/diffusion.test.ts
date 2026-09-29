@@ -177,6 +177,18 @@ describe('DiffusionService — trois machines', () => {
     expect(read('ha2', 'scriptsha/scripts.yaml')).toBeUndefined();
   });
 
+  it('une machine de production qui démarre APRÈS la machine en réception lui envoie quand même ses fichiers', async () => {
+    const broker = new MemoryBroker();
+    put('ha2', 'teleinfo/compteurs.yaml', 'compteurs ha2');
+    const falbala = machine(broker, 'falbala', 'reception');
+    falbala.start();
+    await wait(500); // falbala a déjà fait sa demande, personne n'a répondu
+    const ha2 = machine(broker, 'ha2', 'complet');
+    ha2.start();
+    await wait(1200);
+    expect(read('falbala', 'teleinfo/compteurs.yaml')).toBe('compteurs ha2');
+  });
+
   it('mode arrêté : rien ne part, rien n’arrive', async () => {
     const broker = new MemoryBroker();
     put('ha2', 'tasmota/rules.yaml', 'regles ha2');

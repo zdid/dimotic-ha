@@ -90,6 +90,7 @@ export class DiffusionService {
   private pendingChanges = new Set<string>();
   private settleTimer?: ReturnType<typeof setTimeout>;
   private inventoryTimer?: ReturnType<typeof setTimeout>;
+  private peerJoinTimer?: ReturnType<typeof setTimeout>;
   private inventories: InventoryMessage[] = [];
   private connected = false;
   private lastSync?: string;
@@ -161,7 +162,7 @@ export class DiffusionService {
   }
 
   stop(): void {
-    for (const t of [this.settleTimer, this.inventoryTimer]) if (t) clearTimeout(t);
+    for (const t of [this.settleTimer, this.inventoryTimer, this.peerJoinTimer]) if (t) clearTimeout(t);
     this.watcher?.close();
     this.transport?.disconnect();
   }
@@ -329,8 +330,17 @@ export class DiffusionService {
     const body = JSON.parse(raw);
     if (parts[0] === 'inventaire' && parts[1] === 'demande') {
       if (body.from === this.machineId) return;
-      // Réception seule : on ne publie rien, donc pas d'inventaire à fournir.
+      // Réception seule : on ne publie rien, donc pas d'inventaire à fournir. Mais une machine qui
+      // (re)démarre ne pousse rien vers une machine muette : on refait NOTRE demande, décalée, pour
+      // récupérer ses fichiers (constaté à l'essai du 29/09/2026 : il fallait « Resynchroniser »).
       if (this.mode === 'complet') this.publish(`${TOPIC}/inventaire/${this.machineId}`, this.myInventory());
+      else if (this.mode === 'reception' && !this.inventoryTimer) {
+        if (this.peerJoinTimer) clearTimeout(this.peerJoinTimer);
+        this.peerJoinTimer = setTimeout(() => {
+          this.peerJoinTimer = undefined;
+          this.requestInventories(`machine ${body.from} apparue`);
+        }, this.timings.inventoryWindow);
+      }
       return;
     }
     if (parts[0] === 'inventaire' && parts[1] && parts[1] !== this.machineId) {

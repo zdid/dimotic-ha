@@ -6,7 +6,7 @@
   <meta name="description" content="HA WS/MQTT Application - Configuration Interface">
   <title>HA/MQTT</title>
   <link rel="icon" type="image/png" href="/images/maisonsouriante.png">
-  <!-- Derniere modification: 2026-07-22 - Ajout du chargement d'Alpine.js (vendorise + bootstrap), avant app.js -->
+  <!-- Derniere modification: 2026-09-29 10:48:59 - Section Diffusion des données (app-diffusion-manager) -->
   
   <!-- Styles - Chargés depuis des fichiers externes -->
   <link rel="stylesheet" href="/styles/general.css">
@@ -54,6 +54,9 @@
     </div>
     <div id="section-post-install" class="content-section" style="display: none;">
       <app-post-install-manager></app-post-install-manager>
+    </div>
+    <div id="section-diffusion" class="content-section" style="display: none;">
+      <app-diffusion-manager></app-diffusion-manager>
     </div>
 
     <!-- Container pour les modules dynamiques -->
