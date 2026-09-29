@@ -1,8 +1,12 @@
 # Spécifications Fonctionnelles — Application OUTILS
 
-**Version :** 1.3
-**Date :** 28 Septembre 2026
+**Version :** 1.4
+**Date :** 29 Septembre 2026
 **Statut :** Document de référence pour l'application `applications/outils`
+
+> **v1.4 (29/09/2026)** — script **« Configurer un appareil Tasmota (à distance) » retiré** (ancien §7.3,
+> demande utilisateur) : entièrement repris par l'application `tasmota` (fiche « Appliquer », mise à jour
+> OTA, recherche et mise en service des Tasmota inconnus — `fonctionnelles-tasmota_specs` v1.2).
 
 > **v1.3 (28/09/2026)** — nouveau script intégré **« Configurer un appareil Tasmota (à distance) »**
 > (§7, §7.3, demande utilisateur : « un script qui ne me laisse que les variables ») : configuration
@@ -220,7 +224,6 @@ moteur partagé n'est pas supprimé (il peut servir à d'autres scripts).
 | Id | Titre | sudo | Rôle |
 |----|-------|------|------|
 | `prepare-sd-card` | Préparer et écrire une carte SD/clé USB Raspberry Pi | oui | ⭐ v1.2 — voir §7.2 (archive auto-extractible). Remplace « 1/2 — Préparer » et « 2/2 — Flasher » (`flash-sd-card`, retiré). |
-| `tasmota-config` | Configurer un appareil Tasmota (à distance) | non | ⭐ v1.3 — voir §7.3 |
 | `duckdns-caddy` | Accès externe (DuckDNS + Caddy) | oui | Domaines DuckDNS + reverse proxy HTTPS |
 | `agent-ha-deploy` | Agent Claude Code — déploiement sur Home Assistant (SSH) | non | Préparation d'un agent sur une machine HA |
 | `build-all` | Compiler toutes les applications dimotic-ha | non | ⭐ 25/09/2026 — compilation locale : core puis chaque application (serveur + écrans), option `npm install`, arrêt et nom de la première application en échec. **Sans** `npm prune` (réservé à l'image Docker) |
@@ -281,31 +284,12 @@ e2fsprogs file openssl`).
 Rien n'est installé au premier démarrage : il ne fait que la configuration propre à la machine
 (pas besoin d'Internet pour démarrer ; WiFi requis seulement pour être joignable).
 
-### 7.3 « Configurer un appareil Tasmota (à distance) » (⭐ v1.3)
+### 7.3 (retiré en v1.4)
 
-Bash + `curl` + `jq` + `mosquitto-clients` (prérequis vérifiés), exécuté par SSH (par défaut sur
-falbala). L'appareil doit seulement être déjà connecté au Wi-Fi. Communication (décision utilisateur
-28/09/2026) :
-- **par MQTT en priorité** : l'appareil est retrouvé à partir de son IP dans sa découverte retenue
-  (`tasmota/discovery/<MAC>/config`, champ `ip`), sur `MQTT_HOST` puis sur ha2 ; commandes sur
-  `cmnd/…`, réponses sur `stat/…/RESULT` ou `STATUS<n>` — **aucun mot de passe**, fonctionne avec une
-  interface web protégée (`WebPassword`, voulu) ;
-- **par le web** (`http://<IP>/cm?cmnd=…`) seulement pour un appareil neuf pas encore sur MQTT, sans
-  mot de passe web.
-
-- **Variables** : `IP`, `DEVICENAME` (convention QUOI---LIEU, doit contenir `---`), `TOPIC`
-  (minuscules, chiffres, `_`), `SITE` (`cuisine_ete`, `garage`, `maison`, `exterieur`), `MQTT_HOST` (défaut ha2
-  192.168.1.51), `MODELE` (`Sonoff Basic R4 (Magic Switch)` ou `ne pas changer`), `OTA` (case), `MAGIC_PULSE` (liste : `4000 (standard Tasmota)` par défaut, 8000, 15000, 30000, ne pas
-  changer — sensibilité du Magic Switch ; aucune autre valeur conseillée trouvée),
-  `LATITUDE`/`LONGITUDE` (défaut Saint Fort : 45.4609 / -0.718).
-- **Déroulé** : état actuel (version, modèle, nom, topics, MQTT, nom réseau) → réglages prévus →
-  **confirmation** → OTA si coché (`Upgrade 1`, attente du redémarrage) → modèle R4 si choisi
-  (`Template` avec GPIO5 = MagicSwitch, `Module 0`) → **un seul envoi** (`Backlog`) : `MagicSwitchPulse` si choisi, `SetOption19 0`,
-  heure de France (`Timezone 99`, `TimeDST`/`TimeSTD`), position, `DeviceName`, `Hostname` (dérivé du
-  topic), `MqttHost`/`MqttPort`, `FullTopic %prefix%/<site>/%topic%/`, `Topic` → relecture (par le
-  nouveau topic, sur le nouveau broker) :
-  **`DeviceName` complet ou tronqué**, connexion au broker.
-- **Jamais** `SetOption30` ni `FriendlyName` : fixés par nommage dans la découverte réécrite.
+Le script « Configurer un appareil Tasmota (à distance) » (v1.3) est retiré : l'application `tasmota`
+fait tout ce qu'il faisait (état de l'appareil, modèle, MQTT/noms/heure/position, mise à jour OTA,
+vérification), et davantage (liste stockée, publication vers HA, règles, modes). Le fichier reste dans
+l'historique git (commit d'avant le 29/09/2026).
 
 ---
 
@@ -361,6 +345,7 @@ falbala). L'appareil doit seulement être déjà connecté au Wi-Fi. Communicati
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.4 | 29/09/2026 | Claude | Script « Configurer un appareil Tasmota (à distance) » retiré (§7.3), repris par l'application `tasmota`. v1.3 archivée. |
 | 1.3 | 28/09/2026 | Claude | Script intégré « Configurer un appareil Tasmota (à distance) » (§7.3). v1.2 archivée. |
 | 1.2 | 26/09/2026 | Claude | **Carte SD Raspberry Pi en un seul script** (§7.2) : questions au départ (WiFi compris), image de base préparée dans qemu et gardée en cache (installations hors de la carte), nettoyage avant clonage (clés d'hôte SSH, machine-id, cloud-init), trixie-lite par cloud-init par défaut + bookworm-lite, pause unique pour choisir la carte avec arrêt possible et reprise directe ; `flash-sd-card` retiré. Progression du téléchargement allégée. v1.1 archivée. |
 | 1.1 | 25/09/2026 | Claude | **Exécution par SSH** (§5.5) : bouton à côté du téléchargement, machines du gossip + locale + saisie libre, clé de dimotic-ha avec prérequis `ssh-copy-id` affiché, sortie en direct et réponses tapées (pseudo-terminal), champ `execution` du `.yaml` pour présélectionner machine et dossier ; sécurisation reportée (TODO). v1.0 archivée. |
