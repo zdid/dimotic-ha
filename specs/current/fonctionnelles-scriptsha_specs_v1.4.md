@@ -1,5 +1,7 @@
 # Spécifications Fonctionnelles - Module Scripts HA (scriptsha)
 
+*Version 1.4 - 29 Septembre 2026 — **rapport « indisponibles + piles » remplacé par deux scripts intégrés** (§9bis).*
+
 *Version 1.3 - 24 Septembre 2026*
 *v1.3 : revue de code — délai d'expiration de 30 s sur toutes les requêtes vers le core (helpers, liste d'entités, diffusion/retrait, import) : un core muet laissait le verrou de réconciliation pris à vie et un script « en cours » ; dépôt de fichier raté entièrement annulé (fichier et entrée). Vérifié : protection anti-boucle de la minuterie (incident du 18/08) toujours en place.*
 *Généralisation du provisionnement (§4bis réécrite) : le mécanisme n'est plus câblé en dur sur le
@@ -394,6 +396,25 @@ existantes au moment de la création de `scriptsha`. `scriptsha` suit le code r�
 
 ---
 
+## 9bis. Scripts intégrés livrés avec l'application (v1.4)
+
+Déposés au démarrage s'ils sont absents (jamais réécrits ensuite ; une divergence est seulement signalée) ;
+service de notification `notify.mobile_app_TON_TELEPHONE`, à remplacer après déploiement. **Aucun n'est
+déployé dans HA automatiquement.**
+
+| Identifiant | Rôle |
+|---|---|
+| `piles_faibles_matin_soir` | 8 h et 20 h : objets à pile — capteur `battery` en % sous 20, capteur en mV sous 2700, indicateur binaire « pile faible » |
+| `indisponibles_rfxcom_tasmota_zigbee_matin_soir` | 8 h et 20 h : objets **RFXCOM, Tasmota et Zigbee** indisponibles, un nom par appareil |
+
+Reconnaissance (vérifiée sur le vrai HA) : RFXCOM et Tasmota par le fabricant de l'appareil (`manufacturer`),
+Zigbee par l'identifiant d'appareil `zigbee2mqtt_…`. Nom = celui de l'appareil suivi de sa pièce
+(« Thermostat (Bureau) »), dédoublonné (plusieurs entités par appareil).
+
+**Retiré en v1.4** : `rapport_entites_indisponibles_et_piles_faibles_matin_soir` (un seul rapport pour toutes
+les entités indisponibles et les piles). Une copie déjà déposée ou déployée n'est pas supprimée
+automatiquement : à retirer par l'utilisateur.
+
 ## 10. Arborescence des Programmes
 
 ```
@@ -434,6 +455,7 @@ applications/scriptsha/
 ### 11.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.4 | 2026-09-29 | Claude | Rapport unique « indisponibles + piles faibles » remplacé par deux scripts intégrés : piles faibles, et objets RFXCOM/Tasmota/Zigbee indisponibles (§9bis). v1.3 archivée. |
 | 1.3 | 2026-09-24 | Claude | Revue de code : délai d'expiration (30 s) sur les requêtes vers le core, verrou de réconciliation toujours libéré, dépôt raté annulé. v1.2 archivée. |
 | 1.2 | 2026-08-18 | Claude | Généralisation du provisionnement (§4bis) : `ProvisioningConfig` structuré remplace le câblage en dur sur un id de script ; nommage des helpers basé sur la taxonomie QUOI/OÙ du projet (`HaHelperBridge` étendu : `area_id`/`quoiIds`/`taxonomy` par entité) avec anti-collision intra-passe ; `matchesWatchCondition()` isolée pour évolution rapide (demande explicite utilisateur). Revérifié en conditions réelles avec le nouveau nommage — 2 collisions taxonomiques réelles correctement désambiguïsées, idempotence confirmée. Ancienne version v1.1 archivée. |
 | 1.1 | 2026-08-18 | Claude | Provisionnement automatique lumières↔timers (première version, câblée en dur). `HaWsClient.listHelpers/createHelper/deleteHelper`, `HaHelperBridge`. Vérifié en conditions réelles (35 lumières → 35 timers). Ancienne version v1.0 archivée. |

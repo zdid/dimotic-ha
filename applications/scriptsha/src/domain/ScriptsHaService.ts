@@ -185,19 +185,79 @@ action:
 `;
 }
 
-const REPORT_SCRIPT_ID = 'rapport_entites_indisponibles_et_piles_faibles_matin_soir';
-const REPORT_SCRIPT_TITLE = 'Rapport entités indisponibles et piles faibles - matin/soir';
-const REPORT_SCRIPT_DESCRIPTION =
-  'Notifie chaque matin et soir les entités indisponibles et les capteurs à pile faible ' +
-  '(pourcentage ou millivolts).';
-// ⭐ 24/08/2026 : contenu entièrement statique (pas de liste régénérée par l'app comme pour la
-// minuterie) — service notify cible `notify.mobile_app_TON_TELEPHONE`, placeholder à remplacer par
-// l'utilisateur après déploiement sur une machine donnée (un seul téléphone par machine).
-function buildReportAutomationYaml(): string {
-  return `alias: "Rapport entités indisponibles et piles faibles - matin/soir"
+// ⭐ 29/09/2026 (demande utilisateur) — l'ancien rapport unique « indisponibles + piles faibles » est
+// remplacé par DEUX scripts : un pour les objets à pile, un pour les objets RFXCOM / Tasmota / Zigbee
+// indisponibles. Contenu statique ; service notify `notify.mobile_app_TON_TELEPHONE`, placeholder à
+// remplacer après déploiement (un seul téléphone par machine). Reconnaissance vérifiée sur le vrai HA
+// (rendu par /api/template) : RFXCOM et Tasmota par le fabricant de l'appareil (`manufacturer`),
+// Zigbee par l'identifiant d'appareil `zigbee2mqtt_…`. Nom = celui de l'appareil (dédoublonné, plusieurs
+// entités par appareil) suivi de sa pièce.
+const BATTERY_SCRIPT_ID = 'piles_faibles_matin_soir';
+const BATTERY_SCRIPT_TITLE = 'Piles faibles - matin/soir';
+const BATTERY_SCRIPT_DESCRIPTION =
+  'Notifie chaque matin et soir les objets dont la pile est faible (capteur en %, en mV, ou indicateur pile faible).';
+function buildBatteryAutomationYaml(): string {
+  return `alias: "Piles faibles - matin/soir"
 description: >-
-  Notifie chaque matin et soir les entités indisponibles et les capteurs à pile
-  faible (pourcentage ou millivolts).
+  Notifie chaque matin et soir les objets dont la pile est faible (capteur en
+  pourcentage, en millivolts, ou indicateur « pile faible »).
+trigger:
+  - platform: time
+    at: "08:00:00"
+  - platform: time
+    at: "20:00:00"
+action:
+  - variables:
+      seuil_batterie_pct: 20
+      seuil_batterie_mv: 2700
+      piles: >
+        {% set ns = namespace(pct=[], mv=[], faible=[]) %}
+        {% for s in states.sensor if s.state not in ['unknown', 'unavailable'] %}
+        {% set lieu = area_name(s.entity_id) %}
+        {% set nom = (device_attr(s.entity_id, 'name_by_user') or device_attr(s.entity_id, 'name') or s.name) ~ ((' (' ~ lieu ~ ')') if lieu else '') %}
+        {% if s.attributes.get('device_class') == 'battery'
+              and s.attributes.get('unit_of_measurement') == '%'
+              and s.state | float(-1) < seuil_batterie_pct %}
+        {% set ns.pct = ns.pct + [nom ~ ' ' ~ s.state ~ ' %'] %}
+        {% elif s.attributes.get('unit_of_measurement') == 'mV'
+              and s.state | float(-1) < seuil_batterie_mv %}
+        {% set ns.mv = ns.mv + [nom ~ ' ' ~ s.state ~ ' mV'] %}
+        {% endif %}
+        {% endfor %}
+        {% for s in states.binary_sensor if s.attributes.get('device_class') == 'battery' and s.state == 'on' %}
+        {% set lieu = area_name(s.entity_id) %}
+        {% set ns.faible = ns.faible + [(device_attr(s.entity_id, 'name_by_user') or device_attr(s.entity_id, 'name') or s.name) ~ ((' (' ~ lieu ~ ')') if lieu else '')] %}
+        {% endfor %}
+        {{ dict(pct=ns.pct | unique | list, mv=ns.mv | unique | list, faible=ns.faible | unique | list) }}
+  - condition: template
+    value_template: >
+      {{ (piles.pct | count > 0) or (piles.mv | count > 0) or (piles.faible | count > 0) }}
+  - service: notify.mobile_app_TON_TELEPHONE
+    data:
+      title: "Piles faibles"
+      message: >
+        {% if piles.pct | count > 0 %}
+        🔋 Piles faibles % ({{ piles.pct | count }}) : {{ piles.pct | join(', ') }}
+        {% endif %}
+        {% if piles.mv | count > 0 %}
+        🔋 Piles faibles mV ({{ piles.mv | count }}) : {{ piles.mv | join(', ') }}
+        {% endif %}
+        {% if piles.faible | count > 0 %}
+        🪫 Pile faible signalée ({{ piles.faible | count }}) : {{ piles.faible | join(', ') }}
+        {% endif %}
+mode: single
+`;
+}
+
+const UNAVAILABLE_SCRIPT_ID = 'indisponibles_rfxcom_tasmota_zigbee_matin_soir';
+const UNAVAILABLE_SCRIPT_TITLE = 'Objets RFXCOM, Tasmota et Zigbee indisponibles - matin/soir';
+const UNAVAILABLE_SCRIPT_DESCRIPTION =
+  'Notifie chaque matin et soir les objets RFXCOM, Tasmota et Zigbee indisponibles (un nom par appareil).';
+function buildUnavailableAutomationYaml(): string {
+  return `alias: "Objets RFXCOM, Tasmota et Zigbee indisponibles - matin/soir"
+description: >-
+  Notifie chaque matin et soir les objets RFXCOM, Tasmota et Zigbee
+  indisponibles (un nom par appareil, avec sa pièce).
 trigger:
   - platform: time
     at: "08:00:00"
@@ -215,59 +275,37 @@ action:
         - tag
         - image
         - sun
-      seuil_batterie_pct: 20
-      seuil_batterie_mv: 2700
-      unavailable_entities: >
-        {{ states
-           | rejectattr('domain', 'in', domaines_exclus)
-           | selectattr('state', 'eq', 'unavailable')
-           | map(attribute='name')
-           | list }}
-      # ⭐ 25/08/2026, bug réel corrigé : ces deux variables utilisaient une compréhension de liste
-      # Python ([x for x in ... if ...]), invalide en Jinja2 (moteur de HA) — rejetée à la
-      # sauvegarde avec TemplateSyntaxError (POST /api/config/automation/config/... → HTTP 400),
-      # jamais détecté avant un vrai déploiement car aucune validation locale de template Jinja2.
-      # Récrit avec namespace()+for, seule construction Jinja2 permettant d'accumuler une liste
-      # depuis une boucle (pas d'équivalent direct aux filtres selectattr/map ici, la condition
-      # combine plusieurs attributs ET une comparaison numérique après conversion de state).
-      low_battery_pct: >
-        {% set ns_pct = namespace(items=[]) %}
-        {% for s in states.sensor %}
-        {% if s.attributes.get('device_class') == 'battery'
-              and s.attributes.get('unit_of_measurement') == '%'
-              and s.state not in ['unknown', 'unavailable']
-              and s.state | float(-1) < seuil_batterie_pct %}
-        {% set ns_pct.items = ns_pct.items + [s.name] %}
+      indisponibles: >
+        {% set ns = namespace(rfxcom=[], tasmota=[], zigbee=[]) %}
+        {% for s in states | rejectattr('domain', 'in', domaines_exclus) | selectattr('state', 'eq', 'unavailable') %}
+        {% set fabricant = device_attr(s.entity_id, 'manufacturer') %}
+        {% set ids = device_attr(s.entity_id, 'identifiers') | string %}
+        {% set lieu = area_name(s.entity_id) %}
+        {% set nom = (device_attr(s.entity_id, 'name_by_user') or device_attr(s.entity_id, 'name') or s.name) ~ ((' (' ~ lieu ~ ')') if lieu else '') %}
+        {% if fabricant == 'RFXCOM' %}
+        {% set ns.rfxcom = ns.rfxcom + [nom] %}
+        {% elif fabricant == 'Tasmota' %}
+        {% set ns.tasmota = ns.tasmota + [nom] %}
+        {% elif 'zigbee2mqtt' in ids %}
+        {% set ns.zigbee = ns.zigbee + [nom] %}
         {% endif %}
         {% endfor %}
-        {{ ns_pct.items }}
-      low_battery_mv: >
-        {% set ns_mv = namespace(items=[]) %}
-        {% for s in states.sensor %}
-        {% if s.attributes.get('unit_of_measurement') == 'mV'
-              and s.state not in ['unknown', 'unavailable']
-              and s.state | float(-1) < seuil_batterie_mv %}
-        {% set ns_mv.items = ns_mv.items + [s.name] %}
-        {% endif %}
-        {% endfor %}
-        {{ ns_mv.items }}
+        {{ dict(rfxcom=ns.rfxcom | unique | list, tasmota=ns.tasmota | unique | list, zigbee=ns.zigbee | unique | list) }}
   - condition: template
     value_template: >
-      {{ (unavailable_entities | count > 0)
-         or (low_battery_pct | count > 0)
-         or (low_battery_mv | count > 0) }}
+      {{ (indisponibles.rfxcom | count > 0) or (indisponibles.tasmota | count > 0) or (indisponibles.zigbee | count > 0) }}
   - service: notify.mobile_app_TON_TELEPHONE
     data:
-      title: "Rapport maison"
+      title: "Objets indisponibles"
       message: >
-        {% if unavailable_entities | count > 0 %}
-        🔴 Indisponibles ({{ unavailable_entities | count }}) : {{ unavailable_entities | join(', ') }}
+        {% if indisponibles.rfxcom | count > 0 %}
+        📡 RFXCOM ({{ indisponibles.rfxcom | count }}) : {{ indisponibles.rfxcom | join(', ') }}
         {% endif %}
-        {% if low_battery_pct | count > 0 %}
-        🔋 Piles faibles % ({{ low_battery_pct | count }}) : {{ low_battery_pct | join(', ') }}
+        {% if indisponibles.tasmota | count > 0 %}
+        🔌 Tasmota ({{ indisponibles.tasmota | count }}) : {{ indisponibles.tasmota | join(', ') }}
         {% endif %}
-        {% if low_battery_mv | count > 0 %}
-        🔋 Piles faibles mV ({{ low_battery_mv | count }}) : {{ low_battery_mv | join(', ') }}
+        {% if indisponibles.zigbee | count > 0 %}
+        🐝 Zigbee ({{ indisponibles.zigbee | count }}) : {{ indisponibles.zigbee | join(', ') }}
         {% endif %}
 mode: single
 `;
@@ -392,11 +430,18 @@ const BUILTIN_SCRIPTS: BuiltinScriptDef[] = [
     normalize: (text) => text.replace(/^ {4}entity_id:\n(?: {6}- .*\n)*/m, '    entity_id: []\n')
   },
   {
-    id: REPORT_SCRIPT_ID,
-    title: REPORT_SCRIPT_TITLE,
-    description: REPORT_SCRIPT_DESCRIPTION,
+    id: BATTERY_SCRIPT_ID,
+    title: BATTERY_SCRIPT_TITLE,
+    description: BATTERY_SCRIPT_DESCRIPTION,
     haDomain: 'automation',
-    buildYaml: buildReportAutomationYaml
+    buildYaml: buildBatteryAutomationYaml
+  },
+  {
+    id: UNAVAILABLE_SCRIPT_ID,
+    title: UNAVAILABLE_SCRIPT_TITLE,
+    description: UNAVAILABLE_SCRIPT_DESCRIPTION,
+    haDomain: 'automation',
+    buildYaml: buildUnavailableAutomationYaml
   },
   {
     id: EVOO7_DECALAGE_SCRIPT_ID,
