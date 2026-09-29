@@ -196,8 +196,16 @@
       désactiver rfxcom sur stfort, brancher le boîtier sur falbala, régler le port (falbala : `/dev/ttyUSB1` hérité,
       préférer `/dev/serial/by-id/…`), activer rfxcom sur falbala ; **point de vigilance** : les découvertes HA de stfort
       (`bridgeInstance` rfx_bridge_stfort_…) — même unique_id, topics d'état/commande différents — à purger au basculement ;
-      recopier le fichier juste avant le basculement (états modifiés entre-temps sur stfort) ; **temps 3 (diffusion) à faire** — trancher d'abord la relecture des fichiers reçus (proposition :
-      redémarrage à chaud de l'application). Déploiement Docker sur ha2/stfort : la migration se fera au premier
+      recopier le fichier juste avant le basculement (états modifiés entre-temps sur stfort) ;
+      **Procédure de bascule stfort → falbala (constat 29/09/2026 sur le broker de ha2)** : 1) désactiver rfxcom sur
+      stfort ; 2) recopier `data/rfxcom/config-rfxcom-devices-v1.0.yaml` de stfort vers
+      `data/rfxcom/machine_config-rfxcom-devices-v1.0.yaml` de falbala ; 3) effacer (retenu vide) les messages retenus
+      de stfort : 86 découvertes `homeassistant/<type>/rfx_bridge_stfort_stfort_578666/<objet>/config`,
+      `rfxcom/rfx_bridge_stfort_stfort_578666/registered-devices` (sinon falbala croit les appareils revendiqués par
+      stfort et relaie au lieu de publier) et `.../status` ; 4) brancher le boîtier, régler `port` (machine_config) ;
+      5) activer rfxcom sur falbala (mêmes unique_id → entités HA conservées). Autre instance annoncée sur le broker :
+      `rfx_bridge_0001_orangepizero2_453502` (online, liste vide) — à identifier. **temps 3 (diffusion) à faire** — **décidé 29/09/2026 : relecture des fichiers reçus DANS CHAQUE APPLICATION, sans
+      coupure** (écouteur `core:data:file:changed`, pas de redémarrage — l'utilisateur retestera presque toutes les applications). Déploiement Docker sur ha2/stfort : la migration se fera au premier
       démarrage de la nouvelle version (sauvegarde de l'ancien config.yaml dans data/core/machine_diffusion/).
     - (historique) **⚠️ Diffusion des données entre machines : NI SPÉCIFIÉE NI IMPLÉMENTÉE (constat 28/09/2026)** — conception
       du 06/09/2026 (mémoire « duplication config multi-machines ») : 2 fichiers par app (`machine_config.yaml` jamais
