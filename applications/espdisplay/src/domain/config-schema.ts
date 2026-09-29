@@ -20,10 +20,12 @@ import { z } from 'zod';
 // mais ici la commande distante est une commande SSH FORCÉE (voir ~/bin/espdisplay-agent-run.sh
 // sur la machine cible) qui ignore tout sauf l'identifiant de plan reçu via SSH_ORIGINAL_COMMAND —
 // la clé ne permet donc RIEN d'autre que ce pipeline précis, pas un accès shell général.
+// ⭐ 29/09/2026 (spec v1.3) — machine distante OBLIGATOIRE, réglages communs (diffusés) ; clé SSH =
+// la clé unique de l'installation (data/core/machine_ssh, comme les autres cibles), plus de clé dédiée
+// (`sshKeyPath` retiré, ignoré s'il reste dans un ancien fichier).
 const remoteTargetSchema = z.object({
   host: z.string().default(''),
-  sshUser: z.string().default('didier'),
-  sshKeyPath: z.string().default('')
+  sshUser: z.string().default('didier')
 });
 
 export const espDisplayConfigSchema = z.object({
@@ -45,5 +47,5 @@ export const DEFAULT_ESPDISPLAY_CONFIG: EspDisplayConfig = {
   esphomeConfigDir: '/docker/esphome/config',
   pipelineScriptPath: '',
   pythonBin: 'python3',
-  remote: { host: '', sshUser: 'didier', sshKeyPath: '' }
+  remote: { host: '', sshUser: 'didier' }
 };

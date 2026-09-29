@@ -9,7 +9,7 @@
  *
  * Orchestration des écrans ESP (ESPHome/LVGL) : déclenché par un événement générique sur
  * l'EventBus partagé (ex: HAPLAN -> espdisplay:deploy-floorplan), exécute le pipeline Python de
- * génération/compilation, localement ou via SSH distant (voir EspDisplayService.runPipelineRemote).
+ * génération/compilation, toujours par SSH sur la machine ESPHome (voir EspDisplayService.runPipelineRemote).
  *
  * Configuration UI ajoutée le 14/08/2026 (absente jusque-là — squelette minimal du 13/08) :
  * découvert en conditions réelles que la config `remote.*` (hôte/utilisateur/clé SSH), mise en
@@ -53,23 +53,22 @@ export const ESPDISPLAY_UI_METADATA: ModuleUiMetadata = {
   fields: [
     {
       title: 'Conteneur ESPHome',
-      description: "Conteneur Docker esphome (esphome/esphome, network_mode: host) et son répertoire de config — sur CETTE machine si \"Machine distante\" ci-dessous est vide, sinon sur la machine distante.",
+      description: "Conteneur Docker esphome (esphome/esphome, network_mode: host) et son répertoire de config — sur la machine ESPHome ci-dessous (celle qui héberge le conteneur), pas sur celle qui affiche cette page.",
       icon: '🐳',
       fields: [
         { name: 'esphomeContainer', label: 'Nom du conteneur', type: 'text', default: 'esphome' },
         { name: 'esphomeConfigDir', label: 'Répertoire de config monté', type: 'text', default: '/docker/esphome/config' },
-        { name: 'pipelineScriptPath', label: 'Chemin du script Python (local)', type: 'text', hint: "Vide = applications/haplan/tools/generate_esphome_floorplan.py — sans effet si une machine distante est configurée (la commande forcée côté cible impose son propre chemin)" },
+        { name: 'pipelineScriptPath', label: 'Chemin du script Python (sur la machine ESPHome)', type: 'text', hint: "Vide = generate_esphome_floorplan.py du dépôt sur la machine ESPHome (dossier applications/haplan/tools)" },
         { name: 'pythonBin', label: 'Binaire Python', type: 'text', default: 'python3' }
       ]
     },
     {
-      title: 'Machine distante (optionnel)',
-      description: "Laisser \"Hôte\" vide pour exécuter localement (valable seulement si CETTE machine héberge le conteneur esphome). Sinon, délégation par SSH — clé dédiée, commande forcée côté cible (~/bin/espdisplay-agent-run.sh) qui ne permet RIEN d'autre que ce pipeline précis. Mis en place pour ha2 → falbala le 14/08/2026 (ha2/Pi4 n'a pas assez de RAM pour compiler ESP-IDF).",
+      title: 'Machine ESPHome (obligatoire)',
+      description: "Machine qui héberge le conteneur esphome (la compilation ESP-IDF demande beaucoup de mémoire : pas sur un Pi4). Le déploiement y est toujours lancé par SSH, avec la clé SSH unique de dimotic-ha (la même que pour les autres machines) — à autoriser une fois pour cet utilisateur sur cette machine (voir la page d'accueil). Côté machine ESPHome, ~/bin/espdisplay-agent-run.sh lance le pipeline. Réglages communs à toutes les machines (diffusés).",
       icon: '🌐',
       fields: [
-        { name: 'remote.host', label: 'Hôte', type: 'text', placeholder: '192.168.1.26', hint: 'Vide = exécution locale' },
-        { name: 'remote.sshUser', label: 'Utilisateur SSH', type: 'text', default: 'didier' },
-        { name: 'remote.sshKeyPath', label: 'Clé SSH privée (chemin dans le conteneur)', type: 'text', hint: 'Doit être montée en volume, ex: /app/secrets/espdisplay-agent_id_ed25519 (lecture seule, uid/gid 1000)' }
+        { name: 'remote.host', label: 'Hôte', type: 'text', placeholder: '192.168.1.26', required: true, hint: 'Obligatoire — adresse de la machine ESPHome' },
+        { name: 'remote.sshUser', label: 'Utilisateur SSH', type: 'text', default: 'didier' }
       ]
     }
   ]
@@ -89,7 +88,7 @@ export const ESPDISPLAY_MENU_CONFIG: ApplicationMenuConfig = {
 export const ESPDISPLAY_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   id: 'espdisplay',
   name: 'ESPDISPLAY',
-  description: 'Orchestration des écrans ESP (ESPHome/LVGL) : reçoit une demande de déploiement (ex: depuis HAPLAN) et exécute le pipeline génération+compilation Python correspondant, localement ou via SSH distant.',
+  description: 'Orchestration des écrans ESP (ESPHome/LVGL) : reçoit une demande de déploiement (ex: depuis HAPLAN) et exécute le pipeline génération+compilation Python correspondant, par SSH sur la machine ESPHome.',
   icon: '🖥️',
 
   menu: ESPDISPLAY_MENU_CONFIG,

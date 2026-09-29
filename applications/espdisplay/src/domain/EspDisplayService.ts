@@ -16,6 +16,7 @@
 import { spawn } from 'node:child_process';
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
+import { ensureGlobalSshKey } from '../../../core/dist/exports';
 import { espDisplayConfigSchema, type EspDisplayConfig } from './config-schema';
 
 export interface EspDisplayDeployRequest {
@@ -41,8 +42,7 @@ export const ESPDISPLAY_EVENTS = {
 } as const;
 
 export class EspDisplayService implements IEspDisplayService {
-  private readonly config: EspDisplayConfig;
-  private readonly pipelineScript: string;
+  private config: EspDisplayConfig;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -50,8 +50,15 @@ export class EspDisplayService implements IEspDisplayService {
     private readonly configProvider: IAppConfigProvider<EspDisplayConfig>
   ) {
     this.config = espDisplayConfigSchema.parse(configProvider.getAppConfig());
-    this.pipelineScript = this.resolvePipelineScript();
     this.setupEventListeners();
+    // ⭐ 29/09/2026 — réglages communs : un config.yaml reçu d'une autre machine (diffusion) ou
+    // enregistré depuis la page est relu sans redémarrer l'application.
+    this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (e) => {
+      if (e?.moduleId !== 'espdisplay' || !e.success) return;
+      this.configProvider.reload?.();
+      this.config = espDisplayConfigSchema.parse(this.configProvider.getAppConfig());
+      this.logger.info('EspDisplayService', `Réglages relus — machine ESPHome : ${this.config.remote.host || 'non renseignée'}`);
+    });
   }
 
   static create(
@@ -60,14 +67,6 @@ export class EspDisplayService implements IEspDisplayService {
     configProvider: IAppConfigProvider<EspDisplayConfig>
   ): EspDisplayService {
     return new EspDisplayService(eventBus, logger, configProvider);
-  }
-
-  private resolvePipelineScript(): string {
-    if (this.config.pipelineScriptPath) {
-      return this.config.pipelineScriptPath;
-    }
-    const projectRoot = process.env.PROJECT_ROOT || process.cwd();
-    return path.join(projectRoot, 'applications', 'haplan', 'tools', 'generate_esphome_floorplan.py');
   }
 
   private setupEventListeners(): void {
@@ -80,8 +79,8 @@ export class EspDisplayService implements IEspDisplayService {
 
   async start(): Promise<void> {
     const mode = this.config.remote.host
-      ? `distant via SSH vers ${this.config.remote.sshUser}@${this.config.remote.host}`
-      : `local (pipeline: ${this.pipelineScript})`;
+      ? `par SSH vers ${this.config.remote.sshUser}@${this.config.remote.host}`
+      : 'impossible : machine ESPHome non renseignée (obligatoire)';
     this.logger.info('EspDisplayService', `Démarrage — exécution ${mode}, conteneur: ${this.config.esphomeContainer}`);
   }
 
@@ -95,9 +94,10 @@ export class EspDisplayService implements IEspDisplayService {
     const planArg = request.floorplanId ?? '--all';
     this.logger.info('EspDisplayService', `Déploiement demandé : ${label}`);
 
+    // ⭐ 29/09/2026 (spec v1.3) : machine ESPHome obligatoire, plus d'exécution locale implicite.
     const result = this.config.remote.host
       ? await this.runPipelineRemote(planArg)
-      : await this.runPipelineLocal(planArg);
+      : { ok: false, message: 'Machine ESPHome non renseignée : Paramètres Techniques › Écrans ESP › Hôte (obligatoire)' };
     const durationMs = Date.now() - start;
 
     const deployResult: EspDisplayDeployResult = {
@@ -114,17 +114,6 @@ export class EspDisplayService implements IEspDisplayService {
     }
 
     this.eventBus.emitGeneric<EspDisplayDeployResult>(ESPDISPLAY_EVENTS.DEPLOY_RESULT, deployResult);
-  }
-
-  private runPipelineLocal(planArg: string): Promise<{ ok: boolean; message: string }> {
-    const args = [
-      this.pipelineScript,
-      planArg,
-      '--compile',
-      '--esphome-container', this.config.esphomeContainer,
-      '--esphome-config-dir', this.config.esphomeConfigDir
-    ];
-    return this.runProcess(this.config.pythonBin, args);
   }
 
   /**
@@ -144,15 +133,27 @@ export class EspDisplayService implements IEspDisplayService {
    */
   private runPipelineRemote(planArg: string): Promise<{ ok: boolean; message: string }> {
     const target = this.config.remote;
-    const knownHostsPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'espdisplay', 'known_hosts');
+    const knownHostsPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'espdisplay', 'machine_known_hosts');
     const args = [
       '-o', 'BatchMode=yes',
       '-o', 'ConnectTimeout=10',
       '-o', 'StrictHostKeyChecking=accept-new',
       '-o', `UserKnownHostsFile=${knownHostsPath}`
     ];
-    if (target.sshKeyPath) args.push('-i', target.sshKeyPath);
-    args.push(`${target.sshUser}@${target.host}`, planArg);
+    // ⭐ 29/09/2026 : clé SSH unique de l'installation (comme les autres cibles), script agent appelé
+    // explicitement (plus de commande forcée liée à une clé dédiée). L'argument passe par le shell
+    // distant : son format est donc contrôlé ici.
+    if (!/^(--all|[A-Za-z0-9_.-]{1,100})$/.test(planArg)) {
+      return Promise.resolve({ ok: false, message: `Identifiant de plan refusé : ${planArg}` });
+    }
+    // Réglages de la machine ESPHome transmis au script agent (qui les codait en dur) : conteneur,
+    // dossier de config, binaire Python, script (vide = celui du dépôt sur cette machine).
+    const extra = [this.config.esphomeContainer, this.config.esphomeConfigDir, this.config.pythonBin, this.config.pipelineScriptPath];
+    if (extra.some((v) => v && !/^[A-Za-z0-9_.\/~-]{1,200}$/.test(v))) {
+      return Promise.resolve({ ok: false, message: 'Réglage ESPHome refusé (caractères non autorisés) : conteneur, dossier, Python ou script' });
+    }
+    args.push('-i', ensureGlobalSshKey());
+    args.push(`${target.sshUser}@${target.host}`, '~/bin/espdisplay-agent-run.sh', planArg, ...extra.map((v) => v || "''"));
     return this.runProcess('ssh', args);
   }
 

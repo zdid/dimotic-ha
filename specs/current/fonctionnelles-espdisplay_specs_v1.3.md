@@ -1,5 +1,8 @@
 # Spécifications Fonctionnelles - Module ESPDISPLAY
 
+*Version 1.3 - 29 Septembre 2026 — **machine ESPHome obligatoire, réglages communs (diffusés), clé SSH de
+la machine qui appelle** (§5.1, §6.3bis).*
+
 *Version 1.2 - 19 Septembre 2026 — §9.1 : référence morte vers `inter-app-communication_specs`
 (retirée de `specs/current/`, jamais implémentée) corrigée vers `techniques-socle-ha-mqtt_specs`
 §9bis.*
@@ -186,9 +189,15 @@ compilé qui ne correspond à aucun appareil apparié.
 | `esphomeConfigDir` | string | `/docker/esphome/config` | Répertoire monté dans ce conteneur |
 | `pipelineScriptPath` | string | `''` | Vide = résolu vers `applications/haplan/tools/generate_esphome_floorplan.py` (relatif à `PROJECT_ROOT`) |
 | `pythonBin` | string | `python3` | Doit avoir PyYAML + Pillow installés (dépendances du script, hors runtime Node) |
-| `remote.host` | string | `''` (v1.1) | Vide = exécution locale ; sinon délégation SSH, voir §6.3 |
-| `remote.sshUser` | string | `didier` (v1.1) | |
-| `remote.sshKeyPath` | string | `''` (v1.1) | Chemin de la clé privée dédiée, monté en volume dans le conteneur (voir §6.3) |
+| `remote.host` | string | `''` | ⭐ v1.3 : **obligatoire** — machine qui héberge le conteneur esphome ; vide = déploiement refusé avec un message clair (plus d'exécution locale implicite), voir §6.3bis |
+| `remote.sshUser` | string | `didier` | |
+| ~~`remote.sshKeyPath`~~ | — | — | **Retiré en v1.3** : clé SSH = celle de la machine qui appelle (§6.3bis) ; ignoré s'il reste dans un ancien fichier |
+
+**⭐ v1.3 — tous ces réglages sont communs** : ils décrivent la machine où tourne ESPHome, pas la machine
+locale. Ils vivent dans `config.yaml`, **diffusé** aux autres machines (`techniques-diffusion-data_specs`
+v1.6) ; plus aucun n'est propre à la machine (`layers.ts` : plus de déclaration `machine` pour
+`espdisplay`). Un `config.yaml` reçu ou enregistré est relu sans redémarrage (`app:module:config:saved`).
+`known_hosts` devient `machine_known_hosts` (propre à la machine, jamais diffusé).
 
 ### 5.2 Configuration UI (v1.1)
 
@@ -233,6 +242,22 @@ pour un Pi5**, seule l'**infaisabilité du Pi4/ha2** est un fait vérifié.
 flash OTA réel validé sur écran physique). `esphomeContainer`/`esphomeConfigDir` restent
 configurables (§5) si cet hébergement devait un jour changer, mais **aucun mécanisme de bascule
 automatique n'existe** — un changement de machine hôte est une reconfiguration manuelle.
+
+### 6.3bis Clé SSH et script agent (v1.3)
+
+- **Clé** : celle de **la machine qui appelle** (`ensureGlobalSshKey()`, `data/core/machine_ssh/
+  id_ed25519`, propre à chaque machine, jamais diffusée) — la même que pour toutes les autres cibles de
+  déploiement. Chaque machine qui déploie un écran doit être autorisée **une fois** sur la machine
+  ESPHome (`ssh-copy-id -i data/core/machine_ssh/id_ed25519.pub <utilisateur>@<hôte>`, pavé de la page
+  d'accueil). L'ancienne clé dédiée et sa commande forcée ne sont plus utilisées.
+- **Appel** : `ssh -i <clé> <utilisateur>@<hôte> ~/bin/espdisplay-agent-run.sh <plan|--all> <conteneur>
+  <dossier config> <python> <script>` — les réglages ESPHome de la page sont transmis au script (qui les
+  codait en dur). Arguments contrôlés avant l'envoi (`[A-Za-z0-9_./~-]`).
+- **Script agent** : `applications/espdisplay/tools/espdisplay-agent-run.sh`, à copier dans `~/bin/` de la
+  machine ESPHome ; accepte encore l'ancien appel par commande forcée (plan lu dans
+  `$SSH_ORIGINAL_COMMAND`).
+- **Sécurité** : la clé de la machine appelante ouvre un accès normal à l'utilisateur, comme pour les autres
+  cibles ; restriction possible par `command=` dans `authorized_keys` (à décider).
 
 ### 6.3 Exécution distante par SSH (v1.1) — bug de production corrigé le 14/08/2026
 
@@ -329,5 +354,6 @@ applications/haplan/tools/
 ### 9.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.3 | 2026-09-29 | Claude | Machine ESPHome obligatoire (plus d'exécution locale implicite), réglages communs diffusés (plus de déclaration propre à la machine), clé SSH de la machine appelante (`sshKeyPath` retiré), script agent `tools/espdisplay-agent-run.sh` paramétré, `known_hosts` → `machine_known_hosts` (§5.1, §6.3bis). v1.2 archivée. |
 | 1.1 | 2026-08-15 | Claude | **Exécution distante par SSH** (§6.3) — corrige un échec réel en production (`ha2`, ni python3 ni conteneur esphome) : commande forcée, clé dédiée, `UserKnownHostsFile` persisté, `openssh-client` ajouté à l'image Docker (3 bugs distincts trouvés en conditions réelles). **Configuration UI** (§5.2) — menu "Écrans ESP", jusque-là absent. |
 | 1.0 | 2026-08-13 | Claude | Première spécification. Nouvelle application, créée en même temps que le code — orchestration du déploiement d'écrans ESP via EventBus générique (pattern `integration:bridge:register`), appel du pipeline Python existant côté HAPLAN, choix d'hébergement Docker documenté avec l'essai réel (et l'échec réel) sur ha2/Pi4. Testée en conditions quasi réelles : EventBus simulé + vrai sous-processus + vraie compilation Docker + vrai flash OTA sur écran physique. |
