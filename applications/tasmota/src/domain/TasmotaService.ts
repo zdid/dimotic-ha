@@ -568,9 +568,17 @@ export class TasmotaService implements ITasmotaService {
 
   private async readDevice(mac: string): Promise<void> {
     const device = this.requireDevice(mac);
-    const status = await this.commandAndWait<Record<string, unknown>>(device, 'Status', '0',
-      (suffix, body) => (suffix === 'STATUS0' || suffix === 'RESULT') && body && typeof body === 'object' && 'Status' in (body as object) ? body : undefined);
-    if (!status) {
+    // Tasmota 15 répond à « Status 0 » en plusieurs messages (STATUS, STATUS1…STATUS11), les anciens
+    // firmwares en un seul STATUS0 : chaque partie utile est demandée séparément (constaté le 29/09/2026).
+    const part = (n: number, key: string) => this.commandAndWait<Record<string, unknown>>(device, 'Status', n ? String(n) : '',
+      (suffix, body) => {
+        if (!body || typeof body !== 'object') return undefined;
+        const b = body as Record<string, unknown>;
+        if ((suffix === (n ? `STATUS${n}` : 'STATUS') || suffix === 'STATUS0' || suffix === 'RESULT') && key in b) return b[key] as Record<string, unknown>;
+        return undefined;
+      });
+    const st = await part(0, 'Status');
+    if (!st) {
       this.log(`${this.label(device)} : pas de réponse à Status 0 (hors ligne ?)`, 'error', device.mac);
       this.eventBus.emitGeneric(TASMOTA_SOCKET_EVENTS.DEVICE_DETAILS, { mac: device.mac, error: 'Pas de réponse' });
       return;
@@ -590,7 +598,9 @@ export class TasmotaService implements ITasmotaService {
       invert: await this.query<string | number>(device, 'ShutterInvert1', 3000)
     } : undefined;
 
-    const st = (status.Status ?? {}) as Record<string, unknown>;
+    const fwr = await part(2, 'StatusFWR');
+    const net = await part(5, 'StatusNET');
+    const mqt = await part(6, 'StatusMQT');
     const site = /^%prefix%\/([^/%]+)\/%topic%\/?$/.exec(String(fullTopic ?? ''))?.[1] ?? '';
     const templateName = template && typeof template === 'object' ? String((template as Record<string, unknown>).NAME ?? '') : '';
     this.eventBus.emitGeneric(TASMOTA_SOCKET_EVENTS.DEVICE_DETAILS, {
@@ -605,9 +615,9 @@ export class TasmotaService implements ITasmotaService {
       magicSwitchPulse: typeof magic === 'number' ? magic : undefined,
       rules,
       shutter,
-      firmware: (status.StatusFWR as Record<string, unknown> | undefined)?.Version,
-      mqttHost: (status.StatusMQT as Record<string, unknown> | undefined)?.MqttHost,
-      hostname: (status.StatusNET as Record<string, unknown> | undefined)?.Hostname
+      firmware: fwr?.Version,
+      mqttHost: mqt?.MqttHost,
+      hostname: net?.Hostname
     });
     this.log(`${this.label(device)} : réglages relus`, 'ok', device.mac);
   }
@@ -636,7 +646,8 @@ export class TasmotaService implements ITasmotaService {
     const deviceName = composeDeviceName(parts);
     if (deviceName.length > DEVICE_NAME_MAX) throw new Error(`Nom trop long (${deviceName.length} > ${DEVICE_NAME_MAX} caractères) : ${deviceName}`);
     const topic = (req.topic?.trim() || suggestTopic(parts));
-    if (!/^[a-z0-9_]{1,32}$/.test(topic)) throw new Error(`Nom technique invalide « ${topic} » (a-z, 0-9, _ ; 32 caractères au plus)`);
+    // Majuscules et tiret acceptés : le topic d'origine d'un Tasmota est `tasmota_<6 hexa majuscules>`.
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(topic)) throw new Error(`Nom technique invalide « ${topic} » (lettres, chiffres, _ ou - ; 32 caractères au plus)`);
     const site = req.site?.trim() ?? '';
     if (!this.config.sites.includes(site)) throw new Error(`Site inconnu : « ${site} »`);
     const fullTopic = `%prefix%/${site}/%topic%/`;
@@ -811,7 +822,10 @@ export class TasmotaService implements ITasmotaService {
     const text = buildRuleText(rule.template, rule.params, rule.slot);
     const active = isRuleActive(rule, this.currentMode);
     this.log(`Rule${rule.slot} (${findTemplate(rule.template)?.label ?? rule.template}, ${active ? 'active' : 'inactive'}) : ${text}`, 'info', device.mac);
-    this.command(device, `Rule${rule.slot}`, text);
+    // Une commande à la fois : sans attendre la réponse à l'écriture du texte, cette réponse (état
+    // ANCIEN) était prise pour celle de l'activation → « NON conforme » au hasard (constaté le 28/09).
+    const written = await this.commandAndWait<{ State?: string; Rules?: string }>(device, `Rule${rule.slot}`, text, this.resultKey(`Rule${rule.slot}`));
+    if (!written) this.log(`Rule${rule.slot} : pas de réponse à l'écriture du texte`, 'error', device.mac);
     const state = await this.commandAndWait<{ State?: string; Rules?: string }>(device, `Rule${rule.slot}`, active ? '1' : '0', this.resultKey(`Rule${rule.slot}`));
     const norm = (s: string): string => s.replace(/\s+/g, ' ').trim().toLowerCase();
     const ok = !!state && norm(state.Rules ?? '') === norm(text) && (state.State ?? '').toUpperCase() === (active ? 'ON' : 'OFF');
