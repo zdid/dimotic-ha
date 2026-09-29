@@ -76,7 +76,7 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Racine du bundle (archive auto-extractible) ou du dépôt : scripts/ est juste en dessous dans le
 # bundle, applications/outils/reposcripts/scripts/ dans un clone.
-if [ -f "$SCRIPT_DIR/../data/core/ssh/id_ed25519.pub" ] || [ -f "$SCRIPT_DIR/../compose.deploy.yaml" ]; then
+if [ -f "$SCRIPT_DIR/../data/core/machine_ssh/id_ed25519.pub" ] || [ -f "$SCRIPT_DIR/../compose.deploy.yaml" ]; then
   BUNDLE_ROOT="$SCRIPT_DIR/.."
 else
   BUNDLE_ROOT="$SCRIPT_DIR/../../../.."
@@ -174,7 +174,7 @@ add_package_if_missing() {
 }
 
 run_base() {
-  local dimotic_key="$BUNDLE_ROOT/data/core/ssh/id_ed25519.pub"
+  local dimotic_key="$BUNDLE_ROOT/data/core/machine_ssh/id_ed25519.pub"
   local compose="$BUNDLE_ROOT/compose.deploy.yaml"
   [ -f "$dimotic_key" ] || { echo "Clé dimotic-ha introuvable : $dimotic_key" >&2; exit 1; }
   [ -f "$compose" ] || { echo "compose.deploy.yaml introuvable : $compose" >&2; exit 1; }

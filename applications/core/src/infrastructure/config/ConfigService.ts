@@ -409,6 +409,28 @@ export class ConfigService {
     this.moduleSchemas.set(moduleId, schema);
   }
 
+  /**
+   * ⭐ 29/09/2026 — attribut `storage` des champs de formulaire d'un module (ConfigField) : fichier
+   * de rangement d'un réglage nouveau (machine_config.yaml / secrets_config.yaml). Appelé par
+   * AppService au chargement de chaque application.
+   */
+  registerModuleStorage(moduleId: string, fields: unknown): void {
+    const machine: string[] = [];
+    const secrets: string[] = [];
+    const visit = (list: unknown, prefix = ''): void => {
+      if (!Array.isArray(list)) return;
+      for (const item of list as Array<Record<string, unknown>>) {
+        if (Array.isArray(item?.fields)) visit(item.fields, prefix); // groupe
+        const name = typeof item?.name === 'string' ? `${prefix}${item.name}` : undefined;
+        if (!name) continue;
+        if (item.storage === 'machine') machine.push(name);
+        if (item.storage === 'secret') secrets.push(name);
+      }
+    };
+    visit(fields);
+    if (machine.length || secrets.length) this.writer.registerStorage(moduleId, { machine, secrets });
+  }
+
   saveModuleConfig<T>(moduleId: string, config: T): SaveResult {
     console.log('[ConfigService SERVEUR] Sauvegarde configuration module - moduleId:', moduleId);
     console.log('[ConfigService SERVEUR] Config module:', redactForLog(config, 2));

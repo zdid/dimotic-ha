@@ -163,7 +163,11 @@ export class CoreDeployService {
    */
   private async seedConfigIfAbsent(target: DeploymentTargetConfig): Promise<DeployResult> {
     const remoteConfigPath = `${target.remoteDir}/data/core/config.yaml`;
-    const exists = await runSsh(target, `test -f ${shellQuote(remoteConfigPath)} && echo present`);
+    // ⭐ 29/09/2026 — configuration en trois fichiers (layers.ts) : déjà configurée si config.yaml OU
+    // machine_config.yaml existe. Le fichier semé reste « à plat » : le core de la cible le répartit
+    // lui-même au démarrage (migration, ConfigLoader.migrate) — idem pour pushConfig ci-dessous.
+    const remoteMachinePath = `${target.remoteDir}/data/core/machine_config.yaml`;
+    const exists = await runSsh(target, `{ test -f ${shellQuote(remoteConfigPath)} || test -f ${shellQuote(remoteMachinePath)}; } && echo present`);
     if (exists.output.trim() === 'present') {
       this.logger.info('CoreDeployService', `data/core/config.yaml déjà présent sur ${target.host}, non écrasé`);
       return { success: true, step: 'seed-config' };

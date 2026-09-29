@@ -31,7 +31,7 @@ export interface RemoteTarget {
  * applications et toutes les cibles (⭐ 24/08/2026, revu sur demande explicite : le modèle
  * précédent, une clé par application ET par cible, n'était pas ce qui était voulu — la
  * granularité par cible ajoutait de la friction sans bénéfice retenu par l'utilisateur).
- * `data/core/ssh/id_ed25519`, jamais `~/.ssh/...` : le conteneur Docker tourne en `USER node`
+ * `data/core/machine_ssh/id_ed25519`, jamais `~/.ssh/...` : le conteneur Docker tourne en `USER node`
  * (home `/home/node`, jamais persisté, aucun volume SSH monté, voir Dockerfile/compose.yaml) —
  * seul `data/` survit et reste identique en dev local et en Docker. Rangée sous `data/core/`
  * (pas un `data/ssh/` de premier niveau) parce que `core` est le seul module dont la présence est
@@ -39,7 +39,8 @@ export interface RemoteTarget {
  * démarrage mais ne la "possèdent" pas.
  */
 export function globalSshKeyPath(): string {
-  const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'core', 'ssh');
+  // ⭐ 29/09/2026 : `machine_ssh` (propre à la machine, jamais reproduit — techniques-diffusion-data_specs §8.3).
+  const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'core', 'machine_ssh');
   return path.join(dataDir, 'id_ed25519');
 }
 

@@ -3,6 +3,15 @@ import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import { z } from 'zod';
 import { AppConfig, configSchema, generateRandomMachineId } from './schema';
+import {
+  readLayered,
+  layersExist,
+  writeLayered,
+  migrateLayered,
+  setMachineValue,
+  CORE_DECLARATION,
+  APP_DECLARATIONS
+} from './layers';
 
 /**
  * Valeurs par défaut complètes pour la configuration
@@ -116,16 +125,17 @@ export class ConfigLoader {
    * @throws Error si YAML invalide ou validation échouée (pas si le fichier est simplement absent)
    */
   load(): AppConfig {
-    if (!fs.existsSync(this.configPath)) {
+    // ⭐ 29/09/2026 — trois fichiers (config.yaml / machine_config.yaml / secrets_config.yaml, voir
+    // layers.ts) : l'installation est neuve seulement si AUCUN n'existe.
+    const coreDir = path.dirname(this.configPath);
+    if (!layersExist(coreDir)) {
       this.createDefaultConfigFile();
       this.createdByThisProcess = true;
     }
 
-    const fileContent = fs.readFileSync(this.configPath, 'utf-8');
-
     let parsedConfig: unknown;
     try {
-      parsedConfig = yaml.load(fileContent);
+      parsedConfig = readLayered(coreDir).merged ?? {};
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown YAML parsing error';
       throw new Error(`Invalid YAML in configuration file: ${errorMessage}`);
@@ -166,13 +176,9 @@ export class ConfigLoader {
    */
   private ensureMachineIdPersisted(rawConfig: Partial<AppConfig> | null | undefined, configWithDefaults: AppConfig): void {
     if ((rawConfig as any)?.core?.machineId) return; // déjà présent sur disque, rien à faire
-
-    const onDiskConfig = (rawConfig && typeof rawConfig === 'object' ? { ...(rawConfig as Record<string, unknown>) } : {}) as Record<string, unknown>;
-    onDiskConfig.core = { ...(onDiskConfig.core as Record<string, unknown> | undefined), machineId: configWithDefaults.core.machineId };
-
+    // ⭐ 29/09/2026 — écrit dans machine_config.yaml (propre à la machine, jamais reproduit).
     try {
-      fs.mkdirSync(path.dirname(this.configPath), { recursive: true });
-      fs.writeFileSync(this.configPath, yaml.dump(onDiskConfig, { indent: 2, sortKeys: false }), 'utf-8');
+      setMachineValue(path.dirname(this.configPath), 'core.machineId', configWithDefaults.core.machineId);
     } catch {
       // Best-effort : si l'écriture échoue (permissions, disque plein...), configWithDefaults
       // reste utilisable pour CE démarrage — seul un futur redémarrage regénérerait un id différent.
@@ -230,8 +236,45 @@ export class ConfigLoader {
   }
 
   private createDefaultConfigFile(): void {
-    fs.mkdirSync(path.dirname(this.configPath), { recursive: true });
-    fs.writeFileSync(this.configPath, yaml.dump(DEFAULT_CONFIG, { indent: 2, sortKeys: false }), 'utf-8');
+    writeLayered(path.dirname(this.configPath), DEFAULT_CONFIG as unknown as Record<string, unknown>, CORE_DECLARATION);
+  }
+
+  /**
+   * ⭐ 29/09/2026 (techniques-diffusion-data_specs §8, temps 1) — migration vers les trois fichiers,
+   * À APPELER PAR LE SEUL PROCESS DU CORE avant le premier load() (jamais par les applications en
+   * process séparé, qui ne font que lire). Idempotente, refaite à chaque démarrage :
+   * - core et applications déclarées : chemins machine/secrets sortis de config.yaml ;
+   * - renommages de fichiers propres à la machine : `core/ssh/` → `core/machine_ssh/`,
+   *   `core/ha-structure-*.yaml` → `core/machine_ha-structure-*.yaml`.
+   * Retourne un compte rendu (une ligne par changement) pour le journal.
+   */
+  migrate(): string[] {
+    const report: string[] = [];
+    const coreDir = path.dirname(this.configPath);
+    const dataRoot = this.appDataRoot ?? path.dirname(coreDir);
+    const history = (app: string) => path.join(dataRoot, 'core', 'machine_diffusion', 'historique', app);
+
+    const coreMoved = migrateLayered(coreDir, CORE_DECLARATION, history('core'));
+    if (coreMoved.length) report.push(`core : ${coreMoved.join(', ')} → machine_config.yaml / secrets_config.yaml`);
+    for (const [app, decl] of Object.entries(APP_DECLARATIONS)) {
+      const moved = migrateLayered(path.join(dataRoot, app), decl, history(app));
+      if (moved.length) report.push(`${app} : ${moved.join(', ')} → machine_config.yaml / secrets_config.yaml`);
+    }
+
+    const renames: Array<[string, string]> = [
+      ['ssh', 'machine_ssh'],
+      ['ha-structure-debug.yaml', 'machine_ha-structure-debug.yaml'],
+      ['ha-structure-changes.yaml', 'machine_ha-structure-changes.yaml']
+    ];
+    for (const [from, to] of renames) {
+      const src = path.join(coreDir, from);
+      const dst = path.join(coreDir, to);
+      if (fs.existsSync(src) && !fs.existsSync(dst)) {
+        fs.renameSync(src, dst);
+        report.push(`core/${from} → core/${to}`);
+      }
+    }
+    return report;
   }
 
   /**
@@ -251,16 +294,10 @@ export class ConfigLoader {
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name === 'core') continue;
 
-      const sectionPath = path.join(this.appDataRoot!, entry.name, 'config.yaml');
-      if (!fs.existsSync(sectionPath)) continue;
-
-      try {
-        const parsed = yaml.load(fs.readFileSync(sectionPath, 'utf-8'));
-        target[entry.name] = parsed;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Invalid YAML in ${sectionPath}: ${message}`);
-      }
+      // ⭐ 29/09/2026 — config.yaml + machine_config.yaml + secrets_config.yaml fusionnés (layers.ts).
+      const appDir = path.join(this.appDataRoot!, entry.name);
+      if (!layersExist(appDir)) continue;
+      target[entry.name] = readLayered(appDir).merged;
     }
   }
 }

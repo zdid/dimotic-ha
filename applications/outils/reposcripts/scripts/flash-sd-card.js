@@ -313,7 +313,7 @@ function baseKey(entry, profile) {
     image: entry.extract_sha256,
     packages: [...profile.packages].sort(),
     apps: [...profile.apps].sort(),
-    dimoticKey: fileHash(path.join(BUNDLE_ROOT, 'data', 'core', 'ssh', 'id_ed25519.pub')),
+    dimoticKey: fileHash(path.join(BUNDLE_ROOT, 'data', 'core', 'machine_ssh', 'id_ed25519.pub')),
     compose: fileHash(path.join(BUNDLE_ROOT, 'compose.deploy.yaml')),
     prepareScript: fileHash(PREPARE_SH),
     agents: Object.fromEntries(profile.apps.map((a) => [a, dirSignature(APP_AGENT_DIRS[a])]))

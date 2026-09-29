@@ -214,9 +214,9 @@ export function renderSshPrepSection(container: HTMLElement, options: RenderSshP
   const knownHosts = Array.from(new Set(targets.map((t) => t.host).filter((host) => !!host)));
   const commandBlock = knownHosts.length > 0
     ? knownHosts
-        .map((host) => `${cdCommand}\nmkdir -p ~/.ssh\nssh-copy-id -i data/core/ssh/id_ed25519.pub ${user}@${escapeHtml(host)}`)
+        .map((host) => `${cdCommand}\nmkdir -p ~/.ssh\nssh-copy-id -i data/core/machine_ssh/id_ed25519.pub ${user}@${escapeHtml(host)}`)
         .join('\n\n')
-    : `${cdCommand}\nmkdir -p ~/.ssh\nssh-copy-id -i data/core/ssh/id_ed25519.pub ${user}@&lt;hôte-de-la-cible&gt;`;
+    : `${cdCommand}\nmkdir -p ~/.ssh\nssh-copy-id -i data/core/machine_ssh/id_ed25519.pub ${user}@&lt;hôte-de-la-cible&gt;`;
 
   container.innerHTML = `
     <div class="ssh-prep-section">

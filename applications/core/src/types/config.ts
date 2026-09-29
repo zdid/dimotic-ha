@@ -37,6 +37,11 @@ export interface ConfigField {
   // pour une action destructive/irréversible (optionnel, aucune confirmation par défaut).
   action?: string;
   confirm?: string;
+  // ⭐ 29/09/2026 (techniques-diffusion-data_specs §8.2) — fichier de rangement d'un réglage NOUVEAU :
+  // 'machine' → machine_config.yaml (jamais reproduit), 'secret' → secrets_config.yaml (non reproduit).
+  // Sans rapport avec le masquage à l'écran (type 'password') : un secret peut être saisi en clair.
+  // Un réglage déjà présent dans un fichier y reste, quel que soit cet attribut.
+  storage?: 'machine' | 'secret';
   // Uniquement pour type: 'array' — liste d'objets avec ajout/suppression dynamique, rendue par
   // Alpine côté navigateur (voir applications/core/src/presentation/ui/ts/config/ModuleManager.ts
   // generateArrayFieldHtml()). itemFields décrit la forme d'un élément (chemins pointés

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import { z } from 'zod';
 import { AppConfig, configSchema } from './schema';
+import { writeLayered, CORE_DECLARATION, APP_DECLARATIONS, type LayerDeclaration } from './layers';
 
 /**
  * Résultat de la sauvegarde
@@ -80,7 +81,35 @@ export class ConfigWriter {
       return { success: false, error: `Validation error: ${error}` };
     }
 
-    return this.writeYamlAtomic(this.configPath, config);
+    // ⭐ 29/09/2026 — réparti dans config.yaml / machine_config.yaml / secrets_config.yaml (layers.ts).
+    return this.writeLayeredSafe(path.dirname(this.configPath), config as unknown as Record<string, unknown>, CORE_DECLARATION);
+  }
+
+  /** Déclarations `storage` des champs de formulaire des applications (voir registerStorage). */
+  private readonly storageDeclarations = new Map<string, LayerDeclaration>();
+
+  /**
+   * ⭐ 29/09/2026 — réglages d'une application déclarés `storage: 'machine' | 'secret'` sur leur
+   * ConfigField : décide du fichier d'un réglage NOUVEAU (un réglage existant reste là où il est).
+   */
+  registerStorage(moduleId: string, decl: LayerDeclaration): void {
+    this.storageDeclarations.set(moduleId, decl);
+  }
+
+  private declarationFor(moduleId: string): LayerDeclaration {
+    const a = APP_DECLARATIONS[moduleId] ?? {};
+    const b = this.storageDeclarations.get(moduleId) ?? {};
+    return { machine: [...(a.machine ?? []), ...(b.machine ?? [])], secrets: [...(a.secrets ?? []), ...(b.secrets ?? [])] };
+  }
+
+  private writeLayeredSafe(dir: string, data: Record<string, unknown>, decl: LayerDeclaration): SaveResult {
+    try {
+      writeLayered(dir, data, decl, this.tmpSuffix);
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown write error';
+      return { success: false, error: `Write failed: ${errorMessage}` };
+    }
   }
 
   /**
@@ -92,6 +121,10 @@ export class ConfigWriter {
   saveModuleFile(moduleId: string, data: unknown): SaveResult {
     if (!this.appDataRoot) {
       return { success: false, error: 'ConfigWriter: appDataRoot non fourni, saveModuleFile() indisponible' };
+    }
+    // ⭐ 29/09/2026 — trois fichiers (layers.ts) ; une section qui n'est pas un objet reste écrite telle quelle.
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      return this.writeLayeredSafe(path.join(this.appDataRoot, moduleId), data as Record<string, unknown>, this.declarationFor(moduleId));
     }
     const filePath = path.join(this.appDataRoot, moduleId, 'config.yaml');
     return this.writeYamlAtomic(filePath, data);

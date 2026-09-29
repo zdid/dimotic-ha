@@ -31,6 +31,10 @@ beforeEach(() => {
 
 afterEach(() => {
   try { if (fs.existsSync(configPath)) fs.unlinkSync(configPath); } catch {}
+  // ⭐ 29/09/2026 — fichiers voisins de la configuration en trois fichiers (layers.ts).
+  for (const f of ['machine_config.yaml', 'secrets_config.yaml']) {
+    try { fs.rmSync(path.join(testDir, f), { force: true }); } catch {}
+  }
 });
 
 describe('ConfigLoader', () => {

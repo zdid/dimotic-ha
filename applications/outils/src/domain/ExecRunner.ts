@@ -1,7 +1,7 @@
 /**
  * ⭐ 25/09/2026 — exécution d'un script Outils sur une machine par SSH (fonctionnelles-outils_specs
  * §5.5, décisions utilisateur) : Outils se connecte LUI-MÊME avec la clé unique de dimotic-ha
- * (`data/core/ssh/id_ed25519`), copie le script (`scp`) puis le lance avec un pseudo-terminal
+ * (`data/core/machine_ssh/id_ed25519`), copie le script (`scp`) puis le lance avec un pseudo-terminal
  * (`ssh -tt`) — la sortie est relayée en direct et ce que l'utilisateur tape est envoyé au script
  * comme dans un terminal (confirmations `read -rp` des scripts interactifs).
  *

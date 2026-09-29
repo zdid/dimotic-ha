@@ -499,6 +499,8 @@ export class AppService {
       this.configService.registerModuleSchema(appId, module[schemaKey] as any);
       this.logger.debug('AppService', `Schéma de configuration enregistré pour ${appId}`);
     }
+    // ⭐ 29/09/2026 — fichier de rangement des réglages nouveaux (ConfigField.storage).
+    this.configService.registerModuleStorage(appId, appModule.configUi?.fields);
 
     const socketEventsKey = Object.keys(module).find((k) => k.endsWith('_SOCKET_EVENTS'));
     if (socketEventsKey && module[socketEventsKey]) {

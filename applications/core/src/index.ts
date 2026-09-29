@@ -122,6 +122,13 @@ class ApplicationBootstrap {
     const configPath = process.env.CONFIG_PATH || path.join(dataRoot, 'core', 'config.yaml');
     const configLoader = new ConfigLoader(configPath, configSchema, dataRoot);
     const configWriter = new ConfigWriter(configPath, configSchema, '.tmp', dataRoot);
+    // ⭐ 29/09/2026 — migration vers config.yaml / machine_config.yaml / secrets_config.yaml
+    // (techniques-diffusion-data_specs §8), par ce seul process, avant le premier chargement.
+    try {
+      for (const line of configLoader.migrate()) this.logger.info('ConfigMigration', line);
+    } catch (error) {
+      this.logger.error('ConfigMigration', `Migration des fichiers de configuration impossible : ${error}`);
+    }
     this.configService = new ConfigService(configLoader, configWriter, this.logger);
 
     // Le logger est créé avant la config (ci-dessus) avec un niveau par défaut 'info' — le

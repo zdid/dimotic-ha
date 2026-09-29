@@ -8,8 +8,8 @@ import { HaStructuredRegistry } from '../types/ha-structure';
 // HaRegistryTracer - Traces de debug pour le référentiel structuré HA
 //
 // Deux fichiers dans data/, actifs uniquement en mode debug (logging.level: debug) :
-// - ha-structure-debug.yaml : instantané complet de l'arbre (réécrit à chaque changement)
-// - ha-structure-changes.yaml : journal des ajouts/suppressions/mises à jour d'entités,
+// - machine_ha-structure-debug.yaml (⭐ 29/09/2026, préfixe machine_ : jamais reproduit) : instantané complet de l'arbre (réécrit à chaque changement)
+// - machine_ha-structure-changes.yaml : journal des ajouts/suppressions/mises à jour d'entités,
 //   lieux (areas) et devices — jamais les changements d'état — vidé à chaque démarrage.
 // =============================================================================
 
@@ -30,8 +30,8 @@ export class HaRegistryTracer {
     dataDir?: string
   ) {
     this.dataDir = dataDir || path.dirname(process.env.CONFIG_PATH || '/app/data/core/config.yaml');
-    this.snapshotPath = path.join(this.dataDir, 'ha-structure-debug.yaml');
-    this.changeLogPath = path.join(this.dataDir, 'ha-structure-changes.yaml');
+    this.snapshotPath = path.join(this.dataDir, 'machine_ha-structure-debug.yaml');
+    this.changeLogPath = path.join(this.dataDir, 'machine_ha-structure-changes.yaml');
   }
 
   private isDebugActive(): boolean {

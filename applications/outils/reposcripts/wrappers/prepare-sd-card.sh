@@ -22,7 +22,7 @@
 # @outils:bundle applications/outils/reposcripts/scripts/flash-sd-card.js => scripts/flash-sd-card.js
 # @outils:bundle applications/outils/reposcripts/scripts/prepare-sd-card.sh => scripts/prepare-sd-card.sh
 # @outils:bundle applications/outils/node_modules/js-yaml => node_modules/js-yaml
-# @outils:bundle data/core/ssh/id_ed25519.pub
+# @outils:bundle data/core/machine_ssh/id_ed25519.pub
 # @outils:bundle compose.deploy.yaml
 # @outils:bundle applications/teleinfo/device-agent
 #

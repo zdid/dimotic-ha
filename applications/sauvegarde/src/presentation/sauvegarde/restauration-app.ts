@@ -412,7 +412,7 @@ function renderPrereq(): void {
   const key = publicKey || '<clé publique introuvable>';
   $<HTMLTextAreaElement>('cmd-authorize').value =
     `mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo '${key}' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys`;
-  $<HTMLTextAreaElement>('cmd-copyid').value = `ssh-copy-id -i data/core/ssh/id_ed25519.pub root@${host}`;
+  $<HTMLTextAreaElement>('cmd-copyid').value = `ssh-copy-id -i data/core/machine_ssh/id_ed25519.pub root@${host}`;
 }
 
 function copyField(id: string): void {
