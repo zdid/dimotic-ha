@@ -134,6 +134,15 @@ export class RfxComService implements IRfxComService {
   private static readonly INITIAL_DISCOVERIES_MIN_INTERVAL_MS = 30000;
   private lastInitialDiscoveriesAt = 0;
 
+  // ⭐ 29/09/2026, constaté à la mise en service sur falbala (découvertes neuves après purge) : les
+  // états partaient dans la foulée des découvertes, AVANT que HA ait créé les entités — non retenus,
+  // ils étaient perdus (lumières « unknown » jusqu'au redémarrage suivant). Seconde passe, ÉTATS
+  // SEULS, quelques secondes plus tard : purement passive (mêmes fonctions *StateAtStartup, aucune
+  // commande RF), valeurs courantes (un changement entre-temps n'est pas écrasé), inoffensive pour
+  // HA si l'entité existait déjà.
+  private static readonly STATES_REPUBLISH_DELAY_MS = 10000;
+  private statesRepublishTimer: ReturnType<typeof setTimeout> | null = null;
+
   // ⭐ 10/08/2026, demande utilisateur : journal des ordres reçus (HA→RFXCOM) avec leur résultat
   // d'exécution réel — 100 dernières entrées maximum, voir socket-events.ts::ORDERS_LIST.
   private static readonly MAX_ORDERS = 100;
@@ -288,6 +297,10 @@ export class RfxComService implements IRfxComService {
     // ce qui relançait la boucle de reconnexion qu'on venait d'arrêter.
     this.transceiver.disconnect();
     this.stopReconnectLoop();
+    if (this.statesRepublishTimer) {
+      clearTimeout(this.statesRepublishTimer);
+      this.statesRepublishTimer = null;
+    }
     this.lastStatesStore.flush();
     this.eventBus.emitGeneric('integration:bridge:unregister', {
       moduleName: MODULE_NAME,
@@ -581,6 +594,29 @@ export class RfxComService implements IRfxComService {
     }
     this.lastDiscovery = new Date().toISOString();
     this.publishRegisteredDevicesList();
+    this.scheduleStatesRepublish();
+  }
+
+  /** Seconde passe, états seuls (voir STATES_REPUBLISH_DELAY_MS). */
+  private scheduleStatesRepublish(): void {
+    if (this.statesRepublishTimer) clearTimeout(this.statesRepublishTimer);
+    this.statesRepublishTimer = setTimeout(() => {
+      this.statesRepublishTimer = null;
+      let count = 0;
+      for (const device of this.deviceManager.getConfiguredDevices()) {
+        if (device.transmitToHa && device.lastValue !== undefined) {
+          this.publishDeviceStateAtStartup(device);
+          count++;
+        }
+      }
+      for (const receiver of this.receiverManager.getAllReceivers()) {
+        if (receiver.config.transmitToHa) {
+          this.publishReceiverStateAtStartup(receiver);
+          count++;
+        }
+      }
+      this.logger.info('RfxComService', `États republiés ${RfxComService.STATES_REPUBLISH_DELAY_MS / 1000} s après les découvertes (${count}) — HA a eu le temps de créer les entités neuves`);
+    }, RfxComService.STATES_REPUBLISH_DELAY_MS);
   }
 
   // ==========================================================================
