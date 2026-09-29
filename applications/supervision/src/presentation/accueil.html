@@ -1,4 +1,4 @@
-<!-- Derniere modification: 2026-09-25 11:40:00 - Creation : fragment de la page d'accueil (supervision v1.2 §6) -->
+<!-- Derniere modification: 2026-09-29 19:08:00 - Explication des cases à cocher : taille normale, couleur du texte -->
 <!-- Fragment chargé par le core (HomeView.ts) à la place de « Applications sur les autres machines » ;
      rendu par presentation/ts/accueil.js (window.supervisionAccueil.init). -->
 <style>
@@ -22,12 +22,19 @@
   .sup-line-warn { color: #c98a00; }
   .sup-line-info { color: #888; }
   .sup-others summary { cursor: pointer; color: #888; margin-top: 0.5rem; }
+  .sup-help { font-size: 1em; line-height: 1.5; margin: 0.6rem 0 0.8rem; padding: 0.6rem 0.8rem; border-left: 3px solid rgba(128,128,128,0.5); background: rgba(128,128,128,0.08); }
+  .sup-help p { margin: 0.3rem 0; }
 </style>
 <section class="sup-section">
   <div class="sup-head">
     <h3>Machines du site</h3>
     <button type="button" data-sup-refresh>🔄 Rafraîchir les sauvegardes</button>
     <span class="sup-backups-state" data-sup-backups-state></span>
+  </div>
+  <div class="sup-help">
+    <p><strong>☑ devant une machine</strong> : la machine est supervisée. Elle s'affiche ici, avec ses sauvegardes en face ; une de ses applications cochée qui s'arrête ou plante est signalée en rouge. Décochée, elle passe dans « Autres machines », pour mémoire seulement.</p>
+    <p><strong>☑ devant une application</strong> (machine supervisée seulement) : application surveillée. Décochée, son arrêt n'est signalé qu'en orange, sans alerte.</p>
+    <p>Cocher une machine coche avec elle ses applications déjà annoncées. Chaque case est prise en compte aussitôt, sans bouton « Enregistrer », et vaut pour toutes les machines du site : la même sélection s'affiche partout. Une machine ou une application qui apparaît arrive décochée.</p>
   </div>
   <div data-sup-selected><p>Chargement…</p></div>
   <details class="sup-others" data-sup-others-wrap>
