@@ -1,0 +1,16 @@
+scenario 
+pour un neuf 
+la connexion du tasmotta est 192.168.1.4 en me connectant sur son wifi.
+La mchine falbale dispose de l'ethernet (mode normal) et du wifi qui peut 
+se connecter sur le tasmotta
+en conséquence la premiere partie se ferait directement en http sur le tasmotta
+wifi+mqtt
+le reste une fois le tasmotta redemarré avec le bon wifi et le mqtt, se fera par mqtt.
+Les 2 scripts peuvent etre séparés
+et lancés indépendamment.
+Gestion des règles, il faut proposer un certains nombre de règles préetablies comme
+ les thermostats ou les minuteries.
+On choisit la regle, on la modifie comme la minuterie on peut changer la durée.
+On peut activer ou non la règle.
+ il faudrait prevoir la gestion de mode comme presence absence et autres , 
+des modes comme confort pour les thermostat qui activerait d'autre regles
