@@ -119,7 +119,8 @@ function renderDevices(): void {
     ].filter(Boolean).join(', ') || '—';
     const name = d.conventional
       ? esc(d.precis || d.quoi)
-      : `<span class="badge">À nommer</span> <span class="muted">${esc(d.name)}</span>`;
+      // Appareil à nommer : son topic (unique, ex. tasmota_77B62C) plutôt que « Tasmota », commun à tous les neufs.
+      : `<span class="badge">À nommer</span> <strong>${esc(d.topic)}</strong> <span class="muted">(${esc(d.name)})</span>`;
     return `<tr class="${d.mac === selectedMac ? 'selected' : ''}">
       <td><span class="dot ${dot}" title="${d.online ? 'En ligne' : d.online === false ? 'Hors ligne' : 'État inconnu'}"></span></td>
       <td>${name}<div class="muted">${esc(d.mac)}</div></td>
@@ -152,7 +153,7 @@ function openFiche(mac: string): void {
   const d = currentDevice();
   if (!d || !state) return;
   $('fiche').classList.remove('hidden');
-  $('fiche-title').textContent = `Fiche — ${d.conventional ? (d.precis || d.quoi) : 'appareil à nommer'} (${d.mac})`;
+  $('fiche-title').textContent = `Fiche — ${d.conventional ? (d.precis || d.quoi) : `${d.topic}, à nommer`} (${d.mac})`;
   $('fiche-sub').textContent = `${d.model ?? ''} ${d.version ?? ''} — ${d.ip ?? ''} — lecture de l'appareil en cours…`;
   $<HTMLSelectElement>('f-site').innerHTML = state.config.sites.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
   $<HTMLSelectElement>('f-model').innerHTML = state.models.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('');

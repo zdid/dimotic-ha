@@ -583,7 +583,9 @@ export class TasmotaService implements ITasmotaService {
       this.eventBus.emitGeneric(TASMOTA_SOCKET_EVENTS.DEVICE_DETAILS, { mac: device.mac, error: 'Pas de réponse' });
       return;
     }
-    const template = await this.query<unknown>(device, 'Template');
+    // Tasmota répond à « Template » sans clé Template : directement {"NAME":…,"GPIO":…} (29/09/2026).
+    const template = await this.commandAndWait<unknown>(device, 'Template', '',
+      (suffix, body) => suffix === 'RESULT' && body && typeof body === 'object' && 'NAME' in (body as object) ? body : undefined);
     const fullTopic = await this.query<string>(device, 'FullTopic');
     const magic = await this.query<number>(device, 'MagicSwitchPulse', 3000);
     const rules: Record<number, { state: string; text: string }> = {};
@@ -702,26 +704,30 @@ export class TasmotaService implements ITasmotaService {
           return suffix === 'discovery' && c.dn === deviceName && c.t === topic && c.ft === fullTopic ? c : undefined;
         },
         resolve: (v) => resolve(v as TasmotaDiscoveryConfig | undefined),
+        // Tasmota republie sa découverte ~20 s après la reconnexion (mesuré le 29/09/2026) : 60 s.
         timer: setTimeout(() => {
           this.waiters = this.waiters.filter((w) => w !== waiter);
           resolve(undefined);
-        }, 20_000)
+        }, 60_000)
       };
       this.waiters.push(waiter);
     });
     if (topicChanged) {
-      this.log(`Topics : FullTopic ${fullTopic}, Topic ${topic}, Hostname ${hostname} (reconnexion MQTT)`, 'info', mac);
+      this.log(`Topics : FullTopic ${fullTopic}, Topic ${topic}, Hostname ${hostname} (reconnexion MQTT, découverte attendue sous ~20 s)`, 'info', mac);
       this.command(device, 'Backlog', `Hostname ${hostname}; FullTopic ${fullTopic}; Topic ${topic}`);
+      // Nouveaux topics pris tout de suite (sans attendre la découverte) : la relecture de la fiche
+      // interrogeait sinon l'ancien topic et échouait (constaté le 29/09/2026).
+      device.cfg = { ...device.cfg, t: topic, ft: fullTopic, hn: hostname };
+      device.topics = deviceTopics(device.cfg);
+      if (this.connected) this.subscribeDevice(device);
     } else if (device.cfg.dn !== deviceName) {
       // Le nom seul ne republie pas forcément la découverte : un redémarrage la force.
       this.log('Redémarrage pour republier la découverte sous le nouveau nom', 'info', mac);
       this.command(device, 'Restart', '1');
     }
-    const confirmed = device.cfg.dn === deviceName && device.cfg.t === topic && device.cfg.ft === fullTopic
-      ? device.cfg
-      : await expectDiscovery;
+    const confirmed = !topicChanged && device.cfg.dn === deviceName ? device.cfg : await expectDiscovery;
     if (!confirmed) {
-      this.log('⚠️ Découverte non reçue avec les nouveaux réglages dans les 20 s : relire la fiche pour vérifier', 'error', mac);
+      this.log('⚠️ Découverte non reçue avec les nouveaux réglages dans les 60 s : relire la fiche pour vérifier', 'error', mac);
     } else {
       this.log(`Vérifié : nom « ${confirmed.dn} », topics ${deviceTopics(confirmed).cmnd}…`, 'ok', mac);
     }
@@ -955,7 +961,8 @@ export class TasmotaService implements ITasmotaService {
 
   private label(device: DeviceRecord): string {
     const dn = device.cfg.dn ?? device.mac;
-    return isConventionalName(dn) ? `« ${dn} »` : `${device.mac} (« ${dn} »)`;
+    // Appareil à nommer : désigné par son topic (unique, ex. tasmota_77B62C), pas par « Tasmota ».
+    return isConventionalName(dn) ? `« ${dn} »` : `${device.cfg.t} (« ${dn} »)`;
   }
 
   private log(message: string, level: LogLevel = 'info', scope?: string): void {
