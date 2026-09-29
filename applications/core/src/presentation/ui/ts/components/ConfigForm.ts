@@ -652,8 +652,12 @@ export class ConfigForm extends HTMLElement {
         <div class="config-grid">
           ${section.fields.map(field => this.buildFieldHtml(field)).join('')}
         </div>
+        ${section.id === 'machine'
+          // ⭐ 29/09/2026 : « Sauvegarder » juste sous le site (seul champ qu'il enregistre), puis la
+          // diffusion dans la même boîte (index.html) — ses cases sont prises en compte aussitôt.
+          ? `${this.buildSaveButton()}<slot></slot>` : ''}
       </div>
-      ${this.buildSaveButton()}
+      ${section.id === 'machine' ? '' : this.buildSaveButton()}
       ${section.id === 'logging' ? this.buildRestartButton() : ''}
     `;
   }

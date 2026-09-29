@@ -56,7 +56,8 @@ export const APP_DECLARATIONS: Record<string, LayerDeclaration> = {
   evoo7: { secrets: ['box.password'] },
   rpigpio: { secrets: ['mqtt.password'] },
   teleinfo: { secrets: ['mqtt.password'] },
-  espdisplay: { machine: ['esphomeContainer', 'esphomeConfigDir', 'pipelineScriptPath', 'pythonBin', 'remote'] },
+  // espdisplay : ⭐ 29/09/2026, plus aucun réglage propre à la machine — ils décrivent la machine où
+  // tourne ESPHome (distante, obligatoire), donc communs et diffusés (spec espdisplay v1.3).
   // 29/09/2026 : rfxcom migré à part (déplacement du boîtier de stfort vers falbala).
   rfxcom: { machine: ['port', 'baudRate'] }
 };

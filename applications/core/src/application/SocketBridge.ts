@@ -532,9 +532,9 @@ export class SocketBridge {
       // @ts-ignore
       socket.on('core:diffusion:status:get', () => this.eventBus.emitGeneric('core:diffusion:status:get', {}));
       // @ts-ignore
-      socket.on('core:diffusion:mode:set', (data: { mode: string }) => {
-        this.logger.info('SocketBridge', `Socket.io → EventBus: core:diffusion:mode:set de ${socket.id} (${data?.mode})`);
-        this.eventBus.emitGeneric('core:diffusion:mode:set', data);
+      socket.on('core:diffusion:settings:set', (data: { send: boolean; receive: boolean }) => {
+        this.logger.info('SocketBridge', `Socket.io → EventBus: core:diffusion:settings:set de ${socket.id} (diffuser=${data?.send}, recevoir=${data?.receive})`);
+        this.eventBus.emitGeneric('core:diffusion:settings:set', data);
       });
       // @ts-ignore
       socket.on('core:diffusion:resync', () => this.eventBus.emitGeneric('core:diffusion:resync', {}));

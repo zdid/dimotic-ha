@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { exclusionReason, appOf, canReceive, isNewer } from './rules';
+import { exclusionReason, appOf, canReceive, canSend, isNewer } from './rules';
+
+const MODES = { arretee: { send: false, receive: false }, complet: { send: true, receive: true }, reception: { send: false, receive: true }, diffusion: { send: true, receive: false } };
+const A = MODES.arretee, C = MODES.complet, R = MODES.reception, S = MODES.diffusion;
 import { DiffusionService, type DiffusionTransport } from './DiffusionService';
 
 // Diffusion des fichiers de data/ (techniques-diffusion-data_specs v1.3).
@@ -25,12 +28,14 @@ describe('règles', () => {
   });
 
   it('isole en réception seule les applications actives, jamais en mode complet', () => {
+    expect(canSend('x/a.yaml', S)).toBe(true);
+    expect(canReceive('x/a.yaml', S, new Set())).toBe(false); // diffuse seulement
     const active = new Set(['core', 'rfxcom']);
     expect(appOf('applications/monapp/src/a.ts')).toBe('monapp');
-    expect(canReceive('rfxcom/config.yaml', 'reception', active)).toBe(false);
-    expect(canReceive('tasmota/rules.yaml', 'reception', active)).toBe(true);
-    expect(canReceive('rfxcom/config.yaml', 'complet', active)).toBe(true);
-    expect(canReceive('tasmota/rules.yaml', 'arretee', active)).toBe(false);
+    expect(canReceive('rfxcom/config.yaml', R, active)).toBe(false);
+    expect(canReceive('tasmota/rules.yaml', R, active)).toBe(true);
+    expect(canReceive('rfxcom/config.yaml', C, active)).toBe(true);
+    expect(canReceive('tasmota/rules.yaml', A, active)).toBe(false);
   });
 
   it('le plus récent gagne, départage stable à date égale', () => {
@@ -66,12 +71,12 @@ class MemoryBroker {
   }
 }
 
-function fakeConfig(machineId: string, mode: 'arretee' | 'complet' | 'reception', active: string[] = []) {
-  let m = mode;
+function fakeConfig(machineId: string, mode: keyof typeof MODES, active: string[] = []) {
+  let m = MODES[mode];
   return {
     getConfig: () => ({ core: { machineId }, ha: { mqtt: { host: 'memoire', port: 1883 } } }),
-    getDiffusionMode: () => m,
-    setDiffusionMode: (x: typeof m) => { m = x; return { success: true }; },
+    getDiffusionSettings: () => m,
+    setDiffusionSettings: (x: typeof m) => { m = x; return { success: true }; },
     getKnownApps: () => active,
     getDisabledApps: () => [],
     reload: () => undefined
@@ -107,7 +112,7 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-function machine(broker: MemoryBroker, id: string, mode: 'arretee' | 'complet' | 'reception', active: string[] = []) {
+function machine(broker: MemoryBroker, id: string, mode: keyof typeof MODES, active: string[] = []) {
   fs.mkdirSync(dataOf(id), { recursive: true });
   const s = new DiffusionService(fakeConfig(id, mode, active), fakeBus(id), quietLogger, dataOf(id), () => broker.transport(), T);
   services.push(s);
@@ -187,6 +192,20 @@ describe('DiffusionService — trois machines', () => {
     ha2.start();
     await wait(1200);
     expect(read('falbala', 'teleinfo/compteurs.yaml')).toBe('compteurs ha2');
+  });
+
+  it('diffuse seulement : envoie ses fichiers, ne reçoit rien', async () => {
+    const broker = new MemoryBroker();
+    const t0 = Date.now() - 3600_000;
+    put('source', 'tasmota/rules.yaml', 'regles source', t0 + 1000);
+    put('ha2', 'tasmota/rules.yaml', 'regles ha2', t0);
+    put('ha2', 'teleinfo/compteurs.yaml', 'compteurs ha2', t0);
+    const ha2 = machine(broker, 'ha2', 'complet');
+    const source = machine(broker, 'source', 'diffusion');
+    for (const s of [ha2, source]) s.start();
+    await wait(1200);
+    expect(read('ha2', 'tasmota/rules.yaml')).toBe('regles source');
+    expect(read('source', 'teleinfo/compteurs.yaml')).toBeUndefined();
   });
 
   it('mode arrêté : rien ne part, rien n’arrive', async () => {

@@ -6,7 +6,7 @@
   <meta name="description" content="HA WS/MQTT Application - Configuration Interface">
   <title>HA/MQTT</title>
   <link rel="icon" type="image/png" href="/images/maisonsouriante.png">
-  <!-- Derniere modification: 2026-09-29 18:51:30 - Diffusion des données déplacée sur la page Site -->
+  <!-- Derniere modification: 2026-09-29 19:35:54 - Diffusion : deux cases (Diffuser / Recevoir), dans la boîte Site -->
   
   <!-- Styles - Chargés depuis des fichiers externes -->
   <link rel="stylesheet" href="/styles/general.css">
@@ -26,9 +26,9 @@
   <main class="main-content">
     <!-- Sections de contenu - masquées par défaut -->
     <div id="section-machine" class="content-section" style="display: none;">
-      <app-config-form data-section="machine"></app-config-form>
-      <!-- ⭐ 29/09/2026 (demande utilisateur) : la diffusion des données se règle sur la page Site. -->
-      <app-diffusion-manager></app-diffusion-manager>
+      <!-- ⭐ 29/09/2026 (demande utilisateur) : la diffusion se règle sur la page Site, dans la même
+           boîte que la machine (projetée dans la carte du formulaire, voir ConfigForm <slot>). -->
+      <app-config-form data-section="machine"><app-diffusion-manager></app-diffusion-manager></app-config-form>
     </div>
 
     <div id="section-ha" class="content-section" style="display: none;">

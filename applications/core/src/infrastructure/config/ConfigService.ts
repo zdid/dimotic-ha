@@ -244,13 +244,27 @@ export class ConfigService {
     this.config = this.loader.load();
   }
 
-  /** ⭐ 29/09/2026 — mode de diffusion de CETTE machine (machine_config.yaml, voir DiffusionService). */
-  getDiffusionMode(): 'arretee' | 'complet' | 'reception' {
-    return this.config.diffusion?.mode ?? 'arretee';
+  /**
+   * ⭐ 29/09/2026 (spec v1.6) — cases Diffuser / Recevoir de CETTE machine (machine_config.yaml).
+   * Non réglées : les deux cochées (demande utilisateur), enregistrées au démarrage de la diffusion
+   * (voir isDiffusionSet). L'ancien mode `complet` / `reception` est repris ; `arretee` était la
+   * valeur de départ jamais choisie, il vaut « non réglé ».
+   */
+  getDiffusionSettings(): { send: boolean; receive: boolean } {
+    const d = this.config.diffusion ?? {};
+    if (typeof d.send === 'boolean' || typeof d.receive === 'boolean') return { send: !!d.send, receive: !!d.receive };
+    if (d.mode === 'reception') return { send: false, receive: true };
+    return { send: true, receive: true };
   }
 
-  setDiffusionMode(mode: 'arretee' | 'complet' | 'reception'): SaveResult {
-    const diffusion = { mode };
+  /** Les cases ont-elles déjà été enregistrées (sinon : défaut à écrire) ? */
+  isDiffusionSet(): boolean {
+    const d = this.config.diffusion ?? {};
+    return typeof d.send === 'boolean' || typeof d.receive === 'boolean';
+  }
+
+  setDiffusionSettings(settings: { send: boolean; receive: boolean }): SaveResult {
+    const diffusion = { send: !!settings.send, receive: !!settings.receive };
     const result = this.writer.save(this.socle({ diffusion }));
     if (result.success) this.config = { ...this.config, diffusion };
     return result;

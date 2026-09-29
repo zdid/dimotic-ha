@@ -447,9 +447,9 @@ export class AppService {
     // 2.2ter. Diffusion des fichiers de data/ (⭐ 29/09/2026) — mode propre à la machine, arrêtée par défaut.
     this.diffusionService.start();
     this.eventBus.onGeneric('core:diffusion:status:get', () => this.eventBus.emitGeneric('diffusion:status', this.diffusionService.getStatus()));
-    this.eventBus.onGeneric<{ mode: string }>('core:diffusion:mode:set', (data) => {
-      const mode = data?.mode;
-      if (mode === 'arretee' || mode === 'complet' || mode === 'reception') this.diffusionService.setMode(mode);
+    this.eventBus.onGeneric<{ send?: unknown; receive?: unknown }>('core:diffusion:settings:set', (data) => {
+      if (typeof data?.send !== 'boolean' || typeof data?.receive !== 'boolean') return;
+      this.diffusionService.setSettings({ send: data.send, receive: data.receive });
     });
     this.eventBus.onGeneric('core:diffusion:resync', () => this.diffusionService.resync());
 

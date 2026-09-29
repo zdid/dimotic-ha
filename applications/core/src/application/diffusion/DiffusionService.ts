@@ -26,7 +26,7 @@ import {
   canReceive,
   isIsolated,
   isNewer,
-  type DiffusionMode,
+  type DiffusionSettings,
   type Version
 } from './rules';
 
@@ -67,7 +67,8 @@ export interface DiffusionFileView {
 
 export interface DiffusionStatus {
   machineId: string;
-  mode: DiffusionMode;
+  send: boolean;
+  receive: boolean;
   connected: boolean;
   lastSync?: string;
   peers: Record<string, string>; // machineId → dernier inventaire reçu
@@ -117,11 +118,21 @@ export class DiffusionService {
   // Cycle de vie
   // ==========================================================================
 
-  private get mode(): DiffusionMode {
-    return this.configService.getDiffusionMode();
+  private get settings(): DiffusionSettings {
+    return this.configService.getDiffusionSettings() ?? { send: false, receive: false };
+  }
+
+  private describe(s = this.settings): string {
+    return s.send && s.receive ? 'diffuse et reçoit' : s.send ? 'diffuse seulement' : s.receive ? 'reçoit seulement' : 'arrêtée';
   }
 
   start(): void {
+    // ⭐ 29/09/2026 — cases jamais enregistrées : la valeur par défaut (ou l'ancien mode) est écrite
+    // dans machine_config.yaml, pour qu'elle se voie et reste la même ensuite.
+    if (this.configService.isDiffusionSet && !this.configService.isDiffusionSet()) {
+      const result = this.configService.setDiffusionSettings(this.settings);
+      if (result?.success) this.logger.info('Diffusion', `Cases de diffusion enregistrées (non réglées jusqu'ici) : ${this.describe()}`);
+    }
     this.loadDeletions();
     this.scan();
     this.startWatcher();
@@ -158,7 +169,7 @@ export class DiffusionService {
     });
     this.transport.connect();
     this.transport.subscribe(`${TOPIC}/#`, 1);
-    this.logger.info('Diffusion', `Diffusion des données : mode « ${this.mode} » (machine ${this.machineId})`);
+    this.logger.info('Diffusion', `Diffusion des données : ${this.describe()} (machine ${this.machineId})`);
   }
 
   stop(): void {
@@ -167,11 +178,11 @@ export class DiffusionService {
     this.transport?.disconnect();
   }
 
-  setMode(mode: DiffusionMode): { success: boolean; error?: string } {
-    const result = this.configService.setDiffusionMode(mode);
+  setSettings(settings: DiffusionSettings): { success: boolean; error?: string } {
+    const result = this.configService.setDiffusionSettings(settings);
     if (result.success) {
-      this.logger.info('Diffusion', `Mode de diffusion : « ${mode} »`);
-      if (mode !== 'arretee') this.requestInventories('changement de mode');
+      this.logger.info('Diffusion', `Diffusion : ${this.describe(settings)}`);
+      if (settings.send || settings.receive) this.requestInventories('changement de réglage');
       this.emitStatus();
     }
     return result;
@@ -284,13 +295,13 @@ export class DiffusionService {
         const after = this.indexFile(rel);
         if (!after || (before && before.sha256 === after.sha256)) continue;
         this.deletions.delete(rel);
-        if (canSend(rel, this.mode)) this.sendFile(rel, 'modification locale');
+        if (canSend(rel, this.settings)) this.sendFile(rel, 'modification locale');
       } else if (before) {
         this.index.delete(rel);
         const at = Date.now();
         this.deletions.set(rel, { at, origin: this.machineId });
         this.saveDeletions();
-        if (canSend(rel, this.mode)) this.publishFile({ path: rel, mtime: at, sha256: '', origin: this.machineId, deleted: true });
+        if (canSend(rel, this.settings)) this.publishFile({ path: rel, mtime: at, sha256: '', origin: this.machineId, deleted: true });
       }
     }
     this.emitStatus();
@@ -305,7 +316,8 @@ export class DiffusionService {
   }
 
   private requestInventories(why: string): void {
-    if (this.mode === 'arretee' || !this.transport) return;
+    const s = this.settings;
+    if ((!s.send && !s.receive) || !this.transport) return;
     this.inventories = [];
     this.publish(`${TOPIC}/inventaire/demande`, { from: this.machineId, at: new Date().toISOString() });
     this.logger.info('Diffusion', `Demande des inventaires (${why})`);
@@ -316,16 +328,17 @@ export class DiffusionService {
   private myInventory(): InventoryMessage {
     const files: InventoryMessage['files'] = [];
     for (const [rel, e] of this.index) {
-      if (canSend(rel, this.mode)) files.push({ path: rel, mtime: e.mtime, sha256: e.sha256, origin: this.machineId, size: e.size });
+      if (canSend(rel, this.settings)) files.push({ path: rel, mtime: e.mtime, sha256: e.sha256, origin: this.machineId, size: e.size });
     }
     for (const [rel, d] of this.deletions) {
-      if (canSend(rel, this.mode)) files.push({ path: rel, mtime: d.at, sha256: '', origin: d.origin, deleted: true });
+      if (canSend(rel, this.settings)) files.push({ path: rel, mtime: d.at, sha256: '', origin: d.origin, deleted: true });
     }
     return { from: this.machineId, files };
   }
 
   private handleMessage(topic: string, raw: string): void {
-    if (this.mode === 'arretee' || !topic.startsWith(`${TOPIC}/`)) return;
+    const s = this.settings;
+    if ((!s.send && !s.receive) || !topic.startsWith(`${TOPIC}/`)) return;
     const parts = topic.slice(TOPIC.length + 1).split('/');
     const body = JSON.parse(raw);
     if (parts[0] === 'inventaire' && parts[1] === 'demande') {
@@ -333,8 +346,8 @@ export class DiffusionService {
       // Réception seule : on ne publie rien, donc pas d'inventaire à fournir. Mais une machine qui
       // (re)démarre ne pousse rien vers une machine muette : on refait NOTRE demande, décalée, pour
       // récupérer ses fichiers (constaté à l'essai du 29/09/2026 : il fallait « Resynchroniser »).
-      if (this.mode === 'complet') this.publish(`${TOPIC}/inventaire/${this.machineId}`, this.myInventory());
-      else if (this.mode === 'reception' && !this.inventoryTimer) {
+      if (s.send) this.publish(`${TOPIC}/inventaire/${this.machineId}`, this.myInventory());
+      else if (s.receive && !this.inventoryTimer) {
         if (this.peerJoinTimer) clearTimeout(this.peerJoinTimer);
         this.peerJoinTimer = setTimeout(() => {
           this.peerJoinTimer = undefined;
@@ -349,7 +362,7 @@ export class DiffusionService {
       return;
     }
     if (parts[0] === 'demande' && parts[1] === this.machineId) {
-      if (this.mode !== 'complet') return;
+      if (!s.send) return;
       for (const rel of (body.paths ?? []) as string[]) {
         if (this.index.has(rel) || this.deletions.has(rel)) this.sendFile(rel, `demandé par ${body.from}`);
       }
@@ -367,7 +380,7 @@ export class DiffusionService {
     const best = new Map<string, Version & { from: string }>();
     for (const inv of this.inventories) {
       for (const f of inv.files ?? []) {
-        if (exclusionReason(f.path, f.size) || !canReceive(f.path, this.mode, active)) continue;
+        if (exclusionReason(f.path, f.size) || !canReceive(f.path, this.settings, active)) continue;
         const cur = best.get(f.path);
         if (!cur || isNewer(f, cur)) best.set(f.path, { ...f, from: inv.from });
       }
@@ -383,11 +396,11 @@ export class DiffusionService {
     let pushed = 0;
     // Envoi « plus récent ici » seulement si d'autres machines ont répondu (sinon personne à qui
     // l'envoyer : une machine seule renverrait tout à chaque démarrage).
-    if (this.mode === 'complet' && this.inventories.length > 0) {
+    if (this.settings.send && this.inventories.length > 0) {
       for (const rel of [...this.index.keys(), ...this.deletions.keys()]) {
         const mine = this.localVersion(rel);
         const theirs = best.get(rel);
-        if (mine && canSend(rel, this.mode) && (!theirs || isNewer(mine, theirs))) {
+        if (mine && canSend(rel, this.settings) && (!theirs || isNewer(mine, theirs))) {
           this.sendFile(rel, 'plus récent ici');
           pushed++;
         }
@@ -428,7 +441,7 @@ export class DiffusionService {
   private receiveFile(msg: FileMessage): void {
     const rel = msg.path;
     if (!rel || rel.includes('..') || path.isAbsolute(rel)) return;
-    if (exclusionReason(rel, msg.size) || !canReceive(rel, this.mode, this.activeApps())) return;
+    if (exclusionReason(rel, msg.size) || !canReceive(rel, this.settings, this.activeApps())) return;
     if (msg.mtime > Date.now() + FUTURE_TOLERANCE_MS) {
       this.logger.warn('Diffusion', `${rel} reçu de ${msg.origin} daté dans le futur (${new Date(msg.mtime).toISOString()}) — horloge à vérifier`);
     }
@@ -526,13 +539,13 @@ export class DiffusionService {
   // ==========================================================================
 
   getStatus(): DiffusionStatus {
-    const mode = this.mode;
+    const settings = this.settings;
     const active = this.activeApps();
     const files: DiffusionFileView[] = [];
     for (const [rel, e] of this.index) {
       files.push({
         path: rel, app: appOf(rel), size: e.size, mtime: e.mtime,
-        state: isIsolated(rel, mode, active) ? 'isolé' : 'reproduit',
+        state: isIsolated(rel, settings, active) ? 'isolé' : 'reproduit',
         last: this.lastEvents.get(rel)
       });
     }
@@ -540,7 +553,7 @@ export class DiffusionService {
       files.push({ path: rel, app: appOf(rel), mtime: d.at, state: 'supprimé', last: this.lastEvents.get(rel) });
     }
     files.sort((a, b) => a.path.localeCompare(b.path));
-    return { machineId: this.machineId, mode, connected: this.connected, lastSync: this.lastSync, peers: Object.fromEntries(this.peers), files };
+    return { machineId: this.machineId, send: settings.send, receive: settings.receive, connected: this.connected, lastSync: this.lastSync, peers: Object.fromEntries(this.peers), files };
   }
 
   private emitStatus(): void {

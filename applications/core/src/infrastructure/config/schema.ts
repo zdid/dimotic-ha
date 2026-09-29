@@ -197,10 +197,13 @@ export const configSchema = z.object({
   externalSites: z.array(externalSiteSchema).default([]),
   // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — diffusion des fichiers de data/ entre
   // machines : réglage PROPRE À LA MACHINE (machine_config.yaml, layers.CORE_DECLARATION).
-  // arretee (défaut) : rien ne part ni n'arrive ; complet : envoie et reçoit (production) ;
-  // reception : reçoit seulement, applications actives isolées (machine de développement).
+  // ⭐ 29/09/2026 (spec v1.6) : deux cases, send (Diffuser) et receive (Recevoir). Absentes = défaut
+  // selon la machine (Docker : les deux ; hors Docker : aucune), voir ConfigService.getDiffusionSettings.
+  // `mode` : ancien réglage (arretee / complet / reception), relu tant que les cases n'existent pas.
   diffusion: z.object({
-    mode: z.enum(['arretee', 'complet', 'reception']).default('arretee')
+    send: z.boolean().optional(),
+    receive: z.boolean().optional(),
+    mode: z.enum(['arretee', 'complet', 'reception']).optional()
   }).default({}),
   // Les sections spécifiques aux modules seront ajoutées dynamiquement
 }).passthrough()

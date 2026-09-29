@@ -16,18 +16,20 @@ interface DiffusionFileView {
 
 interface DiffusionStatus {
   machineId: string;
-  mode: 'arretee' | 'complet' | 'reception';
+  send: boolean;
+  receive: boolean;
   connected: boolean;
   lastSync?: string;
   peers: Record<string, string>;
   files: DiffusionFileView[];
 }
 
-const MODES: Array<{ id: DiffusionStatus['mode']; label: string; hint: string }> = [
-  { id: 'arretee', label: 'Arrêtée', hint: 'Rien ne part, rien n’arrive (valeur par défaut).' },
-  { id: 'complet', label: 'Complète', hint: 'Envoie et reçoit — machines de production.' },
-  { id: 'reception', label: 'Réception seule', hint: 'Reçoit la production, n’envoie rien ; les applications actives ici sont isolées (ni envoyées ni remplacées) — machine de développement.' }
-];
+/** ⭐ 29/09/2026 (spec v1.6) — deux cases au lieu de trois modes. */
+const describe = (send: boolean, receive: boolean): string =>
+  send && receive ? 'diffuse et reçoit (production)'
+    : send ? 'diffuse seulement : envoie ses fichiers, ne prend rien des autres'
+      : receive ? 'reçoit seulement (développement) : prend les fichiers des autres, n’envoie rien ; les applications actives ici sont isolées (ni remplacées ni envoyées)'
+        : 'ne diffuse ni ne reçoit : rien ne part, rien n’arrive';
 
 const esc = (v: unknown): string => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 const when = (iso?: string | number): string => (iso ? new Date(iso).toLocaleString('fr-FR') : '—');
@@ -37,13 +39,13 @@ const createTemplate = (): HTMLTemplateElement => {
   const template = document.createElement('template');
   template.innerHTML = `
     <style>
-      .diffusion { padding: 20px; background: #2c3e50; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,.3); color: #ecf0f1; }
-      .diffusion h2 { color: #ecf0f1; margin-bottom: 10px; }
+      .diffusion { margin-top: 24px; padding-top: 16px; border-top: 1px solid #4a6278; color: #ecf0f1; }
+      .diffusion h3 { color: #ecf0f1; margin: 0 0 10px 0; }
       .section-description { margin: 0 0 16px 0; color: #95a5a6; font-size: 0.9rem; }
-      .modes { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
-      .mode { display: flex; gap: 10px; align-items: flex-start; padding: 10px; background: #34495e; border-radius: 6px; cursor: pointer; }
-      .mode.active { outline: 2px solid #3498db; }
-      .mode .hint { font-size: 0.8rem; color: #95a5a6; }
+      .modes { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 8px; font-size: 1rem; }
+      .modes label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+      .modes input { width: 18px; height: 18px; }
+      .summary { margin-bottom: 16px; color: #bdc3c7; }
       .state { display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.9rem; margin-bottom: 12px; }
       .btn { padding: 8px 14px; border-radius: 4px; border: none; background: #3498db; color: #fff; cursor: pointer; }
       .btn:disabled { opacity: .5; cursor: default; }
@@ -57,9 +59,13 @@ const createTemplate = (): HTMLTemplateElement => {
       .tag.isole { background: #e67e22; } .tag.supprime { background: #7f8c8d; }
     </style>
     <div class="diffusion">
-      <h2>🔁 Diffusion des données</h2>
-      <p class="section-description">Reproduction des fichiers de <code>data/</code> entre les machines dimotic-ha (MQTT, sans message retenu ; le plus récent gagne, l'ancienne version reste dans l'historique local). Jamais reproduits : fichiers <code>machine_…</code> et <code>secrets_…</code>, <code>tmp</code>, <code>node_modules</code>, <code>.bak</code>, plus de 1 Mo (sauf images de plan). Le mode est propre à CETTE machine.</p>
-      <div class="modes" id="modes"></div>
+      <h3>🔁 Diffusion des données</h3>
+      <p class="section-description">Reproduction des fichiers de <code>data/</code> entre les machines dimotic-ha (MQTT, sans message retenu ; le plus récent gagne, l'ancienne version reste dans l'historique local). Jamais reproduits : fichiers <code>machine_…</code> et <code>secrets_…</code>, <code>tmp</code>, <code>node_modules</code>, <code>.bak</code>, plus de 1 Mo (sauf images de plan). Réglage propre à CETTE machine, pris en compte aussitôt (sans le bouton Sauvegarder).</p>
+      <div class="modes">
+        <label><input type="checkbox" id="send"> Diffuser (envoyer les fichiers de cette machine)</label>
+        <label><input type="checkbox" id="receive"> Recevoir (prendre les fichiers des autres machines)</label>
+      </div>
+      <div class="summary" id="summary"></div>
       <div class="state" id="state"></div>
       <div class="toolbar">
         <button class="btn" id="resync">🔄 Resynchroniser</button>
@@ -86,6 +92,13 @@ class DiffusionManager extends HTMLElement {
   }
 
   connectedCallback(): void {
+    // ⭐ 29/09/2026 — le composant est dans la page dès le chargement : il s'active avant que app.ts
+    // ait créé window.app. Sans cette attente il plantait et n'affichait jamais les réglages.
+    if (!window.app?.socketService) {
+      setTimeout(() => this.connectedCallback(), 100);
+      return;
+    }
+    if (this.socket) return;
     this.socket = window.app.socketService.getSocket();
     this.socket.on('core:diffusion:status', (s: DiffusionStatus) => {
       this.status = s;
@@ -100,27 +113,29 @@ class DiffusionManager extends HTMLElement {
     const s = this.status;
     if (!s) return;
     const root = this.shadowRoot!;
-    root.getElementById('modes')!.innerHTML = MODES.map((m) => `
-      <label class="mode ${m.id === s.mode ? 'active' : ''}">
-        <input type="radio" name="mode" value="${m.id}" ${m.id === s.mode ? 'checked' : ''}>
-        <span><strong>${m.label}</strong><br><span class="hint">${m.hint}</span></span>
-      </label>`).join('');
-    root.querySelectorAll<HTMLInputElement>('input[name="mode"]').forEach((input) => {
-      input.addEventListener('change', () => {
-        if (input.value !== s.mode && confirm(`Passer la diffusion de cette machine en mode « ${MODES.find((m) => m.id === input.value)?.label} » ?`)) {
-          this.socket.emit('core:diffusion:mode:set', { mode: input.value });
-        } else {
-          this.render();
-        }
-      });
-    });
+    const sendBox = root.getElementById('send') as HTMLInputElement;
+    const receiveBox = root.getElementById('receive') as HTMLInputElement;
+    sendBox.checked = s.send;
+    receiveBox.checked = s.receive;
+    root.getElementById('summary')!.textContent = `Cette machine ${describe(s.send, s.receive)}.`;
+    const onChange = (): void => {
+      const send = sendBox.checked;
+      const receive = receiveBox.checked;
+      if (confirm(`Désormais, cette machine ${describe(send, receive)}.\n\nConfirmer ?`)) {
+        this.socket.emit('core:diffusion:settings:set', { send, receive });
+      } else {
+        this.render();
+      }
+    };
+    sendBox.onchange = onChange;
+    receiveBox.onchange = onChange;
     const peers = Object.entries(s.peers);
     root.getElementById('state')!.innerHTML = `
       <span>Machine : <strong>${esc(s.machineId)}</strong></span>
       <span>Broker : ${s.connected ? '🟢 connecté' : '🔴 non connecté'}</span>
       <span>Dernière synchronisation : ${when(s.lastSync)}</span>
       <span>Machines vues : ${peers.length ? peers.map(([m, at]) => `${esc(m)} <span class="muted">(${when(at)})</span>`).join(', ') : '<span class="muted">aucune</span>'}</span>`;
-    (root.getElementById('resync') as HTMLButtonElement).disabled = s.mode === 'arretee';
+    (root.getElementById('resync') as HTMLButtonElement).disabled = !s.send && !s.receive;
     this.renderFiles();
   }
 

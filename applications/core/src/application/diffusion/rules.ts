@@ -3,7 +3,13 @@
  * pures, testées à part (rules.test.ts). Chemins toujours relatifs à data/, séparateur '/'.
  */
 
-export type DiffusionMode = 'arretee' | 'complet' | 'reception';
+/** ⭐ 29/09/2026 (spec v1.6 §2bis) — deux cases par machine au lieu de trois modes : Diffuser (envoie)
+ *  et Recevoir. Recevoir sans Diffuser = machine de développement : ses applications actives sont
+ *  isolées (ni remplacées ni envoyées). */
+export interface DiffusionSettings {
+  send: boolean;
+  receive: boolean;
+}
 
 export const MAX_SIZE = 1024 * 1024;              // D4 : 1 Mo
 export const MAX_SIZE_PLAN_IMAGES = 20 * 1024 * 1024; // D5 : images de plan, 20 Mo
@@ -42,18 +48,18 @@ export function appOf(relPath: string): string {
   return (segs[0] === 'applications' ? segs[1] : segs[0]) ?? '';
 }
 
-/** Application isolée (ni envoi ni réception) : mode réception + application active ici. */
-export function isIsolated(relPath: string, mode: DiffusionMode, activeApps: Set<string>): boolean {
-  return mode === 'reception' && activeApps.has(appOf(relPath));
+/** Application isolée (ni envoi ni réception) : Recevoir sans Diffuser + application active ici. */
+export function isIsolated(relPath: string, s: DiffusionSettings, activeApps: Set<string>): boolean {
+  return s.receive && !s.send && activeApps.has(appOf(relPath));
 }
 
-export function canSend(relPath: string, mode: DiffusionMode): boolean {
-  return mode === 'complet';
+export function canSend(relPath: string, s: DiffusionSettings): boolean {
+  return s.send;
 }
 
-export function canReceive(relPath: string, mode: DiffusionMode, activeApps: Set<string>): boolean {
-  if (mode === 'arretee') return false;
-  return !isIsolated(relPath, mode, activeApps);
+export function canReceive(relPath: string, s: DiffusionSettings, activeApps: Set<string>): boolean {
+  if (!s.receive) return false;
+  return !isIsolated(relPath, s, activeApps);
 }
 
 export interface Version {
