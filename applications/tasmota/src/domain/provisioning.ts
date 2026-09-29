@@ -77,7 +77,9 @@ export async function scanTasmotaAccessPoints(wifiInterface: string): Promise<Ar
 
 async function httpCommandAt(host: string, command: string, timeoutMs = 8000): Promise<string> {
   const url = `http://${host}/cm?cmnd=${encodeURIComponent(command)}`;
-  const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  // ⭐ 29/09/2026 — Referer obligatoire : un Tasmota récent (constaté en 15.6.0, contrôle du
+  // référent SetOption128) ferme la connexion sans rien répondre à /cm sans cet en-tête.
+  const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers: { Referer: `http://${host}/` } });
   return await response.text();
 }
 
