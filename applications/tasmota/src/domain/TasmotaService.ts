@@ -66,7 +66,7 @@ const MODE_SELECT_SOURCE = 'tasmota/select/dimotic_tasmota/mode/config';
 const MODE_SELECT_HA = 'homeassistant/select/dimotic_tasmota/mode/config';
 const MODE_SETTLE_MS = 3000;
 
-/** Modèle officiel Sonoff Basic R4, GPIO5 = MagicSwitch (repris du script Outils tasmota-config). */
+/** Modèle officiel Sonoff Basic R4, GPIO5 = MagicSwitch. */
 const TEMPLATE_R4 = '{"NAME":"Sonoff Basic R4","GPIO":[0,0,0,0,224,10560,544,0,0,32,0,0,0,0,0,0,0,0,0,0,0,0],"FLAG":0,"BASE":1}';
 const MODEL_R4 = 'Sonoff Basic R4 (Magic Switch)';
 
@@ -80,6 +80,23 @@ interface DeviceRecord {
   /** Signature de la dernière publication HA (évite de republier à l'identique). */
   haSignature?: string;
   haTopics: Set<string>;
+  /** ⭐ 29/09/2026 (spec v1.2 §3.4) — modèle (commande `Module`), puce (`Status 2`), contenu du
+   *  modèle (`Gpio 255`, broches utilisées) et firmware au moment de la lecture. Stockés. */
+  model?: string;
+  hardware?: string;
+  pins?: string[];
+  modelFirmware?: string;
+}
+
+/** Ce qui est stocké par appareil dans data/tasmota/devices.yaml (spec v1.2 §3.4). */
+interface StoredDevice {
+  cfg: TasmotaDiscoveryConfig;
+  sn?: Record<string, unknown>;
+  lastSeen: string;
+  model?: string;
+  hardware?: string;
+  pins?: string[];
+  modelFirmware?: string;
 }
 
 interface Waiter {
@@ -101,6 +118,9 @@ export class TasmotaService implements ITasmotaService {
   private readonly bridgeInstance: string;
   private readonly dataDir: string;
   private readonly rulesPath: string;
+  private readonly devicesPath: string;
+  private saveDevicesTimer?: NodeJS.Timeout;
+  private readonly modelReading = new Set<string>();
   private rules: RulesFile;
   private readonly devices = new Map<string, DeviceRecord>();
   private readonly subscribed = new Set<string>();
@@ -130,6 +150,8 @@ export class TasmotaService implements ITasmotaService {
     this.dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', MODULE_NAME);
     this.rulesPath = path.join(this.dataDir, 'rules.yaml');
     this.rules = this.loadRules();
+    this.devicesPath = path.join(this.dataDir, 'devices.yaml');
+    this.loadDevices();
   }
 
   static create(eventBus: IEventBus, logger: Logger, configProvider: IAppConfigProvider<TasmotaConfig>, haBridge?: HaBridgeClient): TasmotaService {
@@ -161,6 +183,108 @@ export class TasmotaService implements ITasmotaService {
     fs.renameSync(tmp, this.rulesPath);
   }
 
+  /**
+   * ⭐ 29/09/2026 (spec v1.2 §3.4) — la liste des appareils est STOCKÉE : le broker repart vide à
+   * chaque redémarrage (persistance désactivée, voulu), un Tasmota débranché ne se réannonce pas et
+   * disparaissait donc de la liste (et de HA).
+   */
+  private loadDevices(): void {
+    try {
+      if (!fs.existsSync(this.devicesPath)) return;
+      const stored = (yaml.load(fs.readFileSync(this.devicesPath, 'utf8')) ?? {}) as Record<string, StoredDevice>;
+      for (const [mac, d] of Object.entries(stored)) this.adoptStored(mac, d);
+      this.logger.info('TasmotaService', `${this.devices.size} appareil(s) relus de devices.yaml`);
+    } catch (error) {
+      this.logger.error('TasmotaService', `devices.yaml illisible, ignoré : ${error}`);
+    }
+  }
+
+  /** Ajoute ou met à jour un appareil depuis sa forme stockée — jamais un appareil en ligne, dont
+   *  l'annonce vivante fait foi. */
+  private adoptStored(mac: string, d: StoredDevice): void {
+    if (!d?.cfg || typeof d.cfg.t !== 'string' || typeof d.cfg.ft !== 'string') return;
+    const existing = this.devices.get(mac);
+    if (existing?.online) return;
+    const cfg = { ...d.cfg, mac };
+    const device: DeviceRecord = existing ?? { mac, cfg, topics: deviceTopics(cfg), lastSeen: d.lastSeen, haTopics: new Set() };
+    Object.assign(device, { cfg, topics: deviceTopics(cfg), sn: d.sn, lastSeen: d.lastSeen, model: d.model, hardware: d.hardware, pins: d.pins, modelFirmware: d.modelFirmware });
+    this.devices.set(mac, device);
+    if (this.connected) {
+      this.subscribeDevice(device);
+      this.publishDevice(device);
+    }
+  }
+
+  /** devices.yaml reçu d'une autre machine (diffusion) : ajouts et mises à jour adoptés, appareils
+   *  oubliés là-bas retirés ici (sauf s'ils sont en ligne : ils se réannonceraient). */
+  private mergeDevicesFile(origin: string): void {
+    try {
+      const stored = (yaml.load(fs.readFileSync(this.devicesPath, 'utf8')) ?? {}) as Record<string, StoredDevice>;
+      for (const [mac, d] of Object.entries(stored)) this.adoptStored(mac, d);
+      for (const device of [...this.devices.values()]) {
+        if (stored[device.mac] || device.online) continue;
+        this.clearHa(device);
+        this.devices.delete(device.mac);
+      }
+      this.logger.info('TasmotaService', `devices.yaml reçu de ${origin} : ${this.devices.size} appareil(s)`);
+      this.scheduleEmit();
+    } catch (error) {
+      this.logger.error('TasmotaService', `devices.yaml reçu illisible : ${error}`);
+    }
+  }
+
+  private scheduleSaveDevices(): void {
+    if (this.saveDevicesTimer) return;
+    this.saveDevicesTimer = setTimeout(() => {
+      this.saveDevicesTimer = undefined;
+      this.saveDevices();
+    }, 2000);
+  }
+
+  private saveDevices(): void {
+    const out: Record<string, StoredDevice> = {};
+    for (const d of [...this.devices.values()].sort((a, b) => a.mac.localeCompare(b.mac))) {
+      out[d.mac] = { cfg: d.cfg, ...(d.sn ? { sn: d.sn } : {}), lastSeen: d.lastSeen,
+        ...(d.model ? { model: d.model } : {}), ...(d.hardware ? { hardware: d.hardware } : {}),
+        ...(d.pins ? { pins: d.pins } : {}), ...(d.modelFirmware ? { modelFirmware: d.modelFirmware } : {}) };
+    }
+    try {
+      fs.mkdirSync(this.dataDir, { recursive: true });
+      const tmp = `${this.devicesPath}.tmp`;
+      fs.writeFileSync(tmp, yaml.dump(out));
+      fs.renameSync(tmp, this.devicesPath);
+    } catch (error) {
+      this.logger.error('TasmotaService', `Enregistrement de devices.yaml impossible : ${error}`);
+    }
+  }
+
+  /** Modèle, puce et contenu du modèle lus par MQTT — quand ils manquent ou que le firmware a changé. */
+  private async readModel(device: DeviceRecord, force = false): Promise<void> {
+    if (this.modelReading.has(device.mac)) return;
+    if (!force && device.model && device.pins && device.modelFirmware === device.cfg.sw) return;
+    this.modelReading.add(device.mac);
+    try {
+      const mod = await this.query<Record<string, string>>(device, 'Module', 5000);
+      const gpio = await this.commandAndWait<Record<string, Record<string, number>>>(device, 'Gpio', '255',
+        (suffix, body) => suffix === 'RESULT' && body && typeof body === 'object' && Object.keys(body as object).some((k) => /^GPIO\d+$/.test(k))
+          ? body as Record<string, Record<string, number>> : undefined, 5000);
+      const fwr = await this.commandAndWait<Record<string, unknown>>(device, 'Status', '2',
+        (suffix, body) => (suffix === 'STATUS2' || suffix === 'RESULT') && body && typeof body === 'object' && 'StatusFWR' in (body as object)
+          ? (body as Record<string, Record<string, unknown>>).StatusFWR : undefined, 5000);
+      if (!mod && !gpio && !fwr) return;
+      if (mod && typeof mod === 'object') device.model = Object.values(mod)[0];
+      if (gpio) device.pins = Object.entries(gpio).flatMap(([pin, role]) =>
+        Object.entries(role ?? {}).filter(([, code]) => code !== 0).map(([name]) => `${pin} : ${name}`));
+      if (fwr?.Hardware) device.hardware = String(fwr.Hardware);
+      device.modelFirmware = device.cfg.sw;
+      this.logger.info('TasmotaService', `${this.label(device)} : modèle ${device.model ?? '?'} (${device.hardware ?? '?'}) — ${(device.pins ?? []).join(', ') || 'aucune broche'}`);
+      this.scheduleSaveDevices();
+      this.scheduleEmit();
+    } finally {
+      this.modelReading.delete(device.mac);
+    }
+  }
+
   async start(): Promise<void> {
     this.logger.info('TasmotaService', 'Démarrage');
     this.setupListeners();
@@ -173,6 +297,11 @@ export class TasmotaService implements ITasmotaService {
   }
 
   async stop(): Promise<void> {
+    if (this.saveDevicesTimer) {
+      clearTimeout(this.saveDevicesTimer);
+      this.saveDevicesTimer = undefined;
+      this.saveDevices();
+    }
     for (const t of [this.emitTimer, this.modeSettleTimer]) if (t) clearTimeout(t);
     for (const w of this.waiters) clearTimeout(w.timer);
     this.waiters = [];
@@ -192,7 +321,13 @@ export class TasmotaService implements ITasmotaService {
       for (const topic of ['tasmota/discovery/+/config', 'tasmota/discovery/+/sensors', HA_STATUS_TOPIC, MODE_TOPIC, MODE_SET_TOPIC]) {
         this.subscribe(topic);
       }
-      for (const device of this.devices.values()) this.subscribeDevice(device);
+      // Broker peut-être reparti vide (persistance désactivée) : les entités HA des appareils connus
+      // sont republiées à chaque connexion, y compris ceux qui sont débranchés (spec v1.2 §3.4).
+      for (const device of this.devices.values()) {
+        this.subscribeDevice(device);
+        device.haSignature = undefined;
+        this.publishDevice(device);
+      }
       this.publishModeSelect();
       if (this.modeSettleTimer) clearTimeout(this.modeSettleTimer);
       this.modeSettleTimer = setTimeout(() => this.initModeIfNone(), MODE_SETTLE_MS);
@@ -223,6 +358,10 @@ export class TasmotaService implements ITasmotaService {
     // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — fichier de data/tasmota/ reçu d'une autre
     // machine (diffusion du core) : relu ici, sans redémarrer l'application.
     this.eventBus.onGeneric<{ app: string; path: string; origin: string }>('core:data:file:changed', (e) => {
+      if (e?.app === MODULE_NAME && e.path === 'tasmota/devices.yaml') {
+        this.mergeDevicesFile(e.origin);
+        return;
+      }
       if (e?.app !== MODULE_NAME || e.path !== 'tasmota/rules.yaml') return;
       this.rules = this.loadRules();
       this.logger.info('TasmotaService', `rules.yaml reçu de ${e.origin} : règles relues, modes remis en conformité`);
@@ -375,7 +514,10 @@ export class TasmotaService implements ITasmotaService {
       const online = raw.trim() === 'Online';
       const cameOnline = online && device.online !== true;
       device.online = online;
-      if (cameOnline) void this.enforceModeOnDevice(device, 'retour en ligne');
+      if (cameOnline) {
+        void this.enforceModeOnDevice(device, 'retour en ligne');
+        void this.readModel(device);
+      }
       this.scheduleEmit();
     } else if (body && typeof body === 'object') {
       this.relayShutterState(device, body as Record<string, unknown>, suffix);
@@ -415,6 +557,7 @@ export class TasmotaService implements ITasmotaService {
         this.logger.info('TasmotaService', `Découverte effacée : ${mac} retiré`);
         this.clearHa(existing);
         this.devices.delete(mac);
+        this.scheduleSaveDevices();
         this.scheduleEmit();
       }
       return;
@@ -433,11 +576,14 @@ export class TasmotaService implements ITasmotaService {
     device.topics = deviceTopics(cfg);
     device.lastSeen = new Date().toISOString();
     this.devices.set(mac, device);
+    this.scheduleSaveDevices();
     if (this.connected) this.subscribeDevice(device);
     if (!existing) this.logger.info('TasmotaService', `Appareil ${mac} « ${cfg.dn ?? '?'} » (${cfg.ip ?? '?'})`);
+    // L'annonce arrive à la connexion de l'appareil : il est joignable, modèle lu si besoin.
+    setTimeout(() => void this.readModel(device), 3000);
     // Sous gestion par découverte MQTT désormais : plus la peine de le montrer comme « trouvé sur
     // le réseau » (§6bis).
-    if (this.networkFound.some((d) => d.mac === mac)) {
+    if (this.networkFound.some((d) => d.mac === mac && !d.known)) {
       this.networkFound = this.networkFound.filter((d) => d.mac !== mac);
       this.emitNetworkStatus();
     }
@@ -460,6 +606,7 @@ export class TasmotaService implements ITasmotaService {
     try {
       const body = JSON.parse(raw) as { sn?: Record<string, unknown> };
       device.sn = body.sn;
+      this.scheduleSaveDevices();
       this.publishDevice(device);
       this.scheduleEmit();
     } catch {
@@ -815,6 +962,7 @@ export class TasmotaService implements ITasmotaService {
     this.publish(`tasmota/discovery/${device.mac}/config`, '', true);
     this.publish(`tasmota/discovery/${device.mac}/sensors`, '', true);
     this.devices.delete(device.mac);
+    this.scheduleSaveDevices();
     this.log(`${this.label(device)} oublié (réapparaît à son prochain redémarrage s'il est encore en service)`, 'ok', device.mac);
     this.scheduleEmit();
   }
@@ -995,15 +1143,29 @@ export class TasmotaService implements ITasmotaService {
     this.networkScanning = true;
     this.emitNetworkStatus();
     const log = (message: string, level: LogLevel = 'info'): void => this.log(message, level, 'réseau');
+    // ⭐ 29/09/2026 (demande utilisateur : « tous les Tasmota qu'il ne connaît pas, les neufs et les
+    // pas neufs, surtout quand ils pointent n'importe où ») : la même recherche lance aussi celle
+    // des neufs (points d'accès Wi-Fi), si cette machine le permet.
+    const apScan = this.provisionCheck?.available ? this.refreshProvisionCheck(true) : Promise.resolve();
     try {
       const all = await scanNetworkForTasmota(log);
-      // Déjà connu par découverte MQTT (déjà visible dans la liste principale) : pas la peine de
-      // le remontrer ici, la recherche sert à retrouver ce qui n'est PAS encore sous gestion.
-      const known = new Set(this.devices.keys());
-      this.networkFound = all.filter((d) => !known.has(d.mac));
+      // Appareil connu trouvé sur le réseau : son modèle stocké est complété au passage.
+      for (const f of all) {
+        const device = this.devices.get(f.mac);
+        if (!device || !f.model) continue;
+        Object.assign(device, { model: f.model, hardware: f.hardware ?? device.hardware, pins: f.pins ?? device.pins, modelFirmware: device.cfg.sw });
+        this.scheduleSaveDevices();
+      }
+      // Écarté seulement s'il est connu ET pointe vers notre broker : un Tasmota connu par une
+      // ancienne annonce mais qui pointe ailleurs (ou nulle part) reste à reprendre en main.
+      const ours = (d: NetworkTasmota): boolean => d.mqttHost === this.config.mqtt.host && (d.mqttPort ?? 1883) === this.config.mqtt.port;
+      this.networkFound = all
+        .filter((d) => !this.devices.has(d.mac) || !ours(d))
+        .map((d) => ({ ...d, known: this.devices.has(d.mac) }));
     } catch (error) {
       log(String(error instanceof Error ? error.message : error), 'error');
     } finally {
+      await apScan;
       this.networkScanning = false;
       this.emitNetworkStatus();
     }
@@ -1082,7 +1244,10 @@ export class TasmotaService implements ITasmotaService {
         lieu: t?.nomLieu,
         precis: t?.nomPrecis,
         ip: d.cfg.ip,
-        model: d.cfg.md,
+        model: d.model ?? d.cfg.md,
+        hardware: d.hardware,
+        pins: d.pins,
+        lastSeen: d.lastSeen,
         version: d.cfg.sw,
         topic: d.cfg.t,
         site: /^%prefix%\/([^/%]+)\/%topic%\/?$/.exec(d.cfg.ft)?.[1] ?? '',

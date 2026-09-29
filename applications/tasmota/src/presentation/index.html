@@ -33,7 +33,7 @@
     .log { max-height: 280px; overflow: auto; font-family: monospace; font-size: .85em; white-space: pre-wrap; }
     .log .error { color: #f66; } .log .ok { color: #6c6; }
     .ap-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
-    .ap-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .ap-item { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }
     .danger { background: #a33 !important; }
     .hidden { display: none !important; }
   </style>
@@ -115,17 +115,14 @@
       </div>
 
       <div class="card">
-        <h2>Mise en service d'un Tasmota neuf</h2>
-        <p class="muted">Depuis la machine par laquelle vous accédez à cette page : son Wi-Fi rejoint le point d'accès du Tasmota neuf (sorti d'usine), lui donne le Wi-Fi et le broker, puis est remis dans son état d'origine. L'Ethernet (domotique) n'est pas touché.</p>
+        <h2>Rechercher les Tasmota inconnus</h2>
+        <p class="muted">Une seule recherche, deux sortes de Tasmota : les <strong>neufs</strong> (point d'accès Wi-Fi <code>tasmota-…</code>, vus par le Wi-Fi de cette machine) et ceux <strong>déjà sur le réseau qui ne pointent pas vers notre broker</strong> (aucun broker, un autre broker, ou une ancienne machine), trouvés par une requête directe à chaque adresse du réseau local. Un Tasmota protégé par un mot de passe web n'est pas trouvé.</p>
+        <div class="actions"><button class="btn btn-primary" id="btn-network-scan">🔍 Rechercher les Tasmota inconnus</button></div>
+        <h3>Neufs (point d'accès Wi-Fi)</h3>
+        <p class="muted">Mise en service depuis la machine par laquelle vous accédez à cette page : son Wi-Fi rejoint le point d'accès du Tasmota neuf, lui donne le Wi-Fi et le broker, puis est remis dans son état d'origine. L'Ethernet (domotique) n'est pas touché.</p>
         <div id="prov-check" class="muted"></div>
-        <div class="actions"><button class="btn btn-secondary" id="btn-scan">📡 Rechercher les Tasmota neufs</button></div>
         <div class="ap-list" id="ap-list"></div>
-      </div>
-
-      <div class="card">
-        <h2>Rechercher les Tasmota déjà sur le réseau</h2>
-        <p class="muted">Différent de la recherche ci-dessus : pour un Tasmota qui a déjà rejoint le réseau normal (Wi-Fi déjà donné, en point d'accès ou par un autre moyen) mais ne s'est jamais annoncé sur notre broker. Une requête directe est envoyée à chaque adresse du réseau local — les appareils protégés par un mot de passe web ne sont pas trouvés.</p>
-        <div class="actions"><button class="btn btn-secondary" id="btn-network-scan">🔍 Rechercher les Tasmota déjà sur le réseau</button></div>
+        <h3>Sur le réseau, hors de notre broker</h3>
         <div class="ap-list" id="network-list"></div>
       </div>
 
@@ -154,6 +151,6 @@
 
   <script type="module" src="/applications/tasmota/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-09-29 17:47:52 - Recherche des Tasmota déjà connectés au réseau (scan HTTP actif) -->
+  <!-- Derniere modification: 2026-09-29 19:19:42 - Liste stockée (devices.yaml), modèle/puce/broches affichés -->
 </body>
 </html>

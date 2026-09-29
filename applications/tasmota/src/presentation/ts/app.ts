@@ -32,6 +32,9 @@ interface DeviceView {
   precis?: string;
   ip?: string;
   model?: string;
+  hardware?: string;
+  pins?: string[];
+  lastSeen?: string;
   version?: string;
   topic: string;
   site: string;
@@ -76,6 +79,10 @@ interface NetworkFound {
   mqttHost?: string;
   mqttPort?: number;
   firmware?: string;
+  model?: string;
+  hardware?: string;
+  pins?: string[];
+  known?: boolean;
 }
 
 interface NetworkStatusView {
@@ -139,13 +146,13 @@ function renderDevices(): void {
       // Appareil à nommer : son topic (unique, ex. tasmota_77B62C) plutôt que « Tasmota », commun à tous les neufs.
       : `<span class="badge">À nommer</span> <strong>${esc(d.topic)}</strong> <span class="muted">(${esc(d.name)})</span>`;
     return `<tr class="${d.mac === selectedMac ? 'selected' : ''}">
-      <td><span class="dot ${dot}" title="${d.online ? 'En ligne' : d.online === false ? 'Hors ligne' : 'État inconnu'}"></span></td>
+      <td><span class="dot ${dot}" title="${d.online ? 'En ligne' : d.online === false ? 'Hors ligne' : 'État inconnu'}"></span>${!d.online && d.lastSeen ? `<div class="muted" title="Dernière annonce">${esc(new Date(d.lastSeen).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }))}</div>` : ''}</td>
       <td>${name}<div class="muted">${esc(d.mac)}</div></td>
       <td>${esc(d.quoi ?? '')}</td>
       <td>${esc(d.lieu ?? '')}</td>
       <td>${esc(d.site)}<div class="muted">${esc(d.topic)}</div></td>
       <td>${d.ip ? `<a href="http://${esc(d.ip)}/" target="_blank" rel="noopener">${esc(d.ip)}</a>` : ''}</td>
-      <td>${esc(d.model ?? '')}<div class="muted">${esc(d.version ?? '')}</div></td>
+      <td>${esc(d.model ?? '')}${d.hardware ? ` <span class="muted">(${esc(d.hardware)})</span>` : ''}<div class="muted">${esc(d.version ?? '')}</div>${d.pins ? `<div class="muted">${d.pins.length ? d.pins.map(esc).join('<br>') : 'aucune broche utilisée'}</div>` : ''}</td>
       <td>${esc(content)}${d.rules.length ? `<div class="muted">${d.rules.length} règle(s)</div>` : ''}</td>
       <td>${d.published ? '<span class="badge ok">publié</span>' : '—'}</td>
       <td><button class="btn btn-secondary" data-fiche="${esc(d.mac)}">Fiche</button></td>
@@ -321,7 +328,6 @@ function renderProvision(p: ProvisionView | undefined): void {
     : check.available
       ? `✅ Possible depuis cette machine : Wi-Fi ${esc(check.wifiInterface)} (${check.wifiConnection ? `connecté à « ${esc(check.wifiConnection)} », sera rétabli` : 'déconnecté, sera laissé déconnecté'}), Ethernet ${esc(check.ethernetInterface)} inchangé.`
       : `❌ Indisponible sur cette machine : ${esc(check.reason)}`;
-  ($('btn-scan') as HTMLButtonElement).disabled = !check?.available || p.running;
   $('ap-list').innerHTML = p.accessPoints.map((ap) => `<div class="ap-item">
       <span>📶 <strong>${esc(ap.ssid)}</strong> <span class="muted">signal ${ap.signal} %</span></span>
       <button class="btn btn-primary" data-ap="${esc(ap.ssid)}"${p.running ? ' disabled' : ''}>Mettre en service</button>
@@ -339,7 +345,7 @@ function renderProvision(p: ProvisionView | undefined): void {
 
 function renderNetworkFound(v: NetworkStatusView | undefined): void {
   if (!v) return;
-  $('btn-network-scan').textContent = v.scanning ? '🔍 Recherche en cours…' : '🔍 Rechercher les Tasmota déjà sur le réseau';
+  $('btn-network-scan').textContent = v.scanning ? '🔍 Recherche en cours…' : '🔍 Rechercher les Tasmota inconnus';
   ($('btn-network-scan') as HTMLButtonElement).disabled = v.scanning;
   const list = $('network-list');
   if (v.scanning && v.found.length === 0) {
@@ -347,19 +353,21 @@ function renderNetworkFound(v: NetworkStatusView | undefined): void {
     return;
   }
   if (v.found.length === 0) {
-    list.innerHTML = '<div class="muted">Aucun Tasmota non géré trouvé sur le réseau (ceux déjà connus apparaissent dans la liste ci-dessus).</div>';
+    list.innerHTML = '<div class="muted">Aucun : tous les Tasmota trouvés sur le réseau pointent vers notre broker.</div>';
     return;
   }
   list.innerHTML = v.found.map((d) => {
     const alreadyOurs = d.mqttHost === v.ourMqttHost && (d.mqttPort ?? 1883) === (v.ourMqttPort ?? 1883);
+    const knownTag = d.known ? ' <span class="badge">déjà dans la liste</span>' : '';
     const action = alreadyOurs
       ? '<span class="muted">déjà pointé vers notre broker — apparaîtra ici sous peu s’il ne s’est pas encore reconnecté</span>'
       : `<button class="btn btn-primary" data-network-point="${esc(d.ip)}">Pointer vers notre broker</button>`;
     return `<div class="ap-item">
-      <span>💡 <strong>${esc(d.deviceName || d.topic || d.mac)}</strong>
-        <span class="muted">${esc(d.ip)} — ${esc(d.mac)} — firmware ${esc(d.firmware ?? '?')} — broker actuel : ${esc(d.mqttHost || 'aucun')}${d.mqttHost ? `:${d.mqttPort ?? 1883}` : ''}</span>
+      <span>💡 <strong>${esc(d.deviceName || d.topic || d.mac)}</strong>${knownTag}
+        <span class="muted">${esc(d.ip)} — ${esc(d.mac)} — modèle ${esc(d.model ?? '?')}${d.hardware ? ` (${esc(d.hardware)})` : ''}${d.model === 'Generic' ? ' : carte générique' : ''} — firmware ${esc(d.firmware ?? '?')} — broker actuel : ${esc(d.mqttHost || 'aucun')}${d.mqttHost ? `:${d.mqttPort ?? 1883}` : ''}</span>
       </span>
       ${action}
+      ${d.pins ? `<div class="muted" style="flex-basis:100%">Contenu du modèle : ${d.pins.length ? d.pins.map(esc).join(' · ') : 'aucune broche utilisée'}</div>` : ''}
     </div>`;
   }).join('');
   moduleRoot().querySelectorAll<HTMLButtonElement>('[data-network-point]').forEach((b) => b.addEventListener('click', () => {
@@ -438,10 +446,6 @@ function bindActions(): void {
   $('btn-rules').addEventListener('click', () => {
     if (!selectedMac) return;
     socket.emit('tasmota:rules:save', { mac: selectedMac, rules: collectRules() });
-  });
-  $('btn-scan').addEventListener('click', () => {
-    $('prov-check').textContent = 'Recherche Wi-Fi en cours…';
-    socket.emit('tasmota:provision:check', { scan: true });
   });
   $('btn-network-scan').addEventListener('click', () => socket.emit('tasmota:network:scan'));
   $('btn-config').addEventListener('click', () => {

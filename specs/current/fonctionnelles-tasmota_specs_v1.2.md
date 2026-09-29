@@ -1,8 +1,8 @@
 # Spécifications — Application TASMOTA
 
-**Version :** 1.1
-**Date :** 28 Septembre 2026 (v1.1 : partage entre machines — D7 corrigée, §9)
-**Version précédente :** 1.0 — 28 Septembre 2026
+**Version :** 1.2
+**Date :** 29 Septembre 2026 (v1.2 : liste stockée, modèle et contenu du modèle, recherche unique des Tasmota inconnus)
+**Version précédente :** 1.1 — 28 Septembre 2026
 **Statut :** Première version — conception décidée avec l'utilisateur le 28/09/2026 (voir `TODO.md`,
 section TASMOTA), essais réels préalables sur un Sonoff Basic R4 (Tasmota 15.6.0, ESP32-C3).
 **Remplace :** le script Outils « Configurer un appareil Tasmota (à distance) »
@@ -98,6 +98,22 @@ relais / volets / capteurs détectés, état de publication vers HA.
 `Tasmota` après une remise d'usine. Un appareil à nommer **n'est pas publié vers HA** (voulu : un
 appareil n'apparaît dans HA qu'une fois nommé).
 
+### 3.4 Liste stockée — `data/tasmota/devices.yaml` (v1.2)
+
+Le broker repart **vide** à chaque redémarrage (persistance désactivée, voulu) : un Tasmota débranché ne
+se réannonce pas et disparaissait de la liste et de HA. La liste est donc **stockée** par MAC :
+annonce (`cfg`), capteurs (`sn`), date de dernière annonce, **modèle** (commande `Module`, ex.
+« Sonoff Basic R4 », « Generic »), **puce** (`Status 2` → `StatusFWR.Hardware`), **contenu du modèle**
+(`Gpio 255` : broches utilisées et leur rôle, dans la langue du firmware — `Gpio` seul répond « Not
+supported » pour un modèle figé) et firmware au moment de la lecture.
+
+- Relue au démarrage ; un appareil débranché reste affiché (sans point vert, date de dernière annonce).
+- À chaque connexion au broker, les entités HA de **tous** les appareils connus sont republiées.
+- Modèle lu par MQTT quand l'appareil s'annonce ou revient en ligne, si l'information manque ou si le
+  firmware a changé ; complété aussi par la recherche réseau (§6bis).
+- Pas de préfixe `machine_` : reproduite sur toutes les machines par la diffusion ; reçue d'une autre
+  machine, elle est fusionnée (un appareil oublié là-bas est retiré ici, sauf s'il est en ligne).
+
 **Oublier un appareil** (retiré du parc) : efface les découvertes retenues (native et HA) et ses
 attributs. S'il est encore en service, il réapparaît à son prochain redémarrage.
 
@@ -188,6 +204,18 @@ service ne vaut que pour un appareil **sorti d'usine** (ou remis d'usine). Docke
 l'image, `network_mode: host`, volume `/run/dbus/system_bus_socket`, `privileged` (ou
 `apparmor=unconfined`) — en place depuis le 28/09/2026 (Dockerfile, compose).
 
+## 6bis. Recherche des Tasmota inconnus (v1.2)
+
+Un seul bouton, deux sortes de résultats :
+- **neufs** : points d'accès Wi-Fi `tasmota-…` à portée de la machine (§6, si nmcli le permet) ;
+- **déjà sur le réseau mais hors de notre broker** (aucun, un autre, une ancienne machine) : requête
+  `Status 0` à chaque adresse du `/24` de l'adresse principale de la machine, puis `Module` et
+  `Gpio 255` pour ceux trouvés. **En-tête `Referer` obligatoire** sur `/cm` (Tasmota récents, sinon
+  connexion fermée sans réponse). Écarté seulement s'il est connu **et** pointe vers notre broker ; un
+  appareil connu qui pointe ailleurs porte « déjà dans la liste ». Action : « Pointer vers notre
+  broker » (`Backlog MqttHost …; MqttPort …` en HTTP). Limites : un seul sous-réseau, un Tasmota
+  protégé par mot de passe web n'est pas trouvé.
+
 ## 7. Règles et modes
 
 ### 7.1 Règles préétablies
@@ -246,8 +274,8 @@ Côté ia : outils à ajouter (évolution d'ia, hors de cette version).
 `data/tasmota/rules.yaml` : règles par MAC (`slot`, `template`, `params`, `modes`, `enabled`).
 Aucun fichier `machine_` : les deux fichiers seront reproduits sur toutes les machines quand la diffusion du
 core existera (D7) ; **en attendant ils restent locaux** — une règle définie depuis une machine n'est connue
-(pour l'application des modes) que de cette machine. La liste des appareils n'est pas stockée : elle est
-reconstruite depuis les découvertes retenues du broker, et le mode courant est retenu sur le broker.
+(pour l'application des modes) que de cette machine. La liste des appareils est stockée dans
+`data/tasmota/devices.yaml` (§3.4, v1.2) ; le mode courant est retenu sur le broker.
 
 ## 10. Déclaration du module et événements
 
@@ -274,5 +302,6 @@ masqué), `device:read`/`device:details`, `device:apply`, `device:action`, `devi
 
 | Version | Date | Auteur | Modifications |
 |---|---|---|---|
+| 1.2 | 29/09/2026 | Claude | Liste stockée (`devices.yaml`, §3.4) : le broker repart vide à chaque redémarrage ; entités HA republiées à chaque connexion ; modèle, puce et contenu du modèle (`Module`, `Status 2`, `Gpio 255`) lus, stockés, affichés ; recherche unique des Tasmota inconnus (§6bis), en-tête `Referer` sur `/cm`. |
 | 1.1 | 28/09/2026 | Claude | D7/§9 corrigés : la diffusion des fichiers de `data/` n'existe pas encore (core) ; règle `machine_` (non reproduit) / autres fichiers reproduits ; config et règles locales en attendant. |
 | 1.0 | 28/09/2026 | Claude | Création : liste, nommage + publication HA comme RFXCOM, fiche réinjectée, mise en service d'un neuf (nmcli), règles préétablies + modes (select HA), dialogue ia. |

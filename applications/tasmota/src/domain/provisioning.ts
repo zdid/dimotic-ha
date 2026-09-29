@@ -157,6 +157,18 @@ export interface NetworkTasmota {
   mqttHost?: string;
   mqttPort?: number;
   firmware?: string;
+  /** Nom du modèle (commande `Module`, ex. « Sonoff Basic R4 », « Generic ») — `Status 0` n'en donne
+   *  que le numéro. */
+  model?: string;
+  /** Puce (StatusFWR.Hardware, ex. « ESP8266EX », « ESP32-C3 v0.4 »). */
+  hardware?: string;
+  /** Contenu réel du modèle : broches utilisées et leur rôle (commande `Gpio 255`, qui répond aussi
+   *  pour un modèle figé, là où `Gpio` seul répond « Not supported »), ex. « GPIO5 : Relay1 ». Nom
+   *  du rôle dans la langue du firmware. */
+  pins?: string[];
+  /** Déjà dans la liste (ancienne annonce sur notre broker) mais pointe ailleurs — renseigné par
+   *  TasmotaService, pas par la recherche. */
+  known?: boolean;
 }
 
 const SCAN_TIMEOUT_MS = 700;
@@ -189,11 +201,24 @@ export async function scanNetworkForTasmota(log: ProvisionLog): Promise<NetworkT
         const parsed = JSON.parse(text) as {
           Status?: { DeviceName?: string; Topic?: string };
           StatusNET?: { Mac?: string };
-          StatusFWR?: { Version?: string };
+          StatusFWR?: { Version?: string; Hardware?: string };
           StatusMQT?: { MqttHost?: string; MqttPort?: number };
         };
         const mac = parsed.StatusNET?.Mac?.replace(/:/g, '').toUpperCase();
         if (!mac || !parsed.StatusFWR?.Version) continue; // pas un Tasmota (ou réponse incomplète)
+        // Nom du modèle : une requête de plus, seulement pour les Tasmota trouvés (réponse
+        // {"Module":{"<n>":"<nom>"}}).
+        let model: string | undefined;
+        try {
+          const m = JSON.parse(await httpCommandAt(ip, 'Module', 3000)) as { Module?: Record<string, string> };
+          model = m.Module ? Object.values(m.Module)[0] : undefined;
+        } catch { /* modèle facultatif */ }
+        let pins: string[] | undefined;
+        try {
+          const g = JSON.parse(await httpCommandAt(ip, 'Gpio 255', 3000)) as Record<string, Record<string, number>>;
+          pins = Object.entries(g).flatMap(([gpio, role]) =>
+            Object.entries(role ?? {}).filter(([, code]) => code !== 0).map(([name]) => `${gpio} : ${name}`));
+        } catch { /* broches facultatives */ }
         found.push({
           mac,
           ip,
@@ -201,7 +226,10 @@ export async function scanNetworkForTasmota(log: ProvisionLog): Promise<NetworkT
           topic: parsed.Status?.Topic,
           mqttHost: parsed.StatusMQT?.MqttHost,
           mqttPort: parsed.StatusMQT?.MqttPort,
-          firmware: parsed.StatusFWR.Version
+          firmware: parsed.StatusFWR.Version,
+          model,
+          hardware: parsed.StatusFWR.Hardware,
+          pins
         });
       } catch {
         // Hôte injoignable, pas de serveur HTTP, pas du JSON exploitable (mot de passe web…) : ignoré.
