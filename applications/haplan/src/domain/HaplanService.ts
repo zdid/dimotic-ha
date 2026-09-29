@@ -293,6 +293,16 @@ export class HaplanService implements IHaplanService {
   // ==========================================================================
 
   private setupSocketEventListeners(): void {
+    // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — fichier de data/haplan/ reçu d'une autre
+    // machine (diffusion du core) : relu ici, sans redémarrer l'application.
+    this.eventBus.onGeneric<{ app: string; path: string; origin: string }>('core:data:file:changed', (e) => {
+      if (e?.app !== 'haplan') return;
+      this.floorplansConfig = this.configFileManager.load();
+      this.recomputeTrackedEntityIds();
+      this.logger.info('HaplanService', `${e.path} reçu de ${e.origin} : plans relus`);
+      this.emitFloorplansList();
+      this.emitEntitiesStateBulk();
+    });
     this.eventBus.onGeneric(HAPLAN_CLIENT_EVENTS.GET_STATUS, () => this.emitStatus());
 
     this.eventBus.onGeneric(HAPLAN_CLIENT_EVENTS.GET_FLOORPLANS, () => {

@@ -178,6 +178,16 @@ export class NommageService implements INommageService {
   // ==========================================================================
 
   private setupEventListeners(): void {
+    // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — fichier de data/nommage/ reçu d'une autre
+    // machine (diffusion du core) : relu ici, sans redémarrer l'application.
+    this.eventBus.onGeneric<{ app: string; path: string; origin: string }>('core:data:file:changed', (e) => {
+      if (e?.app !== 'nommage' || !e.path.startsWith('nommage/translations/')) return;
+      this.entityNameTranslations = this.translationsRepository.loadCountryTranslations(this.config.language.country);
+      this.logger.info('NommageService', `${e.path} reçu de ${e.origin} : traductions relues, ${this.relayed.size} découverte(s) republiée(s)`);
+      for (const { discoveryMessage, parsed } of this.relayed.values()) {
+        this.emitPassthroughDiscovery(discoveryMessage, parsed);
+      }
+    });
     this.eventBus.on('nommage:discovery:raw',
       (data: unknown) => {
         this.handleRawDiscoveryMessage(data as DiscoveryMessage);

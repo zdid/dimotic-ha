@@ -125,6 +125,9 @@ export class PlanificateurService implements IPlanificateurService {
     );
   }
 
+  /** Programmation faite (HA prêt) — une relecture reprogramme seulement dans ce cas. */
+  private haScheduled = false;
+
   async start(): Promise<void> {
     this.logger.info('PlanificateurService', 'Démarrage du service planificateur...');
 
@@ -155,6 +158,7 @@ export class PlanificateurService implements IPlanificateurService {
     const open = async (): Promise<void> => {
       if (scheduled) return;
       scheduled = true;
+      this.haScheduled = true;
       if (!(await this.sunTimes.ensurePosition())) {
         this.logger.warn('PlanificateurService', 'Position GPS de HA inconnue — planifications « soleil » réessayées toutes les 10 min');
       }
@@ -238,6 +242,21 @@ export class PlanificateurService implements IPlanificateurService {
   // ==========================================================================
 
   private setupSocketEventListeners(): void {
+    // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — fichier de data/planificateur/ reçu d'une autre
+    // machine (diffusion du core) : relu ici, sans redémarrer l'application.
+    this.eventBus.onGeneric<{ app: string; path: string; origin: string }>('core:data:file:changed', (e) => {
+      if (e?.app !== 'planificateur') return;
+      this.schedulerRuntime.stopAll();
+      this.handler.load();
+      if (this.haScheduled) {
+        this.handler.scheduleActivePlanifications();
+        this.stateWatcher?.setPlans(this.handler.listPlanifications());
+      }
+      this.logger.info('PlanificateurService', `${e.path} reçu de ${e.origin} : macros et planifications relues${this.haScheduled ? ' et reprogrammées' : ''}`);
+      this.emitMacros();
+      this.emitPlanifications();
+      this.emitStatus();
+    });
     this.eventBus.onGeneric(PLANIFICATEUR_CLIENT_EVENTS.GET_STATUS, () => this.emitStatus());
     this.eventBus.onGeneric(PLANIFICATEUR_CLIENT_EVENTS.GET_MACROS, () => this.emitMacros());
     this.eventBus.onGeneric(PLANIFICATEUR_CLIENT_EVENTS.GET_PLANIFICATIONS, () => this.emitPlanifications());

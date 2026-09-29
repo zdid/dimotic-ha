@@ -97,6 +97,15 @@ export class RpigpioService implements IRpigpioService {
   }
 
   private setupEventListeners(): void {
+    // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — fichier de data/rpigpio/ reçu d'une autre
+    // machine (diffusion du core) : relu ici, sans redémarrer l'application.
+    this.eventBus.onGeneric<{ app: string; path: string; origin: string }>('core:data:file:changed', (e) => {
+      if (e?.app !== 'rpigpio') return;
+      this.pins = this.pinsManager.load().pins;
+      this.logger.info('RpigpioService', `${e.path} reçu de ${e.origin} : broches relues (redéployer l'agent pour les appliquer au Pi)`);
+      this.emitPins();
+      this.emitStatus();
+    });
     this.eventBus.on(RPIGPIO_CLIENT_EVENTS.GET_STATUS, () => this.emitStatus());
     this.eventBus.on(RPIGPIO_CLIENT_EVENTS.GET_PINS, () => this.emitPins());
     this.eventBus.on(RPIGPIO_CLIENT_EVENTS.SAVE_PIN, (data: unknown) => this.handleSavePin(data as SavePinInput));

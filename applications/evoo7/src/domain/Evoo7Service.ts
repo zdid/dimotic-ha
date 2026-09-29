@@ -599,6 +599,18 @@ export class Evoo7Service implements IEvoo7Service {
   // ==========================================================================
 
   private setupSocketEventListeners(): void {
+    // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — fichier de data/evoo7/ reçu d'une autre
+    // machine (diffusion du core) : relu ici, sans redémarrer l'application.
+    this.eventBus.onGeneric<{ app: string; path: string; origin: string }>('core:data:file:changed', (e) => {
+      if (e?.app !== MODULE_NAME) return;
+      this.donneesConfig = this.configFileManager.load();
+      this.donnees = new Map(Object.entries(this.donneesConfig.evoo7_donnees));
+      this.thermostat = this.donneesConfig.thermostat;
+      this.logger.info('Evoo7Service', `${e.path} reçu de ${e.origin} : données relues, découverte republiée`);
+      this.publishInitialDiscoveries();
+      this.emitDonneesList();
+      this.emitStatus();
+    });
     this.eventBus.onGeneric('evoo7:status:get', () => this.emitStatus());
     this.eventBus.onGeneric('evoo7:donnees:list:get', () => this.emitDonneesList());
 

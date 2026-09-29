@@ -87,6 +87,15 @@ export class TeleinfoService implements ITeleinfoService {
   }
 
   private setupEventListeners(): void {
+    // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — fichier de data/teleinfo/ reçu d'une autre
+    // machine (diffusion du core) : relu ici, sans redémarrer l'application.
+    this.eventBus.onGeneric<{ app: string; path: string; origin: string }>('core:data:file:changed', (e) => {
+      if (e?.app !== 'teleinfo') return;
+      this.compteurs = this.compteursManager.load().compteurs;
+      this.logger.info('TeleinfoService', `${e.path} reçu de ${e.origin} : compteurs relus`);
+      this.emitCompteurs();
+      this.emitStatus();
+    });
     this.eventBus.on(TELEINFO_CLIENT_EVENTS.GET_STATUS, () => this.emitStatus());
     this.eventBus.on(TELEINFO_CLIENT_EVENTS.GET_COMPTEURS, () => this.emitCompteurs());
     this.eventBus.on(TELEINFO_CLIENT_EVENTS.SAVE_COMPTEUR, (data: unknown) => this.handleSaveCompteur(data as SaveCompteurInput));

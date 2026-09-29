@@ -208,6 +208,15 @@ export class TasmotaService implements ITasmotaService {
       });
     };
     on(TASMOTA_CLIENT_EVENTS.GET_STATE, () => this.emitState());
+    // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — fichier de data/tasmota/ reçu d'une autre
+    // machine (diffusion du core) : relu ici, sans redémarrer l'application.
+    this.eventBus.onGeneric<{ app: string; path: string; origin: string }>('core:data:file:changed', (e) => {
+      if (e?.app !== MODULE_NAME || e.path !== 'tasmota/rules.yaml') return;
+      this.rules = this.loadRules();
+      this.logger.info('TasmotaService', `rules.yaml reçu de ${e.origin} : règles relues, modes remis en conformité`);
+      for (const device of this.devices.values()) void this.enforceModeOnDevice(device, 'règles reçues');
+      this.scheduleEmit();
+    });
     on<{ mac: string }>(TASMOTA_CLIENT_EVENTS.DEVICE_READ, (d) => this.readDevice(String(d?.mac ?? '')));
     on<ApplyRequest>(TASMOTA_CLIENT_EVENTS.DEVICE_APPLY, (d) => this.applyDevice(d));
     on<{ mac: string; action: string }>(TASMOTA_CLIENT_EVENTS.DEVICE_ACTION, (d) => this.deviceAction(String(d?.mac ?? ''), String(d?.action ?? '')));

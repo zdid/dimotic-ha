@@ -480,6 +480,14 @@ export class ScriptsHaService implements IScriptsHaService {
   }
 
   private setupEventListeners(): void {
+    // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — fichier de data/scriptsha/ reçu d'une autre
+    // machine (diffusion du core) : relu ici, sans redémarrer l'application.
+    this.eventBus.onGeneric<{ app: string; path: string; origin: string }>('core:data:file:changed', (e) => {
+      if (e?.app !== 'scriptsha') return;
+      this.scripts = this.scriptsManager.load().scripts;
+      this.logger.info('ScriptsHaService', `${e.path} reçu de ${e.origin} : scripts relus`);
+      this.emitScripts();
+    });
     this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.SCRIPTS_GET, () => this.emitScripts());
     this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.SCRIPT_DEPLOY, (data: unknown) => this.handleDeploy((data as { id: string }).id));
     this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.SCRIPT_UNDEPLOY, (data: unknown) => this.handleUndeploy((data as { id: string }).id));

@@ -319,6 +319,17 @@ export class ArexxService implements IArexxService {
   // ==========================================================================
 
   private setupSocketEventListeners(): void {
+    // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — fichier de data/arexx/ reçu d'une autre
+    // machine (diffusion du core) : relu ici, sans redémarrer l'application.
+    this.eventBus.onGeneric<{ app: string; path: string; origin: string }>('core:data:file:changed', (e) => {
+      if (e?.app !== MODULE_NAME) return;
+      this.sensorsConfig = this.configFileManager.load();
+      this.sensorRegistry.loadConfigured(this.sensorsConfig.arexx_sensors as Record<string, ArexxSensorInfo>);
+      this.logger.info('ArexxService', `${e.path} reçu de ${e.origin} : capteurs relus, découverte republiée`);
+      this.publishInitialDiscoveries();
+      this.emitSensorsList();
+      this.emitStatus();
+    });
     this.eventBus.onGeneric('arexx:status:get', () => this.emitStatus());
     this.eventBus.onGeneric('arexx:sensors:list:get', () => this.emitSensorsList());
 
