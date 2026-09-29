@@ -10,7 +10,8 @@ import {
   migrateLayered,
   setMachineValue,
   CORE_DECLARATION,
-  APP_DECLARATIONS
+  APP_DECLARATIONS,
+  DATA_RENAMES
 } from './layers';
 
 /**
@@ -244,8 +245,8 @@ export class ConfigLoader {
    * À APPELER PAR LE SEUL PROCESS DU CORE avant le premier load() (jamais par les applications en
    * process séparé, qui ne font que lire). Idempotente, refaite à chaque démarrage :
    * - core et applications déclarées : chemins machine/secrets sortis de config.yaml ;
-   * - renommages de fichiers propres à la machine : `core/ssh/` → `core/machine_ssh/`,
-   *   `core/ha-structure-*.yaml` → `core/machine_ha-structure-*.yaml`.
+   * - renommages de fichiers propres à la machine (layers.DATA_RENAMES : clé SSH, ha-structure-*,
+   *   ia/comparatif.log, arexx/drivers/).
    * Retourne un compte rendu (une ligne par changement) pour le journal.
    */
   migrate(): string[] {
@@ -261,17 +262,12 @@ export class ConfigLoader {
       if (moved.length) report.push(`${app} : ${moved.join(', ')} → machine_config.yaml / secrets_config.yaml`);
     }
 
-    const renames: Array<[string, string]> = [
-      ['ssh', 'machine_ssh'],
-      ['ha-structure-debug.yaml', 'machine_ha-structure-debug.yaml'],
-      ['ha-structure-changes.yaml', 'machine_ha-structure-changes.yaml']
-    ];
-    for (const [from, to] of renames) {
-      const src = path.join(coreDir, from);
-      const dst = path.join(coreDir, to);
+    for (const [from, to] of DATA_RENAMES) {
+      const src = path.join(dataRoot, from);
+      const dst = path.join(dataRoot, to);
       if (fs.existsSync(src) && !fs.existsSync(dst)) {
         fs.renameSync(src, dst);
-        report.push(`core/${from} → core/${to}`);
+        report.push(`${from} → ${to}`);
       }
     }
     return report;

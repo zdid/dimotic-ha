@@ -187,7 +187,13 @@
          de masquage = paramètre de l'appareil dans l'application** ;
       10. Pi du garage (GARAGE3) **après** l'application ;
       11. commits / sort du script Outils `tasmota-config` : **plus tard**.
-    - **⚠️ Diffusion des données entre machines : NI SPÉCIFIÉE NI IMPLÉMENTÉE (constat 28/09/2026)** — conception
+    - **Diffusion des données (spec `techniques-diffusion-data_specs` v1.2, 29/09/2026)** : temps 1 (core, trois
+      fichiers de configuration) ✅ ; temps 2 ✅ pour toutes les applications **sauf rfxcom** (process particulier à
+      prévoir : déplacement du boîtier RFXCOM sur la machine, `port`/`baudRate` → machine, fichier des appareils →
+      `machine_…`) ; **temps 3 (diffusion) à faire** — trancher d'abord la relecture des fichiers reçus (proposition :
+      redémarrage à chaud de l'application). Déploiement Docker sur ha2/stfort : la migration se fera au premier
+      démarrage de la nouvelle version (sauvegarde de l'ancien config.yaml dans data/core/machine_diffusion/).
+    - (historique) **⚠️ Diffusion des données entre machines : NI SPÉCIFIÉE NI IMPLÉMENTÉE (constat 28/09/2026)** — conception
       du 06/09/2026 (mémoire « duplication config multi-machines ») : 2 fichiers par app (`machine_config.yaml` jamais
       diffusé / `config.yaml` diffusé), envoi par la machine où l'app est active à chaque modification + resynchro
       à la demande, destinataires = registre gossip — mis en pause par l'utilisateur, aucun code, aucune spec, rôle

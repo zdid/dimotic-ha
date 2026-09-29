@@ -144,7 +144,7 @@ describe('ConfigLoader / ConfigWriter en trois fichiers', () => {
 
     const loader = new ConfigLoader(configPath, configSchema, dataRoot);
     const report = loader.migrate();
-    expect(report.join('\n')).toMatch(/ssh → core\/machine_ssh/);
+    expect(report.join('\n')).toMatch(/core\/ssh → core\/machine_ssh/);
     expect(fs.existsSync(path.join(coreDir, 'machine_ssh', 'id_ed25519.pub'))).toBe(true);
     expect(fs.existsSync(path.join(coreDir, 'machine_ha-structure-debug.yaml'))).toBe(true);
 

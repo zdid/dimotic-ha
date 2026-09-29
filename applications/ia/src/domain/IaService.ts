@@ -728,7 +728,7 @@ export class IaService implements IIaService {
    * transmet à planificateur (toujours dry-run, voir runChatRounds/ToolExecutor.execute) — pur
    * outil d'observation, jamais une action, quel que soit le fournisseur actif en config. Compare
    * la décision structurée (verbe/quoi/lieux ou JSON planification/gestion/macro), pas le texte, et
-   * le temps de réponse de chacun ; journalise une ligne dans data/ia/comparatif.log (tail -f
+   * le temps de réponse de chacun ; journalise une ligne dans data/ia/machine_comparatif.log (tail -f
    * dessus, demande utilisateur).
    */
   private async handleCompareCommand(message: string): Promise<void> {
@@ -782,7 +782,7 @@ export class IaService implements IIaService {
     });
   }
 
-  /** Une ligne par comparaison, format compact à plat — pensé pour `tail -f data/ia/comparatif.log`. */
+  /** Une ligne par comparaison, format compact à plat — pensé pour `tail -f data/ia/machine_comparatif.log`. */
   private logComparison(question: string, sides: ComparisonSide[], diffsPerSide: { label: string; diffs: string[] }[], allMatch: boolean): void {
     const fmtSide = (s: ComparisonSide) => `${s.label ?? s.model}(${s.provider}:${s.model}) ${s.latencyMs}ms${s.corrected ? ' [corrigé après vérification]' : ''} ${JSON.stringify(s.decision)}`;
     const anyCorrected = sides.some((s) => s.corrected);
@@ -790,7 +790,7 @@ export class IaService implements IIaService {
       ? (anyCorrected ? `MATCH (mais ${sides.filter((s) => s.corrected).map((s) => s.label ?? s.model).join(', ')} corrigé après vérification — pas juste du premier coup)` : 'MATCH')
       : `DIFF(${diffsPerSide.filter((d) => d.diffs.length > 0).map((d) => `${d.label}: ${d.diffs.join('; ')}`).join(' || ')})`;
     const line = `${new Date().toISOString()} | "${question}" | ${sides.map(fmtSide).join(' | ')} | ${verdict}\n`;
-    const logPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia', 'comparatif.log');
+    const logPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia', 'machine_comparatif.log');
     try {
       fs.appendFileSync(logPath, line);
     } catch (error) {

@@ -22,7 +22,7 @@ import {
 } from './ScriptTemplate';
 import { buildBundle, buildZip, downloadsDir } from './BundleBuilder';
 import { ExecRunner, validateTarget, writeTempScript, type ExecTarget } from './ExecRunner';
-import { readSavedValues, saveValues } from './ScriptValues';
+import { readSavedValues, saveValues, migrateAllSavedValues } from './ScriptValues';
 
 const MODULE_NAME = 'outils';
 const UPLOAD_BATCH_TTL_MS = 10 * 60 * 1000;
@@ -63,6 +63,13 @@ export class OutilsService implements IOutilsService {
 
   async start(): Promise<void> {
     this.logger.info('OutilsService', 'Démarrage du service Outils...');
+    // ⭐ 29/09/2026 — valeurs sensibles rangées dans saved-values/secrets_<id>.json (non reproduit).
+    try {
+      const migrated = migrateAllSavedValues();
+      if (migrated.length) this.logger.info('OutilsService', `Valeurs sensibles rangées à part (secrets_…) : ${migrated.join(', ')}`);
+    } catch (error) {
+      this.logger.warn('OutilsService', `Rangement des valeurs sensibles impossible : ${error}`);
+    }
     this.setupSocketEventListeners();
     this.emitStatus();
     this.logger.info('OutilsService', 'Service Outils démarré');

@@ -21,7 +21,7 @@ export const IA_CLIENT_EVENTS = {
   // ⭐ Envoie la même phrase aux DEUX fournisseurs (config-schema.ts::provider et l'autre) : celui
   // actif exécute réellement (comme TEST_SEND), l'autre s'arrête juste avant l'exécution/dispatch
   // (dry-run) — comparaison de la décision structurée + du temps de réponse, journalisée dans
-  // data/ia/comparatif.log (voir IaService.handleCompareCommand).
+  // data/ia/machine_comparatif.log (voir IaService.handleCompareCommand).
   COMPARE_SEND: 'ia:compare:send'
 } as const;
 

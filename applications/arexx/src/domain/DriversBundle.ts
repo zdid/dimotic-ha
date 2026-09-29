@@ -1,7 +1,7 @@
 /**
  * DriversBundle
  *
- * Prépare `data/arexx/drivers/` — copie du bundle de déploiement (scripts/deploy-sender.sh,
+ * Prépare `data/arexx/machine_drivers/` — copie du bundle de déploiement (scripts/deploy-sender.sh,
  * rf_usb_http_rpi_0_6/, tl-500/) depuis l'installation de l'application elle-même
  * (`applications/arexx/`) vers le volume de données.
  *
@@ -26,7 +26,9 @@ const TARGET_PLACEHOLDER_HOST = 'A_REMPLACER';
 
 export function driversDirPath(): string {
   const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'arexx');
-  return path.join(dataDir, 'drivers');
+  // ⭐ 29/09/2026 : `machine_drivers` (propre à la machine, jamais reproduit — techniques-diffusion-data_specs
+  // §8.3) ; renommé depuis `drivers` par la migration du core. Sur la cible, il reste `drivers` (ArexxDeployService).
+  return path.join(dataDir, 'machine_drivers');
 }
 
 function targetFilePath(): string {

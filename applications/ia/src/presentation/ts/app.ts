@@ -183,7 +183,7 @@ function setupTestForm(): void {
   });
 
   // Comparatif Claude/Mistral (demande utilisateur, 11/08/2026) — même phrase aux deux
-  // fournisseurs, résultat détaillé dans data/ia/comparatif.log (tail -f), résumé bref ici.
+  // fournisseurs, résultat détaillé dans data/ia/machine_comparatif.log (tail -f), résumé bref ici.
   if (compareBtn) {
     compareBtn.addEventListener('click', () => {
       const message = input.value.trim();
@@ -248,7 +248,7 @@ function showCompareResult(reply: CompareReply): void {
   resultEl.className = `test-result ${reply.match && !reply.anyCorrected ? 'ok' : 'error'}`;
   resultEl.innerHTML = `<div class="tokens-label">${matchLabel}</div>`
     + reply.sides.map(fmtSide).join('')
-    + `<div class="tokens-label">Détail complet dans data/ia/comparatif.log</div>`;
+    + `<div class="tokens-label">Détail complet dans data/ia/machine_comparatif.log</div>`;
 }
 
 function formatTokens(promptTokens: number, completionTokens?: number): string {

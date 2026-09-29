@@ -80,6 +80,16 @@ export class ArexxDeployService {
       return { success: false, step: 'copy-drivers', error: copy.error };
     }
 
+    // ⭐ 29/09/2026 — le dossier local s'appelle machine_drivers/ (jamais reproduit) ; la copie arrive
+    // sous ce nom et reprend le nom `drivers/` sur la cible, pour ne rien changer à l'installation
+    // existante (deploy-sender.sh, service arexx-sender) — l'ancien `drivers/` est remplacé.
+    const remoteDir = shellQuote(target.remoteDir);
+    const swap = await runSsh(target, `cd ${remoteDir} && rm -rf drivers.old && { [ ! -d drivers ] || mv drivers drivers.old; } && mv machine_drivers drivers && rm -rf drivers.old`);
+    if (!swap.success) {
+      this.logger.error('ArexxDeployService', `Échec du renommage machine_drivers → drivers sur ${target.host}: ${swap.error}`);
+      return { success: false, step: 'copy-drivers', error: swap.error };
+    }
+
     const run = await runSsh(target, `cd ${shellQuote(`${target.remoteDir}/drivers/scripts`)} && ./deploy-sender.sh`);
     if (!run.success) {
       this.logger.error('ArexxDeployService', `Échec de deploy-sender.sh sur ${target.host}: ${run.error}`);

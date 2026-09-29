@@ -44,10 +44,32 @@ export const CORE_DECLARATION: LayerDeclaration = {
 };
 
 /**
- * Inventaire des applications (spec §8.3) — rempli application par application au temps 2 de la
- * mise en place (ordre du §10bis). Vide tant qu'aucune n'est migrée.
+ * Inventaire des applications (spec §8.3) — temps 2, rempli le 29/09/2026 pour toutes les
+ * applications sauf rfxcom (process particulier : déplacement du boîtier RFXCOM). Applications sans
+ * réglage propre à la machine ni secret : absentes (arbreouquoi, haplan, nommage — son ancien
+ * `sources[].mqtt.password` est vide et abandonné à la prochaine sauvegarde —, outils, planificateur,
+ * sauvegarde, scriptsha, supervision, testcycle, arexx).
  */
-export const APP_DECLARATIONS: Record<string, LayerDeclaration> = {};
+export const APP_DECLARATIONS: Record<string, LayerDeclaration> = {
+  tasmota: { secrets: ['wifi.password'] },
+  ia: { secrets: ['mistralApiKey', 'anthropicApiKey'], machine: ['ollamaHttpPort'] },
+  evoo7: { secrets: ['box.password'] },
+  rpigpio: { secrets: ['mqtt.password'] },
+  teleinfo: { secrets: ['mqtt.password'] },
+  espdisplay: { machine: ['esphomeContainer', 'esphomeConfigDir', 'pipelineScriptPath', 'pythonBin', 'remote'] }
+};
+
+/**
+ * Fichiers/dossiers propres à la machine, renommés `machine_…` par la migration (spec §8.3) — le
+ * code de l'application utilise déjà le nouveau nom. Chemins relatifs à `data/`.
+ */
+export const DATA_RENAMES: Array<[string, string]> = [
+  ['core/ssh', 'core/machine_ssh'],
+  ['core/ha-structure-debug.yaml', 'core/machine_ha-structure-debug.yaml'],
+  ['core/ha-structure-changes.yaml', 'core/machine_ha-structure-changes.yaml'],
+  ['ia/comparatif.log', 'ia/machine_comparatif.log'],
+  ['arexx/drivers', 'arexx/machine_drivers']
+];
 
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
 

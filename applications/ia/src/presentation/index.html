@@ -153,7 +153,7 @@
           <input type="text" id="test-input" list="test-history" placeholder="ex : allume la lumière du salon" autocomplete="off" />
           <datalist id="test-history"></datalist>
           <button class="btn btn-primary" id="test-send">Envoyer</button>
-          <button class="btn btn-secondary" id="test-compare" title="Envoie la même phrase à tous les modèles comparatifs (config.compareModels) — jamais exécuté ni transmis à planificateur, pur comparatif (résultat dans data/ia/comparatif.log)">🧪 Comparer</button>
+          <button class="btn btn-secondary" id="test-compare" title="Envoie la même phrase à tous les modèles comparatifs (config.compareModels) — jamais exécuté ni transmis à planificateur, pur comparatif (résultat dans data/ia/machine_comparatif.log)">🧪 Comparer</button>
         </div>
         <div class="test-result" id="test-result"></div>
       </div>
@@ -173,6 +173,6 @@
 
   <script type="module" src="/applications/ia/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-09-24 18:37:02 - Attente de HA prêt affichée + échappement HTML (app.ts) -->
+  <!-- Derniere modification: 2026-09-29 07:56:56 - Journal du comparatif renommé machine_comparatif.log (propre à la machine) -->
 </body>
 </html>
