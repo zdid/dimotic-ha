@@ -27,6 +27,10 @@ export const TASMOTA_CLIENT_EVENTS = {
   PROVISION_CHECK: 'tasmota:provision:check',
   PROVISION_START: 'tasmota:provision:start',
   NETWORK_SCAN: 'tasmota:network:scan',
+  /** ⭐ v1.3 — enregistrement des voies d'un appareil (spec §4.1bis). */
+  VOIES_SAVE: 'tasmota:voies:save',
+  /** ⭐ v1.4 — enregistrement des thermostats d'un appareil (spec §7bis). */
+  THERMOSTATS_SAVE: 'tasmota:thermostats:save',
   NETWORK_POINT: 'tasmota:network:point'
 } as const;
 
@@ -34,7 +38,9 @@ export const TASMOTA_CLIENT_EVENTS = {
 export const TASMOTA_REQUEST_EVENTS = {
   CATALOG_GET: 'tasmota:catalog:get',
   RULE_DEFINE: 'tasmota:rule:define',
-  MODE_SET: 'tasmota:mode:set'
+  MODE_SET: 'tasmota:mode:set',
+  /** ⭐ v1.4 §7bis.6 — consigne / mode d'un thermostat, mode de la maison. */
+  THERMOSTAT_SET: 'tasmota:thermostat:set'
 } as const;
 
 export const TASMOTA_ALL_EVENTS = {

@@ -3,6 +3,18 @@
 
 
 
+## 🟡 TASMOTA — voies et thermostats réalisés le 30/09/2026 (spec v1.3 / v1.4), points à valider en réel
+
+- **Thermostat ESP32 (Berry)** : essayé en réel sur le R4 (dépôt par `Br`, régulation, `persist`, MQTT natif,
+  chaîne complète depuis HA, retrait, **remise d'usine + remise en service**). **Bogue corrigé** : « Remise d'usine »
+  et « Mettre à jour (OTA) » de l'application n'avaient jamais fonctionné (argument dans le topic) — **OTA toujours à essayer**. **À valider** : plusieurs DS18B20 par `Id` sur un vrai module ;
+  requête ia
+  `tasmota:thermostat:set` de bout en bout.
+- **Thermostat ESP8266 (règles)** : écrit, texte des règles testé, **effet non essayé** (`%mem1%` dans un
+  déclencheur, `RuleTimer`) — le poêle est en production et sans capteur : à essayer sur un autre module.
+- **Voies** : clé de capteur par `Id` non vérifiée sur un vrai module à deux capteurs.
+- **Firmware** : `tasmota32` / `tasmota` standard suffisent (spec §7bis.7) ; éviter lite / minimal.
+
 ## ✅ ESPDISPLAY (page ESPHome) — réglages diffusés, machine ESPHome obligatoire — FAIT le 29/09/2026 (spec espdisplay v1.3)
 
 Réglages communs (`config.yaml`, diffusé), clé SSH de la machine qui appelle, script agent paramétré installé

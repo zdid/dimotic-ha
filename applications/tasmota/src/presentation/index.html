@@ -33,6 +33,8 @@
     .log { max-height: 280px; overflow: auto; font-family: monospace; font-size: .85em; white-space: pre-wrap; }
     .log .error { color: #f66; } .log .ok { color: #6c6; }
     .ap-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+    .voie { border: 1px solid rgba(255,255,255,.12); border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+    .voie h4 { margin: 0 0 6px 0; font-size: .95em; }
     .ap-item { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }
     .danger { background: #a33 !important; }
     .hidden { display: none !important; }
@@ -108,6 +110,19 @@
           <button class="btn btn-secondary danger" id="btn-forget">🗑 Oublier</button>
         </div>
 
+        <h3>Voies (un appareil Home Assistant par voie)</h3>
+        <p class="muted">Un module peut porter des objets sans rapport (deux thermomètres, des lampes de deux endroits, un moteur…). Nommer une voie en fait <strong>son propre appareil</strong> dans Home Assistant, avec sa pièce et sa taxonomie. Voie laissée vide : elle reprend le nom du module (cas courant, rien à saisir).</p>
+        <div id="voies"></div>
+        <div class="actions"><button class="btn btn-primary" id="btn-voies">💾 Enregistrer les voies</button></div>
+
+        <h3>Thermostats (un relais + un thermomètre, consigne par mode de la maison)</h3>
+        <p class="muted" id="thermo-engine"></p>
+        <div id="thermostats"></div>
+        <div class="actions">
+          <button class="btn btn-secondary" id="btn-thermo-add">➕ Ajouter un thermostat</button>
+          <button class="btn btn-primary" id="btn-thermostats">💾 Enregistrer les thermostats</button>
+        </div>
+
         <h3>Règles (Rule1 à Rule3, stockées dans l'appareil)</h3>
         <p class="muted">Une règle par emplacement ; active dans les modes cochés (aucun coché = tous les modes).</p>
         <div id="rules"></div>
@@ -151,6 +166,6 @@
 
   <script type="module" src="/applications/tasmota/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-09-29 19:19:42 - Liste stockée (devices.yaml), modèle/puce/broches affichés -->
+  <!-- Derniere modification: 2026-09-30 13:39:03 - Section Thermostats de la fiche -->
 </body>
 </html>

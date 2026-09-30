@@ -26,13 +26,19 @@ import {
   deviceTopics,
   analyseRelays,
   analyseSensors,
+  listVoies,
+  THERMOSTAT_ID,
+  thermostatBase,
   buildHaDiscovery,
   relayHaTopics,
   attributesTopic,
   shutterStateTopic,
   powerSuffix,
+  DEVICE_CLASSES,
   type TasmotaDiscoveryConfig,
-  type DeviceTopics
+  type DeviceTopics,
+  type VoiesMap,
+  type VoieConfig
 } from './ha-discovery';
 import {
   extractTaxonomy,
@@ -45,6 +51,20 @@ import {
   type NameParts
 } from './taxonomy';
 import { buildRuleText, describeTemplates, findTemplate, isRuleActive, RULE_MAX_LENGTH } from './rules';
+import {
+  THERMOSTAT_SCRIPT,
+  THERMOSTAT_VERSION,
+  THERMOSTAT_SCRIPT_PATH,
+  THERMOSTAT_CONFIG_PATH,
+  AUTOEXEC_PATH,
+  AUTOEXEC_TEXT,
+  DIMOTIC_MARK,
+  buildThermostatConfigJson,
+  fileWriteCommands,
+  byteLength,
+  type ThermostatModuleConfig
+} from './thermostat-berry';
+import { buildThermostatRuleText, memBacklog, RULES_MAX_THERMOSTATS } from './thermostat-rules';
 import {
   checkProvisioning,
   scanTasmotaAccessPoints,
@@ -65,6 +85,10 @@ const HA_STATUS_TOPIC = 'homeassistant/status';
 const MODE_SELECT_SOURCE = 'tasmota/select/dimotic_tasmota/mode/config';
 const MODE_SELECT_HA = 'homeassistant/select/dimotic_tasmota/mode/config';
 const MODE_SETTLE_MS = 3000;
+/** dimotic/tasmota/<MAC>/thermostat<n>/(etat|consigne/set|mode/set) — spec v1.4 §7bis.3. */
+const THERMO_TOPIC_RE = /^dimotic\/tasmota\/([0-9A-Fa-f]{12})\/thermostat(\d+)\/(etat|consigne\/set|mode\/set)$/;
+/** Consignes proposées à la création (°C) — les autres modes prennent 19. */
+const DEFAULT_CONSIGNES: Record<string, number> = { 'présence': 19, confort: 21, 'éco': 17, absence: 15 };
 
 /** Modèle officiel Sonoff Basic R4, GPIO5 = MagicSwitch. */
 const TEMPLATE_R4 = '{"NAME":"Sonoff Basic R4","GPIO":[0,0,0,0,224,10560,544,0,0,32,0,0,0,0,0,0,0,0,0,0,0,0],"FLAG":0,"BASE":1}';
@@ -86,6 +110,11 @@ interface DeviceRecord {
   hardware?: string;
   pins?: string[];
   modelFirmware?: string;
+  /** ⭐ 30/09/2026 (spec v1.3 §4.1bis) — voies nommées : une voie = un appareil HA avec sa taxonomie. */
+  voies?: VoiesMap;
+  /** Moteur de thermostat disponible sur ce module (spec v1.4 §7bis.7). */
+  engine?: 'berry' | 'regles' | 'aucun';
+  engineReason?: string;
 }
 
 /** Ce qui est stocké par appareil dans data/tasmota/devices.yaml (spec v1.2 §3.4). */
@@ -97,6 +126,17 @@ interface StoredDevice {
   hardware?: string;
   pins?: string[];
   modelFirmware?: string;
+  voies?: VoiesMap;
+  engine?: 'berry' | 'regles' | 'aucun';
+  engineReason?: string;
+}
+
+/** Mesure et relais suivis par l'application pour un thermostat à règles (ESP8266, §7bis.4). */
+interface RulesRuntime {
+  temperature?: number;
+  measuredAt: number;
+  heating?: boolean;
+  sig?: string;
 }
 
 interface Waiter {
@@ -121,6 +161,11 @@ export class TasmotaService implements ITasmotaService {
   private readonly devicesPath: string;
   private saveDevicesTimer?: NodeJS.Timeout;
   private readonly modelReading = new Set<string>();
+  /** Dernier état reçu de chaque thermostat (`<MAC>:<n>`) — publié par le module (Berry) ou par nous (règles). */
+  private readonly thermoStates = new Map<string, Record<string, unknown>>();
+  private readonly rulesRuntime = new Map<string, RulesRuntime>();
+  private thermoTimer?: NodeJS.Timeout;
+  private readonly thermoBusy = new Set<string>();
   private rules: RulesFile;
   private readonly devices = new Map<string, DeviceRecord>();
   private readonly subscribed = new Set<string>();
@@ -207,7 +252,7 @@ export class TasmotaService implements ITasmotaService {
     if (existing?.online) return;
     const cfg = { ...d.cfg, mac };
     const device: DeviceRecord = existing ?? { mac, cfg, topics: deviceTopics(cfg), lastSeen: d.lastSeen, haTopics: new Set() };
-    Object.assign(device, { cfg, topics: deviceTopics(cfg), sn: d.sn, lastSeen: d.lastSeen, model: d.model, hardware: d.hardware, pins: d.pins, modelFirmware: d.modelFirmware });
+    Object.assign(device, { cfg, topics: deviceTopics(cfg), sn: d.sn, lastSeen: d.lastSeen, model: d.model, hardware: d.hardware, pins: d.pins, modelFirmware: d.modelFirmware, voies: d.voies, engine: d.engine, engineReason: d.engineReason });
     this.devices.set(mac, device);
     if (this.connected) {
       this.subscribeDevice(device);
@@ -246,7 +291,9 @@ export class TasmotaService implements ITasmotaService {
     for (const d of [...this.devices.values()].sort((a, b) => a.mac.localeCompare(b.mac))) {
       out[d.mac] = { cfg: d.cfg, ...(d.sn ? { sn: d.sn } : {}), lastSeen: d.lastSeen,
         ...(d.model ? { model: d.model } : {}), ...(d.hardware ? { hardware: d.hardware } : {}),
-        ...(d.pins ? { pins: d.pins } : {}), ...(d.modelFirmware ? { modelFirmware: d.modelFirmware } : {}) };
+        ...(d.pins ? { pins: d.pins } : {}), ...(d.modelFirmware ? { modelFirmware: d.modelFirmware } : {}),
+        ...(d.voies && Object.keys(d.voies).length ? { voies: d.voies } : {}),
+        ...(d.engine ? { engine: d.engine } : {}), ...(d.engineReason ? { engineReason: d.engineReason } : {}) };
     }
     try {
       fs.mkdirSync(this.dataDir, { recursive: true });
@@ -261,7 +308,10 @@ export class TasmotaService implements ITasmotaService {
   /** Modèle, puce et contenu du modèle lus par MQTT — quand ils manquent ou que le firmware a changé. */
   private async readModel(device: DeviceRecord, force = false): Promise<void> {
     if (this.modelReading.has(device.mac)) return;
-    if (!force && device.model && device.pins && device.modelFirmware === device.cfg.sw) return;
+    if (!force && device.model && device.pins && device.modelFirmware === device.cfg.sw) {
+      if (!device.engine) await this.detectEngine(device);
+      return;
+    }
     this.modelReading.add(device.mac);
     try {
       const mod = await this.query<Record<string, string>>(device, 'Module', 5000);
@@ -277,11 +327,41 @@ export class TasmotaService implements ITasmotaService {
         Object.entries(role ?? {}).filter(([, code]) => code !== 0).map(([name]) => `${pin} : ${name}`));
       if (fwr?.Hardware) device.hardware = String(fwr.Hardware);
       device.modelFirmware = device.cfg.sw;
+      await this.detectEngine(device);
       this.logger.info('TasmotaService', `${this.label(device)} : modèle ${device.model ?? '?'} (${device.hardware ?? '?'}) — ${(device.pins ?? []).join(', ') || 'aucune broche'}`);
       this.scheduleSaveDevices();
       this.scheduleEmit();
     } finally {
       this.modelReading.delete(device.mac);
+    }
+  }
+
+  /**
+   * ⭐ 30/09/2026 (spec v1.4 §7bis.7) — quel moteur de thermostat ce module peut-il porter ? Berry + système
+   * de fichiers (ESP32 standard) ; sinon les règles (ESP8266 standard) ; sinon aucun (firmware lite / minimal).
+   */
+  private async detectEngine(device: DeviceRecord): Promise<void> {
+    const br = await this.commandAndWait<Record<string, unknown>>(device, 'Br', 'return 1+1',
+      (suffix, body) => suffix === 'RESULT' && body && typeof body === 'object' && ('Br' in (body as object) || (body as { Command?: string }).Command === 'Unknown')
+        ? body as Record<string, unknown> : undefined, 5000);
+    if (!br) return; // pas de réponse (hors ligne) : on ne sait pas, on réessaiera
+    let engine: DeviceRecord['engine'];
+    let reason: string | undefined;
+    if ('Br' in br) {
+      const ufs = await this.query<number>(device, 'UfsType', 4000);
+      if (typeof ufs === 'number' && ufs > 0) engine = 'berry';
+      else { engine = 'aucun'; reason = 'Berry présent mais pas de système de fichiers'; }
+    } else {
+      const rule = await this.query<unknown>(device, 'Rule1', 4000);
+      if (rule) engine = 'regles';
+      else { engine = 'aucun'; reason = 'ni Berry ni règles (firmware « lite » ou « minimal » ?)'; }
+    }
+    if (device.engine !== engine || device.engineReason !== reason) {
+      device.engine = engine;
+      device.engineReason = reason;
+      this.logger.info('TasmotaService', `${this.label(device)} : moteur de thermostat ${engine}${reason ? ` (${reason})` : ''}`);
+      this.scheduleSaveDevices();
+      this.scheduleEmit();
     }
   }
 
@@ -293,6 +373,7 @@ export class TasmotaService implements ITasmotaService {
       this.haBridge.start().then(() => this.scheduleEmit()).catch((error) => this.logger.warn('TasmotaService', `Référentiel HA indisponible : ${error}`));
     }
     void this.refreshProvisionCheck();
+    this.thermoTimer = setInterval(() => this.checkRulesMute(), 60_000);
     this.scheduleEmit();
   }
 
@@ -303,6 +384,7 @@ export class TasmotaService implements ITasmotaService {
       this.saveDevices();
     }
     for (const t of [this.emitTimer, this.modeSettleTimer]) if (t) clearTimeout(t);
+    if (this.thermoTimer) clearInterval(this.thermoTimer);
     for (const w of this.waiters) clearTimeout(w.timer);
     this.waiters = [];
     this.eventBus.emitGeneric('integration:bridge:unregister', { moduleName: MODULE_NAME, bridgeInstance: this.bridgeInstance });
@@ -318,9 +400,13 @@ export class TasmotaService implements ITasmotaService {
         return;
       }
       this.subscribed.clear();
-      for (const topic of ['tasmota/discovery/+/config', 'tasmota/discovery/+/sensors', HA_STATUS_TOPIC, MODE_TOPIC, MODE_SET_TOPIC]) {
+      for (const topic of ['tasmota/discovery/+/config', 'tasmota/discovery/+/sensors', HA_STATUS_TOPIC, MODE_TOPIC, MODE_SET_TOPIC,
+        'dimotic/tasmota/+/+/etat', 'dimotic/tasmota/+/+/consigne/set', 'dimotic/tasmota/+/+/mode/set']) {
         this.subscribe(topic);
       }
+      // ⭐ 30/09/2026 (spec v1.4 §7bis.3) — le broker repart vide à chaque redémarrage : le mode courant
+      // est republié (retenu) à chaque connexion, pour que les thermostats des modules le retrouvent.
+      if (this.currentMode) this.publish(MODE_TOPIC, this.currentMode, true);
       // Broker peut-être reparti vide (persistance désactivée) : les entités HA des appareils connus
       // sont republiées à chaque connexion, y compris ceux qui sont débranchés (spec v1.2 §3.4).
       for (const device of this.devices.values()) {
@@ -378,6 +464,8 @@ export class TasmotaService implements ITasmotaService {
     on<{ scan?: boolean }>(TASMOTA_CLIENT_EVENTS.PROVISION_CHECK, (d) => this.refreshProvisionCheck(!!d?.scan));
     on<{ ssid: string }>(TASMOTA_CLIENT_EVENTS.PROVISION_START, (d) => this.startProvisioning(String(d?.ssid ?? '')));
     on(TASMOTA_CLIENT_EVENTS.NETWORK_SCAN, () => this.scanNetwork());
+    on<{ mac: string; voies: unknown }>(TASMOTA_CLIENT_EVENTS.VOIES_SAVE, (d) => this.saveVoies(String(d?.mac ?? ''), d?.voies));
+    on<{ mac: string; thermostats: unknown }>(TASMOTA_CLIENT_EVENTS.THERMOSTATS_SAVE, (d) => this.saveThermostats(String(d?.mac ?? ''), d?.thermostats));
     on<{ ip: string }>(TASMOTA_CLIENT_EVENTS.NETWORK_POINT, (d) => this.pointDeviceToBroker(String(d?.ip ?? '')));
 
     // --- Requêtes corrélées (ia, §8) ---
@@ -388,6 +476,11 @@ export class TasmotaService implements ITasmotaService {
       this.defineRuleFromRequest(req)
         .then((result) => this.eventBus.emitGeneric(`${TASMOTA_REQUEST_EVENTS.RULE_DEFINE}:reply`, { correlation_id: req?.correlation_id, ...result }))
         .catch((error) => this.eventBus.emitGeneric(`${TASMOTA_REQUEST_EVENTS.RULE_DEFINE}:reply`, { correlation_id: req?.correlation_id, accepted: false, reason: String(error instanceof Error ? error.message : error) }));
+    });
+    this.eventBus.onGeneric<ThermostatSetRequest>(TASMOTA_REQUEST_EVENTS.THERMOSTAT_SET, (req) => {
+      this.thermostatSetFromRequest(req)
+        .then((result) => this.eventBus.emitGeneric(`${TASMOTA_REQUEST_EVENTS.THERMOSTAT_SET}:reply`, { correlation_id: req?.correlation_id, ...result }))
+        .catch((error) => this.eventBus.emitGeneric(`${TASMOTA_REQUEST_EVENTS.THERMOSTAT_SET}:reply`, { correlation_id: req?.correlation_id, accepted: false, reason: String(error instanceof Error ? error.message : error) }));
     });
     this.eventBus.onGeneric<{ correlation_id: string; mode: string }>(TASMOTA_REQUEST_EVENTS.MODE_SET, (req) => {
       const reason = this.setMode(String(req?.mode ?? ''), 'ia');
@@ -466,6 +559,11 @@ export class TasmotaService implements ITasmotaService {
     if (m) return this.onDiscoveryConfig(m[1].toUpperCase(), raw);
     m = DISCOVERY_SENSORS_RE.exec(topic);
     if (m) return this.onDiscoverySensors(m[1].toUpperCase(), raw);
+    const thermo = THERMO_TOPIC_RE.exec(topic);
+    if (thermo) {
+      void this.onThermostatTopic(thermo[1].toUpperCase(), Number(thermo[2]), thermo[3], raw).catch((e) => this.logger.warn('TasmotaService', `Thermostat ${topic} : ${e}`));
+      return;
+    }
     if (topic === HA_STATUS_TOPIC) {
       if (raw.trim() === 'online') {
         this.logger.info('TasmotaService', 'HA en ligne : états des relais redemandés');
@@ -516,12 +614,14 @@ export class TasmotaService implements ITasmotaService {
       device.online = online;
       if (cameOnline) {
         void this.enforceModeOnDevice(device, 'retour en ligne');
+        void this.enforceThermostats(device, 'retour en ligne');
         void this.readModel(device);
       }
       this.scheduleEmit();
     } else if (body && typeof body === 'object') {
       this.relayShutterState(device, body as Record<string, unknown>, suffix);
     }
+    this.trackRulesThermostats(device, suffix, fromTele, body, raw);
     const key = fromTele ? `tele:${suffix}` : suffix;
     for (const waiter of [...this.waiters]) {
       if (waiter.mac !== device.mac) continue;
@@ -620,10 +720,10 @@ export class TasmotaService implements ITasmotaService {
 
   private publishDevice(device: DeviceRecord): void {
     if (!this.config.publishToHa || !this.connected) return;
-    const built = buildHaDiscovery(device.cfg, device.sn);
+    const built = buildHaDiscovery(device.cfg, device.sn, device.voies);
     if (!built) {
       if (device.haTopics.size) {
-        this.logger.info('TasmotaService', `${device.mac} n'est plus nommé selon la convention : retiré de HA`);
+        this.logger.info('TasmotaService', `${device.mac} n'est plus nommé selon la convention (ni aucune voie) : retiré de HA`);
         this.clearHa(device);
       }
       device.haSignature = undefined;
@@ -633,13 +733,13 @@ export class TasmotaService implements ITasmotaService {
     if (signature === device.haSignature) return;
     device.haSignature = signature;
 
-    const newTopics = new Set(built.entities.map((e) => e.haTopic));
+    const newTopics = new Set([...built.entities.map((e) => e.haTopic), ...built.attributes.map((a) => a.topic)]);
     // Ancien composant d'un relais (switch ↔ light) et entités disparues : effacés.
     const stale = new Set<string>(device.haTopics);
     for (const relay of analyseRelays(device.cfg).relays) for (const t of relayHaTopics(device.mac, relay.index)) stale.add(t);
     for (const topic of stale) if (!newTopics.has(topic)) this.publish(topic, '', true);
 
-    this.publish(attributesTopic(device.mac), built.attributes, true);
+    for (const a of built.attributes) this.publish(a.topic, a.payload, true);
     for (const entity of built.entities) {
       this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:discovery`, {
         bridgeInstance: this.bridgeInstance,
@@ -706,7 +806,10 @@ export class TasmotaService implements ITasmotaService {
     this.modeSeen = true;
     this.publish(MODE_TOPIC, mode, true);
     this.log(`Mode « ${mode} » (depuis ${origin}) : règles mises en conformité`, 'ok');
-    for (const device of this.devices.values()) void this.enforceModeOnDevice(device, `mode ${mode}`);
+    for (const device of this.devices.values()) {
+      void this.enforceModeOnDevice(device, `mode ${mode}`);
+      void this.enforceThermostats(device, `mode ${mode}`);
+    }
     this.scheduleEmit();
     return undefined;
   }
@@ -940,13 +1043,21 @@ export class TasmotaService implements ITasmotaService {
         this.log(`${this.label(device)} : le relais va clignoter 3 fois`, 'ok', device.mac);
         return;
       case 'upgrade': {
-        const reply = await this.query<unknown>(device, 'Upgrade 1', 8000);
+        // ⭐ 30/09/2026 : l'argument va dans le PAYLOAD — « Upgrade 1 » comme nom de topic n'était pas compris du module.
+        const reply = await this.commandAndWait<unknown>(device, 'Upgrade', '1', this.resultKey('Upgrade'), 8000);
         this.log(`${this.label(device)} : mise à jour lancée — ${JSON.stringify(reply ?? 'pas de réponse')}`, reply ? 'ok' : 'error', device.mac);
         return;
       }
       case 'reset': {
-        const reply = await this.query<unknown>(device, 'Reset 1', 8000);
-        this.log(`${this.label(device)} : remise d'usine — ${JSON.stringify(reply ?? 'pas de réponse')} ; l'appareil redevient neuf (point d'accès tasmota-…)`, reply ? 'ok' : 'error', device.mac);
+        // ⭐ 30/09/2026 : les fichiers déposés sont effacés AVANT (Tasmota conserve le système de fichiers) et la
+        // remise d'usine est refusée s'ils ne peuvent pas l'être ; l'état local n'est nettoyé qu'une fois
+        // la remise d'usine confirmée par le module. L'argument va dans le payload (le nom de topic
+        // « Reset 1 » n'était pas compris du module : la commande n'a jamais fonctionné avant ce jour).
+        await this.eraseModuleFiles(device);
+        const reply = await this.commandAndWait<unknown>(device, 'Reset', '1', this.resultKey('Reset'), 8000);
+        if (reply === undefined) throw new Error(`${this.label(device)} : pas de réponse à « Reset 1 » — remise d'usine non confirmée (le module est-il en ligne ?)`);
+        this.dropThermostats(device);
+        this.log(`${this.label(device)} : remise d'usine — ${JSON.stringify(reply)} ; l'appareil redevient neuf (point d'accès tasmota-…)`, 'ok', device.mac);
         return;
       }
       case 'read':
@@ -954,6 +1065,49 @@ export class TasmotaService implements ITasmotaService {
       default:
         throw new Error(`Action inconnue : ${action}`);
     }
+  }
+
+  /**
+   * ⭐ 30/09/2026 (spec v1.3 §4.1bis) — enregistre les voies d'un appareil : chaque voie nommée devient son
+   * propre appareil HA (QUOI et lieu de la voie). L'entrée est le remplacement COMPLET des voies : une
+   * voie absente ou entièrement vidée n'a plus de nom (elle hérite du module, comme avant).
+   */
+  private async saveVoies(mac: string, input: unknown): Promise<void> {
+    const device = this.requireDevice(mac);
+    const known = new Map(listVoies(device.cfg, device.sn).map((v) => [v.id, v]));
+    // Les thermostats se règlent ailleurs (saveThermostats) : leurs entrées sont conservées telles quelles.
+    const next: VoiesMap = {};
+    for (const [id, config] of Object.entries(device.voies ?? {})) if (THERMOSTAT_ID.test(id)) next[id] = config;
+    const rows = (input && typeof input === 'object' ? input : {}) as Record<string, Record<string, unknown>>;
+    for (const [id, raw] of Object.entries(rows)) {
+      const voie = known.get(id);
+      if (!voie) throw new Error(`Voie inconnue : ${id}`);
+      const text = (k: string): string => String(raw?.[k] ?? '').trim();
+      const parts: NameParts = { quoi: text('quoi'), precis: text('precis'), lieu: text('lieu'), pere: text('pere'), grandPere: text('grandPere') };
+      const config: NonNullable<VoiesMap[string]> = {};
+      if (parts.quoi || parts.precis || parts.lieu || parts.pere || parts.grandPere) {
+        if (!parts.quoi || !parts.lieu) throw new Error(`${voie.label} : le QUOI et le lieu sont obligatoires (ou tout vider pour reprendre le nom du module)`);
+        const nom = composeDeviceName(parts);
+        if (nom.length > DEVICE_NAME_MAX) throw new Error(`${voie.label} : nom trop long (${nom.length} > ${DEVICE_NAME_MAX} caractères) : ${nom}`);
+        config.nom = nom;
+      }
+      if (!voie.known) {
+        const deviceClass = text('deviceClass');
+        if (deviceClass && !(DEVICE_CLASSES as readonly string[]).includes(deviceClass)) throw new Error(`${voie.label} : type inconnu « ${deviceClass} »`);
+        const unit = text('unit');
+        if (unit.length > 12) throw new Error(`${voie.label} : unité trop longue`);
+        if (deviceClass) config.deviceClass = deviceClass;
+        if (unit) config.unit = unit;
+      }
+      if (config.nom || config.deviceClass || config.unit) next[id] = config;
+    }
+    device.voies = Object.keys(next).length ? next : undefined;
+    device.haSignature = undefined;
+    this.publishDevice(device);
+    this.scheduleSaveDevices();
+    this.scheduleEmit();
+    const named = Object.values(next).filter((v) => v.nom).length;
+    this.log(`${this.label(device)} : ${named} voie(s) nommée(s) sur ${known.size}`, 'ok', device.mac);
   }
 
   private forgetDevice(mac: string): void {
@@ -1058,10 +1212,438 @@ export class TasmotaService implements ITasmotaService {
           relays: analyseRelays(d.cfg).relays.map((r) => r.index + 1),
           shutters: analyseRelays(d.cfg).shutters.map((s) => s.number),
           sensors: analyseSensors(d.sn).map((s) => `${s.group}#${s.measure}`),
-          freeSlots: [1, 2, 3].filter((k) => !used.includes(k))
+          freeSlots: [1, 2, 3].filter((k) => !used.includes(k)),
+          thermostats: this.thermostatKeys(d).map((id) => {
+            const st = this.thermoStates.get(`${d.mac}:${this.numberOf(id)}`);
+            return { thermostat: this.numberOf(id), name: d.voies![id].nom, consigne: st?.consigne, mode: st?.mode, action: st?.action, defaut: st?.defaut };
+          })
         };
       })
     };
+  }
+
+  // ==========================================================================
+  // Thermostats (spec v1.4 §7bis)
+  // ==========================================================================
+
+  private thermostatKeys(device: DeviceRecord): string[] {
+    return Object.entries(device.voies ?? {}).filter(([id, c]) => THERMOSTAT_ID.test(id) && c.relais).map(([id]) => id);
+  }
+
+  private numberOf(id: string): number {
+    return Number(THERMOSTAT_ID.exec(id)?.[1] ?? 0);
+  }
+
+  private currentModeName(): string {
+    return this.currentMode ?? this.config.modes[0];
+  }
+
+  /** Valeur de la clé `Br` renvoyée par le module. */
+  private brCommand(device: DeviceRecord, code: string, timeoutMs = 8000): Promise<unknown> {
+    return this.commandAndWait<unknown>(device, 'Br', code, this.resultKey('Br'), timeoutMs);
+  }
+
+  /**
+   * Enregistre les thermostats d'un module : contrôle, dépôt sur le module (Berry : fichiers ; règles :
+   * règle et mémoires), puis publication. L'entrée remplace TOUS les thermostats du module ; une entrée
+   * vide supprime le thermostat. En cas d'échec du dépôt, l'ancien état est rétabli.
+   */
+  private async saveThermostats(mac: string, input: unknown): Promise<void> {
+    const device = this.requireDevice(mac);
+    if (this.thermoBusy.has(device.mac)) throw new Error(`${this.label(device)} : un dépôt de thermostat est déjà en cours`);
+    this.thermoBusy.add(device.mac);
+    const before = device.voies ? JSON.parse(JSON.stringify(device.voies)) as VoiesMap : undefined;
+    try {
+      if (!device.engine) await this.detectEngine(device);
+      if (device.engine !== 'berry' && device.engine !== 'regles') {
+        throw new Error(`Thermostat indisponible : ${device.engineReason ?? 'moteur non détecté (module hors ligne ?)'}`);
+      }
+      const rows = (input && typeof input === 'object' ? input : {}) as Record<string, Record<string, unknown> | null>;
+      const infos = listVoies(device.cfg, device.sn, device.voies);
+      const relays = new Set(analyseRelays(device.cfg).relays.map((r) => r.index + 1));
+      const temperatureSensors = new Set(analyseSensors(device.sn).filter((x) => x.measure === 'Temperature').map((x) => x.voieId));
+      const next: VoiesMap = {};
+      for (const [id, config] of Object.entries(device.voies ?? {})) if (!THERMOSTAT_ID.test(id)) next[id] = config;
+      const usedRelays = new Set<number>();
+      let count = 0;
+      for (const [id, raw] of Object.entries(rows)) {
+        if (!raw) continue;
+        if (!THERMOSTAT_ID.test(id) || this.numberOf(id) < 1) throw new Error(`Thermostat inconnu : ${id}`);
+        const label = `Thermostat ${this.numberOf(id)}`;
+        const text = (k: string): string => String(raw[k] ?? '').trim();
+        const parts: NameParts = { quoi: text('quoi') || 'thermostat', precis: text('precis'), lieu: text('lieu'), pere: text('pere'), grandPere: text('grandPere') };
+        if (!parts.lieu) throw new Error(`${label} : le lieu est obligatoire`);
+        const nom = composeDeviceName(parts);
+        if (nom.length > DEVICE_NAME_MAX) throw new Error(`${label} : nom trop long (${nom.length} > ${DEVICE_NAME_MAX} caractères)`);
+        const relais = Number(raw.relais);
+        if (!relays.has(relais)) throw new Error(`${label} : relais ${raw.relais} inexistant sur ce module`);
+        if (usedRelays.has(relais)) throw new Error(`${label} : le relais ${relais} est déjà utilisé par un autre thermostat`);
+        usedRelays.add(relais);
+        const capteur = text('capteur');
+        if (!temperatureSensors.has(capteur)) throw new Error(`${label} : capteur de température inconnu (${capteur || 'vide'})`);
+        const number = (key: string, def: number, min: number, max: number, unit: string): number => {
+          const v = raw[key] === undefined || raw[key] === '' || raw[key] === null ? def : Number(raw[key]);
+          if (!Number.isFinite(v) || v < min || v > max) throw new Error(`${label} : ${key} entre ${min} et ${max} ${unit}`);
+          return v;
+        };
+        const consignes: Record<string, number> = {};
+        for (const mode of this.config.modes) {
+          const given = (raw.consignes as Record<string, unknown> | undefined)?.[mode];
+          const v = given === undefined || given === '' ? (DEFAULT_CONSIGNES[mode] ?? 19) : Number(given);
+          if (!Number.isFinite(v) || v < 5 || v > 30) throw new Error(`${label} : consigne « ${mode} » entre 5 et 30 °C`);
+          consignes[mode] = v;
+        }
+        next[id] = {
+          nom, relais, capteur, consignes,
+          hysteresis: number('hysteresis', 0.5, 0.1, 10, '°C'),
+          minOn: number('minOn', 180, 0, 3600, 's'),
+          minOff: number('minOff', 180, 0, 3600, 's'),
+          capteurMuet: number('capteurMuet', 1800, 300, 86400, 's')
+        };
+        count++;
+      }
+      if (device.engine === 'regles' && count > RULES_MAX_THERMOSTATS) throw new Error(`Ce module (ESP8266, règles) porte ${RULES_MAX_THERMOSTATS} thermostats au plus`);
+      void infos;
+      const removed = this.thermostatKeys(device).filter((id) => !next[id]);
+      device.voies = Object.keys(next).length ? next : undefined;
+      if (device.engine === 'berry') await this.deployBerry(device);
+      else await this.deployRules(device, removed);
+      for (const id of removed) this.publish(`${thermostatBase(device.mac, this.numberOf(id))}/etat`, '', true);
+      device.haSignature = undefined;
+      this.publishDevice(device);
+      this.scheduleSaveDevices();
+      this.scheduleEmit();
+      this.log(`${this.label(device)} : ${count} thermostat(s) enregistré(s) (${device.engine === 'berry' ? 'Berry' : 'règles'})`, 'ok', device.mac);
+    } catch (error) {
+      device.voies = before;
+      device.haSignature = undefined;
+      this.publishDevice(device);
+      throw error;
+    } finally {
+      this.thermoBusy.delete(device.mac);
+    }
+  }
+
+  /** Configuration de chaque thermostat telle que le module Berry la reçoit. */
+  private moduleConfigs(device: DeviceRecord): ThermostatModuleConfig[] {
+    const sensors = analyseSensors(device.sn);
+    const out: ThermostatModuleConfig[] = [];
+    for (const id of this.thermostatKeys(device)) {
+      const c = device.voies![id];
+      const sensor = sensors.find((x) => x.voieId === c.capteur);
+      if (!sensor) continue;
+      const n = this.numberOf(id);
+      out.push({
+        n, base: thermostatBase(device.mac, n), relais: c.relais as number, group: sensor.group, id: sensor.sensorId ?? '', measure: sensor.measure,
+        hysteresis: c.hysteresis ?? 0.5, consignes: c.consignes ?? {}, minOn: c.minOn ?? 180, minOff: c.minOff ?? 180,
+        capteurMuet: c.capteurMuet ?? 1800, modeDefaut: this.config.modes[0]
+      });
+    }
+    return out;
+  }
+
+  /** Écrit un fichier sur le module (par morceaux) et contrôle sa taille. */
+  private async writeModuleFile(device: DeviceRecord, path: string, content: string): Promise<void> {
+    for (const code of fileWriteCommands(path, content)) {
+      if (await this.brCommand(device, code) === undefined) throw new Error(`Écriture de ${path} : pas de réponse du module`);
+    }
+    const size = await this.brCommand(device, `var f=open('${path}','r'); var n=f.size(); f.close(); return n`);
+    if (Number(size) !== byteLength(content)) throw new Error(`${path} : ${size} octets dans le module, ${byteLength(content)} attendus`);
+  }
+
+  /** Version du moteur en marche sur le module, d'après les états reçus (y compris ceux de thermostats qu'on vient de retirer). */
+  private runningVersion(device: DeviceRecord): number | undefined {
+    for (const [key, state] of this.thermoStates) {
+      if (key.startsWith(`${device.mac}:`) && typeof state.version === 'number') return state.version;
+    }
+    return undefined;
+  }
+
+  /** Dépôt Berry : programme + autoexec (si absent ou périmé), configuration, puis activation. */
+  private async deployBerry(device: DeviceRecord): Promise<void> {
+    const mac = device.mac;
+    const log = (m: string, level: LogLevel = 'info'): void => this.log(m, level, mac);
+    const running = this.runningVersion(device);
+    // Rien à retirer d'un module où le moteur n'a jamais été déposé.
+    if (running === undefined && this.moduleConfigs(device).length === 0) return;
+    const needScript = running !== THERMOSTAT_VERSION;
+    if (needScript) {
+      // Un autoexec.be qui n'est pas le nôtre appartient à l'utilisateur : jamais écrasé.
+      if (String(await this.brCommand(device, "import path; return path.exists('/autoexec.be')")) === 'true') {
+        const current = String(await this.brCommand(device, "var f=open('/autoexec.be','r'); var s=f.read(); f.close(); return s") ?? '');
+        if (!current.includes(DIMOTIC_MARK)) {
+          throw new Error(`${AUTOEXEC_PATH} existe déjà sur le module et n'est pas géré par dimotic-ha : y ajouter à la main la ligne tasmota.load('${THERMOSTAT_SCRIPT_PATH}')`);
+        }
+      }
+      log(`Dépôt du moteur de thermostat (version ${THERMOSTAT_VERSION}, ${byteLength(THERMOSTAT_SCRIPT)} octets)…`);
+      await this.writeModuleFile(device, THERMOSTAT_SCRIPT_PATH, THERMOSTAT_SCRIPT);
+      await this.writeModuleFile(device, AUTOEXEC_PATH, AUTOEXEC_TEXT);
+    }
+    await this.writeModuleFile(device, THERMOSTAT_CONFIG_PATH, buildThermostatConfigJson(this.moduleConfigs(device)));
+    if (!needScript) {
+      const ok = await this.brCommand(device, 'import global; return global.dimotic_thermo.load_config(true)');
+      if (String(ok) !== 'true') throw new Error(`Rechargement de la configuration refusé par le module (${ok})`);
+      log('Configuration rechargée sans redémarrage', 'ok');
+    } else if (running !== undefined) {
+      // Ancienne version en marche : redémarrage pour repartir proprement (abonnements, minuteries).
+      log('Nouvelle version du moteur : redémarrage du module…');
+      const back = this.waitOnline(device, 90_000);
+      this.command(device, 'Restart', '1');
+      if (!(await back)) throw new Error('Pas de retour en ligne après le redémarrage (90 s)');
+    } else {
+      const loaded = await this.brCommand(device, `return tasmota.load('${THERMOSTAT_SCRIPT_PATH}')`);
+      if (String(loaded) !== 'true') throw new Error(`Chargement du moteur refusé par le module (${loaded}) : voir la console du module`);
+    }
+    // Contrôle : le module publie son état (version comprise).
+    const deadline = Date.now() + 25_000;
+    const wanted = this.thermostatKeys(device).map((id) => `${mac}:${this.numberOf(id)}`);
+    while (Date.now() < deadline) {
+      if (wanted.every((k) => this.thermoStates.get(k)?.version === THERMOSTAT_VERSION)) {
+        log('Moteur actif : état reçu du module', 'ok');
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    log('⚠️ Pas d’état reçu du module en 25 s : vérifier la connexion MQTT du module', 'error');
+  }
+
+  // ---- moteur à règles (ESP8266, §7bis.4) ------------------------------------------------------------
+
+  private freeRuleSlot(device: DeviceRecord, id: string): number {
+    const used = new Set<number>((this.rules[device.mac] ?? []).map((r) => r.slot));
+    for (const other of this.thermostatKeys(device)) if (other !== id && device.voies![other].regleSlot) used.add(device.voies![other].regleSlot as number);
+    const own = device.voies?.[id]?.regleSlot;
+    if (own && !used.has(own)) return own;
+    const slot = [1, 2, 3].find((k) => !used.has(k));
+    if (!slot) throw new Error('Plus d’emplacement de règle libre (Rule1 à Rule3 occupées)');
+    return slot;
+  }
+
+  private async deployRules(device: DeviceRecord, removed: string[]): Promise<void> {
+    for (const id of removed) {
+      const old = this.lastRuleSlot.get(`${device.mac}:${id}`);
+      if (old) {
+        this.command(device, `Rule${old}`, '"');
+        this.command(device, `Rule${old}`, '0');
+        this.lastRuleSlot.delete(`${device.mac}:${id}`);
+      }
+      this.rulesRuntime.delete(`${device.mac}:${this.numberOf(id)}`);
+      this.thermoStates.delete(`${device.mac}:${this.numberOf(id)}`);
+    }
+    const sensors = analyseSensors(device.sn);
+    for (const id of this.thermostatKeys(device)) {
+      const c = device.voies![id];
+      const sensor = sensors.find((x) => x.voieId === c.capteur)!;
+      c.regleSlot = this.freeRuleSlot(device, id);
+      const text = buildThermostatRuleText({ n: this.numberOf(id), relais: c.relais as number, group: sensor.group, measure: sensor.measure, capteurMuet: c.capteurMuet ?? 1800 });
+      this.log(`Rule${c.regleSlot} (thermostat ${this.numberOf(id)}) : ${text}`, 'info', device.mac);
+      const written = await this.commandAndWait<{ Rules?: string }>(device, `Rule${c.regleSlot}`, text, this.resultKey(`Rule${c.regleSlot}`));
+      const norm = (t: string): string => t.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (!written || norm(written.Rules ?? '') !== norm(text)) throw new Error(`Rule${c.regleSlot} : relecture non conforme (règle refusée ou module muet)`);
+      this.lastRuleSlot.set(`${device.mac}:${id}`, c.regleSlot);
+    }
+    await this.enforceThermostats(device, 'enregistrement');
+  }
+
+  /** Mémoires (seuils), activation de la règle et état HA, selon le mode de la maison et le mode du thermostat. */
+  private async enforceThermostats(device: DeviceRecord, why: string): Promise<void> {
+    if (device.engine !== 'regles' || device.online === false) return;
+    for (const id of this.thermostatKeys(device)) {
+      const c = device.voies![id];
+      if (!c.regleSlot) continue;
+      const n = this.numberOf(id);
+      if (c.arret) {
+        this.command(device, `Rule${c.regleSlot}`, '0');
+        this.command(device, `Power${c.relais}`, '0');
+      } else {
+        const goal = c.consignes?.[this.currentModeName()] ?? 19;
+        this.command(device, 'Backlog', memBacklog(n, goal, c.hysteresis ?? 0.5).replace(/^Backlog /, ''));
+        this.command(device, `Rule${c.regleSlot}`, '1');
+      }
+      this.publishRulesState(device, id);
+    }
+    this.logger.info('TasmotaService', `${device.mac} : thermostats à règles remis en conformité (${why})`);
+  }
+
+  private readonly lastRuleSlot = new Map<string, number>();
+
+  /** Mesure et relais suivis pour publier l'état des thermostats à règles. */
+  private trackRulesThermostats(device: DeviceRecord, suffix: string, fromTele: boolean, body: unknown, raw: string): void {
+    if (device.engine !== 'regles') return;
+    const ids = this.thermostatKeys(device);
+    if (!ids.length) return;
+    const power = !fromTele ? /^POWER(\d*)$/.exec(suffix) : null;
+    for (const id of ids) {
+      const c = device.voies![id];
+      const key = `${device.mac}:${this.numberOf(id)}`;
+      const run = this.rulesRuntime.get(key) ?? { measuredAt: Date.now() };
+      let changed = false;
+      if (fromTele && suffix === 'SENSOR' && body && typeof body === 'object') {
+        const sensor = analyseSensors(body as Record<string, unknown>).find((x) => x.voieId === c.capteur);
+        const value = sensor ? ((body as Record<string, Record<string, unknown>>)[sensor.group]?.[sensor.measure]) : undefined;
+        if (typeof value === 'number' && value > -30 && value < 90 && value !== 85) {
+          run.temperature = value;
+          run.measuredAt = Date.now();
+          changed = true;
+        }
+      }
+      if (power && (power[1] ? Number(power[1]) : 1) === c.relais) {
+        run.heating = raw.trim().toUpperCase() === 'ON';
+        changed = true;
+      }
+      this.rulesRuntime.set(key, run);
+      if (changed) this.publishRulesState(device, id);
+    }
+  }
+
+  private publishRulesState(device: DeviceRecord, id: string): void {
+    const c = device.voies?.[id];
+    if (!c) return;
+    const n = this.numberOf(id);
+    const key = `${device.mac}:${n}`;
+    const run = this.rulesRuntime.get(key) ?? { measuredAt: Date.now() };
+    const mode = this.currentModeName();
+    const silent = Date.now() - run.measuredAt > (c.capteurMuet ?? 1800) * 1000;
+    const state: Record<string, unknown> = {
+      moteur: 'regles',
+      temperature: run.temperature ?? null,
+      consigne: c.consignes?.[mode] ?? 19,
+      consignes: c.consignes ?? {},
+      mode: c.arret ? 'off' : 'heat',
+      mode_maison: mode,
+      action: c.arret || silent ? 'off' : run.heating ? 'heating' : 'idle'
+    };
+    if (silent && !c.arret) state.defaut = 'capteur_muet';
+    const sig = JSON.stringify(state);
+    if (sig === run.sig) return;
+    run.sig = sig;
+    this.rulesRuntime.set(key, run);
+    this.thermoStates.set(key, state);
+    this.publish(`${thermostatBase(device.mac, n)}/etat`, state, true);
+    this.scheduleEmit();
+  }
+
+  private checkRulesMute(): void {
+    for (const device of this.devices.values()) {
+      if (device.engine !== 'regles') continue;
+      for (const id of this.thermostatKeys(device)) this.publishRulesState(device, id);
+    }
+  }
+
+  /** Commandes de HA pour un thermostat à règles (le module Berry, lui, les reçoit directement). */
+  private async onThermostatTopic(mac: string, n: number, kind: string, raw: string): Promise<void> {
+    const device = this.devices.get(mac);
+    if (!device) return;
+    const id = `thermostat${n}`;
+    const key = `${mac}:${n}`;
+    if (kind === 'etat') {
+      if (!raw.trim()) {
+        this.thermoStates.delete(key);
+        this.scheduleEmit();
+        return;
+      }
+      let state: Record<string, unknown>;
+      try {
+        state = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      if (state.moteur === 'regles') return; // notre propre republication
+      this.thermoStates.set(key, state);
+      // Consignes réglées depuis HA : la configuration enregistrée suit le module (source de vérité).
+      const c = device.voies?.[id];
+      if (c && state.consignes && typeof state.consignes === 'object') {
+        const next = state.consignes as Record<string, number>;
+        if (JSON.stringify(next) !== JSON.stringify(c.consignes ?? {})) {
+          c.consignes = next;
+          this.scheduleSaveDevices();
+        }
+      }
+      this.scheduleEmit();
+      return;
+    }
+    if (device.engine !== 'regles') return;
+    const c = device.voies?.[id];
+    if (!c) return;
+    if (kind === 'consigne/set') {
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value < 5 || value > 30) {
+        this.logger.warn('TasmotaService', `${mac} thermostat ${n} : consigne refusée (${raw})`);
+        return;
+      }
+      c.consignes = { ...(c.consignes ?? {}), [this.currentModeName()]: value };
+      this.scheduleSaveDevices();
+    } else {
+      const mode = raw.trim();
+      if (mode !== 'heat' && mode !== 'off') return;
+      c.arret = mode === 'off';
+      this.scheduleSaveDevices();
+    }
+    await this.enforceThermostats(device, `commande HA (${kind})`);
+  }
+
+  /** Remise d'usine, 1re étape : efface les fichiers déposés sur le module (Berry). Lève une erreur si l'un d'eux ne s'efface pas. */
+  private async eraseModuleFiles(device: DeviceRecord): Promise<void> {
+    if (device.engine !== 'berry') return;
+    const exists = async (path: string): Promise<boolean> => String(await this.brCommand(device, `import path; return path.exists('${path}')`)) === 'true';
+    const paths = [THERMOSTAT_SCRIPT_PATH, THERMOSTAT_CONFIG_PATH];
+    if (await exists(AUTOEXEC_PATH)) {
+      const current = String(await this.brCommand(device, `var f=open('${AUTOEXEC_PATH}','r'); var s=f.read(); f.close(); return s`) ?? '');
+      if (current.includes(DIMOTIC_MARK)) paths.push(AUTOEXEC_PATH);
+      else this.log(`${AUTOEXEC_PATH} n'est pas géré par dimotic-ha : conservé`, 'info', device.mac);
+    }
+    // La mémoire persistante de Berry (clé `dt` : mode, consignes réglées depuis HA) survit aussi à la remise d'usine.
+    await this.brCommand(device, "import persist; persist.remove('dt'); persist.save(); return 'ok'");
+    for (const path of paths) {
+      if (!(await exists(path))) continue;
+      const reply = await this.commandAndWait<string>(device, 'UfsDelete', path, this.resultKey('UfsDelete'), 5000);
+      if (reply !== 'Done') throw new Error(`${path} : effacement impossible (${reply ?? 'pas de réponse'}) — remise d'usine annulée pour ne pas laisser un thermostat orphelin`);
+      this.log(`${path} effacé`, 'ok', device.mac);
+    }
+  }
+
+  /** Remise d'usine, 2e étape (confirmée) : les thermostats du module disparaissent de la liste et de HA. */
+  private dropThermostats(device: DeviceRecord): void {
+    const ids = this.thermostatKeys(device);
+    for (const id of ids) {
+      this.publish(`${thermostatBase(device.mac, this.numberOf(id))}/etat`, '', true);
+      this.thermoStates.delete(`${device.mac}:${this.numberOf(id)}`);
+      this.rulesRuntime.delete(`${device.mac}:${this.numberOf(id)}`);
+    }
+    if (ids.length) {
+      const next: VoiesMap = {};
+      for (const [id, config] of Object.entries(device.voies ?? {})) if (!THERMOSTAT_ID.test(id)) next[id] = config;
+      device.voies = Object.keys(next).length ? next : undefined;
+      device.haSignature = undefined;
+      this.publishDevice(device);
+      this.scheduleSaveDevices();
+    }
+    device.engine = undefined;
+  }
+
+  /** Requête d'ia (§7bis.6) : consigne, mode du thermostat ou mode de la maison. */
+  private async thermostatSetFromRequest(req: ThermostatSetRequest): Promise<{ accepted: boolean; reason?: string }> {
+    const device = this.findDevice(String(req?.device ?? ''));
+    if (!device) return { accepted: false, reason: `Appareil inconnu : ${req?.device}` };
+    if (device.online === false) return { accepted: false, reason: `${this.label(device)} est hors ligne` };
+    const ids = this.thermostatKeys(device);
+    const id = req.thermostat ? `thermostat${Number(req.thermostat)}` : ids[0];
+    if (!id || !ids.includes(id)) return { accepted: false, reason: `Thermostat inconnu sur ${this.label(device)}` };
+    const base = thermostatBase(device.mac, this.numberOf(id));
+    if (req.mode_maison !== undefined) {
+      const reason = this.setMode(String(req.mode_maison), 'ia');
+      if (reason) return { accepted: false, reason };
+    }
+    if (req.consigne !== undefined) {
+      const v = Number(req.consigne);
+      if (!Number.isFinite(v) || v < 5 || v > 30) return { accepted: false, reason: 'Consigne : entre 5 et 30 °C' };
+      this.publish(`${base}/consigne/set`, String(v));
+    }
+    if (req.mode !== undefined) {
+      if (req.mode !== 'heat' && req.mode !== 'off') return { accepted: false, reason: 'Mode : heat ou off' };
+      this.publish(`${base}/mode/set`, req.mode);
+    }
+    return { accepted: true };
   }
 
   // ==========================================================================
@@ -1248,6 +1830,20 @@ export class TasmotaService implements ITasmotaService {
         hardware: d.hardware,
         pins: d.pins,
         lastSeen: d.lastSeen,
+        engine: d.engine,
+        engineReason: d.engineReason,
+        voies: listVoies(d.cfg, d.sn, d.voies).filter((v) => v.kind !== 'thermostat').map((v) => {
+          const c = d.voies?.[v.id];
+          return { ...v, nom: c?.nom ?? '', parts: c?.nom ? splitDeviceName(c.nom) : undefined, deviceClass: c?.deviceClass, customUnit: c?.unit };
+        }),
+        thermostats: listVoies(d.cfg, d.sn, d.voies).filter((v) => v.kind === 'thermostat').map((v) => {
+          const c = d.voies?.[v.id] as VoieConfig;
+          return {
+            id: v.id, n: v.number, nom: c.nom ?? '', parts: c.nom ? splitDeviceName(c.nom) : undefined, relais: c.relais, capteur: c.capteur,
+            hysteresis: c.hysteresis ?? 0.5, consignes: c.consignes ?? {}, minOn: c.minOn ?? 180, minOff: c.minOff ?? 180, capteurMuet: c.capteurMuet ?? 1800,
+            state: this.thermoStates.get(`${d.mac}:${v.number}`)
+          };
+        }),
         version: d.cfg.sw,
         topic: d.cfg.t,
         site: /^%prefix%\/([^/%]+)\/%topic%\/?$/.exec(d.cfg.ft)?.[1] ?? '',
@@ -1271,6 +1867,8 @@ export class TasmotaService implements ITasmotaService {
       ruleMaxLength: RULE_MAX_LENGTH,
       deviceNameMax: DEVICE_NAME_MAX,
       models: ['ne pas changer', MODEL_R4],
+      defaultConsignes: DEFAULT_CONSIGNES,
+      deviceClasses: [...DEVICE_CLASSES],
       catalogs: this.catalogs(),
       provision: { check: this.provisionCheck, accessPoints: this.accessPoints, running: this.provisioning }
     });
@@ -1285,6 +1883,15 @@ export interface ApplyRequest {
   model?: string;
   magicSwitchPulse?: number | string | null;
   shutter?: { enabled: boolean; open?: number | string; close?: number | string; invert?: boolean };
+}
+
+export interface ThermostatSetRequest {
+  correlation_id: string;
+  device: string;
+  thermostat?: number;
+  consigne?: number;
+  mode?: string;
+  mode_maison?: string;
 }
 
 export interface RuleDefineRequest {
