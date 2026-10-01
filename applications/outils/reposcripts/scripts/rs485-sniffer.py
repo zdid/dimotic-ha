@@ -29,8 +29,18 @@
 #   sudo apt-get install -y python3-serial
 #
 # Usage :
-#   python3 rs485-sniffer.py [device] [baudrate] [bytesize] [parity] [stopbits]
+#   python3 rs485-sniffer.py [device] [baudrate] [bytesize] [parity] [stopbits] [flush_ms]
 #   python3 rs485-sniffer.py /dev/ttyUSB0 9600 8 E 1
+#
+# ⭐ 30/09/2026 (première capture réelle, DDZY422-D2 chez noisy) : DÉCOUPAGE PAR LA STRUCTURE Modbus, plus par
+# le silence. Un adaptateur USB-série livre les octets par paquets de 32 (à 9600 bauds un paquet met déjà 37 ms à
+# arriver) : le délai entre deux morceaux d'une MÊME trame est du même ordre que le silence entre une requête et
+# sa réponse (24 à 35 ms) — aucun seuil de temps ne sépare les deux (avec 4 ms, une réponse de 73 octets sortait
+# en trois « trames » au CRC invalide ; recollées, le CRC était bon). Le script accumule donc les octets et cherche
+# une trame dont la longueur (requête de lecture = 8 octets, réponse = 5 + nombre d'octets annoncé, écriture
+# multiple = 9 + nombre d'octets annoncé, exception = 5) ET le CRC16 sont corrects ; les octets qui ne forment
+# aucune trame sont signalés à part. `flush_ms` (défaut 500) : silence après lequel des octets inutilisables sont
+# abandonnés. Chaque réponse est associée à sa requête (adresse de départ des registres), les textes sont affichés.
 #
 # Valeurs par défaut : /dev/ttyUSB0, 9600, 8, E (paire), 1 — ce sont les
 # paramètres déjà confirmés pour le DDZY422-D2 (guide rapide Solarman +
@@ -55,6 +65,7 @@ baudrate = int(sys.argv[2]) if len(sys.argv) > 2 else 9600
 bytesize = int(sys.argv[3]) if len(sys.argv) > 3 else 8
 parity_arg = (sys.argv[4] if len(sys.argv) > 4 else "E").upper()
 stopbits = int(sys.argv[5]) if len(sys.argv) > 5 else 1
+flush_ms = float(sys.argv[6]) if len(sys.argv) > 6 else 500.0
 
 PARITY_MAP = {"N": serial.PARITY_NONE, "E": serial.PARITY_EVEN, "O": serial.PARITY_ODD}
 STOPBITS_MAP = {1: serial.STOPBITS_ONE, 2: serial.STOPBITS_TWO}
@@ -64,7 +75,8 @@ STOPBITS_MAP = {1: serial.STOPBITS_ONE, 2: serial.STOPBITS_TWO}
 # près pour détecter une coupure de trame.
 bits_per_char = 1 + bytesize + (0 if parity_arg == "N" else 1) + stopbits
 char_time_ms = (bits_per_char / baudrate) * 1000
-silence_threshold_s = max(0.004, (char_time_ms * 3.5) / 1000)
+silence_threshold_s = max(0.004, (char_time_ms * 3.5) / 1000)  # sert de délai de lecture (pas au découpage)
+flush_s = flush_ms / 1000
 
 
 def crc16_modbus(data: bytes) -> int:
@@ -94,7 +106,34 @@ def describe_function(fc: int) -> str:
     return FUNCTION_NAMES.get(fc, f"fonction {fc}")
 
 
+# Dernière requête de lecture vue (adresse de départ, nombre de registres) : sert à situer la réponse suivante.
+pending_read = None
+
+
+def classify(buf: bytes):
+    """('requête' | 'réponse' | None, détail) d'une trame de lecture (3/4) ou d'écriture multiple (16)."""
+    fc = buf[1]
+    if fc in (3, 4):
+        if len(buf) == 8:
+            return "requête", f"lecture de {int.from_bytes(buf[4:6], 'big')} registre(s) à partir de 0x{int.from_bytes(buf[2:4], 'big'):04x}"
+        if len(buf) == 5 + buf[2]:
+            return "réponse", f"{buf[2] // 2} registre(s)"
+    if fc == 16:
+        if len(buf) == 8:
+            return "réponse", f"écriture acquittée à partir de 0x{int.from_bytes(buf[2:4], 'big'):04x}"
+        if len(buf) >= 9 and len(buf) == 9 + buf[6]:
+            return "requête", f"écriture de {int.from_bytes(buf[4:6], 'big')} registre(s) à partir de 0x{int.from_bytes(buf[2:4], 'big'):04x} = {buf[7:-2].hex()}"
+    return None, ""
+
+
+def readable_text(data: bytes):
+    """Chaînes ASCII lisibles (au moins 4 caractères) contenues dans les données, ou None."""
+    parts = [seg.decode("ascii") for seg in data.split(b"\x00") if len(seg) >= 4 and all(32 <= c < 127 for c in seg)]
+    return " | ".join(parts) if parts else None
+
+
 def flush_frame(buf: bytes, frame_count: int) -> int:
+    global pending_read
     if not buf:
         return frame_count
     frame_count += 1
@@ -117,7 +156,45 @@ def flush_frame(buf: bytes, frame_count: int) -> int:
         f"[{now}] #{frame_count} addr={addr} (0x{addr:02x}) fc={fc} ({describe_function(fc)}) "
         f"data={data.hex()} crc={'OK' if crc_ok else 'INVALIDE'} raw={buf.hex()}"
     )
+    if crc_ok:
+        role, detail = classify(buf)
+        if role == "requête" and fc in (3, 4):
+            pending_read = (int.from_bytes(buf[2:4], "big"), int.from_bytes(buf[4:6], "big"))
+        if role:
+            print(f"        ↳ {role} : {detail}")
+        if role == "réponse" and fc in (3, 4) and pending_read and pending_read[1] * 2 == buf[2]:
+            start = pending_read[0]
+            words = [int.from_bytes(buf[3 + i:5 + i], "big") for i in range(0, buf[2], 2)]
+            print("        ↳ registres : " + " ".join(f"{start + i:04x}={w:04x}" for i, w in enumerate(words)))
+            text = readable_text(buf[3:-2])
+            if text:
+                print(f"        ↳ texte : {text}")
+            pending_read = None
     return frame_count
+
+
+def find_frame(buf: bytes):
+    """Longueur de la trame Modbus RTU complète (CRC correct) qui commence au début de `buf`, sinon None."""
+    if len(buf) < 5:
+        return None
+    fc = buf[1]
+    lengths = []
+    if fc & 0x80:
+        lengths.append(5)                      # exception : adresse, code|0x80, code d'erreur, CRC
+    if fc in (3, 4):
+        lengths += [8, 5 + buf[2]]             # requête de lecture ; réponse (octets annoncés)
+    if fc in (5, 6):
+        lengths.append(8)                      # écriture simple : requête et écho identiques
+    if fc == 16:
+        lengths.append(8)                      # acquittement d'écriture multiple
+        if len(buf) >= 7:
+            lengths.append(9 + buf[6])         # requête d'écriture multiple
+    for n in lengths:
+        if len(buf) >= n:
+            crc = crc16_modbus(buf[:n - 2])
+            if crc == (buf[n - 2] | (buf[n - 1] << 8)):
+                return n
+    return None
 
 
 def main():
@@ -140,22 +217,44 @@ def main():
     frame_count = 0
     last_byte_time = time.monotonic()
 
+    def drain(final: bool) -> None:
+        """Extrait de `buf` toutes les trames complètes ; écarte les octets qui n'en forment aucune."""
+        nonlocal frame_count
+        while len(buf) >= 5:
+            n = find_frame(bytes(buf))
+            if n:
+                frame_count = flush_frame(bytes(buf[:n]), frame_count)
+                del buf[:n]
+                continue
+            if final or len(buf) > 300:
+                # Aucune trame à cet endroit : on écarte UN octet et on recommence (resynchronisation).
+                junk = buf[0]
+                del buf[0]
+                ignored.append(junk)
+                continue
+            break
+        if final and buf:
+            ignored.extend(buf)
+            buf.clear()
+        if ignored and (final or len(ignored) >= 1):
+            now_s = datetime.datetime.now().isoformat()
+            print(f"[{now_s}] {len(ignored)} octet(s) ne formant aucune trame valide (démarrage au milieu d'une trame, "
+                  f"parasite ou mauvais réglage) : {bytes(ignored).hex()}")
+            ignored.clear()
+
+    ignored = bytearray()
+
     try:
         while True:
             chunk = ser.read(256)  # bloque au plus `timeout` secondes
             now = time.monotonic()
             if chunk:
-                if buf and (now - last_byte_time) > silence_threshold_s:
-                    frame_count = flush_frame(bytes(buf), frame_count)
-                    buf.clear()
                 buf.extend(chunk)
                 last_byte_time = now
-            else:
-                # Rien reçu pendant `timeout` — si un buffer est en attente,
-                # le silence est déjà largement dépassé, on le vide.
-                if buf:
-                    frame_count = flush_frame(bytes(buf), frame_count)
-                    buf.clear()
+                drain(False)
+            elif buf and (now - last_byte_time) > flush_s:
+                # Longue accalmie : ce qui reste n'est pas une trame complète.
+                drain(True)
     except KeyboardInterrupt:
         print(f"\nArrêt — {frame_count} trame(s) capturée(s).")
     finally:
