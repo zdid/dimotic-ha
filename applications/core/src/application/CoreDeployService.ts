@@ -144,10 +144,41 @@ export class CoreDeployService {
     }
 
     const envPrefix = `DIMOTIC_TAG=${shellQuote(tag)}`;
-    const pullUp = await runSshStreaming(target, `cd ${shellQuote(target.remoteDir)} && ${envPrefix} docker compose pull && ${envPrefix} docker compose up -d`, { onData: onProgress });
-    if (!pullUp.success) {
-      this.logger.error('CoreDeployService', `Échec de docker compose pull/up sur ${target.host}: ${pullUp.error}`);
-      return { success: false, step: 'pull-up', error: pullUp.error, output: pullUp.output };
+    // `pull` reste attaché à la connexion SSH (progression en direct, et il ne touche pas au conteneur).
+    const pull = await runSshStreaming(target, `cd ${shellQuote(target.remoteDir)} && ${envPrefix} docker compose pull`, { onData: onProgress });
+    if (!pull.success) {
+      this.logger.error('CoreDeployService', `Échec de docker compose pull sur ${target.host}: ${pull.error}`);
+      return { success: false, step: 'pull-up', error: pull.error, output: pull.output };
+    }
+
+    // `up -d` DÉTACHÉ de la session SSH (⭐ 01/10/2026, constaté sur noisy2 : déploiement vers la machine
+    // locale = le core tourne dans le conteneur qu'`up -d` recrée ; l'ancien conteneur arrêté, le client SSH
+    // meurt avec lui, l'hôte envoie SIGHUP à `docker compose`, tué entre la suppression de l'ancien conteneur
+    // et la création du nouveau → plus de conteneur du tout). `setsid nohup` le fait survivre ; le code de
+    // sortie est relu dans un fichier, ce qui donne l'erreur à une cible distante (le core local, lui, est
+    // arrêté avant de pouvoir la lire : il n'y a alors rien à rapporter).
+    const dir = shellQuote(target.remoteDir);
+    const launch = await runSsh(
+      target,
+      `cd ${dir} && rm -f .deploy-up.rc .deploy-up.log && ` +
+        `(setsid nohup sh -c ${shellQuote(`${envPrefix} docker compose up -d > .deploy-up.log 2>&1; echo $? > .deploy-up.rc`)} < /dev/null > /dev/null 2>&1 &)`
+    );
+    if (!launch.success) {
+      this.logger.error('CoreDeployService', `Échec du lancement de docker compose up sur ${target.host}: ${launch.error}`);
+      return { success: false, step: 'pull-up', error: launch.error };
+    }
+    for (let attempt = 0; attempt < HEALTH_CHECK_ATTEMPTS * 2; attempt++) {
+      const rc = await runSsh(target, `cat ${shellQuote(target.remoteDir + '/.deploy-up.rc')} 2>/dev/null`);
+      const code = rc.output.trim();
+      if (code !== '') {
+        if (code !== '0') {
+          const log = await runSsh(target, `cat ${shellQuote(target.remoteDir + '/.deploy-up.log')} 2>/dev/null`);
+          this.logger.error('CoreDeployService', `docker compose up a échoué sur ${target.host} (code ${code}) : ${log.output}`);
+          return { success: false, step: 'pull-up', error: `docker compose up -d : code ${code}`, output: log.output };
+        }
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, HEALTH_CHECK_INTERVAL_MS));
     }
 
     return this.waitHealthy(target);
