@@ -6,14 +6,14 @@
 ## ✅ SUPERVISION — bouton « 📄 Voir la log » par machine (01/10/2026, specs supervision v1.6 / sauvegarde v1.7) — vérifié en local sur ha2 et orangepi2
 - Lit par SSH : `status.json`, les 2 logs `tar-*.log` d'échec les plus récents, la fin de `cron.log`. Vérifié dans le navigateur (falbala). **À vérifier sur noisy/noisy2** : nécessite une nouvelle image Docker (pas dans l'image publiée).
 
-## 🔴 DÉPLOIEMENT — sur la machine LOCALE, le conteneur Docker ne redémarre pas (constaté par l'utilisateur 30/09/2026, NON ANALYSÉ, rien corrigé)
+## 🟡 DÉPLOIEMENT — sur la machine LOCALE, le conteneur Docker ne redémarrait pas (constaté 30/09/2026 sur noisy2) — CORRIGÉ et VALIDÉ sur ha2 le 01/10/2026, reste à publier dans l'image
 - **Constat** : depuis l'écran Déploiement, déployer vers la machine locale (celle qui porte le core) ne relance pas le conteneur.
 - **Code concerné** : `applications/core/src/application/CoreDeployService.ts`, `deploy()` : `docker compose pull && docker compose up -d` via SSH (`runSshStreaming`), puis `waitHealthy()`.
 - **Pistes, à vérifier** (aucune prouvée) :
   1. `docker compose up -d` ne recrée pas un conteneur dont l'image (même tag `latest`) et la config n'ont pas changé : pas de redémarrage, sans erreur.
   2. Sur la machine locale, le core peut ne pas tourner dans ce conteneur (sur falbala, dimotic-ha tourne sur l'hôte, pas en Docker) : le conteneur « dimotic-ha » visé n'est alors pas celui qui sert l'écran.
   3. Si le core tourne DANS ce conteneur, `up -d` qui le recrée tue le processus qui pilote le déploiement (plus de retour, `waitHealthy` jamais atteint).
-- **Cause probable confirmée par l'utilisateur (noisy2, 01/10/2026)** : `docker compose up -d` sans `nohup` — l'ancien conteneur arrêté tue le client SSH, donc `compose` est interrompu avant la recréation. **Correction écrite (01/10/2026)** dans `CoreDeployService.deploy()` (`up -d` détaché par `setsid nohup`, code de sortie relu dans `.deploy-up.rc`) ; appliquée à la main dans le conteneur ha2 (fichier `.orig-2026-10-01` conservé), essai de la mise à jour de ha2 par lui-même PAS ENCORE fait, pas dans l'image publiée.
+- **Cause probable confirmée par l'utilisateur (noisy2, 01/10/2026)** : `docker compose up -d` sans `nohup` — l'ancien conteneur arrêté tue le client SSH, donc `compose` est interrompu avant la recréation. **Correction écrite (01/10/2026)** dans `CoreDeployService.deploy()` (`up -d` détaché par `setsid nohup`, code de sortie relu dans `.deploy-up.rc`) ; appliquée à la main dans le conteneur ha2 (fichier `.orig-2026-10-01` conservé), **validé en réel le 01/10/2026 (utilisateur) : ha2 déployé sur lui-même, l'application redémarre bien**. Pas dans l'image publiée : à reconstruire/publier pour noisy2 et les autres (le conteneur ha2 a depuis été recréé depuis l'image publiée, donc sans le correctif).
 - **À demander/observer** : sur quelle machine (falbala ou une autre), ce que montre le journal de l'étape `pull-up`, et `docker ps` avant/après.
 
 ## 🟡 TASMOTA — voies et thermostats réalisés le 30/09/2026 (spec v1.3 / v1.4), points à valider en réel
