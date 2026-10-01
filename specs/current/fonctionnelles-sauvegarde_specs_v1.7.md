@@ -1,6 +1,8 @@
 # Spécifications Fonctionnelles - Sauvegarde/Restauration (SAUVEGARDE)
 
-**Version 1.6 — 25/09/2026 — Claude**
+**Version 1.7 — 01/10/2026 — Claude**
+
+⭐ **v1.7 (01/10/2026)** — échange **`sauvegarde:supervision:log`** (§5quinquies) : journal de la dernière exécution d'une machine, pour le bouton « Voir la log » de la supervision.
 
 ⭐ **v1.6 (25/09/2026)** — pour la supervision (`fonctionnelles-supervision_specs`) : le script écrit
 un **marqueur de dernière réussite par dossier et par cadence** et liste les **cadences en échec**
@@ -386,6 +388,15 @@ lecture SSH (clé unique de dimotic-ha) : présence du script et de son cron, `s
 `last-*`. Réponse par machine : `{ id, site, machine, host, reachable, error?, scriptInstalled,
 cronInstalled, status (contenu de status.json ou null), lastSuccess: { <dossier>: { <cadence>: date } } }`.
 Aucun accès à Nextcloud (pas de mot de passe dans dimotic-ha).
+
+### 5quinquies. Journal de la dernière exécution pour la supervision (⭐ v1.7, 01/10/2026)
+
+Échange corrélé `sauvegarde:supervision:log` `{ correlation_id, addresses }` → `sauvegarde:supervision:log:reply`
+`{ correlation_id, success, machine?, text?, error? }`. Cible : la machine de `targets[]` dont `host` est l'une des
+`addresses`. Une lecture SSH, en lecture seule, concatène `status.json`, les deux logs `tar-*.log` les plus récents
+(40 dernières lignes chacun ; ils n'existent que pour une exécution en échec, §5ter) et les 100 dernières lignes de
+`cron.log`. Texte tronqué à 20 000 caractères (fin conservée). Les deux événements sont déclarés dans
+`bridgedEvents` (application Sauvegarde pour la demande, Supervision pour la réponse).
 
 ## 6. Application dédiée dimotic-ha « Sauvegarde/Restauration » — configuration et restauration
 

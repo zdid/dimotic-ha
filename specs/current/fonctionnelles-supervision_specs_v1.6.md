@@ -1,8 +1,13 @@
 # Spécifications Fonctionnelles — Application SUPERVISION
 
-**Version :** 1.5
-**Date :** 29 Septembre 2026
+**Version :** 1.6
+**Date :** 1er Octobre 2026
 **Statut :** **Implémentée** (étapes 0 à 4 du §9, vérifiées en local sur falbala le 25/09/2026) — vérification multi-machines (étape 5) restante.
+
+> **v1.6 (01/10/2026)** — **Bouton « 📄 Voir la log »** dans le bloc Sauvegardes de chaque machine (§5.1) :
+> affiche le journal de la dernière exécution lu sur la machine (status.json, logs `tar` d'échec, fin de
+> `cron.log`), sans se connecter à la main. Événements : `supervision:backup:log:get` (navigateur → service),
+> `supervision:backup:log` (service → navigateur). Voir `fonctionnelles-sauvegarde` §5quinquies.
 
 > **v1.5 (29/09/2026)** — **« Activée d'office » déclarée dans le module** (`enabledByDefault: true` sur
 > `SUPERVISION_APP`, champ de `ApplicationModule`), **plus dans `package.json`** (décision utilisateur :
@@ -170,6 +175,14 @@ déposé sur Nextcloud.
 - **Rafraîchissement** : à l'ouverture de la page d'accueil, bouton « Rafraîchir », et toutes les heures.
 - **Sauvegarde non active** sur cette machine ou sans réponse (délai 60 s) : « sauvegardes
   indisponibles » avec la raison, le reste de l'affichage fonctionne.
+
+### 5.1 Journal de la dernière exécution (v1.6)
+
+Chaque bloc Sauvegardes porte un bouton « Voir la log ». Le service émet `sauvegarde:supervision:log`
+`{ correlation_id, addresses }` (adresses de la machine, comme pour la correspondance du §5) ; l'application
+Sauvegarde lit le journal par SSH et répond `sauvegarde:supervision:log:reply`. Le service relaie le résultat au
+navigateur (`supervision:backup:log` `{ machineId, text? , error? }`) ; même délai d'attente que la lecture des
+sauvegardes (`backupTimeoutSec`). Le texte s'affiche sous le bloc, jusqu'au prochain rechargement de la page.
 
 ## 6. Écran — page d'accueil (v1.1)
 

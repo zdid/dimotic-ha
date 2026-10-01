@@ -13,7 +13,7 @@ import { sauvegardeConfigSchema, sauvegardeNextcloudSchema, SECRET_FILE_PATH, de
 import type { SauvegardeStatus } from './types';
 import { SecretPushService } from './SecretPushService';
 import { ScriptPushService } from './ScriptPushService';
-import { BACKUP_SCRIPT_REMOTE_PATH, BACKUP_DIR } from './BackupScript';
+import { BACKUP_SCRIPT_REMOTE_PATH, BACKUP_DIR, BACKUP_CRON_LOG_REMOTE_PATH } from './BackupScript';
 import { NextcloudWebDavClient, NextcloudHttpError, type NextcloudCredentials } from './NextcloudWebDavClient';
 import { RestoreService } from './RestoreService';
 
@@ -172,7 +172,38 @@ export class SauvegardeService implements ISauvegardeService {
     this.eventBus.emitGeneric('sauvegarde:supervision:status:reply', { correlation_id: correlationId, success: true, machines });
   }
 
+  /** ⭐ 01/10/2026 — journal de la dernière exécution d'une machine (bouton « Voir la log » de la
+   *  supervision) : status.json, fin des logs tar d'échec et du cron.log. Lecture seule, par SSH. */
+  private async handleSupervisionLog(correlationId: string, addresses: string[]): Promise<void> {
+    const target = this.config.targets.find((t) => addresses.includes(t.host));
+    if (!target) {
+      this.eventBus.emitGeneric('sauvegarde:supervision:log:reply', { correlation_id: correlationId, success: false, error: `aucune machine ${addresses.join(' / ')} dans Sauvegarde` });
+      return;
+    }
+    const command = [
+      'echo "== status.json (dernière exécution) =="',
+      `cat ${BACKUP_DIR}/status.json 2>&1`,
+      'echo',
+      'echo "== logs tar d\'échec les plus récents =="',
+      `for f in $(ls -t ${BACKUP_DIR}/tar-*.log 2>/dev/null | head -2); do echo "-- $f"; tail -n 40 "$f"; done`,
+      'echo "== cron.log (fin) =="',
+      `tail -n 100 ${BACKUP_CRON_LOG_REMOTE_PATH} 2>&1`
+    ].join('; ');
+    const result = await runSsh({ host: target.host, sshKeyPath: ensureGlobalSshKey() }, command, undefined, 20_000);
+    this.eventBus.emitGeneric('sauvegarde:supervision:log:reply', {
+      correlation_id: correlationId, success: result.success, machine: `${target.site}/${target.machine}`,
+      text: result.output.slice(-20_000), ...(result.success ? {} : { error: result.error || 'lecture impossible' })
+    });
+  }
+
   private setupSocketEventListeners(): void {
+    this.eventBus.onGeneric<{ correlation_id: string; addresses: string[] }>('sauvegarde:supervision:log', (req) => {
+      this.handleSupervisionLog(req.correlation_id, Array.isArray(req.addresses) ? req.addresses : []).catch((error) => {
+        this.eventBus.emitGeneric('sauvegarde:supervision:log:reply', {
+          correlation_id: req.correlation_id, success: false, error: error instanceof Error ? error.message : String(error)
+        });
+      });
+    });
     this.eventBus.onGeneric<{ correlation_id: string }>('sauvegarde:supervision:status', (req) => {
       this.handleSupervisionStatus(req.correlation_id).catch((error) => {
         this.eventBus.emitGeneric('sauvegarde:supervision:status:reply', {

@@ -230,7 +230,7 @@ export const SAUVEGARDE_APP: ApplicationModule & { menu?: ApplicationMenuConfig 
   // Process séparé, comme arexx/teleinfo/rpigpio — voir fonctionnelles-supervisor_specs.
   runsAsSeparateProcess: true,
   // ⭐ 25/09/2026 — requête corrélée venant de l'application supervision (spec §5quater).
-  bridgedEvents: ['sauvegarde:supervision:status']
+  bridgedEvents: ['sauvegarde:supervision:status', 'sauvegarde:supervision:log']
 };
 
 // ============================================================================

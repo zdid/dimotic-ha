@@ -184,6 +184,9 @@ export class SupervisionService implements ISupervisionService {
     this.eventBus.onGeneric(SUPERVISION_CLIENT_EVENTS.GET_STATE, () => this.emitState());
     this.eventBus.onGeneric<{ machines: unknown }>(SUPERVISION_CLIENT_EVENTS.SET_SELECTION, (data) => this.setSelection(data?.machines));
     this.eventBus.onGeneric(SUPERVISION_CLIENT_EVENTS.REFRESH_BACKUPS, () => this.requestBackups());
+    this.eventBus.onGeneric<{ machineId: string; addresses: string[] }>(SUPERVISION_CLIENT_EVENTS.GET_BACKUP_LOG, (data) => this.requestBackupLog(data?.machineId, data?.addresses));
+    this.eventBus.onGeneric<{ correlation_id: string; success: boolean; error?: string; machine?: string; text?: string }>(
+      'sauvegarde:supervision:log:reply', (reply) => this.handleBackupLogReply(reply));
 
     this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (event) => {
       if (event.moduleId !== MODULE_NAME || !event.success) return;
@@ -309,6 +312,30 @@ export class SupervisionService implements ISupervisionService {
     this.backups = { ...this.backups, pending: true };
     this.eventBus.emitGeneric('sauvegarde:supervision:status', { correlation_id: id });
     this.scheduleEmit();
+  }
+
+  /** Journal de la dernière sauvegarde d'une machine, lu par SSH par l'application sauvegarde. */
+  private pendingLogs = new Map<string, { machineId: string; timer: NodeJS.Timeout }>();
+
+  private requestBackupLog(machineId: string | undefined, addresses: string[] | undefined): void {
+    if (!machineId || !Array.isArray(addresses) || addresses.length === 0) return;
+    const id = crypto.randomUUID();
+    const timer = setTimeout(() => {
+      if (!this.pendingLogs.delete(id)) return;
+      this.eventBus.emitGeneric(SUPERVISION_SOCKET_EVENTS.BACKUP_LOG, { machineId, error: `pas de réponse de l'application sauvegarde en ${this.config.backupTimeoutSec} s` });
+    }, this.config.backupTimeoutSec * 1000);
+    this.pendingLogs.set(id, { machineId, timer });
+    this.eventBus.emitGeneric('sauvegarde:supervision:log', { correlation_id: id, addresses });
+  }
+
+  private handleBackupLogReply(reply: { correlation_id: string; success: boolean; error?: string; text?: string }): void {
+    const pending = this.pendingLogs.get(reply.correlation_id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingLogs.delete(reply.correlation_id);
+    this.eventBus.emitGeneric(SUPERVISION_SOCKET_EVENTS.BACKUP_LOG, {
+      machineId: pending.machineId, text: reply.text, ...(reply.success ? {} : { error: reply.error || 'erreur inconnue' })
+    });
   }
 
   private handleBackupReply(reply: { correlation_id: string; success: boolean; error?: string; machines?: BackupMachineReport[] }): void {

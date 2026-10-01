@@ -37,7 +37,7 @@ export const SUPERVISION_APP: ApplicationModule = {
   // Activée d'office à sa première apparition (§7.1) — déclaré ici, plus dans package.json (29/09/2026).
   enabledByDefault: true,
   // Réponse de l'application sauvegarde à la requête corrélée (spec §5).
-  bridgedEvents: ['sauvegarde:supervision:status:reply']
+  bridgedEvents: ['sauvegarde:supervision:status:reply', 'sauvegarde:supervision:log:reply']
 };
 
 export function createSupervisionService(

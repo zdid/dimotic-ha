@@ -30,6 +30,8 @@ interface SupState {
   let slot: HTMLElement | null = null;
   let state: SupState | null = null;
   let listening = false;
+  /** Journal de sauvegarde par machine (clé = machineId) : texte, erreur ou lecture en cours. */
+  const logs = new Map<string, { text?: string; error?: string; loading?: boolean }>();
 
   const STATE_LABELS: Record<string, string> = {
     running: 'en marche', 'in-process': 'en marche', starting: 'démarrage', restarting: 'redémarrage',
@@ -71,7 +73,11 @@ interface SupState {
     const labels: Record<string, string> = { ok: 'OK', warn: 'à surveiller', error: 'en erreur', none: 'aucune sauvegarde' };
     const lines = (b.lines ?? []).map((l) =>
       `<li class="sup-line-${esc(l.level)}">${esc(l.text).replace('{date}', esc(fmtDate(l.date)))}</li>`).join('');
-    return `<div class="sup-backup">💾 Sauvegardes (${esc(b.target)}) <span class="sup-badge sup-${esc(b.level)}">${esc(labels[b.level] ?? b.level)}</span><ul>${lines}</ul></div>`;
+    const log = logs.get(m.machineId);
+    const logView = !log ? '' : log.loading ? '<div class="sup-meta">Lecture de la log…</div>'
+      : log.error ? `<div class="sup-badge sup-error">${esc(log.error)}</div>`
+      : `<pre class="sup-log" style="max-height:320px;overflow:auto;font-size:.85em;white-space:pre-wrap">${esc(log.text)}</pre>`;
+    return `<div class="sup-backup">💾 Sauvegardes (${esc(b.target)}) <span class="sup-badge sup-${esc(b.level)}">${esc(labels[b.level] ?? b.level)}</span> <button type="button" style="font-size:.8em;padding:1px 8px;cursor:pointer" data-sup-log="${esc(m.machineId)}">📄 Voir la log</button><ul>${lines}</ul>${logView}</div>`;
   }
 
   function renderMachine(m: SupMachine): string {
@@ -154,10 +160,24 @@ interface SupState {
     if (!listening) {
       listening = true;
       socket().on('supervision:state', (data: SupState) => { state = data; render(); });
+      socket().on('supervision:backup:log', (data: { machineId: string; text?: string; error?: string }) => {
+        logs.set(data.machineId, { text: data.text, error: data.error });
+        render();
+      });
     }
     target.addEventListener('change', (ev) => {
       const el = ev.target as HTMLElement;
       if (el.matches('[data-sup-machine], [data-sup-app]')) sendSelection();
+    });
+    target.addEventListener('click', (ev) => {
+      const btn = (ev.target as HTMLElement).closest<HTMLElement>('[data-sup-log]');
+      if (!btn || !state) return;
+      const id = btn.dataset.supLog!;
+      const m = state.machines.find((x) => x.machineId === id);
+      const addresses = m?.addresses?.length ? m.addresses : m?.address ? [m.address] : [];
+      logs.set(id, { loading: true });
+      render();
+      socket().emit('supervision:backup:log:get', { machineId: id, addresses });
     });
     target.querySelector('[data-sup-refresh]')?.addEventListener('click', () => socket().emit('supervision:backups:refresh'));
     render();
