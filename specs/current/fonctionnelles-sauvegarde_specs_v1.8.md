@@ -1,6 +1,8 @@
 # Spécifications Fonctionnelles - Sauvegarde/Restauration (SAUVEGARDE)
 
-**Version 1.7 — 01/10/2026 — Claude**
+**Version 1.8 — 01/10/2026 — Claude**
+
+⭐ **v1.8 (01/10/2026)** — le script de sauvegarde est **plus bavard** (§5bis, journal `cron.log`) : chaque ligne est horodatée ; début (site, machine, jour, rétention, destination), par dossier : archivage, code et taille de `tar`, éléments du manifeste, durée, premiers messages de `tar` en cas de code ≠ 0 ; par envoi : code HTTP, taille, durée, et en cas d'échec le code et le message de `curl` ; manifeste refusé ; purge (HTTP 204/404) ; bilan par dossier ; fin avec le résultat et la durée totale. `status.json` et les codes de sortie sont inchangés. Jamais le mot de passe dans la log.
 
 ⭐ **v1.7 (01/10/2026)** — échange **`sauvegarde:supervision:log`** (§5quinquies) : journal de la dernière exécution d'une machine, pour le bouton « Voir la log » de la supervision.
 
