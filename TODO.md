@@ -3,6 +3,19 @@
 
 
 
+## ✅ SUPERVISION — bouton « 📄 Voir la log » par machine (01/10/2026, specs supervision v1.6 / sauvegarde v1.7) — vérifié en local sur ha2 et orangepi2
+- Lit par SSH : `status.json`, les 2 logs `tar-*.log` d'échec les plus récents, la fin de `cron.log`. Vérifié dans le navigateur (falbala). **À vérifier sur noisy/noisy2** : nécessite une nouvelle image Docker (pas dans l'image publiée).
+
+## 🔴 DÉPLOIEMENT — sur la machine LOCALE, le conteneur Docker ne redémarre pas (constaté par l'utilisateur 30/09/2026, NON ANALYSÉ, rien corrigé)
+- **Constat** : depuis l'écran Déploiement, déployer vers la machine locale (celle qui porte le core) ne relance pas le conteneur.
+- **Code concerné** : `applications/core/src/application/CoreDeployService.ts`, `deploy()` : `docker compose pull && docker compose up -d` via SSH (`runSshStreaming`), puis `waitHealthy()`.
+- **Pistes, à vérifier** (aucune prouvée) :
+  1. `docker compose up -d` ne recrée pas un conteneur dont l'image (même tag `latest`) et la config n'ont pas changé : pas de redémarrage, sans erreur.
+  2. Sur la machine locale, le core peut ne pas tourner dans ce conteneur (sur falbala, dimotic-ha tourne sur l'hôte, pas en Docker) : le conteneur « dimotic-ha » visé n'est alors pas celui qui sert l'écran.
+  3. Si le core tourne DANS ce conteneur, `up -d` qui le recrée tue le processus qui pilote le déploiement (plus de retour, `waitHealthy` jamais atteint).
+- **Cause probable confirmée par l'utilisateur (noisy2, 01/10/2026)** : `docker compose up -d` sans `nohup` — l'ancien conteneur arrêté tue le client SSH, donc `compose` est interrompu avant la recréation. **Correction écrite (01/10/2026)** dans `CoreDeployService.deploy()` (`up -d` détaché par `setsid nohup`, code de sortie relu dans `.deploy-up.rc`) ; appliquée à la main dans le conteneur ha2 (fichier `.orig-2026-10-01` conservé), essai de la mise à jour de ha2 par lui-même PAS ENCORE fait, pas dans l'image publiée.
+- **À demander/observer** : sur quelle machine (falbala ou une autre), ce que montre le journal de l'étape `pull-up`, et `docker ps` avant/après.
+
 ## 🟡 TASMOTA — voies et thermostats réalisés le 30/09/2026 (spec v1.3 / v1.4), points à valider en réel
 
 - **Thermostat ESP32 (Berry)** : essayé en réel sur le R4 (dépôt par `Br`, régulation, `persist`, MQTT natif,
@@ -871,6 +884,42 @@ chemin « à chaud » (ProcessSupervisor), le redémarrage complet de 15 s n'est
   ne rien débrancher — le module WiFi continue de fonctionner normalement pendant l'écoute.
 - **Reste à faire** : expédier la deuxième clé, la brancher sur place, lancer le script, identifier
   empiriquement débit/adresse/registres à partir des trames réelles capturées.
+
+### ✅ Écoute passive réalisée le 30/09/2026 (Pi « rs485-sniffer », `ssh sniffer`, CH340 sur /dev/ttyUSB0)
+- **Le bus parle** : le module Wi-Fi Solarman interroge le compteur ; **adresse 1, 9600 bauds, 8E1 confirmés**, CRC valides.
+  Capture de référence : `backups/rs485/capture_ddzy422-d2_2026-09-30_90s.txt` (non commitée).
+- **Rythme** : un « cycle complet » toutes les **61 s** (`0x400C`×2, **`0x0000`×34**, `0x400C`×2, `0x5000`×8, `0x5020`×32) ; entre deux
+  cycles, un battement toutes les ~31 s (`0x400C`×2, **écriture de `0x013A` = `0x0025`**, acquittée).
+- **Table des registres, cohérente en interne** (lecture fonction 3, adresse 1 ; à confirmer face à l'afficheur du compteur) :
+  | Registre | Contenu | Échelle | Exemple |
+  |---|---|---|---|
+  | `0x0001` | tension | ×0,1 V | 239,2 V |
+  | `0x0003` | courant | ×0,001 A | 1,859 A |
+  | `0x0007` | puissance active | W | 239 W |
+  | `0x000B` | puissance apparente | VA | 444 VA (= 239,2 × 1,859 ✓) |
+  | `0x000C` | facteur de puissance | ×0,001 | 0,538 (= 239/444 ✓) |
+  | `0x000D` | fréquence | ×0,01 Hz | 49,97 Hz |
+  | `0x000E-0F` | **énergie totale** (32 bits) | ×0,01 kWh | 6243,05 kWh |
+  | `0x0010`, `0x0012`, `0x0014`, `0x0016` | énergie par tarif (4) | ×0,01 kWh | 2230,56 + 1771,89 + 1386,10 + 854,50 = **6243,05 ✓** |
+  | `0x0018-19` + `0x001A`, `0x001C`, `0x001E`, `0x0020` | 2e total (import/export ? à confirmer) et ses 4 tarifs | ×0,01 kWh | 1411,94 = 485,53 + 401,29 + 100,53 + 424,59 ✓ |
+  | `0x0009` | inconnu (205) — réactive ? | | |
+  | `0x5000`×8 | modèle (texte) | | `DDZY422-D2` |
+  | `0x5020`×32 | matériel + micrologiciel (texte) | | `HTPCB_2P1H1R1W(XXX)_V13`, `DDZY422-D2-V11-1.13 2110200830` |
+  Énergie +0,02 kWh en ~5 min à ~240 W : cohérent.
+- **Bogue du script corrigé** : le découpage par silence (4 ms) coupait les réponses longues (adaptateur USB : paquets de 32 octets,
+  37 ms par paquet à 9600 bauds — aucun seuil de temps ne sépare les morceaux d'une trame de l'intervalle requête → réponse, 24 à 35 ms).
+  `rs485-sniffer.py` découpe désormais **par la structure Modbus** (longueur annoncée + CRC) et associe requêtes et réponses ; essayé en réel :
+  28 trames valides, 0 invalide. **`rs485-sniffer.cjs` garde l'ancien découpage par silence** : à porter avant emploi.
+- **Capture de 15 min (30/09, `backups/rs485/capture_ddzy422-d2_2026-09-30_15min.txt`) : 262 trames, 0 invalide.** Nouveautés :
+  - `0x0105-0107` = **horloge du compteur** (AA MM / JJ hh / mm ss), lue toutes les ~5 min ; à l'heure française (le Pi est en heure de Londres), ~41 s d'avance.
+  - `0x0009` = **S − P** (vérifié sur 14/14 relevés) : ce n'est pas la puissance réactive.
+  - **Bascule de tarif observée** : le tarif 2 (`0x12`) cumule jusqu'à ~18:00 (heure du compteur), puis le tarif 3 (`0x14`) : les 4 « tarifs » sont des plages horaires.
+  - Second total (`0x18`, 1411,94 kWh) **constant** malgré la consommation : pas de l'énergie consommée (export ? à confirmer par une injection réelle).
+  - `0x400C` constant (0x0208 / 0x0001) ; `0x0002`, `0x0004-06`, `0x0008`, `0x000A` toujours à 0 (monophasé).
+  - Aucune autre requête rare en 15 min ; seule écriture : `0x013A`=`0x0025`, toutes les 31 s.
+- **À faire** : (1) confirmer les valeurs face à l'afficheur / l'application Solarman ; (2) capture plus longue (10 min) pour voir tous les cycles ;
+  (3) lecture active par nous (modbus2mqtt) avec cette table — **jamais en même temps que le module Wi-Fi** (collision sur le bus) : trouver
+  pourquoi l'interrogation active répondait `AcknowledgeError` (la requête du module est simplement `01 03 00 00 00 22`).
 
 ## Idées de fonctionnalité (à concevoir/implémenter plus tard)
 
