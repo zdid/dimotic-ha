@@ -1,8 +1,18 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.33  
-**Date :** 19 Septembre 2026  
+**Version :** 4.34  
+**Date :** 1er Octobre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.34** : **Démarrage tolérant (§7.2)** — une section `ha.ws` ou `ha.mqtt` **invalide** (hôte sans jeton,
+> jeton sans hôte, champ obligatoire manquant…) ne fait plus planter le core. Constat du 01/10/2026 : la diffusion
+> entre machines avait laissé `ha.ws` avec un hôte et sans jeton (le jeton vit dans `secrets_config.yaml`, non
+> diffusé) sur noisy2 puis sur noisy ; le conteneur bouclait sur « `ha.ws.host: Host is required` » et plus aucune
+> IHM n'était accessible pour corriger. Désormais : la connexion concernée est **désactivée en mémoire**, les valeurs
+> fautives restent affichées et corrigeables dans l'IHM (champs « Requis »), les voyants « HA WebSocket » / « MQTT »
+> passent au **rouge**, l'erreur est consignée au niveau ERROR. Le `ws_enable` / `mqtt_enable` du fichier est
+> **conservé à l'écriture** ; la section `ha` envoyée depuis l'IHM reste validée strictement. Toute erreur ailleurs
+> (port web, journalisation, schéma d'une application) reste bloquante.
 
 > **v4.33** : **§9bis ajoutée — communication générique inter-modules (Fire & Forget +
 > Request/Reply), demande explicite utilisateur** ("doit être décrit... dans le core puisque c'est
@@ -1184,8 +1194,10 @@ targets: []
 
 ### 7.2 Règles
 
-- Lecture **au démarrage uniquement** via `ConfigLoader` — erreur fatale si invalide ; fusionne
-  `data/core/config.yaml` et chaque `data/{app}/config.yaml` détecté par scan de `data/`
+- Lecture **au démarrage uniquement** via `ConfigLoader` — erreur fatale si invalide, **sauf** les sections
+  `ha.ws` / `ha.mqtt` (démarrage tolérant, ⭐ v4.34 : connexion désactivée en mémoire, anomalie exposée par
+  `ConfigLoader.getLoadIssues()` / `ConfigService.getLoadIssues()`, voyants rouges, corrigeable dans l'IHM) ;
+  fusionne `data/core/config.yaml` et chaque `data/{app}/config.yaml` détecté par scan de `data/`
 - Écriture **uniquement via `ConfigWriter`** déclenché par Socket.io — jamais depuis le domaine
 - Écriture **atomique** par fichier : écriture dans `{fichier}.tmp` puis renommage — `saveConfig()`
   (formulaire "Paramètres Techniques" socle) n'écrit que `data/core/config.yaml` (`ha`/`web`/
@@ -1229,6 +1241,11 @@ hat:
 - HA WebSocket est initialisé **uniquement si** : `ha.ws_enable === true` **ET** `ha.ws.host` **ET** `ha.ws.token` sont présents
 - HA MQTT est initialisé **uniquement si** : `ha.mqtt_enable === true` **ET** `ha.mqtt` est présent et valide
 - Les deux connecteurs peuvent être **activés indépendamment** ou **désactivés simultanément**
+- ⭐ v4.34 — **section invalide = connecteur désactivé, pas arrêt du core** : `ha.ws` ou `ha.mqtt` invalide au chargement
+  force `ws_enable` / `mqtt_enable` à `false` **en mémoire** et garde les valeurs brutes (affichage et correction dans
+  l'IHM). À l'écriture d'une autre section (liste d'applications, cibles, diffusion…), le fichier garde le
+  `ws_enable` / `mqtt_enable` d'origine et ces sections fautives ne bloquent pas la validation ; elles sont validées
+  strictement quand c'est la section `ha` elle-même qui est enregistrée depuis l'IHM.
 - Les sections `ha.ws` et `ha.mqtt` peuvent **rester dans le fichier** même si désactivées (pour conservation de la configuration)
 
 **Avantages :**
@@ -2534,6 +2551,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.34** | 01/10/2026 | Claude | **Démarrage tolérant (§7.2)** : une section `ha.ws` / `ha.mqtt` invalide désactive la connexion en mémoire au lieu de faire planter le core ; valeurs corrigeables dans l'IHM, voyants rouges, `ws_enable`/`mqtt_enable` conservés dans le fichier, section `ha` de l'IHM validée strictement. Cause : diffusion de `ha` entre noisy et noisy2 (hôte sans jeton), incident du 01/10/2026. |
 | **4.31** | 23/08/2026 | Claude | **Déploiement de dimotic-ha lui-même sur d'autres machines** (§4.3bis nouvelle, §7.1, §11.4) — nouveau `targets: DeploymentTargetConfig[]` sur le schéma config racine (`disabledApps` forcé à toutes les apps connues sauf `core` sur une machine neuve). Nouveau `CoreDeployService.ts` réutilisant le socle SSH/SCP partagé construit la session précédente pour rpigpio/teleinfo/arexx (même protocole `{targetId, action}`) — copie `compose.deploy.yaml` (pas `compose.yaml`), sème `data/core/config.yaml` uniquement s'il est absent, `docker compose pull && up -d`, attend "healthy". Remplace `docker/rebuild-and-deploy.sh` pour l'étape déploiement (build+push Docker Hub reste manuel) et automatise la procédure jusqu'ici manuelle du §11.4. Nouvelle section IHM "Déploiement" (`DeploymentManager.ts`, Web Component calqué sur `ApplicationsManager.ts` mais sans le moteur générique `type:'array'`, `core` n'en dispose pas pour sa propre config) réutilisant `TargetCards.js` (même composant que les 3 apps), étendu d'un `onDelete` optionnel. Corollaire trouvé en cours de route : `ConfigService.saveConfig()`/`setDisabledApps()` ne préservaient pas `targets` avant d'écrire — même classe de bug que l'incident `disabledApps` du 07/08/2026, corrigé préventivement avant mise en service. Testé en conditions réelles (navigateur) : ajout/suppression de cible, round-trip Socket.io, `data/core/config.yaml` réel confirmé intact (aucun champ existant écrasé). Aucun test de déploiement réel contre ha2/orangepi (machines de production). Ancienne version v4.30 archivée. |
 | **4.30** | 16/08/2026 | Claude | **`parseIncomingCommand()` rejette les commandes retenues** (§8.5.4ter, nouvelle) — incident de sécurité réel RFXCOM : ~21 messages `.../set` retenus sur le broker (probablement `mosquitto_pub -r` manuel ancien), rejoués à chaque redémarrage et exécutés comme de vraies commandes RF433 dès que le transceiver était connecté — maison éteinte de façon imprévisible. Correctif socle (`stateCommand.ts`), protège tous les modules (rfxcom, evoo7, arexx, nommage). Messages déjà présents nettoyés manuellement sur le broker. Ancienne version v4.29 archivée. |
 | **4.29** | 15/08/2026 | Claude | **Deux correctifs distincts, "navigation entre applications" (§6.1/§6.2)** : (1) `arbreouquoi` rejoint la convention `window.{id}App.init()` (laissé de côté en v4.28), écouteurs socket/DOM scindés (une fois vs à chaque revisite). (2) Bug réel `Sidebar.ts` : un module sans `menu.pages` (ESPDISPLAY, HAPLAN) était rendu avec `href="#moduleId"` au lieu de `entry.path`, désynchronisé du sélecteur d'attachement du clic — clic sans effet, corrigé. Toutes deux issues de bugs réels constatés par l'utilisateur. Ancienne version v4.28 archivée. |

@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as yaml from 'js-yaml';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { ConfigLoader, ConfigWriter, configSchema } from './index';
+import { ConfigLoader, ConfigWriter, ConfigService, configSchema } from './index';
 
 const testDir = path.join(os.tmpdir(), 'ha-config-test');
 const configPath = path.join(testDir, 'config.yaml');
@@ -76,11 +76,19 @@ describe('ConfigLoader', () => {
     expect(() => loader.load()).toThrow(/Invalid YAML/);
   });
 
-  it('should throw on missing required field (host)', () => {
-    const invalid = { ha: { ws: { token: 'token' } } };
+  it('should boot (tolerant start) when ha.ws has a token but no host: ws disabled, values kept, issue reported', () => {
+    // ⭐ 01/10/2026 — avant : plantage du core entier (« ha.ws.host: Host is required ») ; maintenant : démarrage,
+    // connexion WS désactivée, valeurs gardées pour correction dans l'IHM (voyant rouge).
+    const invalid = { ha: { ws_enable: true, ws: { token: 'token' } } };
     fs.writeFileSync(configPath, yaml.dump(invalid));
     const loader = new ConfigLoader(configPath);
-    expect(() => loader.load()).toThrow();
+    const result = loader.load();
+    expect(result.ha.ws_enable).toBe(false);
+    expect((result.ha.ws as any).token).toBe('token');
+    const issues = loader.getLoadIssues();
+    expect(issues).toHaveLength(1);
+    expect(issues[0].section).toBe('ha.ws');
+    expect(issues[0].messages.join(' ')).toMatch(/Host is required/);
   });
 
   it('should treat a null field (hand-edited YAML, e.g. "token:" left blank) as unset, not as a type error', () => {
@@ -91,7 +99,35 @@ describe('ConfigLoader', () => {
     const withNullToken = { ha: { ws_enable: true, ws: { host: '192.168.1.50', token: null } } };
     fs.writeFileSync(configPath, yaml.dump(withNullToken));
     const loader = new ConfigLoader(configPath);
-    expect(() => loader.load()).toThrow(/Long-Lived Access Token is required/);
+    const result = loader.load();                              // démarrage tolérant (01/10/2026) : plus d'exception
+    expect(result.ha.ws_enable).toBe(false);
+    expect(loader.getLoadIssues()[0].messages.join(' ')).toMatch(/Long-Lived Access Token is required/);
+  });
+
+  it('should boot when ha.mqtt is invalid: mqtt disabled, ws untouched, issue reported', () => {
+    const cfg = {
+      ha: { ws_enable: true, mqtt_enable: true, ws: { host: 'localhost', token: 'ok' }, mqtt: { host: '', client_id: 'x' } },
+    };
+    fs.writeFileSync(configPath, yaml.dump(cfg));
+    const loader = new ConfigLoader(configPath);
+    const result = loader.load();
+    expect(result.ha.mqtt_enable).toBe(false);
+    expect(result.ha.ws_enable).toBe(true);
+    expect(loader.getLoadIssues().map((i) => i.section)).toEqual(['ha.mqtt']);
+  });
+
+  it('should report no issue for a valid configuration', () => {
+    fs.writeFileSync(configPath, yaml.dump(validConfig));
+    const loader = new ConfigLoader(configPath);
+    loader.load();
+    expect(loader.getLoadIssues()).toEqual([]);
+  });
+
+  it('should still throw when the error is outside ha.ws / ha.mqtt (e.g. an invalid web port), even alongside a HA problem', () => {
+    const cfg = { ha: { ws_enable: true, ws: { token: 'token' } }, web: { port: 99999, host: '0.0.0.0' } };
+    fs.writeFileSync(configPath, yaml.dump(cfg));
+    const loader = new ConfigLoader(configPath);
+    expect(() => loader.load()).toThrow(/web\.port/);
   });
 
   it('should treat an entirely-null, disabled ws section as unconfigured and boot successfully', () => {
@@ -136,5 +172,42 @@ describe('Config Schema', () => {
   it('should reject missing host', () => {
     const invalid = { ha: { ws: { token: 't', port: 8123, reconnect_delay: 5 }, structure: { include_unassigned: false, unassigned_label: '' } }, web: { port: 8080, host: '0.0.0.0' }, logging: { level: 'info', rotate: { max_size_mb: 10, max_files: 5 } } };
     expect(() => configSchema.parse(invalid)).toThrow();
+  });
+});
+
+describe('ConfigService — démarrage tolérant (01/10/2026)', () => {
+  const logger = { info() {}, warn() {}, error() {}, debug() {} } as any;
+  const brokenWs = { ha: { ws_enable: true, mqtt_enable: false, ws: { host: '192.168.1.201', port: 8123, reconnect_delay: 15 } } };
+
+  it('keeps writing the rest of the config while ha.ws is invalid, and does not turn ws_enable off in the file', () => {
+    fs.writeFileSync(configPath, yaml.dump(brokenWs));
+    const service = new ConfigService(new ConfigLoader(configPath), new ConfigWriter(configPath), logger);
+    expect(service.getConfig().ha.ws_enable).toBe(false);          // désactivée en mémoire seulement
+    expect(service.getLoadIssues()).toHaveLength(1);
+
+    const result = service.setAppLists(['rfxcom'], ['rfxcom', 'arexx']);
+    expect(result.success).toBe(true);                             // avant : « Validation failed: ha.ws.token »
+
+    const onDisk = yaml.load(fs.readFileSync(configPath, 'utf-8')) as any;
+    expect(onDisk.ha.ws_enable).toBe(true);                        // l'intention de l'utilisateur est conservée
+    expect(onDisk.ha.ws.host).toBe('192.168.1.201');
+  });
+
+  it('validates ha strictly when the UI saves it: an invalid ws is still refused', () => {
+    fs.writeFileSync(configPath, yaml.dump(brokenWs));
+    const service = new ConfigService(new ConfigLoader(configPath), new ConfigWriter(configPath), logger);
+    const result = service.saveConfig({ ha: { ...service.getConfig().ha, ws_enable: true } } as any);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Long-Lived Access Token is required/);
+  });
+
+  it('accepts the correction made from the UI, then loads without any issue', () => {
+    fs.writeFileSync(configPath, yaml.dump(brokenWs));
+    const service = new ConfigService(new ConfigLoader(configPath), new ConfigWriter(configPath), logger);
+    const fixedHa = { ...service.getConfig().ha, ws_enable: true, ws: { host: '192.168.1.201', port: 8123, token: 'nouveau-jeton', reconnect_delay: 15 } };
+    expect(service.saveConfig({ ...service.getConfig(), ha: fixedHa } as any).success).toBe(true);
+    service.reload();
+    expect(service.getLoadIssues()).toEqual([]);
+    expect(service.getConfig().ha.ws_enable).toBe(true);
   });
 });

@@ -92,7 +92,23 @@ function deepMerge<T>(defaults: T, input: Partial<T>): T {
  * Lit et valide le fichier YAML de configuration.
  * Applique les valeurs par défaut aux champs manquants.
  */
+/**
+ * ⭐ 01/10/2026 — démarrage tolérant : une section `ha.ws` ou `ha.mqtt` INVALIDE (ex. hôte sans jeton, laissée
+ * ainsi par une diffusion entre machines) ne fait plus planter tout le core. La connexion concernée est
+ * désactivée en mémoire (`ws_enable`/`mqtt_enable` à false), les valeurs fautives sont conservées pour être
+ * corrigées dans l'IHM, et l'anomalie est listée ici (voir `ConfigLoader.getLoadIssues()`).
+ */
+export interface ConfigLoadIssue {
+  /** Section concernée : `ha.ws` ou `ha.mqtt`. */
+  section: 'ha.ws' | 'ha.mqtt';
+  /** Messages de validation (chemin : message). */
+  messages: string[];
+  /** Valeur de `ws_enable` / `mqtt_enable` dans le fichier, AVANT la désactivation en mémoire — à restituer à l'écriture. */
+  wasEnabled: boolean;
+}
+
 export class ConfigLoader {
+  private loadIssues: ConfigLoadIssue[] = [];
   private readonly configPath: string;
   private readonly schema: any;
   private readonly appDataRoot?: string;
@@ -151,10 +167,13 @@ export class ConfigLoader {
       this.mergeAppSections(configWithDefaults as Record<string, unknown>);
     }
 
+    this.loadIssues = [];
     try {
       return this.schema.parse(configWithDefaults);
     } catch (error) {
       if (error instanceof z.ZodError) {
+        const tolerated = this.tryTolerantHaLoad(configWithDefaults, error);
+        if (tolerated) return tolerated as AppConfig;
         const errorDetails = error.errors
           .map((err: any) => `${err.path.join('.')}: ${err.message}`)
           .join('; ');
@@ -162,6 +181,45 @@ export class ConfigLoader {
       }
       throw new Error(`Configuration validation error: ${error}`);
     }
+  }
+
+  /** Anomalies tolérées au dernier `load()` (sections HA invalides désactivées en mémoire) ; vide si tout est valide. */
+  getLoadIssues(): ConfigLoadIssue[] {
+    return this.loadIssues.map((i) => ({ section: i.section, messages: [...i.messages], wasEnabled: i.wasEnabled }));
+  }
+
+  /**
+   * Démarrage tolérant (⭐ 01/10/2026) : si TOUTES les erreurs de validation portent sur `ha.ws` et/ou `ha.mqtt`,
+   * valide le reste sans ces sections (donc le core démarre, l'IHM reste accessible), désactive la connexion
+   * concernée et remet les valeurs brutes pour qu'elles se corrigent dans l'IHM. Toute erreur ailleurs
+   * (port web, logging, schéma d'une application…) reste bloquante : retourne `undefined`.
+   */
+  private tryTolerantHaLoad(config: Record<string, any>, error: z.ZodError): Record<string, any> | undefined {
+    const issues = new Map<'ha.ws' | 'ha.mqtt', string[]>();
+    for (const err of error.errors) {
+      const section = err.path[0] === 'ha' && (err.path[1] === 'ws' || err.path[1] === 'mqtt') ? (`ha.${err.path[1]}` as 'ha.ws' | 'ha.mqtt') : undefined;
+      if (!section) return undefined;
+      issues.set(section, [...(issues.get(section) ?? []), `${err.path.join('.')} : ${err.message}`]);
+    }
+    const rawWs = config.ha?.ws;
+    const rawMqtt = config.ha?.mqtt;
+    const wasEnabled = { 'ha.ws': config.ha?.ws_enable === true, 'ha.mqtt': config.ha?.mqtt_enable === true };
+    const stripped = { ...config, ha: { ...config.ha } };
+    if (issues.has('ha.ws')) { delete stripped.ha.ws; stripped.ha.ws_enable = false; }
+    if (issues.has('ha.mqtt')) { delete stripped.ha.mqtt; stripped.ha.mqtt_enable = false; }
+    let parsed: Record<string, any>;
+    try {
+      parsed = this.schema.parse(stripped);
+    } catch {
+      return undefined;                                  // une autre erreur, masquée jusque-là : on ne tolère pas
+    }
+    if (issues.has('ha.ws')) parsed.ha.ws = rawWs;
+    if (issues.has('ha.mqtt')) parsed.ha.mqtt = rawMqtt;
+    this.loadIssues = [...issues].map(([section, messages]) => ({ section, messages, wasEnabled: wasEnabled[section] }));
+    for (const issue of this.loadIssues) {
+      console.error(`[ConfigLoader] ${issue.section} invalide — connexion désactivée, démarrage poursuivi : ${issue.messages.join(' ; ')}`);
+    }
+    return parsed;
   }
 
   /**

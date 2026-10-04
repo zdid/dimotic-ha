@@ -80,6 +80,7 @@ vi.mock('../../infrastructure/remote/SshClient', async () => {
 
 const mockConfigService = {
   getConfig: vi.fn(),
+  getLoadIssues: vi.fn().mockReturnValue([]),
   getHaConfig: vi.fn(),
   getMqttConfig: vi.fn(),
   getLoggingConfig: vi.fn(),
@@ -198,6 +199,7 @@ describe('AppService', () => {
     
     // Réinitialiser les mocks
     mockConfigService.getConfig = vi.fn().mockReturnValue(baseConfig);
+    mockConfigService.getLoadIssues = vi.fn().mockReturnValue([]);
     mockConfigService.getHaConfig = vi.fn().mockReturnValue(baseConfig.ha);
     mockConfigService.getMqttConfig = vi.fn().mockReturnValue(baseConfig.ha?.mqtt);
     mockConfigService.getLoggingConfig = vi.fn().mockReturnValue(baseConfig.logging);

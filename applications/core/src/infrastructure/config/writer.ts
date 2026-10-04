@@ -68,9 +68,17 @@ export class ConfigWriter {
    * @param config - Config à sauvegarder
    * @returns Résultat { success, error? }
    */
-  save(config: AppConfig): SaveResult {
+  save(config: AppConfig, options: { skipHaConnectionValidation?: boolean } = {}): SaveResult {
     try {
-      this.schema.parse(config);
+      // ⭐ 01/10/2026 (démarrage tolérant) : quand on n'écrit PAS la section `ha` (liste d'applications, cibles,
+      // diffusion…) alors qu'elle est invalide en mémoire, ses connexions fautives ne doivent pas bloquer l'écriture
+      // du reste. La section `ha` modifiée depuis l'IHM reste, elle, validée strictement.
+      let toValidate: unknown = config;
+      if (options.skipHaConnectionValidation && config.ha) {
+        const { ws: _ws, mqtt: _mqtt, ...haRest } = config.ha as unknown as Record<string, unknown>;
+        toValidate = { ...config, ha: haRest };
+      }
+      this.schema.parse(toValidate);
     } catch (error) {
       if (error instanceof z.ZodError) {
         const errorDetails = error.errors

@@ -1493,6 +1493,12 @@ export class AppService {
     try {
       const config = this.configService.getConfig();
       const validationResult = this.validateConfig(config);
+
+      // ⭐ 01/10/2026 — démarrage tolérant : sections HA invalides désactivées au chargement (voir ConfigLoader).
+      // Les erreurs de champ partent déjà à l'IHM par validateConfig ci-dessous ; on les rend aussi visibles dans les logs.
+      for (const issue of this.configService.getLoadIssues()) {
+        this.logger.error('AppService', `${issue.section} invalide, connexion désactivée (voyant rouge) — à corriger dans Paramètres Techniques : ${issue.messages.join(' ; ')}`);
+      }
       
       // Émettre la configuration actuelle
       this.eventBus.emit('config:current', config);

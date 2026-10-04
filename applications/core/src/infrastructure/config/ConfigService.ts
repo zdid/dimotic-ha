@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import { AppConfig, HaConfig, MqttConfig, WebConfig, LoggingConfig, DeploymentTargetConfig, HaStackTargetConfig, Zigbee2mqttTargetConfig, ExternalSiteConfig } from './schema';
-import { ConfigLoader } from './loader';
+import { ConfigLoader, type ConfigLoadIssue } from './loader';
 import { ConfigWriter, SaveResult } from './writer';
 import type { Logger } from '../logger/index';
 import { redactForLog } from '../logger/redact';
@@ -71,6 +71,11 @@ export class ConfigService {
     return { ...this.config };
   }
 
+  /** ⭐ 01/10/2026 — sections HA invalides tolérées au dernier chargement (démarrage tolérant, voir ConfigLoader). */
+  getLoadIssues(): ConfigLoadIssue[] {
+    return this.loader.getLoadIssues?.() ?? [];
+  }
+
   /**
    * Retourne la configuration Home Assistant.
    */
@@ -98,7 +103,7 @@ export class ConfigService {
   clearHaWsToken(): SaveResult {
     if (!this.config.ha?.ws) return { success: true };
     const ha = { ...this.config.ha, ws: undefined };
-    const result = this.writer.save(this.socle({ ha }));
+    const result = this.saveSocle({ ha });
     if (result.success) {
       this.config = { ...this.config, ha };
     }
@@ -161,12 +166,12 @@ export class ConfigService {
     // accepté depuis newConfig — `machineId`, lui, reste TOUJOURS repris de this.config, jamais du
     // client (auto-généré, ne doit jamais pouvoir être corrompu/écrasé par un formulaire). Tout le
     // reste du socle (disabledApps, knownApps, cibles, sites externes) vient de this.config via socle().
-    const result = this.writer.save(this.socle({
+    const result = this.saveSocle({
       core: { ...this.config.core, site: newConfig.core?.site ?? this.config.core.site },
       ha: newConfig.ha,
       web: newConfig.web,
       logging: newConfig.logging
-    }));
+    });
     console.log('[ConfigService SERVEUR] Résultat sauvegarde:', result);
     // Pas de rafraîchissement de this.config ici — AppService.handleConfigSave() appelle déjà
     // reload() juste après un succès (relit le fichier écrit ci-dessus), inutile de dupliquer.
@@ -205,6 +210,23 @@ export class ConfigService {
    * l'enregistrement suivant (incidents disabledApps du 07/08/2026 et zigbee2mqttTargets/externalSites
    * du 27/08/2026). Tout nouveau champ du socle s'ajoute ICI uniquement.
    */
+  /**
+   * Écrit le socle. ⭐ 01/10/2026 (démarrage tolérant) : si la section `ha` n'est PAS fournie par l'appelant alors que le
+   * chargement a désactivé en mémoire un `ha.ws` / `ha.mqtt` invalide, on restitue le `ws_enable` / `mqtt_enable` du
+   * fichier (sinon une simple sauvegarde de la liste d'applications éteindrait la connexion pour de bon) et on ne
+   * valide pas ces connexions fautives, qui ne bloquent donc plus les autres écritures. La section `ha` envoyée par
+   * l'IHM (`ha` dans les overrides) reste validée strictement.
+   */
+  private saveSocle(overrides: Partial<AppConfig> = {}): SaveResult {
+    const issues = this.loader.getLoadIssues?.() ?? [];
+    if (!('ha' in overrides) && issues.length > 0) {
+      const ha = { ...this.config.ha } as Record<string, unknown>;
+      for (const issue of issues) ha[issue.section === 'ha.ws' ? 'ws_enable' : 'mqtt_enable'] = issue.wasEnabled;
+      return this.writer.save(this.socle({ ...overrides, ha: ha as unknown as HaConfig }), { skipHaConnectionValidation: true });
+    }
+    return this.writer.save(this.socle(overrides));
+  }
+
   private socle(overrides: Partial<AppConfig> = {}): AppConfig {
     return {
       core: this.config.core,
@@ -233,7 +255,7 @@ export class ConfigService {
 
   /** Enregistre ensemble applications désactivées et applications connues (une seule écriture). */
   setAppLists(disabledApps: string[], knownApps: string[]): SaveResult {
-    const result = this.writer.save(this.socle({ disabledApps, knownApps }));
+    const result = this.saveSocle({ disabledApps, knownApps });
     if (result.success) {
       this.config = { ...this.config, disabledApps, knownApps };
     }
@@ -265,7 +287,7 @@ export class ConfigService {
 
   setDiffusionSettings(settings: { send: boolean; receive: boolean }): SaveResult {
     const diffusion = { send: !!settings.send, receive: !!settings.receive };
-    const result = this.writer.save(this.socle({ diffusion }));
+    const result = this.saveSocle({ diffusion });
     if (result.success) this.config = { ...this.config, diffusion };
     return result;
   }
@@ -283,7 +305,7 @@ export class ConfigService {
    * transitent jamais par ce chemin, chacune a son propre fichier (saveModuleConfig).
    */
   setDisabledApps(disabledApps: string[]): SaveResult {
-    const result = this.writer.save(this.socle({ disabledApps }));
+    const result = this.saveSocle({ disabledApps });
     if (result.success) {
       this.config = { ...this.config, disabledApps };
     }
@@ -304,7 +326,7 @@ export class ConfigService {
    * depuis un payload client partiel).
    */
   setTargets(targets: DeploymentTargetConfig[]): SaveResult {
-    const result = this.writer.save(this.socle({ targets }));
+    const result = this.saveSocle({ targets });
     if (result.success) {
       this.config = { ...this.config, targets };
     }
@@ -323,7 +345,7 @@ export class ConfigService {
    * Sauvegarde la liste des cibles HA+Mosquitto, même narrowing défensif que setTargets().
    */
   setHaStackTargets(haStackTargets: HaStackTargetConfig[]): SaveResult {
-    const result = this.writer.save(this.socle({ haStackTargets }));
+    const result = this.saveSocle({ haStackTargets });
     if (result.success) {
       this.config = { ...this.config, haStackTargets };
     }
@@ -342,7 +364,7 @@ export class ConfigService {
    * Sauvegarde la liste des cibles zigbee2mqtt, même narrowing défensif que setTargets().
    */
   setZigbee2mqttTargets(zigbee2mqttTargets: Zigbee2mqttTargetConfig[]): SaveResult {
-    const result = this.writer.save(this.socle({ zigbee2mqttTargets }));
+    const result = this.saveSocle({ zigbee2mqttTargets });
     if (result.success) {
       this.config = { ...this.config, zigbee2mqttTargets };
     }
@@ -361,7 +383,7 @@ export class ConfigService {
    * Sauvegarde la liste des sites externes, même narrowing défensif que setZigbee2mqttTargets().
    */
   setExternalSites(externalSites: ExternalSiteConfig[]): SaveResult {
-    const result = this.writer.save(this.socle({ externalSites }));
+    const result = this.saveSocle({ externalSites });
     if (result.success) {
       this.config = { ...this.config, externalSites };
     }
