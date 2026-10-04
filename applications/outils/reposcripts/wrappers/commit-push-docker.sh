@@ -144,8 +144,10 @@ if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
 fi
 
 echo "Attention: Aucune machine ne sera mise à jour."
-read -rp "Publier la version ${NUMBER} (tag ${VERSION} + image Docker) ? [o/N] " CONFIRM2
-if [ "$CONFIRM2" != "o" ] && [ "$CONFIRM2" != "O" ]; then
+# ⭐ 04/10/2026 — Entrée = oui : la case « Docker » cochée vaut déjà intention de publier ; un Entrée
+# machinal annulait silencieusement la publication (image restée sur l'ancienne version).
+read -rp "Publier la version ${NUMBER} (tag ${VERSION} + image Docker) ? [O/n] " CONFIRM2
+if [ "$CONFIRM2" = "n" ] || [ "$CONFIRM2" = "N" ]; then
   echo "Tag/Docker annulés — le commit est déjà poussé."
   exit 0
 fi
