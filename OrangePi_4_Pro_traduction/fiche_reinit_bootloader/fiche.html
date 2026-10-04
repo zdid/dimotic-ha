@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Orange Pi 4 Pro – revenir au démarrage sur carte SD</title>
+<style>
+  @page { size: A4; margin: 14mm 13mm; }
+  body { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 9.8pt; line-height: 1.32; color: #111; }
+  h1 { font-size: 17pt; margin: 0 0 2mm; }
+  .sous { color: #555; margin: 0 0 4mm; font-size: 9pt; }
+  h2 { font-size: 12.5pt; margin: 5mm 0 2mm; border-bottom: 1.5px solid #e07b00; padding-bottom: 1mm; }
+  h3 { font-size: 11pt; margin: 3.5mm 0 1.5mm; }
+  img { max-width: 100%; display: block; margin: 2mm auto; }
+  .fig { text-align: center; font-size: 8.5pt; color: #444; margin-bottom: 3mm; }
+  .box { border: 1.5px solid #c00; background: #fff4f4; padding: 2.5mm 3.5mm; margin: 3mm 0; }
+  .note { border: 1px solid #999; background: #f6f6f6; padding: 2.5mm 3.5mm; margin: 3mm 0; font-size: 9.4pt; }
+  table { border-collapse: collapse; width: 100%; margin: 2mm 0; }
+  td, th { border: 1px solid #888; padding: 1.4mm 2mm; vertical-align: top; }
+  th { background: #eee; }
+  code, pre { font-family: "DejaVu Sans Mono", monospace; font-size: 9.2pt; }
+  pre { background: #f1f1f1; border: 1px solid #ccc; padding: 2mm 3mm; white-space: pre-wrap; margin: 1.5mm 0; }
+  ol li, ul li { margin-bottom: 1mm; }
+  .saut { page-break-before: always; }
+  table, pre, .box, .deux, h2, h3 { page-break-inside: avoid; } h2, h3 { page-break-after: avoid; }
+  .deux { display: flex; gap: 4mm; align-items: flex-start; }
+  .deux > div { flex: 1; }
+  .case::before { content: "☐  "; }
+</style>
+</head>
+<body>
+
+<h1>Orange Pi 4 Pro (A733) — revenir au démarrage sur carte SD</h1>
+<p class="sous">Fiche à imprimer · établie le 02/10/2026 à partir du manuel « OrangePi 4 Pro A733 User Manual v1.4 » (photos tirées du manuel) · dimotic-ha</p>
+
+<h2>1. Le problème</h2>
+<p>Quand on a installé le système sur le SSD NVMe avec <code>sudo nand-sata-install</code> → option <b>« 4 Boot from SPI – system on SATA, USB or NVMe »</b>, le script écrit un <b>chargeur de démarrage (bootloader) dans la mémoire SPI Flash</b> soudée sur la carte. Ensuite la carte démarre depuis la SPI Flash, qui lance le système du SSD : une carte SD insérée n'est plus prise en compte (ou le démarrage reste bloqué si le SSD a un souci).</p>
+<p><b>Pour que la carte reprenne la carte SD, il faut effacer (ou neutraliser) le bootloader de la SPI Flash.</b> Le manuel ne décrit pas cette remise à zéro : les méthodes ci-dessous sont les méthodes habituelles sur les cartes Allwinner ; les commandes marquées <b>(à vérifier)</b> n'ont pas encore été essayées sur cette carte.</p>
+
+<h2>2. Où sont les éléments sur la carte</h2>
+<img src="img/vue_dessus_legendee.jpg" style="width:118mm">
+<p class="fig">Vue de dessus (manuel, § 1.6). Repères utiles : <b>BOOT Key</b> (sérigraphié « FEL »), <b>RESET Key</b>, <b>POWER Key</b>, <b>128Mb/256Mb SPI Flash</b>, <b>Debug TTL UART</b> (3 broches marquées « DEBUG », entre le connecteur 40 broches et les 2 ports USB 2.0), alimentation <b>Type-C 5 V / 3 A</b>.</p>
+<img src="img/vue_dessous_legendee.jpg" style="width:100mm">
+<p class="fig">Vue de dessous : <b>MicroSD Card Slot</b> (lecteur de carte SD), emplacement M.2 du SSD NVMe.</p>
+
+<h2>3. Le matériel à préparer</h2>
+<table>
+<tr><th style="width:38%">Élément</th><th>Détail</th></tr>
+<tr><td>Carte microSD (8 Go mini, classe 10) avec une image Orange Pi 4 Pro gravée</td><td>Par ex. <code>Orangepi4pro_1.0.6_debian_bookworm…img</code> (dans <code>~/Téléchargements</code>), gravée avec balenaEtcher.</td></tr>
+<tr><td><b>Module USB ↔ série TTL 3,3 V</b> (« clé USB-TTL »)</td><td><b>Oui, le même type que pour flasher un ESP32 « nu »</b> : module à puce <b>CH340</b>, <b>CP2102</b> ou <b>FT232</b>. Il doit fonctionner en <b>3,3 V</b> (cavalier ou interrupteur sur 3,3 V s'il y en a un). <br>⚠ Une carte de développement ESP32 avec son USB intégré ne convient pas : il faut le petit module seul, à broches.</td></tr>
+<tr><td>3 fils Dupont femelle-femelle</td><td>GND, TX, RX.</td></tr>
+<tr><td>Un PC avec un terminal série</td><td>Linux : <code>picocom</code>, <code>minicom</code> ou <code>screen</code>. Windows : MobaXterm ou PuTTY. <b>115200 bauds</b>, 8 bits, sans parité, 1 bit d'arrêt, sans contrôle de flux.</td></tr>
+</table>
+
+<div class="deux">
+<div><img src="img/module_usb_ttl.jpg" style="width:120mm"><p class="fig">Module USB-TTL 3,3 V (manuel § 2.1) : ne brancher que <b>GND, TXD, RXD</b>. Les broches <b>3,3 V et 5 V ne se branchent pas</b>.</p></div>
+</div>
+
+<h2>4. Brancher le port série de débogage</h2>
+<div class="deux">
+<div><img src="img/port_debug.jpg"><p class="fig">Port « DEBUG » (manuel § 2.10) : de haut en bas <b>GND</b>, <b>RXD</b>, <b>TXD</b> (côté bord de carte).</p></div>
+<div><img src="img/schema_branchement.jpg"><p class="fig">Les fils TX et RX se <b>croisent</b>.</p></div>
+</div>
+<table>
+<tr><th>Module USB-TTL</th><th>→</th><th>Orange Pi, port DEBUG</th></tr>
+<tr><td>GND</td><td>→</td><td>GND</td></tr>
+<tr><td>RXD</td><td>→</td><td>TXD</td></tr>
+<tr><td>TXD</td><td>→</td><td>RXD</td></tr>
+<tr><td>3,3 V / 5 V</td><td></td><td><b>rien</b> (la carte reste alimentée par son Type-C)</td></tr>
+</table>
+<p>Sur le PC Linux : brancher le module, repérer son nom (<code>ls /dev/ttyUSB*</code>, en général <code>/dev/ttyUSB0</code>), puis :</p>
+<pre>sudo picocom -b 115200 /dev/ttyUSB0          (sortie : Ctrl+A puis Ctrl+X)</pre>
+<p>Mettre la carte sous tension : les messages de démarrage défilent. <b>Rien ne s'affiche ?</b> Inverser TX et RX (sans danger), vérifier GND et la vitesse 115200.</p>
+
+<h2>5. Effacer le bootloader de la SPI Flash — trois méthodes</h2>
+<div class="box"><b>Avant tout :</b> ces opérations effacent seulement le chargeur de démarrage de la SPI Flash. Les données du SSD ne sont pas touchées. Après effacement, la carte <b>démarre sur la carte SD</b> ; pour revenir plus tard au démarrage SSD, il suffira de relancer <code>sudo nand-sata-install</code> (option 4).</div>
+
+<h3>Méthode A — le système démarre encore (sur le SSD) : depuis Linux <i>(la plus simple)</i></h3>
+<ol>
+<li>Se connecter (écran/clavier, SSH ou port série).</li>
+<li>Repérer la SPI Flash : <pre>cat /proc/mtd          → une ligne « mtd0: … » doit apparaître</pre>
+Si <code>/proc/mtd</code> est vide, la SPI Flash n'est pas exposée par ce noyau : passer à la méthode B.</li>
+<li>Effacer son début (le bootloader) <b>(à vérifier)</b> :
+<pre>sudo dd if=/dev/zero of=/dev/mtdblock0 bs=1M count=1 status=progress
+sync</pre>
+(variante si l'outil est installé : <code>sudo flash_erase /dev/mtd0 0 0</code>)</li>
+<li>Arrêter : <code>sudo poweroff</code>, insérer la carte SD, remettre sous tension.</li>
+</ol>
+
+<h3>Méthode B — le système ne démarre plus : depuis la console série (u-boot)</h3>
+<ol>
+<li>Port série branché (§ 4), terminal ouvert, <b>carte SD insérée</b>.</li>
+<li>Mettre sous tension et <b>appuyer immédiatement plusieurs fois sur une touche</b> (Entrée ou espace) pendant les premières secondes, jusqu'à obtenir l'invite u-boot (<code>=&gt;</code> ou <code>sunxi#</code>). Si on la rate : bouton <b>RESET</b> et recommencer.</li>
+<li>Essayer d'abord de démarrer une fois sur la SD <b>(à vérifier)</b> :
+<pre>run mmc_boot           ou    boot</pre>
+Si le système de la SD démarre, appliquer ensuite la <b>méthode A</b> depuis ce système pour effacer la SPI Flash définitivement.</li>
+<li>Sinon, effacer la SPI Flash directement depuis u-boot <b>(à vérifier)</b> :
+<pre>sf probe 0
+sf erase 0 0x100000
+reset</pre></li>
+</ol>
+
+<h3>Méthode C — rien ne répond : bouton BOOT (« FEL »)</h3>
+<p>Maintenir le bouton <b>BOOT</b> enfoncé pendant la mise sous tension (ou pendant un appui sur <b>RESET</b>), puis le relâcher : le processeur passe en <b>mode de téléchargement USB (FEL)</b> et ne lit plus la SPI Flash. Ce mode sert à reflasher la carte depuis un PC Windows avec l'outil Allwinner <b>PhoenixSuit / LiveSuit</b> par le port USB-C. C'est le dernier recours : il demande l'outil et l'image adaptés, et la procédure exacte pour l'A733 est <b>à vérifier</b> dans la documentation Orange Pi avant de s'y lancer.</p>
+
+<h2>6. Vérifier que c'est bon</h2>
+<p class="case">La carte SD est insérée, la carte redémarre et le port série affiche le démarrage depuis la carte SD (« mmc0 », « SD card »…).</p>
+<p class="case">Une fois connecté : <code>findmnt /</code> indique <code>/dev/mmcblk…</code> (carte SD) et non <code>/dev/nvme0n1p1</code> (SSD).</p>
+<p class="case">Si l'on veut revenir au SSD plus tard : <code>sudo nand-sata-install</code> → option 4 (réécrit le bootloader dans la SPI Flash).</p>
+
+<div class="note"><b>Rappels du manuel :</b> la carte SD est prioritaire sur l'eMMC ; la sortie série se fait en <b>3,3 V</b> (ne jamais brancher la broche 5 V du module) ; alimentation <b>5 V / 3 A</b> par le Type-C.</div>
+
+</body>
+</html>
