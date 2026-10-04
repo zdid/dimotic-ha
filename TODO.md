@@ -3,8 +3,44 @@
 
 
 
+## 🐛 RFXCOM — appui sur un bouton Lighting2 : la lumière s'allume mais HA n'est pas mis à jour (constaté par l'utilisateur 04/10/2026, noisy, lumière à plusieurs boutons) — CORRIGÉ et VALIDÉ 04/10 (rfxcom v6.4)
+- Logs de noisy (6 h) : de nombreux `Émetteur lighting2_ac_… non associé à un récepteur` — les trames arrivent bien, mais aucun récepteur ne les écoute.
+- **Cause 1 (conception documentée, spec rfxcom §5.3)** : `ReceiverManager.findReceiversForEmitter` ne cherche QUE dans `emitters[]`, jamais le `primaryEmitter`. Plusieurs récepteurs de noisy n'ont QUE un primaryEmitter (`emitters: []`), ex. `recepteur_1001745` cuisine côté salon (`0x01571e7a_12`), `recepteur_1001746` cuisine côté fenêtre (`0x01571e7a_11`), `recepteur_1001748` chambre de Drystan (`0x017325de_10`) : un bouton qui émet ce code allume la lumière (appairage RF du module) mais HA ne bouge pas.
+- **Cause 2 (configuration)** : des boutons reçus ne sont déclarés nulle part (ex. `0x00835ef3_2`, `0x017328f6_10`, `0x00001356_1`) — appairés physiquement au module de la lumière mais inconnus de dimotic-ha.
+- **04/10 — essai réel à Saint-Fort (couloir/escalier, `recepteur_1001269`, RFXCOM sur falbala)** : le bouton du bas émet le code PRINCIPAL `0x017334a2_10` → « non associé » ; et chaque trame est relayée ~15-90 ms plus tard par `rfx_bridge_0001_orangepizero2_453502` → appliquée 2 fois (avec toggle : allumé puis éteint = défaut du 08/09).
+- **CORRIGÉ (spec rfxcom v6.4)** : émetteur principal écouté (ordre On/Off reçu, sans retransmission) ; déduplication 1,5 s direct/relais ; « toggle » supprimé pour Lighting1/2/6 → « suivre le signal reçu » (conversion automatique au démarrage, 16 appairages convertis sur falbala, copie `…bak-avant-suppression-toggle`) ; écran RFXCOM aligné (followReceivedSignal n'est plus perdu à l'enregistrement). **Validé en réel le 04/10** (bouton du bas de l escalier : état remonté à HA et au plan HAPLAN) ; à publier en image Docker (stfort, noisy…).
+
+## 🔲 CONCEPTION — écran unique des agents distants + paramétrage du core regroupé (décisions utilisateur 03/10/2026, rien codé)
+- **Écran unique des déploiements d'agents distants** (même principe pour tous : copie, config, service, présence, log) : **rpigpio, teleinfo, DDSU666-H (futur compteurmodbus), arexx**. Une ligne par machine × agent, actions communes (déployer, démarrer, arrêter, redémarrer, voir la log, retirer). La configuration métier reste dans chaque application.
+- **Liens croisés** : depuis les écrans arexx et rpigpio (et teleinfo, compteur) un lien vers l'application de déploiement, et inversement.
+- **Sauvegarde** : son paramétrage (Nextcloud…) passe au niveau du **core** ; le **nom du répertoire distant n'est plus demandé** (fixe : `backups-dimotic`).
+- **Paramétrage technique du core regroupé sur un seul écran** (un bouton « Enregistrer » par bloc) : Web-services, MQTT, Serveur Web, Journalisation, **Sauvegarde** (Nextcloud) **et Gestion des applications**. **Restent à part** : **Site** (nom, site, diffusion), Déploiement (étendu aux agents des applications + envoi du script de sauvegarde) et Services post-installation. Menu cible : Site · Réglages · Déploiement · Services post-installation.
+- Sauvegarde : au core = serveur Nextcloud, utilisateur, mot de passe d application ; dans l application = machines sauvegardées, état, assistant de restauration ; l envoi script + cron va à l écran Déploiement.
+- **Spec écrite** : `specs/current/conception-agents-distants-reglages_specs_v1.0.md` (D1–D7, plan en 6 étapes, 5 points ouverts §10). Inclut le déploiement de l'agent **DDSU666-H** (compteurmodbus), aujourd'hui posé à la main sur noisy.
+
+## 🔴 NOISY (RPi3) BLOQUÉ depuis le 02/10/2026 ~12h25 — en attente d'une coupure d'alimentation sur place
+- Cause probable (faute de Claude) : `ls -dt /logs/*` sur un répertoire `/logs` géant (entrée de 158 Mo = des millions de fichiers) → RPi3 saturé ; plus de SSH ni de Caddy (`dimotic-noisy-ha.duckdns.org`), accès à noisy2 coupé aussi (rebond par noisy).
+- **À reprendre ensuite (sans jamais parcourir `/logs` en entier)** :
+  1. `/logs` : **03/10, l utilisateur a renommé `/logs` en `/logs2` et supprimé 1 560 000 fichiers.** `/logs2` supprimé. **Cause trouvée et corrigée (03/10)** : module `zigbee` de l ancienne domotique (clé CC2531 `0451:16a8` absente) relancé toutes les ~12 s, un `zigbee2mqtt_*.log` vide à chaque fois ; désactivé par `"host": ["none"]` dans `/home/datadomo/SUPERVISEDNODES.json` (sur une machine non maître, `autostart: false` est ignoré). Sauvegarde `SUPERVISEDNODES.json.bak-20261003-avant-zigbee-off`. Restent à vérifier : `x10`, `smsusb` (matériel absent) — ne PAS toucher `arexx`.
+  2. dimoweb (ancienne domotique) n'écoute pas sur 8081 (`dimoweb.application.port=8081`, processus vivant depuis le 01/10) → `dimoticnoisy.duckdns.org` en 502 ; redémarrer dimoweb et lire sa log.
+  3. Marstek : « SOC min » Omnibattery (`number.batterie_marstek_discharging_cutoff_capacity`) 12 % → 30 % demandé par l'utilisateur.
+     + « SOC max » (`number.batterie_marstek_charging_cutoff_capacity`) 100 % → 90 % demandé (02/10).
+  4. Plus tard (« trop pour l'instant ») : automatisation coupure secteur → SOC min 12 %, retour → 30 % ; nécessite noisy2 + box/switch (+ noisy pour la tension DDSU) sur la sortie secourue, et un essai de coupure réel.
+- **03/10 : noisy redémarré, OK.** MQTT revu : noisy publie en local (.62) + pont Mosquitto vers noisy2 (HA + drivers + internes dimotic-ha ; ancienne domotique non recopiée). **noisy2 en panne** (SSH sans bannière, broker 1883 refusé, dimotic-ha 8087 muet, seul HA répond) → redémarrage sur place ; le pont se connectera seul.
+- Fait le 02/10 sur ha2 : réserve de secours Huawei 40 % → 25 % (entité `number.cuisine_d_ete_onduleur_soc_de_la_batterie_de_secours` activée).
+
 ## ✅ SUPERVISION — bouton « 📄 Voir la log » par machine (01/10/2026, specs supervision v1.6 / sauvegarde v1.7) — vérifié en local sur ha2 et orangepi2
 - Lit par SSH : `status.json`, les 2 logs `tar-*.log` d'échec les plus récents, la fin de `cron.log`. Vérifié dans le navigateur (falbala). **À vérifier sur noisy/noisy2** : nécessite une nouvelle image Docker (pas dans l'image publiée).
+
+## ✅ CORE — démarrage tolérant sur `ha.ws` / `ha.mqtt` invalides (01/10/2026, spec socle v4.34 §7.2) — codé, testé en local, PAS encore déployé
+- Cause de l'incident : la diffusion de `config.yaml` entre noisy et noisy2 a laissé `ha.ws` avec un hôte et sans jeton (jeton dans `secrets_config.yaml`, non diffusé) → le core bouclait sur « `ha.ws.host: Host is required` ».
+- Fait : `ConfigLoader.tryTolerantHaLoad` (connexion désactivée en mémoire, valeurs gardées, `getLoadIssues()`), `ConfigService.saveSocle` (restitue `ws_enable`/`mqtt_enable` d'origine, ne valide pas la connexion fautive quand `ha` n'est pas écrite), `ConfigWriter.save(..., {skipHaConnectionValidation})`, log ERROR dans `AppService`. 165 tests passent ; essayé dans un navigateur sur une instance isolée (voyants rouges, champ jeton « Requis », hôte conservé).
+- **À faire** : image Docker à republier pour noisy / noisy2 / autres ; **le fond reste ouvert** : la section `ha` (hôtes, ports, client_id) est déclarée « commune » et diffusée, alors qu'elle diffère entre machines (HA local à noisy2, pas à noisy) — décision à prendre avec l'utilisateur.
+
+## ✅ DDSU666-H sur noisy -> HA de noisy2 (01/10/2026) — en service, script maison à la place de modbus2mqtt
+- **modbus2mqtt abandonné pour noisy** : RPi3 en Raspbian 10 **32 bits** (armv7l), l'image n'existe pas pour `linux/arm/v7` (« no matching manifest »). Remplacé par `applications/outils/reposcripts/scripts/ddsu666h-mqtt.py` (python3 + `mosquitto_pub`, sans dépendance, Python 3.7 OK), service systemd `ddsu666h-mqtt` sur noisy (`/root/ddsu666h-mqtt.py`, unité `/etc/systemd/system/ddsu666h-mqtt.service`).
+- Lit adresse 11, 9600 8N1, port `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0`, toutes les 5 s ; publie la découverte HA (retenue) et l'état JSON `ddsu666h/noisy/state` sur le **broker de noisy2** (192.168.1.201:1883, `homeassistant/`) : **10 entités créées dans le HA de noisy2** (`sensor.compteur_reseau_noisy_ddsu666_h_*`). Puissance positive = soutirage, négative = injection.
+- **Reste** : comparer avec l'afficheur du compteur ; renommer les entités (noms longs) ; brancher Omnibattery (entité de puissance du réseau) quand la batterie est installée ; décider si le script entre dans l'app `outils` / un modèle d'installation.
 
 ## 🟡 DÉPLOIEMENT — sur la machine LOCALE, le conteneur Docker ne redémarrait pas (constaté 30/09/2026 sur noisy2) — CORRIGÉ et VALIDÉ sur ha2 le 01/10/2026, reste à publier dans l'image
 - **Constat** : depuis l'écran Déploiement, déployer vers la machine locale (celle qui porte le core) ne relance pas le conteneur.
