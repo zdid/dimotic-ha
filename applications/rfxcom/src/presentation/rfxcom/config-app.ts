@@ -36,6 +36,8 @@ interface AssociatedEmitter {
   emitterId: string;
   action: string;
   value?: number;
+  /** Suivre l'ordre On/Off porté par la trame (protocoles Lighting1/2/6) — voir emitterActionOptions. */
+  followReceivedSignal?: boolean;
 }
 
 interface ReceiverConfig {
@@ -535,14 +537,36 @@ function addEmitterRow(existing?: AssociatedEmitter): void {
   row.className = 'emitter-row';
   row.innerHTML = `
     <select class="select-control emitter-id">${emitterOptions}</select>
-    <select class="select-control emitter-action">
-      ${['toggle', 'on', 'off', 'set_level', 'open', 'close', 'stop'].map((a) =>
-        `<option value="${a}" ${existing?.action === a ? 'selected' : ''}>${a}</option>`).join('')}
-    </select>
+    <select class="select-control emitter-action">${emitterActionOptions(existing)}</select>
     <input type="number" class="form-control emitter-value" placeholder="valeur (set_level)" min="0" max="100" value="${existing?.value ?? ''}">
     <button type="button" class="btn btn-danger" data-action="remove-emitter-row">✕</button>
   `;
   container.appendChild(row);
+  // ⭐ 04/10/2026 (spec rfxcom v6.4) : la liste d'actions dépend du protocole du bouton choisi.
+  const idSelect = row.querySelector('.emitter-id') as HTMLSelectElement;
+  const actionSelect = row.querySelector('.emitter-action') as HTMLSelectElement;
+  idSelect.addEventListener('change', () => { actionSelect.innerHTML = emitterActionOptions(undefined, idSelect.value); });
+  if (!existing) actionSelect.innerHTML = emitterActionOptions(undefined, idSelect.value);
+}
+
+/** Protocoles dont chaque trame porte un ordre On/Off explicite (« toggle » n'y existe pas). */
+function emitterSendsOnOff(emitterId: string): boolean {
+  return /^lighting[126]_/i.test(emitterId);
+}
+
+/**
+ * ⭐ 04/10/2026 — options d'action d'un bouton associé. Pour Lighting1/2/6 : « suivre le signal reçu »
+ * (On/Off portés par la trame, valeur `follow` → `action: on` + `followReceivedSignal: true`) à la place
+ * de « toggle », qui n'existe pas dans ces protocoles.
+ */
+function emitterActionOptions(existing?: AssociatedEmitter, emitterIdOverride?: string): string {
+  const emitterId = emitterIdOverride ?? existing?.emitterId ?? '';
+  const onOff = emitterSendsOnOff(emitterId);
+  const actions: Array<[string, string]> = onOff
+    ? [['follow', 'suivre le signal reçu (On/Off)'], ['on', 'on'], ['off', 'off'], ['set_level', 'set_level']]
+    : [['toggle', 'toggle'], ['on', 'on'], ['off', 'off'], ['set_level', 'set_level'], ['open', 'open'], ['close', 'close'], ['stop', 'stop']];
+  const current = existing?.followReceivedSignal ? 'follow' : (existing?.action ?? (onOff ? 'follow' : 'toggle'));
+  return actions.map(([v, label]) => `<option value="${v}" ${current === v ? 'selected' : ''}>${label}</option>`).join('');
 }
 
 function saveReceiver(): void {
@@ -565,9 +589,11 @@ function saveReceiver(): void {
 
   const emitters: AssociatedEmitter[] = Array.from(document.querySelectorAll('#rf-emitters-container .emitter-row')).map((row) => {
     const emitterId = (row.querySelector('.emitter-id') as HTMLSelectElement).value;
-    const action = (row.querySelector('.emitter-action') as HTMLSelectElement).value;
+    const selected = (row.querySelector('.emitter-action') as HTMLSelectElement).value;
     const valueStr = (row.querySelector('.emitter-value') as HTMLInputElement).value;
-    return { emitterId, action, value: valueStr ? Number(valueStr) : undefined };
+    // « suivre le signal reçu » : action de repli 'on' + followReceivedSignal (jusqu'ici perdu à chaque enregistrement depuis l'écran).
+    if (selected === 'follow') return { emitterId, action: 'on', followReceivedSignal: true, value: valueStr ? Number(valueStr) : undefined };
+    return { emitterId, action: selected, value: valueStr ? Number(valueStr) : undefined };
   }).filter((e) => e.emitterId);
 
   const config: ReceiverConfig = {

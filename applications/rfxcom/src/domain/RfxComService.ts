@@ -9,12 +9,13 @@
  * RfxComTransceiver/ConfigFileManager.
  */
 
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
 import { createRfxComError, getCommandTopic, computeBridgeInstance } from '../../../core/dist/exports';
 import { rfxcomConfigSchema, type RfxComConfig } from './config-schema';
 import type { RfxComDevicesConfigFile, ReceiverConfigEntry } from './devices-config-schema';
-import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult, RfxComOrderTrace } from './types';
+import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult, RfxComOrderTrace, AssociatedEmitter } from './types';
 import { DeviceManager } from './devices/DeviceManager';
 import { ReceiverManager } from './receivers/ReceiverManager';
 import type { IReceiverModule, ReceiverCommandResult } from './receivers/BaseReceiver';
@@ -93,6 +94,26 @@ export class RfxComService implements IRfxComService {
   /** uniqueId du primaryEmitter commandé → horodatage (ms epoch) jusqu'auquel un relais entrant le
    *  concernant doit être ignoré — voir RELAY_ECHO_SUPPRESSION_MS/applyReceiverCommandInternal. */
   private recentlyCommandedEmitters: Map<string, number> = new Map();
+  /**
+   * ⭐ 04/10/2026 (spec rfxcom v6.4, bug couloir/escalier) — dernière trame émetteur traitée par objectId :
+   * une même trame entendue par notre RFXCOM ET relayée par une autre instance qui l'a entendue aussi
+   * (relayed-value, 15 à 90 ms plus tard) était appliquée deux fois — avec un appairage « toggle »,
+   * allumé puis aussitôt éteint dans HA. Même bouton + même ordre dans la fenêtre = doublon ignoré.
+   */
+  private lastEmitterFrames: Map<string, { command: string; at: number }> = new Map();
+  private static readonly EMITTER_DEDUP_MS = 1500;
+
+  private isDuplicateEmitterFrame(objectId: string, message: RfxComRawMessage, source: 'local' | 'relais'): boolean {
+    const command = String(message.data.command ?? '').trim().toLowerCase();
+    const now = Date.now();
+    const last = this.lastEmitterFrames.get(objectId);
+    this.lastEmitterFrames.set(objectId, { command, at: now });
+    if (last && last.command === command && now - last.at < RfxComService.EMITTER_DEDUP_MS) {
+      this.logger.debug('RfxComService', `Trame ${objectId} (${command || '?'}) ignorée (${source}) : doublon d'une trame traitée il y a ${now - last.at} ms`);
+      return true;
+    }
+    return false;
+  }
   /** Scènes dont l'exécution séquentielle en cours doit s'arrêter à la prochaine étape. */
   private cancelledScenes: Set<string> = new Set();
   // ⚠️ configureRFX (RfxComTransceiver.pushEnabledProtocols) déclenche lui-même un nouvel
@@ -202,8 +223,10 @@ export class RfxComService implements IRfxComService {
     // sans eux).
     const legacyStates = this.extractLegacyStates();
     this.applyLastStates(this.lastStatesStore.load());
+    const togglesRemoved = this.migrateTogglesToReceivedSignal();
     this.deviceManager.loadConfigured(this.devicesConfig.rfxcom_devices);
     this.receiverManager.loadReceivers(this.devicesConfig.rfxcom_receivers);
+    if (togglesRemoved > 0) this.persistConfig();
     this.sceneManager.loadScenes(this.devicesConfig.rfxcom_receivers);
     if (legacyStates) {
       if (this.lastStatesStore.saveNow(this.buildLastStatesSnapshot())) {
@@ -504,6 +527,7 @@ export class RfxComService implements IRfxComService {
 
     const isEmitter = message.type.startsWith('Lighting');
     if (isEmitter) {
+      if (this.isDuplicateEmitterFrame(uniqueId, message, 'local')) return;
       const affectedReceivers = this.receiverManager.handleEmitterMessage(uniqueId, this.resolveReceivedOnOff(message));
       // ⭐ 14/09/2026, pont protocole (ex: bouton Lighting2 associé à un volet Somfy) : le device
       // réellement commandé n'a rien reçu du bouton (protocoles/adresses différents) —
@@ -762,6 +786,7 @@ export class RfxComService implements IRfxComService {
     }
 
     if (message.type.startsWith('Lighting')) {
+      if (this.isDuplicateEmitterFrame(objectId, message, 'relais')) return;
       const affectedReceivers = this.receiverManager.handleEmitterMessage(objectId, this.resolveReceivedOnOff(message));
       for (const { receiver, toTransmit } of affectedReceivers) {
         if (toTransmit) this.transmitReceiverCommand(receiver, toTransmit);
@@ -1726,6 +1751,45 @@ export class RfxComService implements IRfxComService {
   /** Sauvegarde la CONFIGURATION (devices/récepteurs/scènes) dans config-rfxcom-devices-v1.0.yaml
    *  — ⭐ 24/09/2026 : sans les derniers états (LastStatesStore), donc seulement quand la config
    *  change réellement (paramétrage depuis l'écran, adresse de commande apprise). */
+  /**
+   * ⭐ 04/10/2026 (spec rfxcom v6.4, décision utilisateur) — « toggle » n'existe pas dans les protocoles
+   * qui transportent un ordre On/Off explicite (Lighting1, Lighting2, Lighting6) : basculer l'état mémorisé
+   * au lieu de suivre l'ordre reçu décalait HA de la réalité (trame en double, commande intercalée). Au
+   * démarrage, tout appairage `action: toggle` d'un tel bouton devient « suivre le signal reçu »
+   * (`followReceivedSignal: true`, `action: on` en simple repli). Copie du fichier avant la première
+   * réécriture (`…bak-avant-suppression-toggle`). Retourne le nombre d'appairages convertis.
+   */
+  private migrateTogglesToReceivedSignal(): number {
+    let changed = 0;
+    for (const receiver of Object.values(this.devicesConfig.rfxcom_receivers ?? {})) {
+      const emitters = (receiver as { emitters?: AssociatedEmitter[] }).emitters;
+      if (!Array.isArray(emitters)) continue;
+      for (const e of emitters) {
+        if (e.action === 'toggle' && RfxComService.emitterSendsOnOff(e.emitterId)) {
+          e.action = 'on';
+          e.followReceivedSignal = true;
+          changed++;
+        }
+      }
+    }
+    if (changed > 0) {
+      const file = this.resolveDevicesConfigPath();
+      const backup = `${file}.bak-avant-suppression-toggle`;
+      try {
+        if (fs.existsSync(file) && !fs.existsSync(backup)) fs.copyFileSync(file, backup);
+      } catch (error) {
+        this.logger.warn('RfxComService', `Copie de sauvegarde avant suppression des toggle impossible : ${error}`);
+      }
+      this.logger.info('RfxComService', `${changed} appairage(s) « toggle » converti(s) en « suivre le signal reçu » (protocoles à ordre On/Off)`);
+    }
+    return changed;
+  }
+
+  /** Protocoles dont chaque trame porte un ordre On/Off explicite — « toggle » n'y a pas de sens. */
+  static emitterSendsOnOff(emitterId: string): boolean {
+    return /^lighting[126]_/i.test(emitterId);
+  }
+
   private persistConfig(): void {
     const devices: Record<string, RfxComDeviceInfo> = {};
     for (const [id, device] of Object.entries(this.deviceManager.getConfiguredDevicesRecord())) {

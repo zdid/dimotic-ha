@@ -1,13 +1,23 @@
 # Spécifications — Module RFXCOM
 
-**Version :** 6.3
-**Date :** 29 Septembre 2026
+**Version :** 6.4
+**Date :** 4 Octobre 2026
 **Auteur :** Mistral Vibe / Claude
 **Statut :** En production
 **Type :** Application d'intégration
 **Dépend de :** `nommage_specs_v1.0.md` (protocole de taxonomie QUOI/OÙ), `techniques-socle-ha-mqtt_specs_v4.33.md`,
 `guide-nouvelle-application_specs_v2.0.md`, `fonctionnelles-supervisor_specs_v2.9.md` (§9.1/§9.4 pour le
 principe multi-instances utilisé en Partie 1 §17bis)
+
+> **v6.4 (04/10/2026)** — corrections après le constat de l'utilisateur sur la lumière « couloir / escalier » de
+> Saint-Fort (« la lumière s'allume, mais HA n'est pas mis à jour ») : (1) **l'émetteur principal d'un récepteur est
+> désormais écouté** (§5.3) — une trame portant son code applique au récepteur l'ordre On/Off reçu et publie l'état vers
+> HA, sans retransmission ; (2) **déduplication** des trames émetteur : même bouton + même ordre reçus deux fois en moins
+> de 1,5 s (réception directe ET relais `relayed-value` d'une autre instance) = traités une seule fois ; (3) **« toggle »
+> supprimé pour les protocoles à ordre On/Off explicite (Lighting1, Lighting2, Lighting6)** : remplacé par « suivre le
+> signal reçu » (`followReceivedSignal: true`, `action: on` en repli), conversion automatique de la configuration au
+> démarrage (copie `…bak-avant-suppression-toggle`), écran RFXCOM aligné (et `followReceivedSignal` n'est plus perdu à
+> l'enregistrement d'un récepteur depuis l'écran).
 
 > **v6.3 (29/09/2026)** — (1) **Fichiers propres à la machine** (`techniques-diffusion-data_specs` §8.3) :
 > `port`/`baudRate` dans `data/rfxcom/machine_config.yaml`, appareils dans `machine_config-rfxcom-devices-v1.0.yaml`
@@ -534,11 +544,22 @@ Home Assistant
 1. Bouton physique (Lighting2 0x02B3) envoie: "ON"
 2. RfxComService reçoit message RF433
 3. Service identifie 0x02B3 comme émetteur (lighting2_ac_0x02b3)
-4. ReceiverManager.findReceiversForEmitter() cherche 0x02b3 dans emitters[] de chaque récepteur
-5. Pour chaque récepteur trouvé:
-   a. Module approprié exécute l'action configurée (toggle, on, off, set_level, etc.)
+4. Doublon ? même bouton + même ordre déjà traité il y a moins de 1,5 s (réception directe ou relais
+   d'une autre instance) → ignoré (⭐ v6.4)
+5. ReceiverManager cherche 0x02b3 dans emitters[] de chaque récepteur ET (⭐ v6.4) parmi les
+   primaryEmitter des récepteurs (ordre On/Off lisible uniquement)
+6. Pour chaque récepteur trouvé:
+   a. Module approprié exécute l'action : ordre reçu (followReceivedSignal, émetteur principal),
+      sinon action configurée (on, off, set_level ; toggle seulement hors Lighting1/2/6)
    b. Module met à jour état du récepteur dans HA et persiste lastOn/lastLevel
+   c. Jamais de retransmission pour l'émetteur principal (la lampe a reçu son propre code)
 ```
+
+> ⭐ **v6.4 (04/10/2026) — l'émetteur principal est écouté.** Jusqu'en v6.3, seuls les `emitters[]` étaient
+> consultés (paragraphe ci-dessous, conservé pour l'historique) : un bouton émettant le code principal (appris par
+> le module de la lampe) allumait la lampe sans que HA le sache (constaté en réel le 04/10/2026, Saint-Fort,
+> `recepteur_1001269`). Une même trame entendue par notre RFXCOM et relayée par une autre instance était en outre
+> appliquée deux fois — avec « toggle », allumé puis éteint en ~90 ms (cause du défaut du 08/09/2026).
 
 > ⚠️ **`findReceiversForEmitter` ne recherche QUE dans `emitters[]`, jamais dans `primaryEmitter`
 > lui-même.** Contre-intuitivement, un récepteur n'écoute donc pas automatiquement en écho son
@@ -1393,7 +1414,7 @@ Pour les récepteurs avec `isDimmable: true` :
 |--------------|----------------|-----------|
 | `turn_on` | Envoi ON avec dernier niveau | Utilise `defaultLevel` ou 100% |
 | `turn_off` | Envoi OFF | - |
-| `toggle` | Basculer ON/OFF | Inverse l'état actuel |
+| `toggle` | Basculer ON/OFF | Inverse l'état actuel (commande HA ; côté boutons Lighting1/2/6, « toggle » n'existe plus depuis v6.4 — voir §5.3) |
 | `set_level` | Envoi ON avec niveau spécifié | Voir échelle native ci-dessous |
 
 > ⚠️ **Échelle réelle** : le niveau natif RFXCOM (`Lighting2.setLevel`) est **0-15**, pas 0-100 ni
@@ -1765,6 +1786,7 @@ Capacités Request/Reply envisagées : `rfxcom:devices:list`, `rfxcom:device:get
 | 5.15 | 2026-08-15 | Claude | Ferme le gap restant de v5.14 §20 : `lastValue`/`commandDeviceId` ajoutés à `rfxComDeviceSchema` — survivent désormais au rechargement. Fenêtre de fraîcheur de 30 min retirée de `publishDeviceStateAtStartup()` (§9.2, demande utilisateur) — devenue sans objet une fois `lastValue` persisté correctement, la dernière valeur connue est toujours republiée au démarrage. Nouveau `lastAnyValueChangeAt` (§9.2ter) : horodatage global (tous devices confondus, pas par device), persisté, exposé dans `RfxComStatus` et sur le tableau de bord — demande utilisateur explicite, sans logique de fraîcheur/alerte dessus pour l'instant. Ancienne version v5.14 archivée. |
 | 5.16 | 2026-08-16 | Claude | **Nouvelle §17bis "Multi-instances — Recouvrement RF et Relais entre Bridges"** : ferme une lacune documentaire (`registered-devices`/`claimed-elsewhere`, construit plus tôt dans la session, jamais documenté ici — seulement dans `fonctionnelles-supervisor_specs` §9.4, référence croisée ajoutée). Deux ajouts réels : exclusion effective de la liste "découverts" pour un device revendiqué par une autre instance (§17bis.2, corrige un bug signalé par l'utilisateur — seul un avertissement séparé existait jusqu'ici) et relais de valeur inter-instances (§17bis.3, nouveau topic non retenu `rfxcom/{bridgeInstance}/relayed-value`) avec garde-fou anti-écho pour les commandes envoyées (§17bis.4, `RELAY_ECHO_SUPPRESSION_MS` 5s). Déclaration d'un device reste locale (décision explicite, une idée initiale de déclaration inter-instances a été simplifiée en discussion). Aucun relais de commande (hors scope explicite). **Non vérifié en conditions réelles** (§17bis.5) — nécessiterait deux dongles RFXCOM en recouvrement RF, indisponible cette session. Référence croisée techniques-socle mise à jour (v4.19→v4.30). Ancienne version v5.15 archivée. |
 | 6.1 | 2026-09-24 | Claude | **Derniers états sortis de la configuration** (§10.4, décision utilisateur) : fichier `rfxcom-derniers-etats.json`, écriture groupée ≤ 1/30 s + à l'arrêt, sans `.bak`, migration automatique de l'ancien format (vérifiée sur une copie de la config réelle de stfort : 43 valeurs + 23 récepteurs migrés, config identique hors états) ; config réécrite seulement sur changement réel (y compris `commandDeviceId` appris). **§8.5** : config relue sur disque avant comparaison (reconnexion à chaud jamais effective dans le process séparé). Changer le type d'un récepteur publié retire l'ancienne entité HA et repart sans derniers états (suppression + recréation). Arrêt : déconnexion avant l'arrêt de la boucle de reconnexion. v6.0 archivée. |
+| 6.4 | 2026-10-04 | Claude | Émetteur principal écouté (§5.3), déduplication des trames émetteur (direct + relais), « toggle » supprimé pour Lighting1/2/6 → « suivre le signal reçu » avec conversion automatique au démarrage ; écran aligné. v6.3 archivée. |
 | 6.3 | 2026-09-29 | Claude | Fichiers `machine_` (config machine, appareils, derniers états) ; détection du port prioritaire vérifiée ; états republiés 10 s après les découvertes (entités neuves). v6.2 archivée. |
 | 6.2 | 2026-09-24 | Claude | Volets : dernière position connue republiée vers HA au démarrage/reconnexion (§9.2bis), jamais la position par défaut, jamais de commande matérielle. v6.1 archivée. |
 

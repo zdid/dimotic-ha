@@ -103,16 +103,35 @@ export class ReceiverManager {
    */
   handleEmitterMessage(emitterId: string, receivedAction?: 'on' | 'off'): AffectedReceiver[] {
     const matches = this.findReceiversForEmitter(emitterId);
-    if (matches.length === 0) {
+    // ⭐ 04/10/2026 (spec rfxcom v6.4 §5.3, bug couloir/escalier de Saint-Fort) : un bouton qui émet
+    // le code de l'ÉMETTEUR PRINCIPAL d'un récepteur (même code que celui que HA utilise pour le
+    // commander, appris par le module de la lampe) agit physiquement sur la lampe — le récepteur doit
+    // donc suivre l'ordre reçu et le remonter à HA, comme pour un bouton de emitters[]. Seulement si
+    // l'ordre on/off est lisible sans ambiguïté ; jamais de retransmission (la lampe a déjà reçu le
+    // signal, c'est son propre code).
+    const primaryMatches: IReceiverModule[] = [];
+    if (receivedAction) {
+      for (const receiver of this.receivers.values()) {
+        if (receiver.config.primaryEmitter === emitterId && !matches.some((m) => m.receiver === receiver)) {
+          primaryMatches.push(receiver);
+        }
+      }
+    }
+    if (matches.length === 0 && primaryMatches.length === 0) {
       this.logger.debug('ReceiverManager', `Émetteur ${emitterId} non associé à un récepteur`);
     }
-    return matches.map(({ receiver, associated }) => {
+    const fromPrimary: AffectedReceiver[] = primaryMatches.map((receiver) => {
+      this.logger.debug('ReceiverManager', `Émetteur principal ${emitterId} → ${receiver.config.receiverId} (${receiver.config.name}) : action=${receivedAction} (signal reçu)`);
+      receiver.applyEmitterCommand(receivedAction as 'on' | 'off');
+      return { receiver, toTransmit: null };
+    });
+    return [...fromPrimary, ...matches.map(({ receiver, associated }) => {
       const action = associated.followReceivedSignal && receivedAction ? receivedAction : associated.action;
       // ⭐ 15/09/2026, demande utilisateur (surveillance volets) : jusqu'ici seul le cas SANS
       // appariement était loggé — un appariement réussi restait silencieux, y compris en debug.
       this.logger.debug('ReceiverManager', `Émetteur ${emitterId} → ${receiver.config.receiverId} (${receiver.config.name}) : action=${action}${associated.followReceivedSignal ? ` (signal reçu, config=${associated.action})` : ' (figée en config)'}`);
       const toTransmit = receiver.applyEmitterCommand(action, associated.value);
       return { receiver, toTransmit };
-    });
+    })];
   }
 }
