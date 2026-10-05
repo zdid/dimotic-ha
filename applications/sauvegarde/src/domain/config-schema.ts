@@ -18,7 +18,7 @@ import { z } from 'zod';
 export const SECRET_FILE_PATH = '/dimotic-secrets/nextcloud-backup';
 
 export const sauvegardeNextcloudSchema = z.object({
-  // ⭐ 17/09/2026 — juste le domaine (ex. https://dimoticloud.duckdns.org), PAS le chemin WebDAV
+  // ⭐ 17/09/2026 — juste le domaine (ex. https://monsite.duckdns.org), PAS le chemin WebDAV
   // complet : la remarque de l'utilisateur ("user ne sert à rien s'il n'est pas forcé dans
   // l'adresse") a fait remplacer l'ancien champ `baseUrl` (URL WebDAV complète, redondante avec
   // `user` et risquant l'incohérence entre les deux). Le chemin WebDAV complet

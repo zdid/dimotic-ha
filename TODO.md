@@ -19,10 +19,10 @@
 - **Spec écrite** : `specs/current/conception-agents-distants-reglages_specs_v1.0.md` (D1–D7, plan en 6 étapes, 5 points ouverts §10). Inclut le déploiement de l'agent **DDSU666-H** (compteurmodbus), aujourd'hui posé à la main sur noisy.
 
 ## 🔴 NOISY (RPi3) BLOQUÉ depuis le 02/10/2026 ~12h25 — en attente d'une coupure d'alimentation sur place
-- Cause probable (faute de Claude) : `ls -dt /logs/*` sur un répertoire `/logs` géant (entrée de 158 Mo = des millions de fichiers) → RPi3 saturé ; plus de SSH ni de Caddy (`dimotic-noisy-ha.duckdns.org`), accès à noisy2 coupé aussi (rebond par noisy).
+- Cause probable (faute de Claude) : `ls -dt /logs/*` sur un répertoire `/logs` géant (entrée de 158 Mo = des millions de fichiers) → RPi3 saturé ; plus de SSH ni de Caddy (le domaine DuckDNS de noisy), accès à noisy2 coupé aussi (rebond par noisy).
 - **À reprendre ensuite (sans jamais parcourir `/logs` en entier)** :
   1. `/logs` : **03/10, l utilisateur a renommé `/logs` en `/logs2` et supprimé 1 560 000 fichiers.** `/logs2` supprimé. **Cause trouvée et corrigée (03/10)** : module `zigbee` de l ancienne domotique (clé CC2531 `0451:16a8` absente) relancé toutes les ~12 s, un `zigbee2mqtt_*.log` vide à chaque fois ; désactivé par `"host": ["none"]` dans `/home/datadomo/SUPERVISEDNODES.json` (sur une machine non maître, `autostart: false` est ignoré). Sauvegarde `SUPERVISEDNODES.json.bak-20261003-avant-zigbee-off`. Restent à vérifier : `x10`, `smsusb` (matériel absent) — ne PAS toucher `arexx`.
-  2. dimoweb (ancienne domotique) n'écoute pas sur 8081 (`dimoweb.application.port=8081`, processus vivant depuis le 01/10) → `dimoticnoisy.duckdns.org` en 502 ; redémarrer dimoweb et lire sa log.
+  2. dimoweb (ancienne domotique) n'écoute pas sur 8081 (`dimoweb.application.port=8081`, processus vivant depuis le 01/10) → l'adresse DuckDNS publique de noisy répond 502 ; redémarrer dimoweb et lire sa log.
   3. Marstek : « SOC min » Omnibattery (`number.batterie_marstek_discharging_cutoff_capacity`) 12 % → 30 % demandé par l'utilisateur.
      + « SOC max » (`number.batterie_marstek_charging_cutoff_capacity`) 100 % → 90 % demandé (02/10).
   4. Plus tard (« trop pour l'instant ») : automatisation coupure secteur → SOC min 12 %, retour → 30 % ; nécessite noisy2 + box/switch (+ noisy pour la tension DDSU) sur la sortie secourue, et un essai de coupure réel.
