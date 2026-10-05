@@ -1,7 +1,7 @@
 # Spécifications Fonctionnelles - Application COMPTEURMODBUS
 
-*Version 1.1 - 5 Octobre 2026*
-*v1.1 : l'agent a maintenant un dépôt indépendant (§6.1), récupéré à la compilation de dimotic-ha ; v1.0 archivée dans `specs/archives/v1.0-compteurmodbus/`.*
+*Version 1.2 - 5 Octobre 2026*
+*v1.1 : l'agent a maintenant un dépôt indépendant (§6.1), récupéré à la compilation de dimotic-ha. v1.2 : le tag de l'agent peut être `latest` (dernier tag publié). Versions précédentes dans `specs/archives/v1.0-compteurmodbus/` et `v1.1-compteurmodbus/`.*
 *Première spécification — **conception seulement, aucun code de l'application n'est écrit**. Un prototype
 manuel (script unique + service systemd installés à la main sur noisy) fonctionne en réel depuis le
 01/10/2026 ; cette spec décrit l'application qui le remplace (§12).*
@@ -172,11 +172,11 @@ Chint annonce 8-N-2, la lecture en 8-N-1 fonctionne (vérifié sur noisy).
 ### 6.1 Source de l'agent : dépôt indépendant (v1.1)
 
 L'agent est publié dans son propre dépôt, **https://github.com/zdid/DDSU666-h-mqtt** (MIT, version 0.9.0 du 05/10/2026),
-et n'est plus dans dimotic-ha. dimotic-ha en récupère une **version figée** (tag) à la compilation :
+et n'est plus dans dimotic-ha. dimotic-ha en récupère une **version taguée** à la compilation :
 
-- `docker/agents.lock` : nom, dépôt GitHub, **tag**, dossier local de développement (`~/ownCloud/DDSU666-h-mqtt`) ;
+- `docker/agents.lock` : nom, dépôt GitHub, **tag**, dossier local de développement (`~/ownCloud/DDSU666-h-mqtt`). Le tag est soit **précis** (`v0.9.0` : version figée, image reproductible), soit **`latest`** (v1.2 : le plus récent tag `vX.Y.Z`, comparé entre le dossier local et GitHub — jamais l'état non taguée de la branche). Valeur actuelle : `latest` ;
 - `docker/fetch-agents.sh` : extrait ce tag (`git archive`) du dossier local s'il l'y trouve, sinon le clone depuis
-  GitHub, dans `scripts/agents/ddsu666h-mqtt/` (non commité) avec un fichier `.agent-version` (tag + commit) ;
+  GitHub, dans `scripts/agents/ddsu666h-mqtt/` (non commité) avec un fichier `.agent-version` (**tag réellement utilisé** + commit : avec `latest`, c'est lui qui dit quelle version est dans une image) ;
 - appelé par `build-all.sh` (compilation), `commit-push-docker.sh` (avant tout tag : un échec arrête tout) et
   `docker/rebuild-and-deploy.sh` (image) ; `scripts/` étant déjà copié dans l'image, l'agent y est embarqué et le
   **déploiement SSH (§8) copie ce fichier-là**, sans accès à internet au moment du déploiement.

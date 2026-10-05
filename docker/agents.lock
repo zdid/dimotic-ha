@@ -1,4 +1,4 @@
 # Agents distants fournis par des dépôts indépendants, récupérés à la compilation / construction de l'image
-# par docker/fetch-agents.sh (version figée par le tag : changer de version = un commit ici).
+# par docker/fetch-agents.sh (tag précis = version figée ; « latest » = dernier tag vX.Y.Z publié ; la version utilisée est notée dans .agent-version).
 # nom                 dépôt GitHub                 tag      dossier local de développement (optionnel)
-ddsu666h-mqtt         zdid/DDSU666-h-mqtt          v0.9.0   $HOME/ownCloud/DDSU666-h-mqtt
+ddsu666h-mqtt         zdid/DDSU666-h-mqtt          latest   $HOME/ownCloud/DDSU666-h-mqtt
