@@ -65,3 +65,4 @@ scripts/agents/
 
 # Document de migration du site noisy : noms d'hôte et accès VPN/SSH, jamais publié (reste sur le disque)
 MIGRATION_noisy_*.md
+NEXTCLOUDSYNC.md
