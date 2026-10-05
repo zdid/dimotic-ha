@@ -60,6 +60,9 @@ CONTAINER_NAME="dimotic-ha"
 # -----------------------------------------------------------------------------
 # 1. Build multi-arch + push sur Docker Hub
 # -----------------------------------------------------------------------------
+# Agents distants de dépôts indépendants (version figée dans docker/agents.lock) -> scripts/agents/, copié dans l'image.
+./docker/fetch-agents.sh
+
 echo "=== 1/2 Build + push ${DOCKER_IMAGE}:${VERSION} (+ :latest) ==="
 docker buildx build \
   --builder dimotic-builder \

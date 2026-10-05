@@ -59,3 +59,6 @@ applications/haplan/tools/esphome/floorplan_*.png
 # Fusion manuelle (voir en-tête haplan-display.yaml) — reproductible, pas de source non plus
 applications/haplan/tools/esphome/haplan-display-merged.yaml
 
+
+# Agents distants récupérés à la compilation par docker/fetch-agents.sh (version figée dans docker/agents.lock)
+scripts/agents/

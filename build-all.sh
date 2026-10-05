@@ -21,6 +21,9 @@ if [ -z "$REPO_ROOT" ] || [ ! -d "$REPO_ROOT/applications/core" ]; then
 fi
 cd "$REPO_ROOT"
 
+# Agents distants de dépôts indépendants (version figée dans docker/agents.lock).
+[ ! -x docker/fetch-agents.sh ] || ./docker/fetch-agents.sh
+
 build_app() {
   local app="$1"
   echo "==> ${app}"

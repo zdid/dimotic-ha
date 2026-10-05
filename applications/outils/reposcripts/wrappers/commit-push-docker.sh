@@ -95,6 +95,10 @@ fi
 # Même ordre que docker/build-apps.sh (core d'abord), sans `npm prune` (machine de dev). Un échec
 # arrête tout ici : rien n'est taggé ni publié.
 echo
+echo "=== Agents distants (docker/agents.lock) ==="
+./docker/fetch-agents.sh || { echo "ÉCHEC de la récupération des agents — ni tag ni image (le commit est déjà poussé)." >&2; exit 1; }
+
+echo
 echo "=== Compilation de vérification de toutes les applications ==="
 build_app() {
   local app="$1"

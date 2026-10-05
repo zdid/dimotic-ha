@@ -1,6 +1,7 @@
 # Spécifications Fonctionnelles - Application COMPTEURMODBUS
 
-*Version 1.0 - 1er Octobre 2026*
+*Version 1.1 - 5 Octobre 2026*
+*v1.1 : l'agent a maintenant un dépôt indépendant (§6.1), récupéré à la compilation de dimotic-ha ; v1.0 archivée dans `specs/archives/v1.0-compteurmodbus/`.*
 *Première spécification — **conception seulement, aucun code de l'application n'est écrit**. Un prototype
 manuel (script unique + service systemd installés à la main sur noisy) fonctionne en réel depuis le
 01/10/2026 ; cette spec décrit l'application qui le remplace (§12).*
@@ -168,8 +169,29 @@ Chint annonce 8-N-2, la lecture en 8-N-1 fonctionne (vérifié sur noisy).
 
 ## 6. L'agent déployé
 
-`applications/compteurmodbus/device-agent/compteurmodbus-agent.py` — dérivé du prototype
-`applications/outils/reposcripts/scripts/ddsu666h-mqtt.py`, **sans dépendance** : `python3` ≥ 3.5 (noisy : 3.7),
+### 6.1 Source de l'agent : dépôt indépendant (v1.1)
+
+L'agent est publié dans son propre dépôt, **https://github.com/zdid/DDSU666-h-mqtt** (MIT, version 0.9.0 du 05/10/2026),
+et n'est plus dans dimotic-ha. dimotic-ha en récupère une **version figée** (tag) à la compilation :
+
+- `docker/agents.lock` : nom, dépôt GitHub, **tag**, dossier local de développement (`~/ownCloud/DDSU666-h-mqtt`) ;
+- `docker/fetch-agents.sh` : extrait ce tag (`git archive`) du dossier local s'il l'y trouve, sinon le clone depuis
+  GitHub, dans `scripts/agents/ddsu666h-mqtt/` (non commité) avec un fichier `.agent-version` (tag + commit) ;
+- appelé par `build-all.sh` (compilation), `commit-push-docker.sh` (avant tout tag : un échec arrête tout) et
+  `docker/rebuild-and-deploy.sh` (image) ; `scripts/` étant déjà copié dans l'image, l'agent y est embarqué et le
+  **déploiement SSH (§8) copie ce fichier-là**, sans accès à internet au moment du déploiement.
+
+État de la 0.9.0 : c'est le **prototype** (lecture + publication par `mosquitto_pub`, découverte HA, sonde dans
+`outils/modbus-probe.py`) ; ses valeurs par défaut sont génériques (broker `127.0.0.1`, thème `ddsu666h`, nœud
+`ddsu666h`) : **le déploiement doit passer explicitement `--topic`, `--node`, `--name`** (le prototype de noisy utilisait
+`ddsu666h/noisy`, `ddsu666h_noisy`) pour ne pas renommer les entités existantes. Les capacités décrites ci-dessous
+(client MQTT intégré, LWT, battement de cœur, mode `--sonde`, `config.yaml`) restent **à porter dans ce dépôt** avant la
+livraison de l'application.
+
+### 6.2 Comportement attendu de l'agent
+
+`applications/compteurmodbus/device-agent/compteurmodbus-agent.py` (v1.0) — remplacé par l'agent du dépôt indépendant
+(§6.1) une fois ses capacités portées — **sans dépendance** : `python3` ≥ 3.5 (noisy : 3.7),
 `termios` de la bibliothèque standard.
 
 - Lit son `config.yaml` local (compteurs de CETTE cible, profils, broker). Le YAML est écrit par `generator.ts` en
@@ -182,7 +204,7 @@ Chint annonce 8-N-2, la lecture en 8-N-1 fonctionne (vérifié sur noisy).
 - Reconnexion automatique, republication de la découverte au *birth message* de HA (`homeassistant/status`) et toutes
   les 10 minutes.
 - Mode **`--sonde`** : essaie les adresses et parités demandées, lit les registres de mesure, affiche et sort
-  (même comportement que `modbus-probe.py`, §10.3). Mode `--once` pour un essai sans service.
+  (même comportement que `outils/modbus-probe.py` du dépôt, §10.3). Mode `--once` pour un essai sans service.
 - **N'émet que des lectures** (§11.1).
 
 Présence de l'agent : topic `compteurmodbus/<cible>/agent/status` (JSON `{status, timestamp}`, retenu, LWT
@@ -223,7 +245,7 @@ Même séquence que `teleinfo` §7.1, sur le socle partagé `core/infrastructure
 
 1. **Contrôles préalables** (lecture seule) : `python3` présent et version suffisante ; **le port existe** ; **aucun
    processus ne l'utilise** (`fuser`) ; le broker de destination répond (connexion TCP).
-2. Création de `remoteDir` ; copie de l'agent (SCP) ; écriture de `config.yaml` (SSH `tee`, droits 600 : peut
+2. Création de `remoteDir` ; copie de l'agent (SCP, depuis `scripts/agents/ddsu666h-mqtt/`, §6.1) ; écriture de `config.yaml` (SSH `tee`, droits 600 : peut
    porter le mot de passe MQTT).
 3. Écriture de `compteurmodbus.service` **dans `remoteDir`**, lien symbolique vers `/etc/systemd/system/` (convention
    auto-descriptive du guide §7), `daemon-reload && enable && restart`, vérification `is-active`.
