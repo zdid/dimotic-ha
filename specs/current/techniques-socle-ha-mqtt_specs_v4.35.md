@@ -1,9 +1,19 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.34  
-**Date :** 1er Octobre 2026  
+**Version :** 4.35  
+**Date :** 6 Octobre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
 
+> **v4.35** : **les ordres de HA ne sont plus retenus** — l'entité de découverte (`buildDiscoveryPayload`)
+> déclarait `retain: true`, option HA qui fait publier chaque COMMANDE de l'utilisateur en message retenu sur
+> `command_topic`, en contradiction avec la règle « Commands = QoS 1 + retain false (⭐ v4.35 : aussi côté HA — l’option `retain` de l’entité de découverte est à `false`) » (§8.5.0). Constaté le
+> 06/10/2026 : 17 ordres `…/set` retenus (« OFF », « OPEN » pour deux volets) sur le broker de noisy2. Aucun rejeu
+> réel (la garde de §8.5.4ter les ignorait déjà à la livraison), mais des messages inutiles qui brouillent toute lecture
+> du broker. Corrigé : `retain: false` dans l'entité de découverte (`core/src/ha/integration/discovery.ts`). Les
+> ÉTATS et la découverte elle-même restent retenus. Effet : à la prochaine republication de la découverte par chaque
+> module, HA cesse de retenir ses ordres ; les ordres déjà retenus se purgent par un message vide retenu sur chaque
+> topic `…/set`.
+>
 > **v4.34** : **Démarrage tolérant (§7.2)** — une section `ha.ws` ou `ha.mqtt` **invalide** (hôte sans jeton,
 > jeton sans hôte, champ obligatoire manquant…) ne fait plus planter le core. Constat du 01/10/2026 : la diffusion
 > entre machines avait laissé `ha.ws` avec un hôte et sans jeton (le jeton vit dans `secrets_config.yaml`, non
@@ -1724,7 +1734,7 @@ class HaMqttIntegrationService {
 
 **Règles pour HaMqttIntegrationService :**
 - **LWT** : Topic `{moduleName}/{bridgeInstance}/status` (voir §8.5.4) avec payload `online`/`offline`, QoS 1, retain true
-- **QoS par défaut** : Discovery/State = QoS 1 + retain true, Commands = QoS 1 + retain false
+- **QoS par défaut** : Discovery/State = QoS 1 + retain true, Commands = QoS 1 + retain false (⭐ v4.35 : aussi côté HA — l’option `retain` de l’entité de découverte est à `false`)
 - **Reconnexion automatique** avec backoff configurable
 - **Gestion des erreurs** : Logging + reconnexion automatique, avec les codes normalisés (voir `erreurs_specs`)
 - **⭐ v4.11 — Abonnement automatique aux commandes** : `publishDiscoveryFor` (nom réel de la méthode de

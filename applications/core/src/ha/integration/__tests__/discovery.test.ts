@@ -30,7 +30,7 @@ describe('buildDiscoveryPayload', () => {
     expect(entity.device_class).toBe('temperature');
     expect(entity.unit_of_measurement).toBe('°C');
     expect(entity.command_topic).toBeUndefined();
-    expect(entity.retain).toBe(true);
+    expect(entity.retain).toBe(false); // les ordres de HA ne sont jamais retenus (voir discovery.ts)
     expect(entity.qos).toBe(1);
   });
 

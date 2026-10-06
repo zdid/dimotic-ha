@@ -100,7 +100,12 @@ export function buildDiscoveryPayload(
     // discovery.ts reste indépendant du transport (simulé en entier dans les tests).
     payload_available: 'online',
     payload_not_available: 'offline',
-    retain: true,
+    // ⭐ 06/10/2026 — `retain` (option d'entité HA) = retenir les ORDRES que HA publie sur command_topic.
+    // Une commande est une action ponctuelle : retenue, elle restait sur le broker (17 ordres « OFF »/« OPEN »
+    // trouvés sur noisy2, volets compris) et induisait en erreur toute lecture du broker. Le core les ignorait déjà
+    // à la livraison (voir parseIncomingCommand : un `set` délivré en RETAIN=1 n'est jamais actionnable), donc aucun
+    // rejeu réel — mais aucune raison de les retenir. Les ÉTATS restent retenus par les modules (publishState).
+    retain: false,
     qos: 1,
   };
 
