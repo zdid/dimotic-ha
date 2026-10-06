@@ -27,6 +27,8 @@ export class ReceiverCover implements IReceiverModule {
   private position: number;
   private direction: CoverDirection = null;
   private movingSince: number | null = null; // epoch ms
+  /** Position visée par un `set_position` intermédiaire (0 < cible < 100) ; null = mouvement vers la butée. L'arrêt à l'arrivée est émis par RfxComService (voir msUntilArrival). */
+  private targetPosition: number | null = null;
 
   constructor(
     public readonly config: ReceiverCoverConfig,
@@ -54,6 +56,7 @@ export class ReceiverCover implements IReceiverModule {
     this.position = this.computePosition();
     this.movingSince = null;
     this.direction = null;
+    this.targetPosition = null;
     this.config.lastPosition = this.position;
   }
 
@@ -63,7 +66,14 @@ export class ReceiverCover implements IReceiverModule {
     this.movingSince = Date.now();
   }
 
-  private runtimeState(): 'up' | 'down' | 'intermediate' {
+  /**
+   * État publié vers HA. Pendant un mouvement : `opening` / `closing` (et non la position d'avant le
+   * départ, qui affichait « fermé » un volet en train de s'ouvrir). À l'arrêt : `up` (100 %), `down` (0 %)
+   * ou `intermediate`.
+   */
+  private runtimeState(): 'up' | 'down' | 'intermediate' | 'opening' | 'closing' {
+    if (this.direction === 'opening') return 'opening';
+    if (this.direction === 'closing') return 'closing';
     const pos = this.computePosition();
     if (pos >= 100) return 'up';
     if (pos <= 0) return 'down';
@@ -93,6 +103,7 @@ export class ReceiverCover implements IReceiverModule {
     this.position = this.direction === 'opening' ? 100 : 0;
     this.direction = null;
     this.movingSince = null;
+    this.targetPosition = null;
     this.config.lastPosition = this.position;
   }
 
@@ -118,12 +129,19 @@ export class ReceiverCover implements IReceiverModule {
       const current = this.computePosition();
       if (Math.round(value) === Math.round(current)) return null;
       const desiredDirection: CoverDirection = value > current ? 'opening' : 'closing';
+      // Cible intermédiaire : le volet doit être ARRÊTÉ à l'arrivée (RfxComService émet l'arrêt à
+      // l'instant donné par msUntilArrival). 0 ou 100 = butée : le volet s'arrête tout seul.
+      const intermediate = value > 0 && value < 100;
       // Déjà en train de bouger dans la bonne direction (ex: slider glissé progressivement,
       // plusieurs set_position rapprochés) — ne PAS renvoyer on/off : sur Lighting2, une commande
       // répétée dans le même sens arrête le moteur (toggle physique, voir plus bas), ce qui
-      // interromprait le mouvement en cours pour rien.
-      if (this.direction === desiredDirection) return null;
+      // interromprait le mouvement en cours pour rien. Seule la cible change.
+      if (this.direction === desiredDirection) {
+        this.targetPosition = intermediate ? value : null;
+        return null;
+      }
       this.startMoving(desiredDirection);
+      this.targetPosition = intermediate ? value : null;
       return usesLighting2
         ? { action: desiredDirection === 'opening' ? 'on' : 'off' }
         : { action: desiredDirection === 'opening' ? 'open' : 'close' };
@@ -136,7 +154,7 @@ export class ReceiverCover implements IReceiverModule {
       // descend ou l'inverse) ne nécessite PAS de stop intermédiaire (confirmé — le relais gère
       // lui-même l'interverrouillage électrique entre les deux sens).
       if (command === 'open') {
-        if (this.direction === 'opening') return null; // déjà en train de monter, ignoré
+        if (this.direction === 'opening') { this.targetPosition = null; return null; } // déjà en train de monter, ignoré (la butée devient la cible)
         // ⭐ 15/09/2026, demande utilisateur : PAS de refus "déjà ouvert" (position calculée ===
         // 100) — après une coupure de courant ou un redémarrage de la domotique, ce calcul repart
         // à zéro (voir ReceiverCover constructeur, position jamais persistée) et peut être
@@ -147,7 +165,7 @@ export class ReceiverCover implements IReceiverModule {
         return { action: 'on' };
       }
       if (command === 'close') {
-        if (this.direction === 'closing') return null;
+        if (this.direction === 'closing') { this.targetPosition = null; return null; }
         // Voir commentaire équivalent ci-dessus (branche 'open') — même raisonnement.
         this.startMoving('closing');
         return { action: 'off' };
@@ -221,6 +239,26 @@ export class ReceiverCover implements IReceiverModule {
     return null;
   }
 
+  /**
+   * Durée, en millisecondes, avant que le mouvement en cours n'atteigne sa cible (position visée par un
+   * `set_position` intermédiaire, sinon la butée). `null` si le volet ne bouge pas. RfxComService s'en sert
+   * pour émettre l'arrêt à la position visée (`hasStopTarget`) ou pour republier l'état à l'arrivée.
+   */
+  msUntilArrival(): number | null {
+    this.checkArrival();
+    if (this.direction === null) return null;
+    const pos = this.computePosition();
+    const goal = this.targetPosition ?? (this.direction === 'opening' ? 100 : 0);
+    const remaining = this.direction === 'opening' ? goal - pos : pos - goal;
+    const timeSec = this.direction === 'opening' ? this.config.openTimeSec : this.config.closeTimeSec;
+    return Math.max(0, remaining) / 100 * timeSec * 1000;
+  }
+
+  /** Vrai si le mouvement en cours vise une position intermédiaire : il faudra l'arrêter à l'arrivée. */
+  hasStopTarget(): boolean {
+    return this.direction !== null && this.targetPosition !== null;
+  }
+
   getState(): HaMqttStateMessage {
     this.checkArrival();
     return {
@@ -251,7 +289,7 @@ export class ReceiverCover implements IReceiverModule {
         // 'intermediate' reste non mappé (HA garde le dernier état résolu valide, mieux qu'un
         // "inconnu" permanent).
         positionTemplate: '{{ value_json.attributes.position }}',
-        extra: { state_open: 'up', state_closed: 'down' },
+        extra: { state_open: 'up', state_closed: 'down', state_opening: 'opening', state_closing: 'closing' },
         attributsTaxonomie: buildAttributsTaxonomie(taxonomy),
         device: {
           identifiers: [this.config.receiverId],

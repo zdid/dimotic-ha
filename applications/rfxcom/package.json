@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc -b",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",
-    "watch": "tsc -w"
+    "watch": "tsc -w",
+    "test": "vitest run"
   },
   "dependencies": {
     "rfxcom": "^2.6.2",

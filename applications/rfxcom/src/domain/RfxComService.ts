@@ -18,6 +18,7 @@ import type { RfxComDevicesConfigFile, ReceiverConfigEntry } from './devices-con
 import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult, RfxComOrderTrace, AssociatedEmitter } from './types';
 import { DeviceManager } from './devices/DeviceManager';
 import { ReceiverManager } from './receivers/ReceiverManager';
+import { ReceiverCover } from './receivers/ReceiverCover';
 import type { IReceiverModule, ReceiverCommandResult } from './receivers/BaseReceiver';
 import { SceneManager } from './scenes/SceneManager';
 import { SceneExecutor } from './scenes/SceneExecutor';
@@ -163,6 +164,15 @@ export class RfxComService implements IRfxComService {
   // HA si l'entité existait déjà.
   private static readonly STATES_REPUBLISH_DELAY_MS = 10000;
   private statesRepublishTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Un minuteur par volet en mouvement : à l'instant d'arrivée calculé, soit l'ARRÊT est émis (cible
+   * intermédiaire d'un `set_position`), soit l'état est republié (butée atteinte : sans cela HA
+   * afficherait « en ouverture/fermeture » jusqu'à la prochaine commande). Marge ajoutée à l'arrivée
+   * en butée pour laisser le temps au volet de finir.
+   */
+  private coverTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private static readonly COVER_END_STOP_MARGIN_MS = 500;
 
   // ⭐ 10/08/2026, demande utilisateur : journal des ordres reçus (HA→RFXCOM) avec leur résultat
   // d'exécution réel — 100 dernières entrées maximum, voir socket-events.ts::ORDERS_LIST.
@@ -324,6 +334,8 @@ export class RfxComService implements IRfxComService {
       clearTimeout(this.statesRepublishTimer);
       this.statesRepublishTimer = null;
     }
+    for (const timer of this.coverTimers.values()) clearTimeout(timer);
+    this.coverTimers.clear();
     this.lastStatesStore.flush();
     this.eventBus.emitGeneric('integration:bridge:unregister', {
       moduleName: MODULE_NAME,
@@ -544,6 +556,7 @@ export class RfxComService implements IRfxComService {
       }
       for (const { receiver } of affectedReceivers) {
         this.publishReceiverState(receiver);
+        this.scheduleCoverFollowUp(receiver);
       }
 
       // L'émetteur lui-même (binary_sensor) peut aussi être exposé à HA si transmitToHa
@@ -795,6 +808,7 @@ export class RfxComService implements IRfxComService {
         this.persistStates();
         for (const { receiver } of affectedReceivers) {
           this.publishReceiverState(receiver);
+          this.scheduleCoverFollowUp(receiver);
         }
       }
     }
@@ -941,7 +955,11 @@ export class RfxComService implements IRfxComService {
       case 'Contact':
         return message.data.deviceStatus === 0 ? 'ON' : 'OFF';
       default:
-        return typeof message.data.command === 'string' && message.data.command.toLowerCase() === 'on' ? 'ON' : 'OFF';
+        {
+          // `On` et `Group On` = marche ; tout autre ordre (Off, Group Off, Toggle, Mood, Dim…) s'affiche OFF.
+          const command = typeof message.data.command === 'string' ? message.data.command.trim().toLowerCase() : '';
+          return command === 'on' || command === 'group on' ? 'ON' : 'OFF';
+        }
     }
   }
 
@@ -975,6 +993,15 @@ export class RfxComService implements IRfxComService {
     }
 
     const { component, essential } = receiver.getDiscoveryEssential();
+    if (component === 'cover') {
+      // Curseur de position dans HA : le pourcentage est envoyé sur le topic de commande, encapsulé en JSON
+      // (le socle lit `payload.position`) ; sans modèle, HA enverrait un nombre nu.
+      essential.extra = {
+        ...essential.extra,
+        set_position_topic: getCommandTopic(MODULE_NAME, this.effectiveBridgeInstance, receiver.config.receiverId),
+        set_position_template: '{"position": {{ position }} }'
+      };
+    }
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
       bridgeInstance: this.effectiveBridgeInstance,
       component,
@@ -1256,6 +1283,12 @@ export class RfxComService implements IRfxComService {
     // ce que le récepteur a DÉCIDÉ de faire de la commande HA (action RFXCOM résultante, ou refus).
     this.logger.debug('RfxComService', `Interprétation ${receiverId} (${receiver.config.name}) : commande HA "${command}"${value !== undefined ? ` value=${value}` : ''} → ${result ? `action=${result.action}${result.value !== undefined ? ` value=${result.value}` : ''}` : 'REFUSÉE (état inchangé ou non supportée)'}`);
     if (!result) {
+      // `set_position` vers une cible quand le volet bouge déjà dans le bon sens : rien à émettre (une
+      // commande répétée l'arrêterait), mais la cible a changé — le minuteur d'arrêt est réarmé.
+      if (command === 'set_position' && receiver instanceof ReceiverCover && receiver.hasStopTarget()) {
+        this.scheduleCoverFollowUp(receiver);
+        return { success: true };
+      }
       return { success: false, error: `Commande ${command} non applicable à ${receiverId} (état inchangé ou non supportée)` };
     }
 
@@ -1277,7 +1310,41 @@ export class RfxComService implements IRfxComService {
     }
     this.persistStates();
     this.publishReceiverState(receiver);
+    this.scheduleCoverFollowUp(receiver);
     return { success: true };
+  }
+
+  /**
+   * Arme (ou annule) le minuteur d'un volet après toute commande ou tout signal d'émetteur :
+   * - cible intermédiaire (`set_position`) : à l'arrivée calculée, ordre d'ARRÊT (`stop`) ;
+   * - mouvement vers la butée : à l'arrivée (+ marge), simple republication de l'état, qui passe de
+   *   `opening`/`closing` à `up`/`down` ;
+   * - volet immobile : aucun minuteur.
+   */
+  private scheduleCoverFollowUp(receiver: IReceiverModule): void {
+    if (!(receiver instanceof ReceiverCover)) return;
+    const id = receiver.config.receiverId;
+    const previous = this.coverTimers.get(id);
+    if (previous) clearTimeout(previous);
+    this.coverTimers.delete(id);
+
+    const ms = receiver.msUntilArrival();
+    if (ms === null) return;
+    const needsStop = receiver.hasStopTarget();
+    const delay = Math.ceil(ms) + (needsStop ? 0 : RfxComService.COVER_END_STOP_MARGIN_MS);
+    this.logger.debug('RfxComService', `Volet ${id} : ${needsStop ? 'arrêt' : 'republication de l\'état'} dans ${(delay / 1000).toFixed(1)} s`);
+    const timer = setTimeout(() => {
+      this.coverTimers.delete(id);
+      if (needsStop) {
+        // applyReceiverCommand émet l'arrêt, republie l'état et journalise l'ordre.
+        const result = this.applyReceiverCommand(id, 'stop');
+        if (!result.success) this.logger.warn('RfxComService', `Arrêt du volet ${id} à la position visée impossible : ${result.error}`);
+      } else {
+        this.persistStates();
+        this.publishReceiverState(receiver);
+      }
+    }, delay);
+    this.coverTimers.set(id, timer);
   }
 
   /**
