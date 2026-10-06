@@ -423,7 +423,9 @@ function buildView(
 ) {
   const elements: PictureElement[] = [
     ...floorplan.positions
-      .filter((p) => p.x !== null && p.y !== null)
+      // `__trash_icon__` (et tout identifiant « __x__ ») : marqueurs d'interface du mode édition (corbeille),
+      // enregistrés dans les positions mais qui ne sont pas des entités HA — jamais déployés vers HA.
+      .filter((p) => p.x !== null && p.y !== null && !p.entity_id.startsWith('__'))
       .flatMap((p) => buildElementsForPosition(p.entity_id, p.x! * 100, p.y! * 100, getTaxonomyQuoi(p.entity_id))),
     ...floorplan.texts.map(buildTextElement)
   ];

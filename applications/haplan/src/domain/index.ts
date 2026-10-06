@@ -64,14 +64,14 @@ export interface ApplicationMenuConfig {
 export const HAPLAN_MENU_CONFIG: ApplicationMenuConfig = {
   category: 'Paramètres Techniques',
   section: 'HAPLAN',
-  // Pas de formulaire générique (configUi.fields est vide, rien à paramétrer via ce mécanisme en
-  // Phase 1) — l'entrée de menu ouvre directement le tableau de bord (Sidebar.ts route toute
-  // entry.path commençant par '/applications/' vers une page dédiée plutôt que le formulaire
-  // générique de config).
+  // ⭐ 06/10/2026 : « Paramètres Techniques → HAPLAN » ouvre l'écran de paramètres générique, VIDE (HAPLAN n'a aucun
+  // paramètre technique propre : `configUi.fields` vide → le core affiche « n'a pas de paramètres propres »).
+  // Auparavant l'entrée ouvrait directement le tableau de bord, ce qui prêtait à confusion avec l'application elle-même.
+  // L'application (tableau de bord des plans) reste inchangée.
   entry: {
     label: 'HAPLAN',
     icon: '🗺️',
-    path: '/applications/haplan/presentation/haplan/dashboard.html',
+    path: '/haplan/config',
     order: 40,
     badge: 'Plans'
   }

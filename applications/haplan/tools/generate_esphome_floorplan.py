@@ -263,7 +263,9 @@ def build_icon_widget(page: str, entity_id: str, kind: str, px: int, py: int, ca
             f"          id: icon_{eid}",
             f"          text: !lambda |-",
             f"            return (x == \"on\" || x == \"open\" || x == \"heat\" || x == \"cool\")",
-            f"              ? \"{icon_on}\" : \"{icon_off}\";",
+            # std::string(...) obligatoire : ESPHome 2025.11 appelle .c_str() sur le résultat du lambda,
+            # inutilisable sur un `const char*` issu d'un `? "a" : "b"` (compilation refusée sinon).
+            f"              ? std::string(\"{icon_on}\") : std::string(\"{icon_off}\");",
         ]
     sensor_lines += [
         f"      - lvgl.label.update:",
@@ -432,6 +434,526 @@ def build_glyphs_literal(chars: set) -> str:
     return f'"{escaped}"'
 
 
+# ⭐ 06/10/2026 — page « Énergie en direct » : schéma de flux dessiné en LVGL (aucune image de fond),
+# mêmes capteurs que le tableau HA « Énergie en direct » (power-flow-card-plus). Signes vérifiés sur
+# l'installation : réseau + = achat / − = vente ; batterie + = charge / − = décharge ; la maison est lue
+# directement (emma_puissance_de_soutiree) et non recalculée, comme dans la carte HA.
+ENERGY_PAGE_ID = "energie_direct"
+ENERGY_TITLE = "Énergie en direct"
+ENERGY_NODES = {
+    # nom: (entité, centre x, centre y, couleur, glyphe, légende statique)
+    # Production = puissance des PANNEAUX (DC), pas `onduleur_puissance_active` : celle-ci est la sortie AC de l'onduleur
+    # hybride, qui inclut la décharge de la batterie (627 W affichés à 19:54 avec des panneaux à 0 W — 06/10/2026).
+    "solar":   ("sensor.emma_puissance_de_sortie_des_panneaux", 400, 115, "0xFFC107", chr(0xF185), "Solaire"),
+    "grid":    ("sensor.emma_puissance_active", 150, 255, "0x9C27B0", chr(0xF0E7), None),
+    "home":    ("sensor.emma_puissance_de_soutiree", 650, 255, "0x2196F3", chr(0xF015), "Maison"),
+    "battery": ("sensor.batteries_puissance_de_charge_decharge", 400, 395, "0x4CAF50", chr(0xF241), None),
+}
+ENERGY_SOC_ENTITY = "sensor.batteries_etat_de_la_capacite"
+ENERGY_HUB = (400, 255)
+ENERGY_NODE_DIAMETER = 130
+ENERGY_ARROWS = {"right": chr(0xF061), "left": chr(0xF060), "up": chr(0xF062), "down": chr(0xF063)}
+ENERGY_ICON_FONT_SIZE = 34
+ENERGY_ARROW_FONT_SIZE = 30
+ENERGY_VALUE_FONT_SIZE = 26
+ENERGY_TEXT_FONT_SIZE = 20
+ENERGY_DEADBAND_W = 10   # en dessous, flux considéré nul (pas de flèche)
+ENERGY_TEXTS = ["Achat", "Vente", "Charge", "Décharge", "Repos", "Réseau", "Batterie"]
+
+
+def _cstr(glyph: str) -> str:
+    """Glyphe -> chaîne C échappée en octets UTF-8 (pour un lambda ESPHome)."""
+    return "".join(f"\\x{b:02x}" for b in glyph.encode("utf-8"))
+
+
+def build_energy_page(width: int, height: int) -> dict:
+    assert width == 800 and height == 480, "page énergie dessinée pour 800x480"
+    r = ENERGY_NODE_DIAMETER // 2
+    hx, hy = ENERGY_HUB
+    widgets: list[str] = []
+    sensors: list[str] = []
+
+    def add(*lines: str) -> None:
+        widgets.extend(lines)
+
+    add("  - label:",
+        "      id: energie_titre",
+        "      x: 0", "      y: 8", "      width: 800", "      height: 30",
+        "      text_align: CENTER", "      text_font: font_energy_text",
+        f"      text: \"{ENERGY_TITLE}\"", "      text_color: 0xFFFFFF", "      bg_opa: TRANSP")
+
+    # Traits (dessinés d'abord, recouverts par les disques opaques)
+    for name, (_e, cx, cy, _c, _g, _l) in ENERGY_NODES.items():
+        add("  - line:",
+            f"      id: energie_trait_{name}",
+            "      points:", f"        - {cx}, {cy}", f"        - {hx}, {hy}",
+            "      line_width: 3", "      line_color: 0x444444")
+
+    arrow_pos = {  # centre de la flèche sur chaque trait
+        "solar": (400, 200), "grid": (290, 255), "home": (510, 255), "battery": (400, 322),
+    }
+    for name, (_e, cx, cy, color, glyph, legend) in ENERGY_NODES.items():
+        add("  - obj:",
+            f"      id: energie_cercle_{name}",
+            f"      x: {cx - r}", f"      y: {cy - r}", f"      width: {ENERGY_NODE_DIAMETER}", f"      height: {ENERGY_NODE_DIAMETER}",
+            f"      radius: {r}", "      bg_color: 0x000000", "      bg_opa: COVER",
+            f"      border_color: {color}", "      border_width: 4")
+        add("  - label:",
+            f"      id: energie_icone_{name}",
+            f"      x: {cx - 30}", f"      y: {cy - r + 12}", "      width: 60", "      height: 40",
+            "      text_align: CENTER", "      text_font: font_energy_icons",
+            f"      text: \"{glyph}\"", f"      text_color: {color}", "      bg_opa: TRANSP")
+        add("  - label:",
+            f"      id: energie_valeur_{name}",
+            f"      x: {cx - r + 5}", f"      y: {cy - 8}", f"      width: {ENERGY_NODE_DIAMETER - 10}", "      height: 32",
+            "      text_align: CENTER", "      text_font: font_energy_value",
+            "      text: \"--\"", "      text_color: 0xFFFFFF", "      bg_opa: TRANSP")
+        add("  - label:",
+            f"      id: energie_legende_{name}",
+            f"      x: {cx - r + 5}", f"      y: {cy + 28}", f"      width: {ENERGY_NODE_DIAMETER - 10}", "      height: 26",
+            "      text_align: CENTER", "      text_font: font_energy_text",
+            f"      text: \"{legend or '--'}\"", "      text_color: 0xBBBBBB", "      bg_opa: TRANSP")
+        ax, ay = arrow_pos[name]
+        add("  - label:",
+            f"      id: energie_fleche_{name}",
+            f"      x: {ax - 20}", f"      y: {ay - 20}", "      width: 40", "      height: 40",
+            "      text_align: CENTER", "      text_font: font_energy_arrow",
+            "      text: \"\"", f"      text_color: {color}", "      bg_opa: TRANSP")
+
+    # Niveau de charge de la batterie, à droite du disque
+    bx, by = ENERGY_NODES["battery"][1], ENERGY_NODES["battery"][2]
+    add("  - label:",
+        "      id: energie_soc",
+        f"      x: {bx + r + 12}", f"      y: {by - 16}", "      width: 110", "      height: 32",
+        "      text_align: LEFT", "      text_font: font_energy_value",
+        "      text: \"--\"", "      text_color: 0x4CAF50", "      bg_opa: TRANSP")
+
+    fmt = [
+        "            if (std::isnan(x)) return std::string(\"--\");",
+        "            char buf[16];",
+        "            if (fabsf(x) >= 1000.0f) snprintf(buf, sizeof(buf), \"%.2f kW\", fabsf(x) / 1000.0f);",
+        "            else snprintf(buf, sizeof(buf), \"%.0f W\", fabsf(x));",
+        "            return std::string(buf);",
+    ]
+    dz = f"{ENERGY_DEADBAND_W}.0f"
+    a = {k: _cstr(v) for k, v in ENERGY_ARROWS.items()}
+    # Pour chaque noeud : (expression de la flèche, expression de la légende ou None)
+    logic = {
+        "solar": (f'x > {dz} ? std::string("{a["down"]}") : std::string("")', None),
+        "grid": (f'x > {dz} ? std::string("{a["right"]}") : (x < -{dz} ? std::string("{a["left"]}") : std::string(""))',
+                 f'x > {dz} ? std::string("Achat") : (x < -{dz} ? std::string("Vente") : std::string("Réseau"))'),
+        "home": (f'x > {dz} ? std::string("{a["right"]}") : std::string("")', None),
+        "battery": (f'x > {dz} ? std::string("{a["down"]}") : (x < -{dz} ? std::string("{a["up"]}") : std::string(""))',
+                    f'x > {dz} ? std::string("Charge") : (x < -{dz} ? std::string("Décharge") : std::string("Repos"))'),
+    }
+    for name, (entity, *_rest) in ENERGY_NODES.items():
+        arrow_expr, legend_expr = logic[name]
+        sensors += [
+            "  - platform: homeassistant",
+            f"    id: ha_energie_{name}",
+            f"    entity_id: {entity}",
+            "    internal: true",
+            "    on_value:",
+            # Trace de diagnostic : prouve dans le journal de l'appareil que HA pousse bien la valeur.
+            "      - logger.log:",
+            f"          format: \"energie {name} = %.1f\"",
+            "          args: ['x']",
+            "      - lvgl.label.update:",
+            f"          id: energie_valeur_{name}",
+            "          text: !lambda |-", *fmt,
+            "      - lvgl.label.update:",
+            f"          id: energie_fleche_{name}",
+            f"          text: !lambda 'return {arrow_expr};'",
+        ]
+        if legend_expr:
+            sensors += [
+                "      - lvgl.label.update:",
+                f"          id: energie_legende_{name}",
+                f"          text: !lambda 'return {legend_expr};'",
+            ]
+    sensors += [
+        "  - platform: homeassistant",
+        "    id: ha_energie_soc",
+        f"    entity_id: {ENERGY_SOC_ENTITY}",
+        "    internal: true",
+        "    on_value:",
+        "      - lvgl.label.update:",
+        "          id: energie_soc",
+        "          text: !lambda |-",
+        "            if (std::isnan(x)) return std::string(\"--\");",
+        "            char buf[12];",
+        "            snprintf(buf, sizeof(buf), \"%.0f %%\", x);",
+        "            return std::string(buf);",
+    ]
+
+    chars = set(ENERGY_TITLE) | set("Solaire Maison") | set(" ".join(ENERGY_TEXTS))
+    return {
+        "page": ENERGY_PAGE_ID,
+        "floorplan_id": ENERGY_TITLE,
+        "image_filename": None,
+        "text_entries_used": [],
+        "sensor_block": sensors,
+        "text_sensor_block": [],
+        "widget_block": widgets,
+        "placed": len(ENERGY_NODES) + 1,
+        "skipped": 0,
+        "energy_text_chars": chars,
+    }
+
+
+# ⭐ 06/10/2026 — page « Chauffe des ballons » : reprend le tableau de bord HA `chauffe-ballons` (état, puissance,
+# durées du jour de chaque ballon + ordre de chauffe commandable au toucher). Pas de graphiques d'historique
+# (impossibles en LVGL ESPHome) ni d'« énergie du jour » (carte statistique HA, pas de capteur).
+# Greffée dans une configuration déjà déployée (graft_page), JAMAIS régénérée avec les plans : voir
+# --graft-ballons. Les capteurs d'état passent par `text_sensor` (valeur "on"/"off"), comme les interrupteurs.
+BALLONS_PAGE_ID = "ballons_chauffe"
+BALLONS_TITLE = "Chauffe des ballons"
+BALLONS = {
+    # clé: (nom, couleur, x carte, switch, binary_sensor chauffe, puissance W, durée sur on h, durée chauffe h)
+    "gros": ("Gros ballon", "0x2196F3", 80,
+             "switch.gros_ballon_maison_maison_rez_de_chaussee", "binary_sensor.gros_ballon_en_chauffe",
+             "sensor.gros_ballon_maison_maison_rez_de_chaussee_power",
+             "sensor.maison_gros_ballon_duree_sur_on_aujourd_hui", "sensor.gros_ballon_duree_de_chauffe_aujourd_hui"),
+    "petit": ("Petit ballon", "0xFF9800", 410,
+              "switch.petit_ballon_maison_maison_rez_de_chaussee", "binary_sensor.petit_ballon_en_chauffe",
+              "sensor.petit_ballon_maison_maison_rez_de_chaussee_power",
+              "sensor.maison_petit_ballon_duree_sur_on_aujourd_hui", "sensor.petit_ballon_duree_de_chauffe_aujourd_hui"),
+}
+BALLONS_ORDER_PREMIER = "input_boolean.petit_ballon_en_premier"
+BALLONS_ORDER_UNIQUE = "input_boolean.un_seul_ballon"
+BALLONS_CARD_W = 310
+BALLONS_TEXTS = [
+    "Ordre de chauffe", "En premier : Petit ballon", "En premier : Gros ballon",
+    "Un seul ballon : OUI", "Un seul ballon : NON",
+    "Commande", "Marche", "Arrêt", "Chauffe réelle", "Oui", "Non", "Sur « on »", "Chauffe",
+]
+BALLONS_COLOR_OFF = "0x777777"
+BALLONS_COLOR_HEAT = "0xFF5722"
+
+
+def build_ballons_page() -> dict:
+    w = BALLONS_CARD_W
+    widgets: list[str] = []
+    sensors: list[str] = []
+    text_sensors: list[str] = []
+
+    def add(*lines: str) -> None:
+        widgets.extend(lines)
+
+    add("  - label:", "      id: ballons_titre",
+        "      x: 0", "      y: 8", "      width: 800", "      height: 30",
+        "      text_align: CENTER", "      text_font: font_ballons_title",
+        f"      text: \"{BALLONS_TITLE}\"", "      text_color: 0xFFFFFF", "      bg_opa: TRANSP")
+
+    def label(wid, x, y, wd, h, text, font, color, align="LEFT"):
+        add("  - label:", f"      id: {wid}", f"      x: {x}", f"      y: {y}", f"      width: {wd}", f"      height: {h}",
+            f"      text_align: {align}", f"      text_font: {font}", f"      text: \"{text}\"",
+            f"      text_color: {color}", "      bg_opa: TRANSP")
+
+    g_water, g_fire = chr(0xF773), chr(0xF06D)
+    for key, (name, color, x0, sw, chauffe, power, d_on, d_heat) in BALLONS.items():
+        add("  - obj:", f"      id: ballons_carte_{key}",
+            f"      x: {x0}", "      y: 48", f"      width: {w}", "      height: 272",
+            "      radius: 16", "      bg_color: 0x000000", "      bg_opa: COVER",
+            f"      border_color: {color}", "      border_width: 3")
+        label(f"ballons_nom_{key}", x0, 54, w, 30, name, "font_ballons_title", color, "CENTER")
+        label(f"ballons_icone_{key}", x0 + 125, 88, 60, 46, g_water, "font_ballons_icon", BALLONS_COLOR_OFF, "CENTER")
+        label(f"ballons_puissance_{key}", x0, 134, w, 48, "--", "font_ballons_value", "0xFFFFFF", "CENTER")
+        rows = [("commande", 188, "Commande"), ("chauffe", 214, "Chauffe réelle"), ("duree_on", 240, "Sur « on »"), ("duree_chauffe", 266, "Chauffe")]
+        for rid, ry, caption in rows:
+            label(f"ballons_leg_{rid}_{key}", x0 + 16, ry, 160, 26, caption, "font_ballons_text", "0xBBBBBB")
+            label(f"ballons_val_{rid}_{key}", x0 + 170, ry, 124, 26, "--", "font_ballons_text", "0xFFFFFF", "RIGHT")
+
+        glyph_water, glyph_fire = _cstr(g_water), _cstr(g_fire)
+        text_sensors += [
+            "  - platform: homeassistant", f"    id: ha_ballons_cmd_{key}", f"    entity_id: {sw}", "    internal: true",
+            "    on_value:", "      - lvgl.label.update:", f"          id: ballons_val_commande_{key}",
+            "          text: !lambda 'return x == \"on\" ? std::string(\"Marche\") : std::string(\"Arrêt\");'",
+            "  - platform: homeassistant", f"    id: ha_ballons_chauffe_{key}", f"    entity_id: {chauffe}", "    internal: true",
+            "    on_value:",
+            "      - lvgl.label.update:", f"          id: ballons_val_chauffe_{key}",
+            "          text: !lambda 'return x == \"on\" ? std::string(\"Oui\") : std::string(\"Non\");'",
+            "      - lvgl.label.update:", f"          id: ballons_icone_{key}",
+            f"          text: !lambda 'return x == \"on\" ? std::string(\"{glyph_fire}\") : std::string(\"{glyph_water}\");'",
+            f"          text_color: !lambda 'return x == \"on\" ? lv_color_hex({BALLONS_COLOR_HEAT}) : lv_color_hex({color});'",
+        ]
+        hm = [
+            "            if (std::isnan(x)) return std::string(\"--\");",
+            "            int t = (int) roundf(x * 60.0f);",
+            "            char buf[12];",
+            "            snprintf(buf, sizeof(buf), \"%dh%02d\", t / 60, t % 60);",
+            "            return std::string(buf);",
+        ]
+        sensors += [
+            "  - platform: homeassistant", f"    id: ha_ballons_puissance_{key}", f"    entity_id: {power}", "    internal: true",
+            "    on_value:", "      - lvgl.label.update:", f"          id: ballons_puissance_{key}",
+            "          text: !lambda |-",
+            "            if (std::isnan(x)) return std::string(\"--\");",
+            "            char buf[16];",
+            "            if (fabsf(x) >= 1000.0f) snprintf(buf, sizeof(buf), \"%.2f kW\", x / 1000.0f);",
+            "            else snprintf(buf, sizeof(buf), \"%.0f W\", x);",
+            "            return std::string(buf);",
+            "  - platform: homeassistant", f"    id: ha_ballons_duree_on_{key}", f"    entity_id: {d_on}", "    internal: true",
+            "    on_value:", "      - lvgl.label.update:", f"          id: ballons_val_duree_on_{key}",
+            "          text: !lambda |-", *hm,
+            "  - platform: homeassistant", f"    id: ha_ballons_duree_chauffe_{key}", f"    entity_id: {d_heat}", "    internal: true",
+            "    on_value:", "      - lvgl.label.update:", f"          id: ballons_val_duree_chauffe_{key}",
+            "          text: !lambda |-", *hm,
+        ]
+
+    # Ordre de chauffe : deux « boutons » (labels bordés) qui basculent un input_boolean au toucher
+    label("ballons_ordre_titre", 80, 330, 640, 26, "Ordre de chauffe", "font_ballons_text", "0xBBBBBB", "CENTER")
+    for bid, x0, entity, on_txt, off_txt in (
+        ("premier", 80, BALLONS_ORDER_PREMIER, "En premier : Petit ballon", "En premier : Gros ballon"),
+        ("unique", 410, BALLONS_ORDER_UNIQUE, "Un seul ballon : OUI", "Un seul ballon : NON"),
+    ):
+        add("  - label:", f"      id: ballons_btn_{bid}", f"      x: {x0}", "      y: 360", f"      width: {w}", "      height: 88",
+            "      text_align: CENTER", "      text_font: font_ballons_title", "      pad_top: 28",
+            f"      text: \"--\"", "      text_color: 0xFFFFFF", "      bg_opa: TRANSP",
+            "      radius: 14", "      border_width: 3", "      border_color: 0x666666",
+            "      clickable: true", "      on_click:", "        - homeassistant.service:",
+            "            service: input_boolean.toggle", "            data:", f"              entity_id: {entity}")
+        text_sensors += [
+            "  - platform: homeassistant", f"    id: ha_ballons_btn_{bid}", f"    entity_id: {entity}", "    internal: true",
+            "    on_value:", "      - lvgl.label.update:", f"          id: ballons_btn_{bid}",
+            f"          text: !lambda 'return x == \"on\" ? std::string(\"{on_txt}\") : std::string(\"{off_txt}\");'",
+            "      - lvgl.widget.update:", f"          id: ballons_btn_{bid}",
+            "          border_color: !lambda 'return x == \"on\" ? lv_color_hex(0x4CAF50) : lv_color_hex(0x666666);'",
+        ]
+
+    # Chiffres et « h » indispensables : les durées (« 1h05 ») sont écrites avec font_ballons_text — sans eux, rectangles verticaux.
+    chars = set(BALLONS_TITLE) | set("".join(BALLONS_TEXTS)) | set("".join(b[0] for b in BALLONS.values())) | set("-0123456789h")
+    fonts = [
+        f"  - file: \"{FONT_FILENAME}\"", "    id: font_ballons_icon", "    size: 40",
+        f"    glyphs: [{', '.join(repr(g).replace(chr(39), chr(34)) for g in (g_water, g_fire))}]",
+        '  - file: "gfonts://Roboto"', "    id: font_ballons_title", "    size: 24",
+        f"    glyphs: {build_glyphs_literal(chars)}",
+        '  - file: "gfonts://Roboto"', "    id: font_ballons_text", "    size: 20",
+        f"    glyphs: {build_glyphs_literal(chars)}",
+        '  - file: "gfonts://Roboto"', "    id: font_ballons_value", "    size: 40",
+        '    glyphs: "0123456789.-WkV% "',
+    ]
+    entities = [e for b in BALLONS.values() for e in b[3:]] + [BALLONS_ORDER_PREMIER, BALLONS_ORDER_UNIQUE]
+    return {"font_lines": fonts, "sensor_block": sensors, "text_sensor_block": text_sensors,
+            "widget_block": widgets, "page": BALLONS_PAGE_ID, "entities": entities,
+            "floorplan_id": BALLONS_TITLE, "image_filename": None, "text_entries_used": [],
+            "placed": len(entities), "skipped": 0}
+
+
+def graft_page(existing: str, page: dict, width: int = 800, height: int = 480) -> str:
+    """Greffe une page native (polices, capteurs, text_sensors, page LVGL) dans une configuration ESPHome déjà
+    fusionnée/déployée, sans toucher aux plans existants. Refuse si la page y figure déjà."""
+    lines = existing.split("\n")
+    if any(l.strip() == f"- id: page_{page['page']}" for l in lines):
+        sys.exit(f"Greffe : la page {page['page']} existe déjà dans la configuration.")
+
+    def find(pred, start=0):
+        for i in range(start, len(lines)):
+            if pred(lines[i]):
+                return i
+        sys.exit("Greffe : ancre introuvable (format de la configuration inattendu).")
+
+    def before_comments(i):
+        while i > 0 and (not lines[i - 1].strip() or lines[i - 1].lstrip().startswith("#")):
+            i -= 1
+        return i
+
+    # Dernier bloc de haut en bas pour garder des indices valides : page, sensor, text_sensor, font
+    page_lines = [f"    - id: page_{page['page']}", "      widgets:",
+                  "        - obj:", f"            id: full_screen_clear_{page['page']}",
+                  "            x: 0", "            y: 0", f"            width: {width}", f"            height: {height}",
+                  "            bg_color: 0x000000", "            bg_opa: COVER", "            border_width: 0", "            radius: 0"]
+    page_lines += ["      " + l if l.strip() else l for l in page["widget_block"]]
+    while not lines[-1].strip():
+        lines.pop()
+    lines += page_lines
+    i_lvgl = find(lambda l: l.startswith("lvgl:"))
+    i_sensor = find(lambda l: l.startswith("sensor:"))
+    lines[before_comments(i_lvgl):before_comments(i_lvgl)] = page["sensor_block"]
+    i_sensor = find(lambda l: l.startswith("sensor:"))
+    i_text = find(lambda l: l.startswith("text_sensor:"))
+    pos = before_comments(i_sensor)
+    lines[pos:pos] = page["text_sensor_block"]
+    i_text = find(lambda l: l.startswith("text_sensor:"))
+    pos = before_comments(i_text)
+    lines[pos:pos] = page["font_lines"]
+    return "\n".join(lines) + "\n"
+
+
+def _ha_defaults() -> tuple[str, str]:
+    """URL et jeton du HA visé, lus dans la configuration de cette machine (data/core) — c'est le HA auquel l'écran est
+    appairé tant que le noyau de cette machine pointe sur lui. Redéfinissables par --ha-url / --ha-token-file."""
+    cfg = yaml.safe_load((REPO_ROOT / "data" / "core" / "config.yaml").read_text(encoding="utf-8")) or {}
+    ws = ((cfg.get("ha") or {}).get("ws")) or {}
+    url = f"http://{ws.get('host', '127.0.0.1')}:{ws.get('port', 8123)}"
+    token = ""
+
+    def find(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if "token" in str(k).lower() and isinstance(v, str) and v:
+                    return v
+                r = find(v)
+                if r:
+                    return r
+        return ""
+
+    sec = REPO_ROOT / "data" / "core" / "secrets_config.yaml"
+    if sec.exists():
+        token = find(yaml.safe_load(sec.read_text(encoding="utf-8")) or {})
+    return url, token
+
+
+def check_entities_in_ha(entity_ids: set, url: str, token: str) -> None:
+    """Refuse de continuer si des entités des pages générées n'existent pas dans le HA visé : une erreur de ce type
+    (plans d'un autre site) a déployé le 06/10/2026 des plans de noisy sur l'écran de Saint Fort — plus aucune valeur."""
+    import json
+    import urllib.request
+
+    req = urllib.request.Request(url.rstrip("/") + "/api/states", headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            ha = {s["entity_id"] for s in json.load(resp)}
+    except Exception as e:  # noqa: BLE001
+        sys.exit(f"Garde-fou : lecture des entités de {url} impossible ({e}). --skip-ha-check pour passer outre, à vos risques.")
+    missing = sorted(e for e in entity_ids if e not in ha)
+    if missing:
+        sys.exit(
+            f"Garde-fou : {len(missing)} entité(s) sur {len(entity_ids)} absentes du HA {url} — plans d'un autre site ?\n  "
+            + "\n  ".join(missing[:15]) + ("\n  …" if len(missing) > 15 else "")
+            + "\nRien n'a été déployé. --skip-ha-check pour passer outre."
+        )
+    print(f"Garde-fou : {len(entity_ids)} entités vérifiées dans {url} — toutes présentes.")
+
+
+# ⭐ 06/10/2026 — pages « Thermostats » (poêle + pompe à chaleur) et « Climatisation » (une page par climatiseur, la salle en
+# premier ; la navigation circulaire de la tablette les enchaîne). Commandes au toucher via les services `climate.*` de HA :
+# marche/arrêt (turn_on/turn_off), consigne −/+ (set_temperature, bornée), mode (set_hvac_mode, en boucle) pour les climatiseurs.
+CLIMATE_THERMOSTATS = [
+    # clé, nom, entité, couleur, pas, min, max
+    ("poele", "Poêle", "climate.salle_a_manger_poele", "0xFF9800", 0.5, 15.0, 25.0),
+    ("pac", "Pompe à chaleur", "climate.infra_evoo7_control_thermostat", "0x2196F3", 0.5, 10.0, 30.0),
+]
+CLIMATE_CLIMS = [
+    # clé, nom, entité, pas, min, max, modes cyclables
+    ("clim_salle", "Salle", "climate.153931629788358_climate", 0.5, 16.0, 30.0, ["cool", "heat", "auto", "dry", "fan_only"]),
+    ("clim_bureau", "Bureau", "climate.bureau_climatiseur", 1.0, 16.0, 32.0, ["cool", "heat", "heat_cool", "dry", "fan_only"]),
+    ("clim_ami", "Chambre d'ami", "climate.chambre_d_ami_climatiseur", 1.0, 16.0, 32.0, ["cool", "heat", "heat_cool", "dry", "fan_only"]),
+]
+CLIMATE_COLOR_CLIM = "0x00BCD4"
+CLIMATE_MODE_FR = {
+    "off": "Arrêt", "heat": "Chauffage", "cool": "Froid", "auto": "Auto", "dry": "Déshumid.", "fan_only": "Ventil.", "heat_cool": "Auto",
+}
+CLIMATE_TEXT_CHARS = set("Thermostats Climatisation Poêle Pompe à chaleur Température Consigne Mode Marche Arrêt ") \
+    | set("".join(CLIMATE_MODE_FR.values())) | set(" ".join(n for _k, n, *_r in CLIMATE_THERMOSTATS + CLIMATE_CLIMS)) \
+    | set("0123456789.-+/°C ")
+
+
+def _climate_card(key, name, entity, color, x0, w, step, tmin, tmax, modes):
+    """Une carte de thermostat/climatiseur : retourne (widgets, sensors, text_sensors)."""
+    widgets, sensors, text_sensors = [], [], []
+    y0 = 48
+    cx = x0 + w // 2
+
+    def label(wid, x, y, wd, h, text, font, col, align="CENTER"):
+        widgets.extend(["  - label:", f"      id: {wid}", f"      x: {x}", f"      y: {y}", f"      width: {wd}", f"      height: {h}",
+                        f"      text_align: {align}", f"      text_font: {font}", f"      text: \"{text}\"",
+                        f"      text_color: {col}", "      bg_opa: TRANSP"])
+
+    def button(wid, x, y, wd, h, text, font, border, pad, on_click_lines):
+        widgets.extend(["  - label:", f"      id: {wid}", f"      x: {x}", f"      y: {y}", f"      width: {wd}", f"      height: {h}",
+                        "      text_align: CENTER", f"      text_font: {font}", f"      pad_top: {pad}", f"      text: \"{text}\"",
+                        "      text_color: 0xFFFFFF", "      bg_opa: TRANSP", "      radius: 14", "      border_width: 3",
+                        f"      border_color: {border}", "      clickable: true", "      on_click:"] + on_click_lines)
+
+    widgets.extend(["  - obj:", f"      id: {key}_carte", f"      x: {x0}", f"      y: {y0}", f"      width: {w}", "      height: 380",
+                    "      radius: 16", "      bg_color: 0x000000", "      bg_opa: COVER", f"      border_color: {color}", "      border_width: 3"])
+    label(f"{key}_nom", x0, y0 + 8, w, 30, name, "font_clim_title", color)
+    label(f"{key}_leg_temp", x0, y0 + 48, w, 24, "Température", "font_clim_text", "0xBBBBBB")
+    label(f"{key}_temp", x0, y0 + 72, w, 58, "--", "font_clim_value", "0xFFFFFF")
+    label(f"{key}_leg_cons", x0, y0 + 140, w, 24, "Consigne", "font_clim_text", "0xBBBBBB")
+    label(f"{key}_cons", x0 + 100, y0 + 166, w - 200, 58, "--", "font_clim_value", color)
+    ent = f"              entity_id: {entity}"
+    st = f"id({key}_tgt).state"
+    lam = lambda sign: [
+        "              temperature: !lambda |-",
+        f"                float t = {st};",
+        f"                if (std::isnan(t)) t = {tmin}f;",
+        f"                t = t {sign} {step}f;",
+        f"                if (t < {tmin}f) t = {tmin}f;",
+        f"                if (t > {tmax}f) t = {tmax}f;",
+        "                char buf[12]; snprintf(buf, sizeof(buf), \"%.1f\", t); return std::string(buf);"]
+    for sign, bid, bx, txt in (("-", f"{key}_moins", x0 + 20, "-"), ("+", f"{key}_plus", x0 + w - 100, "+")):
+        button(bid, bx, y0 + 166, 80, 64, txt, "font_clim_value", "0x888888", 4,
+               ["        - homeassistant.service:", "            service: climate.set_temperature", "            data:", ent] + lam(sign))
+    label(f"{key}_mode", x0, y0 + 236, w, 28, "--", "font_clim_text", "0xFFFFFF")
+    # Marche / Arrêt (bascule selon l'état courant) ; bouton de mode en plus pour les climatiseurs
+    bw = (w - 60) // 2 if modes else w - 40
+    onoff = ["        - if:", "            condition:", f"              lambda: 'return id({key}_state).state != \"off\";'",
+             "            then:", "              - homeassistant.service:", "                  service: climate.turn_off", "                  data:",
+             f"                    entity_id: {entity}", "            else:", "              - homeassistant.service:",
+             "                  service: climate.turn_on", "                  data:", f"                    entity_id: {entity}"]
+    button(f"{key}_onoff", x0 + 20, y0 + 280, bw, 80, "Marche / Arrêt", "font_clim_text", "0x666666", 26, onoff)
+    if modes:
+        arr = ", ".join(f'"{m}"' for m in modes)
+        cyc = ["        - homeassistant.service:", "            service: climate.set_hvac_mode", "            data:", ent,
+               "              hvac_mode: !lambda |-",
+               f"                static const char* modes[] = {{{arr}}};",
+               f"                const std::string cur = id({key}_state).state;",
+               f"                int n = {len(modes)}; int i = -1;",
+               "                for (int k = 0; k < n; k++) if (cur == modes[k]) i = k;",
+               "                return std::string(modes[(i + 1) % n]);"]
+        button(f"{key}_modebtn", x0 + 40 + bw, y0 + 280, bw, 80, "Mode", "font_clim_text", "0x666666", 26, cyc)
+
+    fr = "; ".join(f'if (x == "{k}") return std::string("{v}")' for k, v in CLIMATE_MODE_FR.items())
+    text_sensors += ["  - platform: homeassistant", f"    id: {key}_state", f"    entity_id: {entity}", "    internal: true", "    on_value:",
+                     "      - lvgl.label.update:", f"          id: {key}_mode",
+                     f"          text: !lambda 'if (x == \"unavailable\") return std::string(\"Indisponible\"); {fr}; return x;'",
+                     "      - lvgl.widget.update:", f"          id: {key}_onoff",
+                     "          border_color: !lambda 'return (x != \"off\" && x != \"unavailable\" && x != \"unknown\") ? lv_color_hex(0x4CAF50) : lv_color_hex(0x666666);'"]
+    deg = ["            if (std::isnan(x)) return std::string(\"--\");", "            char buf[16];",
+           "            snprintf(buf, sizeof(buf), \"%.1f°C\", x);", "            return std::string(buf);"]
+    sensors += ["  - platform: homeassistant", f"    id: {key}_cur", f"    entity_id: {entity}", "    attribute: current_temperature", "    internal: true",
+                "    on_value:", "      - lvgl.label.update:", f"          id: {key}_temp", "          text: !lambda |-", *deg,
+                "  - platform: homeassistant", f"    id: {key}_tgt", f"    entity_id: {entity}", "    attribute: temperature", "    internal: true",
+                "    on_value:", "      - lvgl.label.update:", f"          id: {key}_cons", "          text: !lambda |-", *deg]
+    return widgets, sensors, text_sensors
+
+
+def build_climate_pages() -> tuple[list, list]:
+    """Pages « Thermostats » (poêle + PAC côte à côte) puis une page « Climatisation » par climatiseur. Retourne (pages, polices)."""
+    pages = []
+
+    # Page thermostats
+    widgets = ["  - label:", "      id: thermostats_titre", "      x: 0", "      y: 8", "      width: 800", "      height: 30",
+               "      text_align: CENTER", "      text_font: font_clim_title", "      text: \"Thermostats\"", "      text_color: 0xFFFFFF", "      bg_opa: TRANSP"]
+    sensors, text_sensors, entities = [], [], []
+    for (key, name, entity, color, step, tmin, tmax), x0 in zip(CLIMATE_THERMOSTATS, (80, 410)):
+        w, s_, t_ = _climate_card(key, name, entity, color, x0, 310, step, tmin, tmax, None)
+        widgets += w; sensors += s_; text_sensors += t_; entities.append(entity)
+    pages.append({"page": "thermostats", "floorplan_id": "Thermostats", "image_filename": None, "text_entries_used": [],
+                  "widget_block": widgets, "sensor_block": sensors, "text_sensor_block": text_sensors, "entities": entities,
+                  "placed": len(entities), "skipped": 0})
+
+    # Une page par climatiseur
+    n = len(CLIMATE_CLIMS)
+    for idx, (key, name, entity, step, tmin, tmax, modes) in enumerate(CLIMATE_CLIMS, start=1):
+        widgets = ["  - label:", f"      id: {key}_titre", "      x: 0", "      y: 8", "      width: 800", "      height: 30",
+                   "      text_align: CENTER", "      text_font: font_clim_title",
+                   f"      text: \"Climatisation {idx}/{n}\"", "      text_color: 0xFFFFFF", "      bg_opa: TRANSP"]
+        w, s_, t_ = _climate_card(key, name, entity, CLIMATE_COLOR_CLIM, 120, 560, step, tmin, tmax, modes)
+        pages.append({"page": key, "floorplan_id": f"Climatisation {name}", "image_filename": None, "text_entries_used": [],
+                      "widget_block": widgets + w, "sensor_block": s_, "text_sensor_block": t_, "entities": [entity],
+                      "placed": 1, "skipped": 0})
+
+    chars = CLIMATE_TEXT_CHARS
+    glyphs = build_glyphs_literal(chars)
+    fonts = ['  - file: "gfonts://Roboto"', "    id: font_clim_title", "    size: 24", f"    glyphs: {glyphs}",
+             '  - file: "gfonts://Roboto"', "    id: font_clim_text", "    size: 20", f"    glyphs: {glyphs}",
+             '  - file: "gfonts://Roboto"', "    id: font_clim_value", "    size: 44", f"    glyphs: {glyphs}"]
+    return pages, fonts
+
+
 def process_floorplan(floorplan_id: str, floorplan: dict, args, out_dir: Path) -> dict:
     """Génère l'image + les widgets d'un plan. Retourne un résumé (page id, lignes générées)."""
     page = slug(floorplan_id) or "plan"
@@ -446,7 +968,12 @@ def process_floorplan(floorplan_id: str, floorplan: dict, args, out_dir: Path) -
     image_filename = f"floorplan_{page}_{args.width}x{args.height}.png"
     final_img.save(out_dir / image_filename)
 
-    positions = [p for p in floorplan.get("positions", []) if p.get("x") is not None and p.get("y") is not None]
+    # `__trash_icon__` (et tout identifiant « __x__ ») : marqueurs d'interface du mode édition HAPLAN
+    # (corbeille), parfois enregistrés dans les positions — pas des entités HA, ESPHome les refuse.
+    positions = [
+        p for p in floorplan.get("positions", [])
+        if p.get("x") is not None and p.get("y") is not None and not str(p.get("entity_id", "")).startswith("__")
+    ]
     texts = [t for t in floorplan.get("texts", []) if t.get("text")]
 
     sensor_block: list[str] = []
@@ -583,7 +1110,8 @@ def run_compile_pipeline(merged_text: str, results: list[dict], out_dir: Path, a
         shutil.copy2(partitions_src, config_dir / PARTITIONS_FILENAME)
 
     for r in results:
-        shutil.copy2(out_dir / r["image_filename"], config_dir / r["image_filename"])
+        if r["image_filename"]:
+            shutil.copy2(out_dir / r["image_filename"], config_dir / r["image_filename"])
 
     print(f"Assets copiés dans : {config_dir}")
     print(f"Compilation : docker exec {args.esphome_container} esphome compile /config/{merged_filename}")
@@ -621,7 +1149,25 @@ def main() -> None:
         help="Nom de fichier sous lequel déployer le YAML fusionné dans --esphome-config-dir "
              "(défaut : même nom que --template, pour matcher l'appareil déjà apparié dans HA)",
     )
+    parser.add_argument("--energy", action="store_true", help="Ajoute la page « Énergie en direct » (déjà incluse par --all)")
+    parser.add_argument("--no-energy", action="store_true", help="Exclut la page « Énergie en direct » même avec --all")
+    parser.add_argument("--no-ballons", action="store_true", help="Exclut la page « Chauffe des ballons » (incluse avec --all)")
+    parser.add_argument("--no-climate", action="store_true", help="Exclut les pages « Thermostats » et « Climatisation » (incluses avec --all)")
+    parser.add_argument("--ha-url", default=None, help="HA visé pour le garde-fou (défaut : celui de data/core/config.yaml)")
+    parser.add_argument("--ha-token-file", default=None, help="Fichier YAML contenant le jeton (défaut : data/core/secrets_config.yaml)")
+    parser.add_argument("--skip-ha-check", action="store_true", help="Désactive le garde-fou « entités présentes dans le HA visé »")
+    parser.add_argument(
+        "--graft-ballons", metavar="YAML", default=None,
+        help="Greffe la page « Chauffe des ballons » dans cette configuration ESPHome déjà déployée (modifiée sur place, "
+             "SANS régénérer les plans) puis quitte. Faire une copie de sauvegarde avant.",
+    )
     args = parser.parse_args()
+
+    if args.graft_ballons:
+        target = Path(args.graft_ballons)
+        target.write_text(graft_page(target.read_text(encoding="utf-8"), build_ballons_page(), args.width, args.height), encoding="utf-8")
+        print(f"Page « {BALLONS_TITLE} » greffée dans {target}")
+        return
 
     if not FLOORPLANS_CONFIG.exists():
         sys.exit(f"Introuvable : {FLOORPLANS_CONFIG}")
@@ -650,6 +1196,38 @@ def main() -> None:
         sys.exit(f"Police introuvable : {font_src} (voir en-tête du script)")
 
     results = [process_floorplan(fid, all_floorplans[fid], args, out_dir) for fid in ids]
+    with_energy = (args.all or args.energy) and not args.no_energy
+    if with_energy:
+        results.append(build_energy_page(args.width, args.height))
+    with_ballons = with_energy and not args.no_ballons
+    if with_ballons:
+        results.append(build_ballons_page())
+    with_climate = with_energy and not args.no_climate
+    climate_fonts: list[str] = []
+    if with_climate:
+        climate_pages, climate_fonts = build_climate_pages()
+        results.extend(climate_pages)
+
+    # Garde-fou : toutes les entités des pages générées doivent exister dans le HA visé (obligatoire avec --compile)
+    if (args.compile or args.merge) and not args.skip_ha_check:
+        wanted = set()
+        for fid in ids:
+            for pos in all_floorplans[fid].get("positions", []):
+                eid = str(pos.get("entity_id", ""))
+                if eid and not eid.startswith("__"):
+                    wanted.add(eid)
+        if with_energy:
+            wanted |= {n[0] for n in ENERGY_NODES.values()} | {ENERGY_SOC_ENTITY}
+        if with_ballons:
+            wanted |= set(next(r for r in results if r["page"] == BALLONS_PAGE_ID)["entities"])
+        if with_climate:
+            wanted |= {e for r in climate_pages for e in r["entities"]}
+        d_url, d_token = _ha_defaults()
+        url = args.ha_url or d_url
+        token = d_token
+        if args.ha_token_file:
+            token = yaml.safe_load(Path(args.ha_token_file).read_text(encoding="utf-8")).get("token", d_token)
+        check_entities_in_ha(wanted, url, token)
 
     lines: list[str] = []
     lines.append(f"# Généré par generate_esphome_floorplan.py --- {len(results)} plan(s) : {', '.join(r['floorplan_id'] for r in results)}")
@@ -658,7 +1236,7 @@ def main() -> None:
     lines.append("")
 
     lines.append("image:")
-    for r in results:
+    for r in (r for r in results if r["image_filename"]):
         lines.append(f"  - file: \"{r['image_filename']}\"")
         lines.append(f"    id: floorplan_bg_{r['page']}")
         lines.append(f"    type: RGB565")
@@ -705,6 +1283,30 @@ def main() -> None:
         lines.append(f"    size: {TEXT_FONT_SIZE_BY_SIZE[size]}")
         lines.append(f"    glyphs: {build_glyphs_literal(text_sizes_used[size])}")
 
+    if with_energy:
+        energy = next(r for r in results if r["page"] == ENERGY_PAGE_ID)
+        lines.append(f"  - file: \"{FONT_FILENAME}\"")
+        lines.append("    id: font_energy_icons")
+        lines.append(f"    size: {ENERGY_ICON_FONT_SIZE}")
+        icon_glyphs = [n[4] for n in ENERGY_NODES.values()]
+        lines.append(f"    glyphs: [{', '.join(repr(g).replace(chr(39), chr(34)) for g in icon_glyphs)}]")
+        lines.append(f"  - file: \"{FONT_FILENAME}\"")
+        lines.append("    id: font_energy_arrow")
+        lines.append(f"    size: {ENERGY_ARROW_FONT_SIZE}")
+        lines.append(f"    glyphs: [{', '.join(repr(g).replace(chr(39), chr(34)) for g in ENERGY_ARROWS.values())}]")
+        lines.append('  - file: "gfonts://Roboto"')
+        lines.append("    id: font_energy_value")
+        lines.append(f"    size: {ENERGY_VALUE_FONT_SIZE}")
+        lines.append('    glyphs: "0123456789.-WkV% "')
+        lines.append('  - file: "gfonts://Roboto"')
+        lines.append("    id: font_energy_text")
+        lines.append(f"    size: {ENERGY_TEXT_FONT_SIZE}")
+        lines.append(f"    glyphs: {build_glyphs_literal(energy['energy_text_chars'] | set('-'))}")
+        if with_ballons:
+            lines.extend(next(r for r in results if r["page"] == BALLONS_PAGE_ID)["font_lines"])
+        if with_climate:
+            lines.extend(climate_fonts)
+
     lines.append("")
 
     all_text_sensor = [l for r in results for l in r["text_sensor_block"]]
@@ -735,12 +1337,13 @@ def main() -> None:
         lines.append(f"          bg_opa: COVER")
         lines.append(f"          border_width: 0")
         lines.append(f"          radius: 0")
-        lines.append(f"      - image:")
-        lines.append(f"          src: floorplan_bg_{r['page']}")
-        lines.append(f"          x: 0")
-        lines.append(f"          y: 0")
-        lines.append(f"          width: {args.width}")
-        lines.append(f"          height: {args.height}")
+        if r["image_filename"]:
+            lines.append(f"      - image:")
+            lines.append(f"          src: floorplan_bg_{r['page']}")
+            lines.append(f"          x: 0")
+            lines.append(f"          y: 0")
+            lines.append(f"          width: {args.width}")
+            lines.append(f"          height: {args.height}")
         for wline in r["widget_block"]:
             # Widgets déjà indentés à 2 espaces (style "  - label:") — les widgets de page ESPHome
             # veulent 6 espaces sous `widgets:` (2 de base + 4 pour rentrer dans `- id:/widgets:`).
@@ -751,7 +1354,7 @@ def main() -> None:
 
     print(f"Fragment   : {out_yaml}")
     for r in results:
-        print(f"  - {r['floorplan_id']!r:30} page={r['page']:20} image={r['image_filename']:35} {r['placed']} placées, {r['skipped']} hors cadre")
+        print(f"  - {r['floorplan_id']!r:30} page={r['page']:20} image={(r['image_filename'] or '(aucune)'):35} {r['placed']} placées, {r['skipped']} hors cadre")
 
     if args.merge or args.compile:
         template_path = Path(args.template)
