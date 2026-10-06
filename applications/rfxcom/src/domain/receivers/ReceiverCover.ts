@@ -68,16 +68,14 @@ export class ReceiverCover implements IReceiverModule {
 
   /**
    * État publié vers HA. Pendant un mouvement : `opening` / `closing` (et non la position d'avant le
-   * départ, qui affichait « fermé » un volet en train de s'ouvrir). À l'arrêt : `up` (100 %), `down` (0 %)
-   * ou `intermediate`.
+   * départ, qui affichait « fermé » un volet en train de s'ouvrir). À l'arrêt : `down` (0 %) ou `up` pour
+   * toute autre position — HA comprend `up` comme « ouvert » et lit le pourcentage dans `position` ; un
+   * état intermédiaire non reconnu par HA le laisserait bloqué sur « en ouverture/fermeture ».
    */
-  private runtimeState(): 'up' | 'down' | 'intermediate' | 'opening' | 'closing' {
+  private runtimeState(): 'up' | 'down' | 'opening' | 'closing' {
     if (this.direction === 'opening') return 'opening';
     if (this.direction === 'closing') return 'closing';
-    const pos = this.computePosition();
-    if (pos >= 100) return 'up';
-    if (pos <= 0) return 'down';
-    return 'intermediate';
+    return this.computePosition() <= 0 ? 'down' : 'up';
   }
 
   /** Marge (%) sous laquelle un mouvement est considéré arrivé en butée — voir checkArrival(). */
@@ -281,13 +279,9 @@ export class ReceiverCover implements IReceiverModule {
         deviceClass: 'shutter',
         // Voir ReceiverLight.ts : sans ça, state_topic (JSON) n'est jamais reconnu par HA.
         valueTemplate: '{{ value_json.state }}',
-        // ⭐ 15/09/2026, bug réel constaté en direct (statut "inconnu" permanent, carte HA ET plan
-        // HAPLAN) : `state` ('up'/'down'/'intermediate') ne fait partie d'aucun vocabulaire HA —
-        // position_topic (percentage réel, déjà dans le même state_topic) laisse HA dériver
-        // ouvert/fermé/pourcentage de façon fiable. state_open/state_closed en complément pour que
-        // le texte d'état lui-même résolve aux deux extrêmes (mappage direct sur 'up'/'down') —
-        // 'intermediate' reste non mappé (HA garde le dernier état résolu valide, mieux qu'un
-        // "inconnu" permanent).
+        // `state` ('up'/'down'/'opening'/'closing') est mappé sur le vocabulaire HA par state_open/state_closed/
+        // state_opening/state_closing (extra ci-dessous) ; position_topic donne le pourcentage, dans le même
+        // state_topic, pour que HA affiche le curseur et dérive ouvert/fermé de façon fiable.
         positionTemplate: '{{ value_json.attributes.position }}',
         extra: { state_open: 'up', state_closed: 'down', state_opening: 'opening', state_closing: 'closing' },
         attributsTaxonomie: buildAttributsTaxonomie(taxonomy),

@@ -37,13 +37,13 @@ describe('ReceiverCover', () => {
       expect(cover.getState().state).toBe('closing');
     });
 
-    it('affiche « intermediate » à l\'arrêt entre les butées', () => {
+    it('à l\'arrêt entre les butées : « up » (ouvert) avec le pourcentage, jamais un état que HA ne connaît pas', () => {
       const cover = new ReceiverCover(makeConfig({ lastPosition: 0 }), 'lighting2');
       cover.translateHaCommand('open');
       vi.advanceTimersByTime(10_000);
       cover.translateHaCommand('stop');
       const state = cover.getState();
-      expect(state.state).toBe('intermediate');
+      expect(state.state).toBe('up');
       expect(state.attributes?.position).toBe(50);
     });
   });
@@ -117,7 +117,7 @@ describe('ReceiverCover', () => {
       cover.translateHaCommand('open');
       vi.advanceTimersByTime(5_000);
       expect(cover.applyEmitterCommand('on')).toBeNull();
-      expect(cover.getState().state).toBe('intermediate');
+      expect(cover.getState().state).toBe('up');
     });
   });
 });
