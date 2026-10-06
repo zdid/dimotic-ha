@@ -1,6 +1,7 @@
 # Spécifications Fonctionnelles - Module HAPLAN
 
-*Version 1.8 - 24 Septembre 2026*
+*Version 1.9 - 6 Octobre 2026*
+*v1.9 : « Paramètres Techniques → HAPLAN » ouvre un écran de paramètres **vide** (§7.1) — l'application (tableau de bord des plans) est inchangée ; **déploiement Lovelace : la cible est celle dont l'adresse correspond à l'adresse WS de HA configurée** (§17.8) ; positions `__trash_icon__` (poubelle du mode édition) jamais déployées (§4.1) ; écran ESP32 : pages natives « Énergie en direct » et « Chauffe des ballons » + garde-fou du générateur (§8.10).*
 *v1.8 : revue de code — abonnement aux états HA toujours posé (avant : seulement si le référentiel était déjà chargé au démarrage → icônes figées si HA n'était pas prêt) ; verrous de déploiement libérés sans réponse (écran ESP : 5 min, carte Lovelace : 2 min) et sur erreur de préparation des images. En suspens (décision utilisateur) : signaler les entités d'un plan absentes de HA.*
 *Fonctionnalité "texte libre" implémentée et déployée en conditions réelles sur les 3 sorties de
 HAPlan (web, carte Lovelace HA, écran ESP32) — voir §4.1, §8.11 (nouvelle), §9.4 (nouvelle), §17
@@ -272,6 +273,11 @@ référence/import sous `data/haplan/client-floorplans.json`, format légèremen
 écriture atomique tmp→rename, fichier manquant → créé vide, erreur de validation Zod au chargement
 → démarrage avec une config vide sans toucher au fichier fautif).
 
+**Marqueurs d'interface (v1.9)** : déplacer la poubelle en mode édition l'enregistre comme une position d'identifiant
+`__trash_icon__` (`FloorPlan.ts`). Ce n'est pas une entité HA : toute position dont l'`entity_id` commence par `__` est
+**ignorée au déploiement** vers la carte Lovelace (`lovelace-generator.ts::buildView`) et vers l'écran ESP32
+(`generate_esphome_floorplan.py`). Elle reste dans le fichier de plans (position de la corbeille à l'écran d'édition).
+
 ### 4.2 Positions — toujours la liste complète, jamais un delta
 
 **Point d'entrée unique** pour ajouter, déplacer ou retirer une icône **ou un texte libre** :
@@ -378,7 +384,10 @@ entités du référentiel (pas seulement celles déjà placées), au démarrage 
 
 ### 7.1 Routage réel (pas SPA)
 
-`menu.entry.path = '/applications/haplan/presentation/haplan/dashboard.html'` — chemin de fichier
+**v1.9 : `menu.entry.path = '/haplan/config'`** — « Paramètres Techniques → HAPLAN » ouvre l'écran de paramètres générique, **vide**
+(`configUi.fields = []` : le core affiche « Cette application n'a pas de paramètres propres », sans bouton Sauvegarder). Avant
+v1.9, cette entrée ouvrait directement le tableau de bord, ce qui le confondait avec l'application elle-même. **L'application
+reste inchangée** : `configUi.menuPath = '/applications/haplan/presentation/haplan/dashboard.html'` — chemin de fichier
 réel, pas la convention SPA `presentation/index.html`. `Sidebar.ts` (core) route tout
 `entry.path` commençant par `/applications/` vers une **vraie navigation**
 (`window.location.href = path`) plutôt que l'embarquement Shadow DOM habituel — mécanisme
@@ -544,6 +553,16 @@ plans (accents français compris, calculé dynamiquement) — même principe que
 capteur (`font_sensor`, restreinte à `0123456789.-`). "Page libre" (§4.3) : aucun cas spécial, une
 image générée est déjà une vraie image, `fit_and_pad()` (contain-fit, ratio préservé) s'applique
 sans changement. Déployé et vérifié en conditions réelles (compilation + OTA) le 08/09/2026.
+
+**Pages natives et garde-fou (v1.9)** : en plus d'une page par plan, `generate_esphome_floorplan.py --all` ajoute deux pages dessinées en LVGL,
+sans image de fond : **« Énergie en direct »** (solaire, réseau, batterie, maison : puissances en watts et sens du flux, capteurs
+de la carte `power-flow-card-plus`) et **« Chauffe des ballons »** (état, puissance, durées du jour de chaque ballon ; deux
+boutons tactiles basculent `input_boolean.petit_ballon_en_premier` et `input_boolean.un_seul_ballon`). Options `--no-energy`,
+`--no-ballons`. Pas de graphiques d'historique ni d'« énergie du jour » (LVGL ESPHome n'a pas de widget de courbe). **Garde-fou** :
+avec `--merge`/`--compile`, le script lit les états du HA visé (`--ha-url`, `--ha-token-file`, par défaut `data/core/`) et **refuse**
+de générer si une entité des pages n'y existe pas (plans d'un autre site déployés par erreur le 06/10/2026 : plus aucune valeur
+à l'écran) ; `--skip-ha-check` pour passer outre. `--graft-ballons <yaml>` greffe la seule page « Chauffe des ballons » dans une
+configuration déjà déployée.
 
 ### 8.11 Texte libre (⭐ 08/09/2026)
 
@@ -715,9 +734,8 @@ persiste dans `localStorage` (clé `haplan:plan-scale`).
 **Mémorisation par écran, pas par utilisateur** : `localStorage` est local au navigateur, pas au
 formulaire générique de paramètres de l'application (`HAPLAN_UI_METADATA.fields`, toujours vide,
 voir §2) — cohérent avec l'usage prévu d'un plan mural fixe, où chaque écran garde son propre
-réglage sans dépendre d'un compte ou d'une session utilisateur. Le formulaire générique n'est de
-toute façon jamais atteint pour cette application : son entrée de menu route directement vers
-`dashboard.html` (§7.1), pas vers la page de configuration générique.
+réglage sans dépendre d'un compte ou d'une session utilisateur. Depuis v1.9, l'entrée de menu « Paramètres
+Techniques → HAPLAN » ouvre l'écran de paramètres générique, vide (§7.1).
 
 ---
 
@@ -1079,6 +1097,11 @@ contient aussi les auto-annonces gossip d'une même machine sous des `machineId`
 redémarrage — le dépôt ne fonctionne qu'avec **exactement une** cible d'`origin: 'local'` (filtrées
 avant comptage), pas une cible `haStackTargets` quelconque comme le code le faisait avant correction.
 
+**Cible = le HA de l'adresse WS configurée (v1.9, côté `core`)** : parmi les cibles `origin: 'local'`, le dépôt retient celle dont
+`host` égale `ha.ws.host` (adresse WS de HA de l'application) ; aucune correspondance → refus explicite listant les cibles
+actuelles (rien n'est écrit ailleurs). Corrige le dépôt des plans de Saint Fort vers une cible laissée par un essai sur noisy2
+(`192.168.1.19`), seule cible de la liste.
+
 ### 17.9 Texte libre et "page libre" sur la carte Lovelace (⭐ 08/09/2026)
 
 - **Texte libre** (§8.11) : élément `action-button` (§17.7 — pas `markdown`), `title` = le texte
@@ -1123,6 +1146,7 @@ avant comptage), pas une cible `haStackTargets` quelconque comme le code le fais
 ### 18.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.9 | 2026-10-06 | Claude | « Paramètres Techniques → HAPLAN » ouvre un écran de paramètres vide (application inchangée) ; déploiement Lovelace vers le HA de l'adresse WS configurée (§17.8) ; positions `__trash_icon__` jamais déployées (§4.1) ; pages natives « Énergie en direct » et « Chauffe des ballons » de l'écran ESP32 et garde-fou « entités présentes dans le HA visé » (§8.10). v1.8 archivée. |
 | 1.8 | 2026-09-24 | Claude | Revue de code : états HA en direct même si HA n'était pas prêt au démarrage ; délais d'expiration des déploiements écran (5 min) et Lovelace (2 min), verrou libéré sur erreur de préparation. v1.7 archivée. |
 | 1.7 | 2026-09-08 | Claude | **Texte libre** (§8.11, §9.3, §17.9) implémenté et déployé en conditions réelles sur les 3 sorties de HAPlan (web, carte Lovelace HA, écran ESP32 §8.10) : élément positionné comme une icône mais sans `entity_id`, 3 paliers de taille, édition inline par double-clic. Conception de départ ("page libre" = plan sans image, `filename` optionnel, cas spécial propagé dans `FloorPlan.ts`/`HaplanService.ts`/`lovelace-generator.ts`/`generate_esphome_floorplan.py`) **abandonnée en cours de route sur demande explicite de l'utilisateur** au profit d'une image unie générée UNE FOIS à la création (§4.3, portrait 4:3, fond transparent) — `filename` reste obligatoire, aucun cas spécial nulle part dans le code final. §17 (Lovelace) passe de "conception, aucun code" à **implémentée** — découverte au passage que l'implémentation réelle avait en fait déjà été construite et affinée entre le 28/08 et le 08/09/2026 sans jamais être reflétée dans une mise à jour de spec (§17.5-17.8 réécrits pour refléter la réalité : `card_mod` obligatoire en pratique pour la couleur/le dimensionnement, pas seulement natif comme supposé en v1.5 ; aplatissement de fond, cache d'image, `::part()` pour le texte libre). Bugs réels corrigés en testant : libellés de statut des interrupteurs génériques enfin corrects (§15.3 bugs #2/#3 révisés — remplace le bouton bascule unique par deux boutons explicites Éteindre/Allumer, plus robuste face à un retour d'état HA peu fiable, ex: RF), glyphe d'icône du radiateur figé après le premier rendu (même bug), nouveau type d'objet `input_boolean` (§9.4, pour les réglages manuels d'automation, ex: "petit ballon en premier" — auparavant reclassé à tort en chauffe-eau par collision de mot-clé), glisser-déposer cassé pour TOUS les objets/textes après un premier aller-retour en mode édition (bug #18, référence DOM orpheline), dépôt Lovelace refusé malgré une seule vraie cible HA (bug #19, doublons gossip du même hôte, côté `core`). Compilation ESP32 : freeze système récurrent de la machine hôte tracé au conteneur Docker `esphome` sans swap configuré (0 Go) — résolu par l'ajout d'un fichier swap de 8 Go (changement système fait par l'utilisateur, hors du périmètre de ce projet). |
 | 1.6 | 2026-08-28 | Claude | **Mécanisme de dépôt révisé** (§17.5/§17.8, nouvelle) : dépôt de fichier par SSH plutôt que le WebSocket envisagé en v1.4/v1.5 — `lovelace/config/save` non documentée officiellement par HA, jugée trop fragile pour une fonctionnalité durable. Instance réelle de l'utilisateur vérifiée en direct (`ha2`, lecture seule) : tableaux de bord en mode storage (`.storage/lovelace_dashboards`), écriture directe risquée (HA peut écraser). Solution : nouveau tableau de bord dédié en mode YAML (coexiste avec l'existant, jamais de conflit), déclaré une fois dans `configuration.yaml` côté HA (redémarrage HA ponctuel, pas de code). Écriture par le même mécanisme SSH déjà éprouvé pour la config HA/Mosquitto (`SshClient.ts`/`HaStackDeployService.ts`, `runSsh`+`tee` pour le YAML, `runScp` pour l'image de fond vers `config/www/`, servie en `/local/...`) — précédent trouvé en examinant d'abord `scriptsha` (non applicable, HA n'a pas d'équivalent REST pour un tableau de bord). Conception toujours non implémentée — mécanisme confirmé par la documentation et un précédent du projet, pas encore testé en conditions réelles. |

@@ -1,9 +1,15 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.35  
+**Version :** 4.36  
 **Date :** 6 Octobre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
 
+> **v4.36** : **page « Paramètres généraux »** — Web-services, MQTT, Serveur Web et Journalisation sur UNE page, chacune avec son
+> propre bouton « Sauvegarder » (§10.4bis) ; **une application sans paramètre technique** n'apparaît plus dans la liste des
+> Paramètres Techniques (et son écran, si on y accède, affiche « n'a pas de paramètres propres » au lieu d'un formulaire vide) ;
+> **dépôt de la carte Plan Lovelace : la cible est le HA dont l'adresse correspond à `ha.ws.host`** (avant : l'unique cible `haStackTargets`,
+> qui pouvait être celle d'un autre site — les plans de Saint Fort visaient noisy2).
+>
 > **v4.35** : **les ordres de HA ne sont plus retenus** — l'entité de découverte (`buildDiscoveryPayload`)
 > déclarait `retain: true`, option HA qui fait publier chaque COMMANDE de l'utilisateur en message retenu sur
 > `command_topic`, en contradiction avec la règle « Commands = QoS 1 + retain false (⭐ v4.35 : aussi côté HA — l’option `retain` de l’entité de découverte est à `false`) » (§8.5.0). Constaté le
@@ -2285,6 +2291,30 @@ réponse.
 | `0` | Arrêt propre (normal, après sauvegarde config, ou redémarrage manuel — voir §10.4) |
 | `1` | Erreur fatale au démarrage, ou exception non capturée (`uncaughtException`) |
 
+### 10.4bis ⭐ Paramètres généraux et paramètres des applications (v4.36)
+
+**Page unique « Paramètres généraux »** (`ConfigForm`, `data-section="tech"`, conteneur `#section-ha`) : les sections `ha` (Web-Services),
+`mqtt`, `web` (Serveur Web) et `logging` sont empilées sur la même page ; la section « Site » (avec la diffusion) garde sa page.
+Les anciens identifiants de section (`ha`, `mqtt`, `web`, `logging`) restent acceptés (liens existants) et ouvrent cette page.
+
+**Une sauvegarde par section** : chaque section a son bouton « Sauvegarder » (trait de séparation SOUS le bouton) et son retour de
+résultat. `TechnicalConfigManager.saveConfig(section)` envoie au serveur la dernière configuration connue de celui-ci
+(`serverConfig`, mise à jour à chaque `config:current`) dans laquelle seuls les champs de CETTE section sont remplacés par la saisie
+courante ; les saisies non sauvegardées des autres sections ne sont ni envoyées ni perdues (`dirtyFields` n'est vidé que pour la
+section enregistrée). `config-save-result` porte le nom de la section. Sans argument, `saveConfig()` envoie toute la configuration.
+
+**Application sans paramètre technique** (`configUi.fields` vide : tasmota, haplan…) : elle n'apparaît plus dans le sous-menu des
+Paramètres Techniques (elle reste dans la liste principale des applications) ; si son écran de paramètres est ouvert,
+`generateModuleConfigForm` affiche « Cette application n'a pas de paramètres propres : elle s'utilise directement depuis sa page »,
+sans formulaire ni bouton « Sauvegarder ».
+
+**Redémarrage manuel et mode développement** : le bouton « Redémarrer l'application » (§10.4) arrête le processus et suppose un
+superviseur qui le relance (Docker). Avec `npm run dev:local` (`tsx watch`), l'application reste arrêtée : la relancer à la main.
+
+**Dépôt de la carte Plan Lovelace** (`AppService.handleHaplanLovelaceDeploy`) : parmi les cibles `haStackTargets` d'`origin: 'local'`,
+la cible retenue est celle dont `host` égale `ha.ws.host` ; aucune correspondance (ou plusieurs) → refus explicite listant les cibles
+configurées, rien n'est écrit ailleurs.
+
 ### 10.4 ⭐ Redémarrage manuel (v4.23)
 
 Bouton "🔄 Redémarrer l'application" dans Paramètres Techniques → Journalisation (avec
@@ -2561,6 +2591,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.36** | 06/10/2026 | Claude | **Page « Paramètres généraux »** (Web-services, MQTT, Serveur Web, Journalisation sur une page, une sauvegarde par section — §10.4bis) ; applications sans paramètre technique retirées de la liste des Paramètres Techniques et écran explicite si ouvert ; **dépôt de la carte Plan Lovelace vers le HA de `ha.ws.host`** (refus explicite sinon). v4.35 archivée. |
 | **4.34** | 01/10/2026 | Claude | **Démarrage tolérant (§7.2)** : une section `ha.ws` / `ha.mqtt` invalide désactive la connexion en mémoire au lieu de faire planter le core ; valeurs corrigeables dans l'IHM, voyants rouges, `ws_enable`/`mqtt_enable` conservés dans le fichier, section `ha` de l'IHM validée strictement. Cause : diffusion de `ha` entre noisy et noisy2 (hôte sans jeton), incident du 01/10/2026. |
 | **4.31** | 23/08/2026 | Claude | **Déploiement de dimotic-ha lui-même sur d'autres machines** (§4.3bis nouvelle, §7.1, §11.4) — nouveau `targets: DeploymentTargetConfig[]` sur le schéma config racine (`disabledApps` forcé à toutes les apps connues sauf `core` sur une machine neuve). Nouveau `CoreDeployService.ts` réutilisant le socle SSH/SCP partagé construit la session précédente pour rpigpio/teleinfo/arexx (même protocole `{targetId, action}`) — copie `compose.deploy.yaml` (pas `compose.yaml`), sème `data/core/config.yaml` uniquement s'il est absent, `docker compose pull && up -d`, attend "healthy". Remplace `docker/rebuild-and-deploy.sh` pour l'étape déploiement (build+push Docker Hub reste manuel) et automatise la procédure jusqu'ici manuelle du §11.4. Nouvelle section IHM "Déploiement" (`DeploymentManager.ts`, Web Component calqué sur `ApplicationsManager.ts` mais sans le moteur générique `type:'array'`, `core` n'en dispose pas pour sa propre config) réutilisant `TargetCards.js` (même composant que les 3 apps), étendu d'un `onDelete` optionnel. Corollaire trouvé en cours de route : `ConfigService.saveConfig()`/`setDisabledApps()` ne préservaient pas `targets` avant d'écrire — même classe de bug que l'incident `disabledApps` du 07/08/2026, corrigé préventivement avant mise en service. Testé en conditions réelles (navigateur) : ajout/suppression de cible, round-trip Socket.io, `data/core/config.yaml` réel confirmé intact (aucun champ existant écrasé). Aucun test de déploiement réel contre ha2/orangepi (machines de production). Ancienne version v4.30 archivée. |
 | **4.30** | 16/08/2026 | Claude | **`parseIncomingCommand()` rejette les commandes retenues** (§8.5.4ter, nouvelle) — incident de sécurité réel RFXCOM : ~21 messages `.../set` retenus sur le broker (probablement `mosquitto_pub -r` manuel ancien), rejoués à chaque redémarrage et exécutés comme de vraies commandes RF433 dès que le transceiver était connecté — maison éteinte de façon imprévisible. Correctif socle (`stateCommand.ts`), protège tous les modules (rfxcom, evoo7, arexx, nommage). Messages déjà présents nettoyés manuellement sur le broker. Ancienne version v4.29 archivée. |
