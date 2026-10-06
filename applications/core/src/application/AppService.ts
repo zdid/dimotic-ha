@@ -1107,11 +1107,18 @@ export class AppService {
    * dépôt — n'importe quel nombre de doublons gossip du même hôte n'a alors plus d'effet.
    */
   private async handleHaplanLovelaceDeploy(data: { yaml: string; images: Array<{ localPath: string; filename: string }> }): Promise<void> {
-    const targets = this.configService.getHaStackTargets().filter((t) => t.origin === 'local');
+    // ⭐ 06/10/2026 : la cible est le HA dont l'adresse WS est configurée dans l'application (`ha.ws.host`), pas « la
+    // seule cible de la liste » — une cible laissée par un essai sur un autre site (noisy2, 192.168.1.19) recevait les
+    // plans de Saint Fort. Aucune cible ne correspond à l'adresse WS → refus explicite, rien n'est écrit ailleurs.
+    const wsHost = this.configService.getConfig().ha?.ws?.host;
+    const locals = this.configService.getHaStackTargets().filter((t) => t.origin === 'local');
+    const targets = wsHost ? locals.filter((t) => t.host === wsHost) : locals;
     if (targets.length !== 1) {
       const error = targets.length === 0
-        ? 'Aucune cible HA+Mosquitto configurée (Paramètres Techniques > Déploiement HA)'
-        : 'Plusieurs cibles HA+Mosquitto configurées, sélection non prise en charge pour ce dépôt';
+        ? (wsHost
+          ? `Aucune cible HA+Mosquitto ne correspond à l'adresse WS de HA configurée (${wsHost}) — ajouter cette machine dans Paramètres Techniques > Déploiement HA (cibles actuelles : ${locals.map((t) => t.host).join(', ') || 'aucune'})`
+          : 'Aucune cible HA+Mosquitto configurée (Paramètres Techniques > Déploiement HA)')
+        : `Plusieurs cibles HA+Mosquitto correspondent à l'adresse WS ${wsHost}, sélection non prise en charge pour ce dépôt`;
       this.logger.error('AppService', `Dépôt carte Plan Lovelace: ${error}`);
       this.eventBus.emitGeneric('core:haplan-lovelace:deploy:result', { success: false, error });
       return;

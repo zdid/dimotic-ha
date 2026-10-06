@@ -31,22 +31,13 @@
       <app-config-form data-section="machine"><app-diffusion-manager></app-diffusion-manager></app-config-form>
     </div>
 
+    <!-- ⭐ 06/10/2026 : « Paramètres généraux » — Web-services, MQTT, Serveur Web et Journalisation sur UNE page, une
+         sauvegarde par section (ConfigForm, data-section="tech"). Ce conteneur sert aussi de support au formulaire de
+         configuration d'un module (Sidebar.showModuleConfig) : son identifiant section-ha est conservé. -->
     <div id="section-ha" class="content-section" style="display: none;">
-      <app-config-form></app-config-form>
+      <app-config-form data-section="tech"></app-config-form>
     </div>
-    
-    <div id="section-mqtt" class="content-section" style="display: none;">
-      <app-config-form data-section="mqtt"></app-config-form>
-    </div>
-    
-    <div id="section-web" class="content-section" style="display: none;">
-      <app-config-form data-section="web"></app-config-form>
-    </div>
-    
-    <div id="section-logging" class="content-section" style="display: none;">
-      <app-config-form data-section="logging"></app-config-form>
-    </div>
-    
+
     <div id="section-applications-manager" class="content-section" style="display: none;">
       <app-applications-manager></app-applications-manager>
     </div>

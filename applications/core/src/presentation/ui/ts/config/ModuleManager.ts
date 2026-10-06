@@ -251,6 +251,19 @@ export class ModuleManager {
     const config = this.moduleConfigs[moduleId];
     const fields = metadata.fields || [];
 
+    // ⭐ 06/10/2026 : une application sans paramètre propre (tasmota, haplan… : `fields` vide, tout se fait sur sa
+    // page) affichait un formulaire vide avec un bouton « Sauvegarder » inutile. Message explicite à la place.
+    if (fields.length === 0) {
+      return `
+        <div class="module-config-header">
+          <h3>${metadata.icon || ''} ${metadata.title}</h3>
+          <p class="section-description">${metadata.description}</p>
+        </div>
+        <div class="info-hint">Cette application n'a pas de paramètres propres : elle s'utilise directement depuis sa page.
+        Son activation se gère dans « Gestion des applications ».</div>
+      `;
+    }
+
     let html = `
       <div class="module-config-header">
         <h3>${metadata.icon || ''} ${metadata.title}</h3>

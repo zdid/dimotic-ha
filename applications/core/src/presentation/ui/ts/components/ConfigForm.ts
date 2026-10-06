@@ -85,6 +85,10 @@ const configSections: ConfigSection[] = [
   }
 ];
 
+// ⭐ 06/10/2026 : « Paramètres généraux » — ces quatre sections sont affichées sur UNE page (empilées), chacune avec son
+// propre bouton « Sauvegarder » (voir TechnicalConfigManager.saveConfig(section)). Le Site reste sur sa page (diffusion).
+const GROUPED_SECTION_IDS = ['ha', 'mqtt', 'web', 'logging'];
+
 // Template HTML pour le Shadow DOM
 const createTemplate = (): HTMLTemplateElement => {
   const template = document.createElement('template');
@@ -238,6 +242,20 @@ const createTemplate = (): HTMLTemplateElement => {
         margin-top: 20px;
         padding-top: 20px;
         border-top: 1px solid #eee;
+      }
+      /* ⭐ 06/10/2026 — page « Paramètres généraux » : le trait de séparation est SOUS le bouton « Sauvegarder » (il sépare
+         une section de la suivante), plus entre la carte et le bouton. */
+      .section-actions-static {
+        margin-top: 12px;
+        padding-top: 0;
+        border-top: none;
+        padding-bottom: 20px;
+        margin-bottom: 14px;
+        border-bottom: 1px solid #eee;
+      }
+      .section-actions-static + .section-actions-danger {
+        border-top: none;
+        margin-top: 0;
       }
       
       .btn {
@@ -412,7 +430,7 @@ export class ConfigForm extends HTMLElement {
   // render() et perdrait le résultat avant même d'avoir pu s'afficher (constaté en direct : la
   // confirmation n'apparaissait jamais). En le portant ici, buildSaveButton() le réinjecte tel
   // quel à chaque render(), quelle qu'en soit la cause.
-  private saveResult: { success: boolean; message: string } | null = null;
+  private saveResult: { success: boolean; message: string; section?: string | null } | null = null;
   private saveResultTimeout: number | undefined;
   // Même raisonnement que saveResult ci-dessus (état du composant, pas un x-data Alpine local)
   // pour survivre à un éventuel render() déclenché entre la demande et la réponse serveur.
@@ -454,7 +472,7 @@ export class ConfigForm extends HTMLElement {
     if (name === 'data-section' && oldValue !== newValue) {
       console.log(`[ConfigForm] data-section changé de ${oldValue} à ${newValue}`);
       // Si on change de section statique, réinitialiser le mode module
-      const staticSections = ['machine', 'ha', 'mqtt', 'web', 'logging', 'applications-manager'];
+      const staticSections = ['machine', 'tech', 'ha', 'mqtt', 'web', 'logging', 'applications-manager'];
       if (staticSections.includes(newValue)) {
         console.log('[ConfigForm] Réinitialisation du mode module (section statique détectée)');
         this.moduleId = null;
@@ -504,7 +522,15 @@ export class ConfigForm extends HTMLElement {
       // événement broadcast à tous) — sans cette garde, un succès distant viderait dirtyFields
       // ici et laisserait la prochaine fusion config:updated écraser l'édition locale en cours.
       if (e.detail.success && this.pendingLocalSave) {
-        this.dirtyFields.clear();
+        // Sauvegarde PAR SECTION : seuls les champs de cette section ne sont plus « en avance » sur le serveur ; les
+        // saisies non sauvegardées des autres sections restent protégées.
+        const sectionFields = e.detail.section ? configSections.find(sec => sec.id === e.detail.section)?.fields : undefined;
+        if (sectionFields) {
+          const names = new Set(sectionFields.map(f => f.name));
+          for (const f of [...this.dirtyFields]) if (names.has(f)) this.dirtyFields.delete(f);
+        } else {
+          this.dirtyFields.clear();
+        }
       }
       this.pendingLocalSave = false;
       this.render();
@@ -617,7 +643,7 @@ export class ConfigForm extends HTMLElement {
   }
   
   private get activeSection(): string {
-    return this.getAttribute('data-section') || 'ha';
+    return this.getAttribute('data-section') || 'tech';
   }
   
   private buildFormSections(): string {
@@ -634,6 +660,14 @@ export class ConfigForm extends HTMLElement {
     
     // Sinon, afficher la section statique normale
     const activeSectionId = this.activeSection;
+    // Page « Paramètres généraux » : les quatre sections empilées, une sauvegarde par section.
+    if (activeSectionId === 'tech' || GROUPED_SECTION_IDS.includes(activeSectionId)) {
+      return GROUPED_SECTION_IDS
+        .map(id => configSections.find(s => s.id === id))
+        .filter((sec): sec is ConfigSection => !!sec)
+        .map(sec => this.buildSection(sec))
+        .join('');
+    }
     const section = configSections.find(s => s.id === activeSectionId);
     
     if (!section) {
@@ -655,9 +689,9 @@ export class ConfigForm extends HTMLElement {
         ${section.id === 'machine'
           // ⭐ 29/09/2026 : « Sauvegarder » juste sous le site (seul champ qu'il enregistre), puis la
           // diffusion dans la même boîte (index.html) — ses cases sont prises en compte aussitôt.
-          ? `${this.buildSaveButton()}<slot></slot>` : ''}
+          ? `${this.buildSaveButton('machine')}<slot></slot>` : ''}
       </div>
-      ${section.id === 'machine' ? '' : this.buildSaveButton()}
+      ${section.id === 'machine' ? '' : this.buildSaveButton(section.id)}
       ${section.id === 'logging' ? this.buildRestartButton() : ''}
     `;
   }
@@ -763,23 +797,25 @@ export class ConfigForm extends HTMLElement {
     return html;
   }
   
-  private buildSaveButton(): string {
+  private buildSaveButton(sectionId: string): string {
     // Le résultat réel (this.saveResult) est un état du composant, pas de l'Alpine x-data local
     // du bouton — voir le commentaire sur le champ pour le pourquoi (render() déclenché par
     // config:current juste après une sauvegarde recréerait un x-data local vierge). "saving" en
     // revanche peut rester local à Alpine : purement une réaction immédiate au clic, sans besoin
     // de survivre à un re-render déclenché ailleurs.
-    const feedbackHtml = this.saveResult
+    // Le retour n'apparaît qu'à côté du bouton de LA section sauvegardée (résultat sans section : tous les boutons).
+    const showFeedback = this.saveResult && (!this.saveResult.section || this.saveResult.section === sectionId);
+    const feedbackHtml = showFeedback && this.saveResult
       ? `<span class="save-feedback${this.saveResult.success ? '' : ' save-feedback-error'}">${this.escapeHtml(this.saveResult.message)}</span>`
       : '';
     return `
-      <div class="section-actions" x-data="{ saving: false }">
+      <div class="section-actions section-actions-static" x-data="{ saving: false }">
         <button
           type="button"
-          id="static-save-button"
-          class="btn btn-primary"
+          class="btn btn-primary static-save-button"
+          data-save-section="${sectionId}"
           :disabled="saving"
-          @click="saving = true; window.app.configManager.saveConfig()"
+          @click="saving = true; window.app.configManager.saveConfig('${sectionId}')"
         >
           <span x-text="saving ? 'Sauvegarde en cours...' : 'Sauvegarder'"></span>
         </button>
@@ -814,8 +850,10 @@ export class ConfigForm extends HTMLElement {
     // pendingLocalSave (voir le champ) doit être positionné en JS, avant l'appel réel à
     // saveConfig(), pour que config-save-result sache distinguer NOTRE sauvegarde de celle d'un
     // autre onglet/utilisateur (même événement broadcast à tous les clients connectés).
-    this.shadowRoot!.getElementById('static-save-button')?.addEventListener('click', () => {
-      this.pendingLocalSave = true;
+    this.shadowRoot!.querySelectorAll('.static-save-button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.pendingLocalSave = true;
+      });
     });
 
     // Écouter les changements sur tous les inputs

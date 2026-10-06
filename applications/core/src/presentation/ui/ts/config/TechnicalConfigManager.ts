@@ -68,6 +68,10 @@ export class TechnicalConfigManager {
     warnings: [],
     requiredMissing: []
   };
+  /** Dernière configuration connue du serveur (vérité sauvegardée) : sert de base à une sauvegarde PAR SECTION. */
+  private serverConfig: TechnicalConfig;
+  /** Section dont la sauvegarde est en cours (relayée avec le résultat pour afficher le retour au bon bouton). */
+  private savingSection: string | null = null;
   public saveInProgress: boolean = false;
   public isLoading: boolean = true;
   public isHaConnected: boolean | null = null;
@@ -119,6 +123,7 @@ export class TechnicalConfigManager {
   constructor(socket: any) {
     this.socket = socket;
     this.config = this.getDefaultConfig();
+    this.serverConfig = this.getDefaultConfig();
     this.setupSocketListeners();
   }
   
@@ -137,6 +142,7 @@ export class TechnicalConfigManager {
     // Configuration actuelle
     this.socket.on('config:current', (partialConfig: Partial<TechnicalConfig>) => {
       this.config = this.mergeDeep({ ...this.config }, partialConfig);
+      this.serverConfig = this.mergeDeep(JSON.parse(JSON.stringify(this.serverConfig)), partialConfig);
       this.isLoading = false;
       this.notifyConfigUpdated();
     });
@@ -153,7 +159,8 @@ export class TechnicalConfigManager {
     // rester consommable par un sélecteur Alpine x-on:config-save-result.window.
     this.socket.on('config:save:result', (result: ConfigSaveResult) => {
       this.saveInProgress = false;
-      window.dispatchEvent(new CustomEvent('config-save-result', { detail: result }));
+      window.dispatchEvent(new CustomEvent('config-save-result', { detail: { ...result, section: this.savingSection } }));
+      this.savingSection = null;
     });
 
     // Résultat de la demande de redémarrage manuel — l'arrêt réel du process suit de peu
@@ -245,19 +252,54 @@ export class TechnicalConfigManager {
     }
   }
   
+  /** Chemins (préfixes pointés) de la configuration qui appartiennent à chaque section de la page « Paramètres généraux ». */
+  private static readonly SECTION_PATHS: Record<string, string[]> = {
+    machine: ['core'],
+    ha: ['ha.ws_enable', 'ha.ws'],
+    mqtt: ['ha.mqtt_enable', 'ha.mqtt'],
+    web: ['web'],
+    logging: ['logging']
+  };
+
+  private getPath(obj: any, path: string): any {
+    return path.split('.').reduce((o, k) => (o === undefined || o === null ? undefined : o[k]), obj);
+  }
+
+  private setPath(obj: any, path: string, value: any): void {
+    const parts = path.split('.');
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (cur[parts[i]] === undefined || cur[parts[i]] === null) cur[parts[i]] = {};
+      cur = cur[parts[i]];
+    }
+    cur[parts[parts.length - 1]] = value;
+  }
+
   /**
-   * Sauvegarde la configuration
+   * Sauvegarde la configuration.
+   * ⭐ 06/10/2026 : avec `section` (« ha », « mqtt », « web », « logging », « machine »), seule CETTE section est
+   * enregistrée — les autres gardent la valeur du serveur, leurs saisies non sauvegardées sont laissées de côté.
+   * Sans `section`, comportement historique (toute la configuration).
    */
-  saveConfig(): void {
-    console.log('[TechnicalConfigManager] Envoi de config:save au serveur');
-    console.log('[TechnicalConfigManager] Config envoyée:', JSON.stringify(this.config, null, 2));
-    
+  saveConfig(section?: string): void {
+    const prefixes = section ? TechnicalConfigManager.SECTION_PATHS[section] : undefined;
+    let payload: any = this.config;
+    if (prefixes) {
+      payload = JSON.parse(JSON.stringify(this.serverConfig));
+      for (const prefix of prefixes) {
+        const value = this.getPath(this.config, prefix);
+        if (value !== undefined) this.setPath(payload, prefix, JSON.parse(JSON.stringify(value)));
+      }
+    }
+    console.log(`[TechnicalConfigManager] Envoi de config:save au serveur (${section ?? 'toute la configuration'})`);
+
     this.saveInProgress = true;
-    this.socket.emit('config:save', this.config);
+    this.savingSection = section ?? null;
+    this.socket.emit('config:save', payload);
     // this.saveInProgress est remis à false par le vrai résultat serveur (config:save:result,
     // voir setupSocketListeners) — plus de setTimeout optimiste ici.
   }
-  
+
   /**
    * Demande le redémarrage manuel de l'application (bouton "Redémarrer l'application").
    * Redémarrage seulement : sous Docker `restart: unless-stopped`, un arrêt persistant

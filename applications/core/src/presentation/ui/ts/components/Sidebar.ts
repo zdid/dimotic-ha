@@ -370,27 +370,9 @@ const createTemplate = (): HTMLTemplateElement => {
                 </a>
               </li>
               <li class="nav-item">
-                <a href="#ha" class="nav-link" data-section="ha">
+                <a href="#tech" class="nav-link" data-section="tech">
                   <span class="nav-icon">⚙️</span>
-                  <span class="nav-label">Web-services</span>
-                </a>
-              </li>
-              <li class="nav-item">
-                <a href="#mqtt" class="nav-link" data-section="mqtt">
-                  <span class="nav-icon">📡</span>
-                  <span class="nav-label">MQTT (Broker externe)</span>
-                </a>
-              </li>
-              <li class="nav-item">
-                <a href="#web" class="nav-link" data-section="web">
-                  <span class="nav-icon">🌐</span>
-                  <span class="nav-label">Serveur Web</span>
-                </a>
-              </li>
-              <li class="nav-item">
-                <a href="#logging" class="nav-link" data-section="logging">
-                  <span class="nav-icon">📝</span>
-                  <span class="nav-label">Journalisation</span>
+                  <span class="nav-label">Paramètres généraux</span>
                 </a>
               </li>
               <li class="nav-item">
@@ -667,10 +649,13 @@ export class Sidebar extends HTMLElement {
     // Mapper les sections du menu aux IDs des div de contenu
     const sectionMappings: Record<string, string> = {
       'machine': 'section-machine',
+      // ⭐ 06/10/2026 : « Paramètres généraux » = Web-services + MQTT + Serveur Web + Journalisation sur une page ;
+      // les anciens identifiants restent acceptés (liens existants) et ouvrent cette même page.
+      'tech': 'section-ha',
       'ha': 'section-ha',
-      'mqtt': 'section-mqtt',
-      'web': 'section-web',
-      'logging': 'section-logging',
+      'mqtt': 'section-ha',
+      'web': 'section-ha',
+      'logging': 'section-ha',
       'applications-manager': 'section-applications-manager',
       'deployment': 'section-deployment',
       'post-install': 'section-post-install',
@@ -800,7 +785,9 @@ export class Sidebar extends HTMLElement {
     if (!container) return;
     
     // Filtrer les modules qui ont une configuration de menu ou configUi (pas core, qui est déjà géré)
-    const paramModules = this.modules.filter(m => m.id !== 'core' && (m.configUi || m.menu));
+    // ⭐ 06/10/2026 : une application sans paramètre technique (`configUi.fields` vide) n'a rien à faire dans cette liste —
+    // elle reste accessible depuis la liste principale des applications.
+    const paramModules = this.modules.filter(m => m.id !== 'core' && (m.configUi?.fields?.length ?? 0) > 0);
     
     console.log('[Sidebar] renderAppParamsSubmenu - Modules avec menu/configUi:', paramModules.map(m => `${m.id}(${m.name})`));
     
