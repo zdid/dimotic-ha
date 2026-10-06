@@ -38,7 +38,9 @@ export const rfxcomConfigSchema = z.object({
   // rétroactivement). Sans ça, des entités créées avant que l'area existe restent SANS area de
   // façon définitive — réaffectation manuelle requise, coûteuse à grande échelle (350+ récepteurs
   // RFXCOM). Désactiver accepte ce risque en échange d'un démarrage qui ne dépend pas de HA WS.
-  waitForHaWsBeforeDiscovery: z.boolean().default(true)
+  waitForHaWsBeforeDiscovery: z.boolean().default(true),
+  /** Trace en hexadécimal chaque paquet reçu et émis par le transceiver (option `debug` de la bibliothèque rfxcom, journal du conteneur). Volumineux : à n'activer que pour un diagnostic. */
+  radioDebug: z.boolean().default(false)
 });
 
 export type RfxComConfig = z.infer<typeof rfxcomConfigSchema>;
@@ -50,5 +52,6 @@ export const DEFAULT_RFXCOM_CONFIG: RfxComConfig = {
   devicesConfigFile: 'config-rfxcom-devices-v1.0.yaml',
   autoDiscovery: true,
   enabledHardwareProtocols: [],
-  waitForHaWsBeforeDiscovery: true
+  waitForHaWsBeforeDiscovery: true,
+  radioDebug: false
 };

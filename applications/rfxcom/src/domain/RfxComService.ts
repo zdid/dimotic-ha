@@ -291,7 +291,7 @@ export class RfxComService implements IRfxComService {
 
     const port = this.resolvePort();
     try {
-      await this.transceiver.connect({ port, baudRate: this.config.baudRate });
+      await this.transceiver.connect({ port, baudRate: this.config.baudRate, debug: this.config.radioDebug });
     } catch (error) {
       // Conforme implementation-rfxcom_specs §11.1 : échec de connexion = WARNING, pas de crash.
       // La découverte HA n'en dépend plus (voir setupSocleEventListeners) — un transceiver RF433
@@ -427,7 +427,7 @@ export class RfxComService implements IRfxComService {
     this.transceiver.disconnect();
     this.hasPushedHardwareProtocolsThisSession = false;
     try {
-      await this.transceiver.connect({ port: newPort, baudRate: this.config.baudRate });
+      await this.transceiver.connect({ port: newPort, baudRate: this.config.baudRate, debug: this.config.radioDebug });
       this.logger.info('RfxComService', 'Reconnexion au transceiver RFXCOM réussie après changement de configuration');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -475,7 +475,7 @@ export class RfxComService implements IRfxComService {
     try {
       this.transceiver.disconnect(); // referme une éventuelle instance orpheline d'une tentative précédente
       this.hasPushedHardwareProtocolsThisSession = false;
-      await this.transceiver.connect({ port, baudRate: this.config.baudRate });
+      await this.transceiver.connect({ port, baudRate: this.config.baudRate, debug: this.config.radioDebug });
     } catch {
       // Échec silencieux — nouvelle tentative dans 5s (onConnectionChange a déjà tracé le motif).
     }
@@ -509,7 +509,7 @@ export class RfxComService implements IRfxComService {
     // (ex: bouton mural pressé) restait totalement silencieux, même en debug. Trace minimale ici,
     // avant tout traitement, pour voir CHAQUE trame Lighting reçue quel que soit son sort ensuite.
     if (message.type.startsWith('Lighting')) {
-      this.logger.debug('RfxComService', `RF reçu: ${uniqueId} — commande=${message.data.command ?? '?'}${message.unitCode !== undefined ? `, unitCode=${message.unitCode}` : ''}`);
+      this.logger.debug('RfxComService', `RF reçu: ${uniqueId} — commande=${message.data.command ?? '?'}${message.unitCode !== undefined ? `, unitCode=${message.unitCode}` : ''} | signal=${message.signalLevel}/15 seq=${message.seqNbr} data=${JSON.stringify(message.data)}`);
     }
 
     // ⭐ Relais de valeur (16/08/2026) : ce device est à nous de le voir, mais pas de le publier —

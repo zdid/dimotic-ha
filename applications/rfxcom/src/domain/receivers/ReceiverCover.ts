@@ -12,7 +12,7 @@
  * explicite ou sur la butée 0/100%.
  */
 
-import type { EssentialEntityData, HaMqttStateMessage } from '../../../../core/dist/exports';
+import type { EssentialEntityData, HaMqttStateMessage, Logger } from '../../../../core/dist/exports';
 import type { EmitterAction, ReceiverCoverConfig } from '../types';
 import type { IReceiverModule, ReceiverCommandResult } from './BaseReceiver';
 import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName } from '../taxonomy';
@@ -31,7 +31,9 @@ export class ReceiverCover implements IReceiverModule {
   constructor(
     public readonly config: ReceiverCoverConfig,
     /** Protocole RFXCOM du primaryEmitter (ex: "lighting2", "blinds1") — détermine la logique de traduction. */
-    private readonly primaryEmitterProtocol: string
+    private readonly primaryEmitterProtocol: string,
+    /** Optionnel : trace chaque décision (commande HA, ordre d'un émetteur) avec le sens et la position. */
+    private readonly logger?: Logger
   ) {
     this.position = config.lastPosition ?? 100;
   }
@@ -94,8 +96,22 @@ export class ReceiverCover implements IReceiverModule {
     this.config.lastPosition = this.position;
   }
 
+  /** État compact pour les traces : sens en cours et position calculée. */
+  private traceState(): string {
+    return `sens=${this.direction ?? 'aucun'} position=${Math.round(this.computePosition())}%`;
+  }
+
   translateHaCommand(command: string, value?: number): ReceiverCommandResult | null {
     this.checkArrival();
+    const before = this.traceState();
+    const result = this.translateHaCommandCore(command, value);
+    this.logger?.debug('ReceiverCover',
+      `Volet ${this.config.receiverId} (${this.config.name}) — commande HA "${command}"${value !== undefined ? `=${value}` : ''} [${this.primaryEmitterProtocol}] : ${before} → ` +
+      `${result ? `émet ${result.action}` : 'aucune émission (ignorée)'} ; après : ${this.traceState()}`);
+    return result;
+  }
+
+  private translateHaCommandCore(command: string, value?: number): ReceiverCommandResult | null {
     const usesLighting2 = this.primaryEmitterProtocol === 'lighting2';
 
     if (command === 'set_position' && value !== undefined) {
@@ -164,6 +180,15 @@ export class ReceiverCover implements IReceiverModule {
 
   applyEmitterCommand(action: EmitterAction): ReceiverCommandResult | null {
     this.checkArrival();
+    const before = this.traceState();
+    const result = this.applyEmitterCommandCore(action);
+    this.logger?.debug('ReceiverCover',
+      `Volet ${this.config.receiverId} (${this.config.name}) — ordre d'un émetteur "${action}" [${this.primaryEmitterProtocol}] : ${before} → ` +
+      `${result ? `retransmet ${result.action}` : 'aucune retransmission'} ; après : ${this.traceState()}`);
+    return result;
+  }
+
+  private applyEmitterCommandCore(action: EmitterAction): ReceiverCommandResult | null {
     // 'on'/'off' : seul Lighting2 parle ce vocabulaire — le bouton associé est donc forcément un
     // bouton Lighting2 (ex: interrupteur mural), quel que soit le protocole du primaryEmitter
     // réellement commandé.

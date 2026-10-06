@@ -74,6 +74,13 @@ export const RFXCOM_UI_METADATA: ModuleUiMetadata = {
           type: 'boolean',
           default: true,
           description: "Évite de créer des entités sans area assignée (HA n'applique l'area suggérée qu'une seule fois, à la création) — désactiver si les entités doivent apparaître même quand HA WebSocket est indisponible."
+        },
+        {
+          name: 'radioDebug',
+          label: 'Trace radio détaillée (diagnostic)',
+          type: 'boolean',
+          default: false,
+          description: "Journalise en hexadécimal chaque paquet reçu et émis par le transceiver. Très verbeux : à activer le temps d'un essai."
         }
       ]
     }

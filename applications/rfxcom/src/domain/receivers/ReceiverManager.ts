@@ -55,7 +55,7 @@ export class ReceiverManager {
         return new ReceiverLight(config);
       case 'cover': {
         const primaryDevice = this.deviceManager.getDevice(config.primaryEmitter);
-        return new ReceiverCover(config, primaryDevice?.protocole ?? 'lighting2');
+        return new ReceiverCover(config, primaryDevice?.protocole ?? 'lighting2', this.logger);
       }
       default:
         throw new Error(`Type de récepteur non géré par ReceiverManager: ${(config as ReceiverConfig).type}`);
