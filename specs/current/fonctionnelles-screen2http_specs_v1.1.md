@@ -1,6 +1,7 @@
 # Spécifications Fonctionnelles - Application SCREEN2HTTP
 
-*Version 1.0 - 7 Octobre 2026*
+*Version 1.1 - 7 Octobre 2026*
+*v1.1 : clé SSH par défaut = celle de l'utilisateur qui lance l'application (plus la clé unique de l'installation) ; plus d'entrée « Console » décalée dans Paramètres Techniques (la page Console est la page de l'application, `id: 'dashboard'`). v1.0 archivée.*
 *v1.0 : première version — portage de l'outil autonome https://github.com/zdid/screen2http (Express + ws + ssh2 + xterm.js, une seule session, configuration `config.yaml` locale) dans le socle : paramétrage dans Paramètres Techniques, affichage dans une page de l'application, plusieurs sessions possibles.*
 
 ## 1. Objet
@@ -12,10 +13,10 @@ Afficher dans le navigateur une session `screen` tournant sur une machine distan
 | Où | Rôle |
 |---|---|
 | **Paramètres Techniques > Console screen** | Formulaire généré depuis `SCREEN2HTTP_UI_METADATA` : liste des sessions screen (cibles) et délais de connexion. Rien d'autre n'est configurable. |
-| **Page « Console »** (`/applications/screen2http/presentation/index.html`) | Affichage seul : sélecteur de session, Se connecter / Déconnecter, état, terminal xterm.js. Aucun réglage. |
+| **Page « Console »** (`/applications/screen2http/presentation/index.html`), accessible depuis la liste des applications | Affichage seul : sélecteur de session, Se connecter / Déconnecter, état, terminal xterm.js. Aucun réglage. |
 | **Service** (`Screen2HttpService`, process séparé) | Une connexion SSH (`ssh2`) par session ouverte depuis un navigateur ; flux du terminal relayé en Socket.io. |
 
-Menu : catégorie *Paramètres Techniques*, entrée « Console screen » (formulaire) et sous-page « Console » (terminal). Application `audience: 'configuration'`, `type: 'standalone'`, `runsAsSeparateProcess: true`, ni MQTT ni HA. Nouvelle application → arrive **désactivée** (activation dans Gestion des applications, à chaud).
+Menu : une seule entrée « Console screen » dans *Paramètres Techniques* (le formulaire) ; la page `index.html` est déclarée avec `id: 'dashboard'` — c'est la page de l'application, pas une sous-entrée des Paramètres (la barre latérale ne décale que les pages d'`id` autre que `dashboard`, comme pour teleinfo). Application `audience: 'configuration'`, `type: 'standalone'`, `runsAsSeparateProcess: true`, ni MQTT ni HA. Nouvelle application → arrive **désactivée** (activation dans Gestion des applications, à chaud).
 
 ## 3. Configuration (`data/screen2http/config.yaml`, section `screen2http`)
 
@@ -28,12 +29,12 @@ Menu : catégorie *Paramètres Techniques*, entrée « Console screen » (formul
 | `targets[].port` | 22 | Port SSH |
 | `targets[].username` | `root` | Utilisateur SSH |
 | `targets[].screenName` | vide | `screen -xS <nom>` ; vide → `screen -x` |
-| `targets[].privateKeyPath` | vide | Clé privée spécifique ; vide → clé unique de l'installation |
+| `targets[].privateKeyPath` | vide | Clé privée spécifique ; vide → clé de l'utilisateur qui lance l'application |
 | `keepaliveInterval` | 10000 ms | Keepalive SSH |
 | `readyTimeout` | 20000 ms | Délai de connexion SSH |
 | `sessionTimeoutSeconds` | 60 s (min 15) | Fermeture d'une session sans signe de vie du navigateur |
 
-Authentification : clé privée uniquement. Par défaut la clé unique de l'installation (`data/core/machine_ssh/id_ed25519`, générée au démarrage si absente — `ensureGlobalSshKey`, comme les autres applications pilotant des machines) : sa clé publique doit être installée sur chaque machine cible. Pas de mot de passe, pas de phrase de passe (écart avec l'outil autonome, qui acceptait une `passphrase`).
+Authentification par clé uniquement. Par défaut, celle de **l'utilisateur qui lance l'application** : première trouvée parmi `~/.ssh/id_ed25519`, `id_ecdsa`, `id_rsa` (sans phrase de passe), et l'agent ssh (`SSH_AUTH_SOCK`) s'il existe — ce qui couvre les clés protégées par phrase de passe. Rien n'est généré. Sa clé publique doit être installée sur chaque machine cible. Sans clé ni agent, la connexion échoue avec un message explicite. En Docker (utilisateur `node`, sans `~/.ssh`), indiquer `privateKeyPath` vers une clé montée dans le conteneur. Pas de mot de passe, pas de champ phrase de passe (écart avec l'outil autonome).
 
 Rechargement : sur `app:module:config:saved` (`configProvider.reload()` avant relecture). Les sessions ouvertes gardent leur connexion ; la nouvelle config vaut pour les suivantes.
 

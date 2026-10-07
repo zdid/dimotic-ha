@@ -12,10 +12,10 @@
  */
 
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { Client, type ClientChannel, type ConnectConfig } from 'ssh2';
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
-import { ensureGlobalSshKey } from '../../../core/dist/exports';
 import { screen2httpConfigSchema, type Screen2HttpConfig, type Screen2HttpTargetConfig } from './config-schema';
 import {
   SCREEN2HTTP_SOCKET_EVENTS,
@@ -91,12 +91,6 @@ export class Screen2HttpService implements IScreen2HttpService {
 
   async start(): Promise<void> {
     this.logger.info('Screen2HttpService', 'Démarrage du service screen2http...');
-    try {
-      ensureGlobalSshKey();
-    } catch (error) {
-      // Sans ssh-keygen la clé unique ne peut être créée ; les cibles ayant leur propre clé restent utilisables.
-      this.logger.warn('Screen2HttpService', `Clé SSH de l'installation indisponible : ${error instanceof Error ? error.message : error}`);
-    }
     this.watchdog = setInterval(() => this.closeStaleSessions(), 5000);
     this.emitStatus();
     this.logger.info('Screen2HttpService', 'Service screen2http démarré');
@@ -179,16 +173,33 @@ export class Screen2HttpService implements IScreen2HttpService {
     }
   }
 
+  /**
+   * Clé de l'utilisateur qui lance l'application : celle de la cible si indiquée, sinon la première
+   * de ~/.ssh (ed25519, ecdsa, rsa) ; l'agent ssh (SSH_AUTH_SOCK) est aussi proposé, ce qui couvre
+   * les clés protégées par phrase de passe.
+   */
   private buildConnectConfig(target: Screen2HttpTargetConfig): ConnectConfig {
-    const keyPath = target.privateKeyPath ? path.resolve(target.privateKeyPath) : ensureGlobalSshKey();
-    return {
+    const connect: ConnectConfig = {
       host: target.host,
       port: target.port,
       username: target.username,
-      privateKey: fs.readFileSync(keyPath, 'utf8'),
       keepaliveInterval: this.config.keepaliveInterval,
       readyTimeout: this.config.readyTimeout
     };
+
+    const keyPath = target.privateKeyPath
+      ? path.resolve(target.privateKeyPath)
+      : ['id_ed25519', 'id_ecdsa', 'id_rsa']
+          .map((name) => path.join(os.homedir(), '.ssh', name))
+          .find((candidate) => fs.existsSync(candidate));
+    if (keyPath) connect.privateKey = fs.readFileSync(keyPath, 'utf8');
+
+    if (process.env.SSH_AUTH_SOCK) connect.agent = process.env.SSH_AUTH_SOCK;
+
+    if (!connect.privateKey && !connect.agent) {
+      throw new Error(`aucune clé dans ${path.join(os.homedir(), '.ssh')} et aucun agent ssh — indiquer une clé privée pour cette cible`);
+    }
+    return connect;
   }
 
   /** Nom filtré (même jeu de caractères que l'original) — jamais interpolé tel quel dans la commande. */
