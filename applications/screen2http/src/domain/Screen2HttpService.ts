@@ -14,6 +14,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { Client, type ClientChannel, type ConnectConfig } from 'ssh2';
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
 import { screen2httpConfigSchema, type Screen2HttpConfig, type Screen2HttpTargetConfig } from './config-schema';
@@ -154,11 +155,18 @@ export class Screen2HttpService implements IScreen2HttpService {
           }
           session.channel = channel;
           this.emitState(sessionId, 'connected');
-          const forward = (chunk: Buffer): void => {
-            this.eventBus.emit(SCREEN2HTTP_SOCKET_EVENTS.OUTPUT, { sessionId, data: chunk.toString('utf8') });
+          // Un caractère UTF-8 (accent, trait de cadre, symbole du prompt) peut être coupé entre deux
+          // paquets SSH : un décodage paquet par paquet le remplaçait par « � » et décalait l'affichage.
+          // Un décodeur par flux garde l'octet incomplet pour le paquet suivant.
+          const forwardFrom = (): ((chunk: Buffer) => void) => {
+            const decoder = new StringDecoder('utf8');
+            return (chunk: Buffer): void => {
+              const data = decoder.write(chunk);
+              if (data) this.eventBus.emit(SCREEN2HTTP_SOCKET_EVENTS.OUTPUT, { sessionId, data });
+            };
           };
-          channel.on('data', forward);
-          channel.stderr.on('data', forward);
+          channel.on('data', forwardFrom());
+          channel.stderr.on('data', forwardFrom());
           channel.on('close', () => this.finishSession(session, 'closed', 'Session terminée'));
         }
       );
