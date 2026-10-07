@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Console screen</title>
+
+  <link rel="stylesheet" href="/styles/main.css">
+  <link rel="stylesheet" href="/applications/screen2http/presentation/vendor/xterm.css">
+
+  <style>
+    .s2h-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .s2h-header { text-align: center; margin-bottom: 20px; }
+    .s2h-header h1 { color: var(--color-accent); font-size: 2em; }
+
+    .s2h-toolbar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+      background: var(--color-surface); border-radius: var(--radius); padding: 12px 15px; margin-bottom: 12px;
+    }
+    .s2h-toolbar select {
+      padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--color-primary);
+      background: var(--color-background); color: var(--color-text); font-size: 0.95em; min-width: 220px;
+    }
+    .s2h-state { margin-left: auto; font-size: 0.9em; color: var(--color-text-muted); }
+    .s2h-state.connected { color: var(--color-success); }
+    .s2h-state.error { color: var(--color-error); }
+
+    .btn { padding: 8px 16px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em; }
+    .btn-primary { background: var(--color-accent); color: white; }
+    .btn-secondary { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-primary); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .s2h-terminal-box {
+      background: #000; border-radius: var(--radius); padding: 8px;
+      height: calc(100vh - 260px); min-height: 320px; box-sizing: border-box; overflow: hidden;
+    }
+    #s2h-terminal { width: 100%; height: 100%; }
+    .s2h-empty { color: var(--color-text-muted); font-style: italic; padding: 10px; }
+  </style>
+</head>
+<body>
+  <div class="s2h-container">
+    <div class="s2h-header">
+      <h1>🖥️ Console screen</h1>
+      <p class="description">Session screen distante, affichée dans le navigateur (SSH)</p>
+    </div>
+
+    <div class="s2h-toolbar">
+      <select id="s2h-target" aria-label="Session screen"></select>
+      <button class="btn btn-primary" id="s2h-connect">Se connecter</button>
+      <button class="btn btn-secondary" id="s2h-disconnect" disabled>Déconnecter</button>
+      <span class="s2h-state" id="s2h-state">Non connecté</span>
+    </div>
+    <div class="s2h-empty" id="s2h-no-target" style="display: none;">
+      Aucune session configurée — ajoute-en une dans Paramètres Techniques &gt; Console screen.
+    </div>
+
+    <div class="s2h-terminal-box"><div id="s2h-terminal"></div></div>
+  </div>
+
+  <script type="module" src="/applications/screen2http/presentation/ts/app.js"></script>
+
+  <!-- Derniere modification: 2026-10-07 15:55:00 - Création de l'application screen2http (portage de zdid/screen2http) -->
+</body>
+</html>

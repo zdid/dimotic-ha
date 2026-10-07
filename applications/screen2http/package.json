@@ -1,0 +1,25 @@
+{
+  "name": "screen2http",
+  "version": "1.0.0",
+  "description": "Console web d'une session screen distante (SSH) — affichage dans le navigateur, paramétrage dans Paramètres Techniques",
+  "main": "dist/domain/index.js",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -b",
+    "build:ui": "tsc -p src/presentation/tsconfig.ui.json && node scripts/copy-vendor.cjs",
+    "watch": "tsc -w"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.3.0",
+    "ssh2": "^1.16.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/ssh2": "^1.15.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
