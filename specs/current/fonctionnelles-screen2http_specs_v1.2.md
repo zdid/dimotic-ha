@@ -1,6 +1,7 @@
 # Spécifications Fonctionnelles - Application SCREEN2HTTP
 
-*Version 1.1 - 7 Octobre 2026*
+*Version 1.2 - 7 Octobre 2026*
+*v1.2 : page Console reprend la présentation de l'outil d'origine — bandeau titre sombre de 42 px (titre, état, choix de session, Connecter/Déconnecter) + terminal plein cadre ; connexion automatique à l'ouverture, reconnexion automatique (3 s) après une vraie coupure. v1.1 archivée.*
 *v1.1 : clé SSH par défaut = celle de l'utilisateur qui lance l'application (plus la clé unique de l'installation) ; plus d'entrée « Console » décalée dans Paramètres Techniques (la page Console est la page de l'application, `id: 'dashboard'`). v1.0 archivée.*
 *v1.0 : première version — portage de l'outil autonome https://github.com/zdid/screen2http (Express + ws + ssh2 + xterm.js, une seule session, configuration `config.yaml` locale) dans le socle : paramétrage dans Paramètres Techniques, affichage dans une page de l'application, plusieurs sessions possibles.*
 
@@ -13,7 +14,7 @@ Afficher dans le navigateur une session `screen` tournant sur une machine distan
 | Où | Rôle |
 |---|---|
 | **Paramètres Techniques > Console screen** | Formulaire généré depuis `SCREEN2HTTP_UI_METADATA` : liste des sessions screen (cibles) et délais de connexion. Rien d'autre n'est configurable. |
-| **Page « Console »** (`/applications/screen2http/presentation/index.html`), accessible depuis la liste des applications | Affichage seul : sélecteur de session, Se connecter / Déconnecter, état, terminal xterm.js. Aucun réglage. |
+| **Page « Console »** (`/applications/screen2http/presentation/index.html`), accessible depuis la liste des applications | Affichage seul, présentation de l'outil d'origine : bandeau titre (titre, état, sélecteur de session — masqué s'il n'y en a qu'une —, Connecter / Déconnecter) et terminal xterm.js plein cadre. Aucun réglage. |
 | **Service** (`Screen2HttpService`, process séparé) | Une connexion SSH (`ssh2`) par session ouverte depuis un navigateur ; flux du terminal relayé en Socket.io. |
 
 Menu : une seule entrée « Console screen » dans *Paramètres Techniques* (le formulaire) ; la page `index.html` est déclarée avec `id: 'dashboard'` — c'est la page de l'application, pas une sous-entrée des Paramètres (la barre latérale ne décale que les pages d'`id` autre que `dashboard`, comme pour teleinfo). Application `audience: 'configuration'`, `type: 'standalone'`, `runsAsSeparateProcess: true`, ni MQTT ni HA. Nouvelle application → arrive **désactivée** (activation dans Gestion des applications, à chaud).
@@ -48,6 +49,8 @@ Rechargement : sur `app:module:config:saved` (`configProvider.reload()` avant re
 6. Garde-fous : entrée limitée à 64 Ko par message, dimensions 1–1000, une seule notification de fin par session.
 
 La page envoie `screen2http:ping` toutes les 15 s ; un contrôle toutes les 5 s ferme toute session muette depuis plus de `sessionTimeoutSeconds` (onglet fermé brutalement, navigateur planté) — aucune connexion SSH orpheline.
+
+**Connexion automatique** à l'ouverture de la page (dernière session choisie, mémorisée dans le navigateur, sinon la première), comme l'outil d'origine. **Reconnexion automatique** 3 s après une coupure survenue au moins 10 s après la connexion ; une session qui s'arrête aussitôt (screen introuvable, clé refusée) ne reboucle pas : le message reste affiché dans le bandeau, bouton Connecter disponible. Déconnecter volontairement ne relance rien.
 
 Quitter la page de la console (autre entrée du menu) **ne coupe pas** la session : le terminal et son contenu sont conservés et rattachés au nouveau DOM au retour (le contenu des applications est injecté dans un Shadow DOM remplacé à chaque visite). Fermer l'onglet la coupe.
 

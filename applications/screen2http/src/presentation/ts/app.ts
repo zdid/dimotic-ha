@@ -13,6 +13,10 @@ type SessionState = 'connecting' | 'connected' | 'closed' | 'error';
 
 const VENDOR = '/applications/screen2http/presentation/vendor';
 const PING_INTERVAL_MS = 15000;
+const RECONNECT_DELAY_MS = 3000;
+/** Une connexion tombée après au moins ce délai est considérée comme une vraie coupure : reconnexion auto. */
+const MIN_STABLE_MS = 10000;
+const LAST_TARGET_KEY = 'screen2http:lastTarget';
 
 let socket: any | null = null;
 let listenersReady = false;
@@ -25,6 +29,9 @@ let term: any | null = null;
 let fit: any | null = null;
 let pingTimer: number | null = null;
 let resizeObserver: ResizeObserver | null = null;
+let connectedAt = 0;
+let reconnectTimer: number | null = null;
+let autoConnectDone = false;
 
 function moduleRoot(): ParentNode {
   return (window as any).__moduleContainerRoot || document;
@@ -62,6 +69,7 @@ async function init(): Promise<void> {
       listenersReady = true;
       window.addEventListener('beforeunload', () => closeSession());
     }
+    $('s2h-root')?.classList.toggle('embedded', moduleRoot() !== document);
     setupToolbar();
     renderTargets();
     renderState();
@@ -79,6 +87,10 @@ function setupSocketListeners(): void {
   socket.on('screen2http:status', (status: { targets: TargetInfo[] }) => {
     targets = status.targets || [];
     renderTargets();
+    if (!autoConnectDone && targets.length > 0 && !sessionId) {
+      autoConnectDone = true;
+      connect(); // comme l'outil d'origine : la console se connecte dès l'ouverture de la page
+    }
   });
 
   socket.on('screen2http:output', (msg: { sessionId: string; data: string }) => {
@@ -88,7 +100,8 @@ function setupSocketListeners(): void {
   socket.on('screen2http:session:state', (msg: { sessionId: string; state: SessionState; message?: string }) => {
     if (msg.sessionId !== sessionId) return;
     if (msg.state === 'connected') {
-      setState('connected', 'Connecté');
+      connectedAt = Date.now();
+      setState('connected', `Connecté — ${selectedLabel()}`);
       sendResize();
       term?.focus();
     } else if (msg.state === 'connecting') {
@@ -96,7 +109,10 @@ function setupSocketListeners(): void {
     } else {
       // closed / error : la session n'existe plus côté serveur
       term?.writeln(`\r\n\x1b[33m[${msg.message || 'Session terminée'}]\x1b[0m`);
+      const wasStable = connectedAt > 0 && Date.now() - connectedAt >= MIN_STABLE_MS;
+      connectedAt = 0;
       endLocalSession(msg.state, msg.message || 'Session terminée');
+      if (wasStable) scheduleReconnect();
     }
   });
 
@@ -108,24 +124,56 @@ function setupToolbar(): void {
   ($('s2h-disconnect') as HTMLButtonElement | null)?.addEventListener('click', () => disconnect());
   ($('s2h-target') as HTMLSelectElement | null)?.addEventListener('change', (e) => {
     selectedTargetId = (e.target as HTMLSelectElement).value;
+    try { localStorage.setItem(LAST_TARGET_KEY, selectedTargetId); } catch { /* stockage indisponible */ }
   });
 }
 
 function renderTargets(): void {
   const select = $('s2h-target') as HTMLSelectElement | null;
-  const empty = $('s2h-no-target');
   if (!select) return;
+  if (!selectedTargetId) {
+    try { selectedTargetId = localStorage.getItem(LAST_TARGET_KEY) ?? ''; } catch { /* stockage indisponible */ }
+  }
   if (!targets.some((t) => t.id === selectedTargetId)) selectedTargetId = targets[0]?.id ?? '';
   select.innerHTML = '';
   for (const t of targets) {
     const opt = document.createElement('option');
     opt.value = t.id;
-    opt.textContent = t.screenName ? `${t.label} — ${t.host} (${t.screenName})` : `${t.label} — ${t.host}`;
+    opt.textContent = targetText(t);
     opt.selected = t.id === selectedTargetId;
     select.appendChild(opt);
   }
-  if (empty) empty.style.display = targets.length === 0 ? 'block' : 'none';
+  // Une seule session : inutile d'afficher un sélecteur.
+  select.style.display = targets.length > 1 ? '' : 'none';
+  if (targets.length === 0 && sessionState === 'idle') {
+    stateMessage = 'Aucune session configurée (Paramètres Techniques > Console screen)';
+  }
   renderState();
+}
+
+function targetText(t: TargetInfo): string {
+  return t.screenName ? `${t.label} — ${t.host} (${t.screenName})` : `${t.label} — ${t.host}`;
+}
+
+function selectedLabel(): string {
+  const t = targets.find((x) => x.id === selectedTargetId);
+  return t ? targetText(t) : selectedTargetId;
+}
+
+function scheduleReconnect(): void {
+  setState('closed', 'Déconnecté — reconnexion...');
+  cancelReconnect();
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null;
+    if (!sessionId) connect();
+  }, RECONNECT_DELAY_MS);
+}
+
+function cancelReconnect(): void {
+  if (reconnectTimer !== null) {
+    window.clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
 }
 
 function setState(state: SessionState | 'idle', message: string): void {
@@ -138,7 +186,7 @@ function renderState(): void {
   const el = $('s2h-state');
   if (el) {
     el.textContent = stateMessage;
-    el.className = 's2h-state' + (sessionState === 'connected' ? ' connected' : sessionState === 'error' ? ' error' : '');
+    el.className = 's2h-status' + (sessionState === 'connected' ? ' connected' : sessionState === 'error' ? ' error' : '');
   }
   const active = sessionState === 'connecting' || sessionState === 'connected';
   const connectBtn = $('s2h-connect') as HTMLButtonElement | null;
@@ -188,6 +236,7 @@ function sendResize(): void {
 }
 
 function connect(): void {
+  cancelReconnect();
   if (!selectedTargetId || !term || sessionId) return;
   try { fit?.fit(); } catch { /* ignoré */ }
   term.reset();
@@ -207,6 +256,7 @@ function connect(): void {
 }
 
 function disconnect(): void {
+  cancelReconnect();
   closeSession();
   setState('idle', 'Déconnecté');
 }

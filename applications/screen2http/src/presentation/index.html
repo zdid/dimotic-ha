@@ -2,64 +2,58 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Console screen</title>
 
-  <link rel="stylesheet" href="/styles/main.css">
   <link rel="stylesheet" href="/applications/screen2http/presentation/vendor/xterm.css">
 
   <style>
-    .s2h-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-    .s2h-header { text-align: center; margin-bottom: 20px; }
-    .s2h-header h1 { color: var(--color-accent); font-size: 2em; }
-
-    .s2h-toolbar {
-      display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
-      background: var(--color-surface); border-radius: var(--radius); padding: 12px 15px; margin-bottom: 12px;
+    html, body { margin: 0; background: #111; }
+    /* Présentation de l'outil d'origine (zdid/screen2http) : bandeau titre sombre de 42 px + terminal
+       plein cadre. Les choix (session, connexion) et l'état s'affichent dans le bandeau. */
+    .s2h-root {
+      display: flex; flex-direction: column; height: 100vh; background: #111;
+      font-family: Arial, sans-serif; color: white;
     }
-    .s2h-toolbar select {
-      padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--color-primary);
-      background: var(--color-background); color: var(--color-text); font-size: 0.95em; min-width: 220px;
-    }
-    .s2h-state { margin-left: auto; font-size: 0.9em; color: var(--color-text-muted); }
-    .s2h-state.connected { color: var(--color-success); }
-    .s2h-state.error { color: var(--color-error); }
+    /* Injectée dans l'application hôte (Shadow DOM) : hauteur moins le cadre de l'hôte. */
+    .s2h-root.embedded { height: calc(100vh - 130px); min-height: 360px; border-radius: 6px; overflow: hidden; }
 
-    .btn { padding: 8px 16px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.9em; }
-    .btn-primary { background: var(--color-accent); color: white; }
-    .btn-secondary { background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-primary); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    .s2h-terminal-box {
-      background: #000; border-radius: var(--radius); padding: 8px;
-      height: calc(100vh - 260px); min-height: 320px; box-sizing: border-box; overflow: hidden;
+    .s2h-header {
+      height: 42px; flex: none; display: flex; align-items: center; padding: 0 12px; gap: 15px;
+      background: #222; color: white;
     }
-    #s2h-terminal { width: 100%; height: 100%; }
-    .s2h-empty { color: var(--color-text-muted); font-style: italic; padding: 10px; }
+    .s2h-status { color: #aaa; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .s2h-status.connected { color: #6c6; }
+    .s2h-status.error { color: #e66; }
+    .s2h-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    .s2h-header select, .s2h-header button {
+      height: 28px; border-radius: 4px; border: 1px solid #555; background: #333; color: white;
+      font-size: 13px; padding: 0 10px;
+    }
+    .s2h-header button { cursor: pointer; }
+    .s2h-header button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .s2h-header select:disabled { opacity: 0.6; }
+
+    .s2h-terminal { flex: 1; min-height: 0; padding: 5px; }
+    .s2h-terminal .xterm { height: 100%; }
   </style>
 </head>
 <body>
-  <div class="s2h-container">
-    <div class="s2h-header">
-      <h1>🖥️ Console screen</h1>
-      <p class="description">Session screen distante, affichée dans le navigateur (SSH)</p>
-    </div>
-
-    <div class="s2h-toolbar">
-      <select id="s2h-target" aria-label="Session screen"></select>
-      <button class="btn btn-primary" id="s2h-connect">Se connecter</button>
-      <button class="btn btn-secondary" id="s2h-disconnect" disabled>Déconnecter</button>
-      <span class="s2h-state" id="s2h-state">Non connecté</span>
-    </div>
-    <div class="s2h-empty" id="s2h-no-target" style="display: none;">
-      Aucune session configurée — ajoute-en une dans Paramètres Techniques &gt; Console screen.
-    </div>
-
-    <div class="s2h-terminal-box"><div id="s2h-terminal"></div></div>
+  <div class="s2h-root" id="s2h-root">
+    <header class="s2h-header">
+      <strong>Console screen</strong>
+      <span class="s2h-status" id="s2h-state">Démarrage...</span>
+      <div class="s2h-actions">
+        <select id="s2h-target" aria-label="Session screen"></select>
+        <button id="s2h-connect">Connecter</button>
+        <button id="s2h-disconnect" disabled>Déconnecter</button>
+      </div>
+    </header>
+    <div class="s2h-terminal" id="s2h-terminal"></div>
   </div>
 
   <script type="module" src="/applications/screen2http/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-10-07 15:55:00 - Création de l'application screen2http (portage de zdid/screen2http) -->
+  <!-- Derniere modification: 2026-10-07 16:20:00 - Présentation de l'outil d'origine : bandeau titre avec choix de session, Connecter/Déconnecter et état ; terminal plein cadre -->
 </body>
 </html>
