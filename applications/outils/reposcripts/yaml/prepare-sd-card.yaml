@@ -5,7 +5,8 @@ description: >-
   « q » pour s'arrêter là (image gardée, reprise directe au choix de la carte en relançant avec
   les mêmes réponses). Installés SYSTÉMATIQUEMENT dans une image de base préparée une fois dans
   qemu puis gardée en cache : Docker CE, /docker/dimotic-ha/ (non démarré), Node.js+npm+serialport+mqtt,
-  mosquitto-clients, build-essential, SSH root (clé dimotic-ha). trixie-lite (cloud-init) par
-  défaut, bookworm-lite possible.
+  mosquitto-clients, build-essential, SSH root (clé dimotic-ha), fail2ban et durcissement SSH (root par
+  clé seulement, mot de passe refusé sauf pour l'utilisateur choisi). trixie-lite (cloud-init) par
+  défaut, bookworm-lite possible ; Orange Pi Zero 2 et 4 Pro avec l'image officielle téléchargée à la main.
 filename: prepare-sd-card.sh
 requiresSudo: true

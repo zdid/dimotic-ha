@@ -20,6 +20,10 @@
  *      relancer avec la même machine et le même profil reprend directement à ce choix.
  *   5. Écriture (dd). L'agrandissement à la taille de la carte se fait au premier démarrage du Pi.
  *
+ * ⭐ 07/10/2026 — fail2ban + durcissement SSH (comme stfort) : fail2ban (backend systemd, 5 essais/10 min, 12 h) installé dans
+ * l'image de base ; SSH : root par clé seulement, mot de passe refusé sauf pour l'utilisateur du profil (champs `sshHardening`
+ * oui/non, `fail2banIgnoreIp` = adresses jamais bannies).
+ *
  * Usage : sudo node flash-sd-card.js <profil.yaml>
  *
  * ⭐ 26/09/2026 — refonte (demande utilisateur) : remplace les deux phases --prepare/--flash
@@ -52,7 +56,7 @@ const PREPARE_SH = path.join(__dirname, 'prepare-sd-card.sh');
 /** Place ajoutée à l'image de base avant les installations (image officielle : ~370 Mo libres). */
 const BASE_EXTRA_MB = 2048;
 /** À incrémenter quand ce que contient l'image de base change (invalide le cache). */
-const BASE_RECIPE_VERSION = 1;
+const BASE_RECIPE_VERSION = 2; // 2 : fail2ban + durcissement SSH dans l'image (07/10/2026)
 
 function machineSlug(machine) {
   return String(machine).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'machine';
@@ -95,10 +99,38 @@ const PI_MODEL_TO_DEVICE = {
   'Raspberry Pi 500': { device: 'pi5', bits: 64 }
 };
 
+// ⭐ 07/10/2026 — Orange Pi : images officielles Debian bookworm (dérivées d'Armbian), téléchargées À LA MAIN par l'utilisateur
+// (orangepi.org : liens Google Drive/Baidu, non automatisables) et fournies par le champ `image` du profil (.7z, .img.xz ou .img).
+// Structure commune vérifiée sur Orangepi4pro 1.0.6 et Orangepizero2 3.1.0 : UNE partition (racine, /boot dedans), U-Boot avant
+// la partition, utilisateur `orangepi` par défaut, assistant de premier lancement `/root/.not_logged_in_yet`, NetworkManager.
+const ORANGEPI_MODELS = { 'Orange Pi Zero 2': 'orangepizero2', 'Orange Pi 4 Pro': 'orangepi4pro' };
+const isOrangePi = (profile) => Object.prototype.hasOwnProperty.call(ORANGEPI_MODELS, profile.piModel);
+const modelBits = (profile) => (isOrangePi(profile) ? 64 : PI_MODEL_TO_DEVICE[profile.piModel].bits);
+/** Préfixe des images de base en cache (une seule gardée par préfixe) — le modèle d'Orange Pi en fait partie. */
+const basePrefix = (profile) => (isOrangePi(profile)
+  ? `orangepi-${ORANGEPI_MODELS[profile.piModel]}-64bit-`
+  : `${profile.distro}-${modelBits(profile)}bit-`);
+
 /** Apps dont l'agent est pré-installé dans l'image (voir prepare-sd-card.sh) -> device-agent. */
 const APP_AGENT_DIRS = { teleinfo: path.join(BUNDLE_ROOT, 'applications', 'teleinfo', 'device-agent') };
 
 function log(msg) { console.log(`[flash-sd-card] ${msg}`); }
+// ⭐ 07/10/2026 — échec pendant la construction d'une image : on la GARDE (« .echec ») pour la consulter, et on affiche les
+// commandes qui ouvrent un terminal dedans (chroot + qemu), en local ou par SSH (cas d'Outils : script lancé à distance).
+function keepFailedImage(partial, layout, what, code) {
+  const kept = partial.replace(/\.partial$/, '') + '.echec';
+  try { fs.rmSync(kept, { force: true }); fs.renameSync(partial, kept); } catch (e) { fail(`${what} échouée (code ${code}) ; image non conservée : ${e.message}`); }
+  const lay = layout ? ` --layout ${layout}` : '';
+  const ips = Object.values(require('os').networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
+  console.error(`\n[flash-sd-card] ${what} échouée (code ${code}).`);
+  console.error(`[flash-sd-card] Image CONSERVÉE pour consultation : ${kept}`);
+  console.error('[flash-sd-card] Terminal dans l\'image (émulation qemu, « exit » pour sortir ; à lancer depuis un vrai terminal) :');
+  console.error(`    sudo bash ${PREPARE_SH} shell ${kept}${lay}`);
+  if (ips.length) console.error(`  depuis un autre poste, par SSH :\n    ssh -t root@${ips[0]} "bash ${PREPARE_SH} shell ${kept}${lay}"`);
+  console.error('[flash-sd-card] L\'image est supprimée au prochain essai ; à effacer à la main sinon (≈ 5 Go).');
+  process.exit(1);
+}
+
 function fail(msg) { console.error(`[flash-sd-card] ERREUR: ${msg}`); process.exit(1); }
 
 function ask(question) {
@@ -160,6 +192,17 @@ function loadProfile(profilePath) {
   for (const app of profile.apps) {
     if (!APP_AGENT_DIRS[app]) fail(`App inconnue: ${app} (câblées : ${Object.keys(APP_AGENT_DIRS).join(', ')})`);
   }
+  if (isOrangePi(profile)) {
+    if (!profile.image) fail(`Orange Pi : le champ "image" est obligatoire (chemin de l'archive .7z, .img.xz ou .img téléchargée sur orangepi.org).`);
+    profile.image = String(profile.image).replace(/^~/, home);
+    profile.distro = 'orangepi-bookworm';   // seule distribution : celle de l'image fournie
+    if (profile.apps.length) fail('Orange Pi : les apps pré-installées (agents, console série) ne sont pas gérées sur ce type d\'image.');
+  }
+  // ⭐ 07/10/2026 — durcissement SSH + fail2ban (comme stfort) : activé par défaut. « oui »/« non », ou booléen.
+  profile.sshHardening = !['non', 'no', 'false', '0'].includes(String(profile.sshHardening ?? 'oui').trim().toLowerCase());
+  // Adresses jamais bannies par fail2ban (127.0.0.1 et ::1 toujours ajoutées) : séparées par espaces ou virgules.
+  profile.fail2banIgnoreIp = String(Array.isArray(profile.fail2banIgnoreIp) ? profile.fail2banIgnoreIp.join(' ') : (profile.fail2banIgnoreIp || ''))
+    .split(/[\s,]+/).filter(Boolean);
   return profile;
 }
 
@@ -195,7 +238,45 @@ function flattenCatalog(osList) {
   return out;
 }
 
+/** Image Orange Pi fournie à la main : décompressée si besoin dans le cache, empreinte lue dans le fichier `.sha` d'Orange Pi. */
+function resolveOrangePiImage(profile) {
+  const src = profile.image;
+  if (!fs.existsSync(src)) fail(`Image Orange Pi introuvable : ${src}`);
+  const baseName = path.basename(src);
+  let imgPath;
+  if (/\.7z$/i.test(src)) {
+    const outDir = path.join(CACHE_DIR, 'orangepi', baseName.replace(/\.7z$/i, ''));
+    fs.mkdirSync(outDir, { recursive: true });
+    let img = fs.readdirSync(outDir).find((n) => n.endsWith('.img'));
+    if (!img) {
+      log(`Décompression (7z) : ${baseName} — plusieurs minutes pour une image de plusieurs Go...`);
+      run('7z', ['x', '-y', `-o${outDir}`, src]);
+      img = fs.readdirSync(outDir).find((n) => n.endsWith('.img'));
+      if (!img) fail(`Aucun fichier .img dans ${src}`);
+    } else {
+      log(`Image déjà décompressée en cache : ${path.join(outDir, img)}`);
+    }
+    imgPath = path.join(outDir, img);
+  } else if (/\.img\.xz$/i.test(src)) {
+    imgPath = path.join(CACHE_DIR, 'orangepi', baseName.replace(/\.xz$/i, ''));
+    fs.mkdirSync(path.dirname(imgPath), { recursive: true });
+    if (!fs.existsSync(imgPath)) { log('Décompression (xz)...'); run('xz', ['-dkc', '-T0', src], { stdio: ['ignore', fs.openSync(imgPath, 'w'), 'inherit'] }); }
+  } else if (/\.img$/i.test(src)) {
+    imgPath = src;
+  } else {
+    fail(`Image Orange Pi : extension non gérée (.7z, .img.xz ou .img attendus) : ${src}`);
+  }
+  // Empreinte attendue : fichier `<image>.img.sha` livré par Orange Pi (« <sha256> *<nom> »), à côté de l'image extraite ou de l'archive.
+  let expected = null;
+  for (const shaPath of [`${imgPath}.sha`, `${src}.sha`]) {
+    if (fs.existsSync(shaPath)) { expected = fs.readFileSync(shaPath, 'utf8').trim().split(/\s+/)[0].toLowerCase(); break; }
+  }
+  log(`Image Orange Pi : ${path.basename(imgPath)} (${profile.piModel}, premier démarrage Orange Pi)${expected ? '' : ' — pas de fichier .sha : empreinte calculée, non vérifiée'}`);
+  return { name: baseName, release_date: '', firstBoot: 'orangepi', localImage: imgPath, extract_sha256: expected };
+}
+
 async function resolveImageEntry(profile) {
+  if (isOrangePi(profile)) return resolveOrangePiImage(profile);
   const modelInfo = PI_MODEL_TO_DEVICE[profile.piModel];
   if (!modelInfo) fail(`Modèle de Pi inconnu: "${profile.piModel}" (attendu: ${Object.keys(PI_MODEL_TO_DEVICE).join(', ')})`);
   const deviceSlug = `${modelInfo.device}-${modelInfo.bits}bit`;
@@ -255,6 +336,18 @@ function downloadFile(url, destPath) {
 
 async function ensureImageDownloaded(entry) {
   fs.mkdirSync(CACHE_DIR, { recursive: true });
+  if (entry.localImage) {   // Orange Pi : image locale, pas de téléchargement — seulement la vérification de l'empreinte
+    log('Vérification SHA256 de l\'image...');
+    const h = crypto.createHash('sha256');
+    await new Promise((resolve, reject) => { fs.createReadStream(entry.localImage).on('data', (d) => h.update(d)).on('end', resolve).on('error', reject); });
+    const actual = h.digest('hex');
+    if (entry.extract_sha256 && actual !== entry.extract_sha256) {
+      fail(`SHA256 invalide pour ${entry.localImage}\n  attendu : ${entry.extract_sha256}\n  obtenu  : ${actual}\nImage corrompue ou incomplète : la retélécharger.`);
+    }
+    log(entry.extract_sha256 ? 'SHA256 vérifié OK (conforme au fichier .sha d\'Orange Pi).' : 'SHA256 calculé (pas de fichier .sha : non vérifié).');
+    entry.extract_sha256 = actual;
+    return entry.localImage;
+  }
   const compressedPath = path.join(CACHE_DIR, path.basename(new URL(entry.url).pathname));
   const imgPath = compressedPath.replace(/\.xz$/, '');
   if (fs.existsSync(imgPath)) {
@@ -315,6 +408,7 @@ function baseKey(entry, profile) {
     apps: [...profile.apps].sort(),
     dimoticKey: fileHash(path.join(BUNDLE_ROOT, 'data', 'core', 'machine_ssh', 'id_ed25519.pub')),
     compose: fileHash(path.join(BUNDLE_ROOT, 'compose.deploy.yaml')),
+    sshHardening: profile.sshHardening,
     prepareScript: fileHash(PREPARE_SH),
     agents: Object.fromEntries(profile.apps.map((a) => [a, dirSignature(APP_AGENT_DIRS[a])]))
   };
@@ -329,7 +423,7 @@ function sparseCopy(src, dest) {
 async function ensureBaseImage(entry, profile, officialImg) {
   fs.mkdirSync(BASE_DIR, { recursive: true });
   const key = baseKey(entry, profile);
-  const basePath = path.join(BASE_DIR, `${profile.distro}-${PI_MODEL_TO_DEVICE[profile.piModel].bits}bit-${key}.img`);
+  const basePath = path.join(BASE_DIR, `${basePrefix(profile)}${key}.img`);
   if (fs.existsSync(basePath)) {
     log(`Image de base déjà en cache (mêmes image/paquets/apps) : ${basePath}`);
     return basePath;
@@ -341,16 +435,18 @@ async function ensureBaseImage(entry, profile, officialImg) {
   const args = [PREPARE_SH, 'base', partial, '--extra-mb', String(BASE_EXTRA_MB)];
   if (profile.packages.length) args.push('--packages', profile.packages.join(','));
   if (profile.apps.length) args.push('--apps', profile.apps.join(','));
+  args.push('--ssh-hardening', profile.sshHardening ? 'yes' : 'no');
+  if (isOrangePi(profile)) args.push('--layout', 'single');
   const r = spawnSync('bash', args, { stdio: 'inherit' });
   if (r.status !== 0) {
-    fs.rmSync(partial, { force: true });
-    fail(`Construction de l'image de base échouée (code ${r.status}) — rien n'est gardé en cache.`);
+    keepFailedImage(partial, isOrangePi(profile) ? 'single' : '', "Construction de l'image de base", r.status);
   }
+  fs.rmSync(`${basePath}.echec`, { force: true });
   fs.renameSync(partial, basePath);
   log(`Image de base prête et gardée en cache : ${basePath}`);
   // Une seule image de base gardée par distribution/architecture (~5 Go chacune) : les anciennes
   // (autres paquets/apps, ou script modifié depuis) sont supprimées.
-  const prefix = `${profile.distro}-${PI_MODEL_TO_DEVICE[profile.piModel].bits}bit-`;
+  const prefix = basePrefix(profile);
   for (const name of fs.readdirSync(BASE_DIR)) {
     if (name.startsWith(prefix) && name.endsWith('.img') && path.join(BASE_DIR, name) !== basePath) {
       fs.rmSync(path.join(BASE_DIR, name), { force: true });
@@ -395,20 +491,41 @@ function cloudInitFiles(profile, personalKeys) {
     manage_etc_hosts: true,
     timezone: 'Europe/Paris',
     keyboard: { model: 'pc105', layout: 'fr' },
-    ssh_pwauth: true,
     // Accès root par clé : la clé dimotic-ha est déjà dans l'image de base ; ne pas laisser
     // cloud-init « désactiver root ».
     disable_root: false,
     users: [user]
   };
+  const writeFiles = [];
   if (personalKeys.length) {
-    userData.write_files = [{
+    writeFiles.push({
       path: '/root/.ssh/authorized_keys',
       append: true,
       permissions: '0600',
       content: `${personalKeys.join('\n')}\n`
-    }];
+    });
   }
+  if (profile.sshHardening) {
+    // Durcissement SSH : l'image de base interdit déjà le mot de passe (drop-in 50-durcissement.conf) ; seul l'utilisateur du
+    // profil le garde (bloc Match en FIN de sshd_config, comme stfort). `ssh_pwauth` n'est volontairement PAS écrit : cloud-init
+    // ajouterait sa ligne PasswordAuthentication après le bloc Match, donc dans sa portée, et couperait le mot de passe de
+    // cet utilisateur.
+    writeFiles.push({
+      path: '/etc/ssh/sshd_config',
+      append: true,
+      content: `\n# Durcissement (Outils dimotic-ha) : l'utilisateur ${profile.user} garde le mot de passe.\nMatch User ${profile.user}\n    PasswordAuthentication yes\n`
+    });
+  } else {
+    userData.ssh_pwauth = true;
+  }
+  if (profile.fail2banIgnoreIp.length) {
+    writeFiles.push({
+      path: '/etc/fail2ban/jail.d/zz-ignoreip.local',
+      permissions: '0644',
+      content: `[DEFAULT]\nignoreip = 127.0.0.1/8 ::1 ${profile.fail2banIgnoreIp.join(' ')}\n`
+    });
+  }
+  if (writeFiles.length) userData.write_files = writeFiles;
   const instanceId = `${machineSlug(profile.machine)}-${Date.now()}`;
   const files = {
     'user-data': `#cloud-config\n# Généré par Outils (dimotic-ha) — machine "${profile.machine}".\n${yaml.dump(userData, { lineWidth: -1 })}`,
@@ -446,28 +563,46 @@ async function buildMachineImage(entry, profile, basePath) {
   sparseCopy(basePath, partial);
   const personalKeys = readPersonalKeys(profile);
 
-  withBootfs(partial, (boot) => {
-    fs.writeFileSync(path.join(boot, 'ssh'), ''); // active SSH au premier démarrage (sshswitch)
-    if (entry.firstBoot === 'cloudinit') {
-      for (const [name, content] of Object.entries(cloudInitFiles(profile, personalKeys))) {
-        fs.writeFileSync(path.join(boot, name), content);
-      }
-      log(`cloud-init écrit : user-data (nom "${profile.hostname}", utilisateur "${profile.user}", ${personalKeys.length} clé(s) perso), meta-data${profile.wifi ? `, network-config (WiFi "${profile.wifi.ssid}")` : ''}.`);
-    } else {
-      fs.writeFileSync(path.join(boot, 'userconf.txt'), `${profile.user}:${hashPassword(profile.password)}\n`);
-      log(`bootfs : SSH activé, utilisateur "${profile.user}" (userconf.txt).`);
-    }
-  });
-
-  if (entry.firstBoot === 'legacy') {
-    const args = [PREPARE_SH, 'legacy-machine', partial, '--hostname', profile.hostname, '--user', profile.user];
+  if (entry.firstBoot === 'orangepi') {
+    // Orange Pi : une seule partition, pas de bootfs ni de cloud-init — tout se fait dans l'image (utilisateur créé dans le chroot).
+    const args = [PREPARE_SH, 'opi-machine', partial, '--layout', 'single', '--hostname', profile.hostname, '--user', profile.user,
+      '--ssh-hardening', profile.sshHardening ? 'yes' : 'no'];
     for (const k of profile.personalSshKeys) args.push('--key', k);
+    if (profile.fail2banIgnoreIp.length) args.push('--fail2ban-ignoreip', profile.fail2banIgnoreIp.join(' '));
     if (profile.wifi) {
-      args.push('--wifi-ssid', profile.wifi.ssid, '--wifi-country', profile.wifi.country);
+      args.push('--wifi-ssid', profile.wifi.ssid);
       if (profile.wifi.password) args.push('--wifi-pass', String(profile.wifi.password));
     }
-    const r = spawnSync('bash', args, { stdio: 'inherit' });
-    if (r.status !== 0) { fs.rmSync(partial, { force: true }); fail(`Personnalisation de la machine échouée (code ${r.status}).`); }
+    // Le mot de passe haché passe par l'environnement (pas par la ligne de commande, visible dans `ps`).
+    const r = spawnSync('bash', args, { stdio: 'inherit', env: { ...process.env, PASSWORD_HASH: hashPassword(profile.password) } });
+    if (r.status !== 0) keepFailedImage(partial, 'single', 'Personnalisation de la machine (Orange Pi)', r.status);
+  } else {
+    withBootfs(partial, (boot) => {
+      fs.writeFileSync(path.join(boot, 'ssh'), ''); // active SSH au premier démarrage (sshswitch)
+      if (entry.firstBoot === 'cloudinit') {
+        for (const [name, content] of Object.entries(cloudInitFiles(profile, personalKeys))) {
+          fs.writeFileSync(path.join(boot, name), content);
+        }
+        log(`cloud-init écrit : user-data (nom "${profile.hostname}", utilisateur "${profile.user}", ${personalKeys.length} clé(s) perso), meta-data${profile.wifi ? `, network-config (WiFi "${profile.wifi.ssid}")` : ''}.`);
+      } else {
+        fs.writeFileSync(path.join(boot, 'userconf.txt'), `${profile.user}:${hashPassword(profile.password)}\n`);
+        log(`bootfs : SSH activé, utilisateur "${profile.user}" (userconf.txt).`);
+      }
+    });
+
+    if (entry.firstBoot === 'legacy') {
+      const args = [PREPARE_SH, 'legacy-machine', partial, '--hostname', profile.hostname, '--user', profile.user,
+        '--ssh-hardening', profile.sshHardening ? 'yes' : 'no'];
+      if (profile.fail2banIgnoreIp.length) args.push('--fail2ban-ignoreip', profile.fail2banIgnoreIp.join(' '));
+      for (const k of profile.personalSshKeys) args.push('--key', k);
+      if (profile.wifi) {
+        args.push('--wifi-ssid', profile.wifi.ssid, '--wifi-country', profile.wifi.country);
+        if (profile.wifi.password) args.push('--wifi-pass', String(profile.wifi.password));
+      }
+      const r = spawnSync('bash', args, { stdio: 'inherit' });
+      if (r.status !== 0) keepFailedImage(partial, '', 'Personnalisation de la machine', r.status);
+    }
+
   }
 
   fs.renameSync(partial, outPath);
@@ -476,8 +611,8 @@ async function buildMachineImage(entry, profile, basePath) {
 
 /** Ce qui rend une image de machine réutilisable telle quelle à la relance (même profil, même base). */
 function machineSignature(profile, basePath) {
-  const { machine, piModel, distro, hostname, user, password, personalSshKeys, packages, apps, wifi } = profile;
-  return JSON.stringify({ basePath, machine, piModel, distro, hostname, user, password, personalSshKeys, packages, apps, wifi: wifi || null });
+  const { machine, piModel, distro, hostname, user, password, personalSshKeys, packages, apps, wifi, sshHardening, fail2banIgnoreIp } = profile;
+  return JSON.stringify({ basePath, machine, piModel, distro, hostname, user, password, personalSshKeys, packages, apps, wifi: wifi || null, sshHardening, fail2banIgnoreIp });
 }
 
 // ==========================================================================
@@ -565,7 +700,7 @@ async function main() {
     return;
   }
   await timedStep('Écriture de l\'image (dd)', () => { flashImage(imgPath, device); });
-  log(`Terminé — carte prête pour "${profile.machine}", à insérer dans le Pi.${entry.firstBoot === 'cloudinit' ? ' Premier démarrage un peu plus long (cloud-init) ; suivi : /var/log/cloud-init-output.log.' : ''}`);
+  log(`Terminé — carte prête pour "${profile.machine}", à insérer dans le Pi.${entry.firstBoot === 'cloudinit' ? ' Premier démarrage un peu plus long (cloud-init) ; suivi : /var/log/cloud-init-output.log.' : ''}${entry.firstBoot === 'orangepi' ? ' Orange Pi : le système s\'agrandit seul à la taille de la carte au premier démarrage, et les clés SSH d\'hôte sont recréées.' : ''}`);
 }
 
 main().catch((err) => fail(err.stack || String(err)));

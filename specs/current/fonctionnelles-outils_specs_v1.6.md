@@ -1,9 +1,14 @@
 # Spécifications Fonctionnelles — Application OUTILS
 
-**Version :** 1.5
-**Date :** 30 Septembre 2026
+**Version :** 1.6
+**Date :** 7 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/outils`
 
+> **v1.6 (07/10/2026)** — script « Carte SD / clé USB » (§7.2) : **fail2ban et durcissement SSH** installés dans l'image
+> (comme stfort : root par clé seulement, mot de passe refusé sauf pour l'utilisateur du profil, fail2ban sur le journal
+> systemd) et **Orange Pi Zero 2 / 4 Pro** gérées à partir de l'image officielle Debian bookworm téléchargée à la main.
+> Nouveaux champs du formulaire : `SSH_DURCISSEMENT`, `FAIL2BAN_IGNOREIP`, `IMAGE_ORANGEPI`.
+>
 > **v1.5 (30/09/2026)** — « Commit + push + tag + build Docker » : **un seul format de version, `X.Y.Z`**,
 > proposé, affiché et saisi (le script proposait `v3.3.4` mais annonçait « la version 3.3.4 » : taper
 > `3.4.0` était refusé). Le `v` saisi reste accepté ; le tag git garde son `v` (`vX.Y.Z`).
@@ -259,20 +264,48 @@ l'image, jamais sur la carte). Archive auto-extractible, lancée avec `sudo` sur
 prépare (prérequis vérifiés au départ : `nodejs xz-utils qemu-user-static binfmt-support parted
 e2fsprogs file openssl`).
 
-1. **Questions, toutes au départ** : machine, modèle de Pi, distribution (`trixie-lite` par défaut,
-   `bookworm-lite`), nom d'hôte, utilisateur, mot de passe, clé SSH personnelle (case), paquets,
-   apps, **WiFi** (SSID vide = Ethernet, pays `FR` par défaut).
-2. **Image officielle** (catalogue Raspberry Pi Imager), téléchargée et vérifiée (SHA256), en cache.
+1. **Questions, toutes au départ** : machine, modèle (Raspberry Pi, ou **Orange Pi Zero 2 / Orange Pi 4 Pro**),
+   distribution (`trixie-lite` par défaut, `bookworm-lite` ; ignorée pour une Orange Pi), nom d'hôte,
+   utilisateur, mot de passe, clé SSH personnelle (case), **durcissement SSH** (`SSH_DURCISSEMENT`, `oui` par
+   défaut), **adresses jamais bannies par fail2ban** (`FAIL2BAN_IGNOREIP`, `192.168.0.0/16` par défaut ; 127.0.0.1 et
+   ::1 toujours incluses), paquets, apps, **WiFi** (SSID vide = Ethernet, pays `FR` par défaut), et pour une Orange Pi
+   le **chemin de l'image** (`IMAGE_ORANGEPI`).
+2. **Image officielle** (catalogue Raspberry Pi Imager), téléchargée et vérifiée (SHA256), en cache. **Orange Pi** : pas de
+   catalogue ni de téléchargement automatique (liens orangepi.org sur Google Drive/Baidu) — l'utilisateur fournit l'archive
+   `.7z` (ou `.img.xz`, `.img`) ; elle est décompressée dans `data/.sd-card-image-cache/orangepi/`, et l'empreinte est
+   comparée au fichier `.sha` livré par Orange Pi (calculée sans vérification s'il manque). Prérequis en plus : `7z`
+   (`p7zip-full`) et `qemu-aarch64-static`. Images vérifiées : `Orangepizero2_3.1.0` (serveur) et `Orangepi4pro_1.0.6`
+   (bureau XFCE) — Debian 12, **une seule partition** (racine, `/boot` dedans, U-Boot avant la partition), utilisateur
+   `orangepi` par défaut, assistant de premier lancement `/root/.not_logged_in_yet`, NetworkManager.
 3. **Image de base, en cache** — clé de cache : image officielle, paquets, apps, clé SSH dimotic-ha,
    `compose.deploy.yaml`, script `prepare-sd-card.sh`, contenu des device-agents. Construite une fois
    par combinaison, **dans qemu sur la machine qui prépare** (chroot, `qemu-user-static`) :
    agrandissement de 2 Go, paquets, Node.js + npm (tarball) + `serialport`/`mqtt` globaux,
    mosquitto-clients, build-essential, curl, **Docker CE** (get.docker.com, service activé au
    démarrage), `/docker/dimotic-ha/` (compose, **non démarré**), device-agents des apps (+ console
-   série désactivée pour `teleinfo`), accès SSH root par la clé dimotic-ha. **Nettoyage avant
+   série désactivée pour `teleinfo`), accès SSH root par la clé dimotic-ha, **fail2ban** (`fail2ban`, `python3-systemd`,
+   `nftables` ; `jail.local` : 5 essais en 10 minutes puis 12 heures, `backend = systemd`, `banaction = nftables`, jail `sshd`)
+   et **durcissement SSH** (drop-ins : `PermitRootLogin prohibit-password`, `PasswordAuthentication no`,
+   `KbdInteractiveAuthentication no` ; `--ssh-hardening no` rétablit l'ancien `PermitRootLogin yes`). **Contrôle dans l'image** :
+   `sshd -t` et `sshd -T` (root : pas de mot de passe), `fail2ban-client -t` — la construction échoue si l'un d'eux échoue.
+   Sur Orange Pi (`--layout single`) : agrandissement de la partition 1, `apt-get update` toléré en cas d'échec (dépôts Orange Pi
+   parfois injoignables). **Nettoyage avant
    clonage** : clés d'hôte SSH supprimées (régénérées au premier démarrage), `/etc/machine-id`
    remis à `uninitialized`, état cloud-init supprimé, cache apt vidé, binaire qemu retiré.
 4. **Image de la machine** (quelques secondes) : copie creuse de la base, puis :
+   - **Durcissement par machine** (tous les modes) : seul l'**utilisateur du profil** garde le mot de passe SSH — bloc
+     `Match User <utilisateur>` tout à la **fin** de `sshd_config` (comme stfort) — et un drop-in
+     `fail2ban/jail.d/zz-ignoreip.local` porte les adresses jamais bannies. Sur `trixie-lite` (cloud-init), `write_files`
+     ajoute ces deux fichiers et **`ssh_pwauth` n'est volontairement pas écrit** (cloud-init ajouterait sa ligne
+     `PasswordAuthentication` après le bloc `Match`, donc dans sa portée, et couperait le mot de passe de cet utilisateur) ;
+     avec `SSH_DURCISSEMENT=non`, `ssh_pwauth: true` comme avant. Vérifié avec le vrai `sshd -T -C user=…` : root et les autres
+     refusés, l'utilisateur du profil accepté ;
+   - **Orange Pi** (mode `opi-machine`, dans l'image, via chroot) : nom d'hôte, fuseau Europe/Paris, **utilisateur du
+     profil créé** (groupes sudo, docker, dialout…, mot de passe haché passé par l'environnement `PASSWORD_HASH`),
+     utilisateur `orangepi` par défaut **supprimé**, **mot de passe root verrouillé** (accès root par clé), assistant de premier
+     lancement désactivé (`/root/.not_logged_in_yet` retiré — `orangepi-firstrun-config` n'a alors plus d'objet), clés
+     personnelles pour root et l'utilisateur, WiFi par une connexion NetworkManager, clés d'hôte SSH recréées au premier
+     démarrage par `orangepi-firstrun`. Le système s'agrandit seul à la carte (`orangepi-resize-filesystem`) ;
    - `trixie-lite` — **cloud-init** sur bootfs : `user-data` (nom d'hôte, fuseau Europe/Paris,
      clavier fr, utilisateur avec mot de passe chiffré SHA-512 et clés perso, clés perso ajoutées à
      root, `disable_root: false`, `ssh_pwauth: true`), `network-config` (WiFi, netplan v2),
@@ -342,7 +375,14 @@ l'historique git (commit d'avant le 29/09/2026).
 - L'import `.zip` ne réimporte pas les dépendances `@outils:bundle`.
 - Un vrai téléchargement `.sh` depuis une URL HTTP (archive §5.2) peut déclencher l'avertissement
   « fichier potentiellement dangereux » de Chrome.
-- `checklist` n'accepte pas de valeur par défaut (`@outils:default` ignoré pour ce type).
+- `checklist` n'accepte pas de valeur par défaut (`@outils:default` ignoré pour ce type) : le durcissement SSH est donc un
+  `select` (`oui` par défaut) et non une case à cocher.
+- **Orange Pi : conçu et vérifié sur les images (structure, outils présents, empreintes) mais pas encore éprouvé sur une
+  carte réelle** — le chroot (QEMU), l'agrandissement et le premier démarrage sont à valider au premier flashage. Les apps
+  pré-installées (agent teleinfo, console série) ne sont pas gérées sur ces images. Image du 4 Pro : variante « bureau »
+  (5,8 Go, XFCE) fournie ; une variante serveur est préférable pour un usage sans écran.
+- **fail2ban sur Trixie / Orange Pi** : configuration contrôlée dans l'image, mais l'effet réel (bannissement) n'a été
+  observé que sur Raspbian 10 / Debian 12 hors de ce script.
 
 ---
 
@@ -350,6 +390,7 @@ l'historique git (commit d'avant le 29/09/2026).
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.6 | 07/10/2026 | Claude | Script « Carte SD » : **fail2ban + durcissement SSH** dans l'image et par machine (champs `SSH_DURCISSEMENT`, `FAIL2BAN_IGNOREIP`), **Orange Pi Zero 2 / 4 Pro** (image officielle fournie à la main, `IMAGE_ORANGEPI`, mode `opi-machine`, image à une partition) (§7.2) ; **Docker activé explicitement au démarrage** dans l'image (get.docker.com échoue dans un chroot) ; **en cas d'échec de construction l'image est conservée** (`*.echec`) et les commandes d'un terminal interactif dedans (mode `shell` de `prepare-sd-card.sh`, local ou `ssh -t`) sont affichées. v1.5 archivée. |
 | 1.5 | 30/09/2026 | Claude | Version de l'image : format unique `X.Y.Z` proposé/affiché/saisi (`v` accepté), tag git `vX.Y.Z` (§7.1). v1.4 archivée. |
 | 1.4 | 29/09/2026 | Claude | Script « Configurer un appareil Tasmota (à distance) » retiré (§7.3), repris par l'application `tasmota`. v1.3 archivée. |
 | 1.3 | 28/09/2026 | Claude | Script intégré « Configurer un appareil Tasmota (à distance) » (§7.3). v1.2 archivée. |
