@@ -2,9 +2,8 @@
  * Schéma de configuration de l'application SCREEN2HTTP (section `screen2http` de
  * data/screen2http/config.yaml), édité dans Paramètres Techniques.
  *
- * Connexion SSH en root direct avec la clé unique de l'installation (data/core/machine_ssh/, voir
- * core/infrastructure/remote/SshClient.ts) — `privateKeyPath` ne sert qu'à imposer une autre clé
- * pour une cible précise.
+ * Connexion SSH avec la clé de l'utilisateur qui lance l'application (~/.ssh/id_ed25519, id_ecdsa,
+ * id_rsa, ou son agent ssh) — `privateKeyPath` ne sert qu'à imposer une autre clé pour une cible.
  */
 
 import { z } from 'zod';
@@ -19,7 +18,7 @@ const targetConfigSchema = z.object({
   username: z.string().min(1).default('root'),
   /** Nom de la session screen à rejoindre (`screen -xS <nom>`) ; vide = `screen -x` sans nom. */
   screenName: z.string().default(''),
-  /** Clé privée spécifique ; vide = clé unique de l'installation. */
+  /** Clé privée spécifique ; vide = clé de l'utilisateur qui lance l'application. */
   privateKeyPath: z.string().default('')
 });
 

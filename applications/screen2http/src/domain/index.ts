@@ -41,7 +41,7 @@ export interface ApplicationMenuConfig {
 
 export const SCREEN2HTTP_UI_METADATA: ModuleUiMetadata = {
   title: 'SCREEN2HTTP - Console screen distante',
-  description: "Machines et sessions screen accessibles depuis la page « Console ». Connexion SSH en root avec la clé unique de l'installation (data/core/machine_ssh/) : la clé publique doit être installée sur chaque machine cible.",
+  description: "Machines et sessions screen accessibles depuis la page « Console ». Connexion SSH avec la clé de l'utilisateur qui lance l'application (~/.ssh/id_ed25519, id_ecdsa ou id_rsa, ou son agent ssh) : sa clé publique doit être installée sur chaque machine cible.",
   icon: '🖥️',
   category: 'SCREEN2HTTP',
   menuLabel: 'Console screen',
@@ -64,9 +64,9 @@ export const SCREEN2HTTP_UI_METADATA: ModuleUiMetadata = {
             { name: 'label', label: 'Nom affiché', type: 'text', placeholder: 'Mon application' },
             { name: 'host', label: 'Hôte', type: 'text', placeholder: '192.168.1.100' },
             { name: 'port', label: 'Port SSH', type: 'number', default: 22 },
-            { name: 'username', label: 'Utilisateur', type: 'text', default: 'root' },
+            { name: 'username', label: 'Utilisateur', type: 'text', default: 'root', hint: 'Compte sur la machine distante' },
             { name: 'screenName', label: 'Nom de la session screen', type: 'text', placeholder: 'monapp', hint: "Équivaut à « screen -xS <nom> » ; vide = « screen -x » (une seule session attendue)" },
-            { name: 'privateKeyPath', label: 'Clé privée (optionnel)', type: 'text', hint: "Vide = clé unique de l'installation" }
+            { name: 'privateKeyPath', label: 'Clé privée (optionnel)', type: 'text', placeholder: '/home/pi/.ssh/id_ed25519', hint: "Vide = clé SSH de l'utilisateur qui lance l'application (~/.ssh/id_ed25519, id_ecdsa, id_rsa, ou agent ssh)" }
           ]
         }
       ]
@@ -95,7 +95,7 @@ export const SCREEN2HTTP_MENU_CONFIG: ApplicationMenuConfig = {
   },
   pages: [
     {
-      id: 'console',
+      id: 'dashboard',
       label: 'Console',
       icon: '🖥️',
       path: '/applications/screen2http/presentation/index.html',
