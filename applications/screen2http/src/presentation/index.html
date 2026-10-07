@@ -22,6 +22,11 @@
       height: 42px; flex: none; display: flex; align-items: center; padding: 0 12px; gap: 15px;
       background: #222; color: white;
     }
+    .s2h-back {
+      margin-left: -4px; width: 30px; height: 30px; flex: none; display: flex; align-items: center; justify-content: center;
+      border-radius: 4px; color: white; text-decoration: none; font-size: 20px; line-height: 1;
+    }
+    .s2h-back:hover { background: #444; }
     .s2h-status { color: #aaa; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .s2h-status.connected { color: #6c6; }
     .s2h-status.error { color: #e66; }
@@ -41,6 +46,7 @@
 <body>
   <div class="s2h-root" id="s2h-root">
     <header class="s2h-header">
+      <a class="s2h-back" href="/" title="Retour à la page principale et son menu" aria-label="Retour">←</a>
       <strong>Console screen</strong>
       <span class="s2h-status" id="s2h-state">Démarrage...</span>
       <div class="s2h-actions">
@@ -54,6 +60,6 @@
 
   <script type="module" src="/applications/screen2http/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-10-07 16:20:00 - Présentation de l'outil d'origine : bandeau titre avec choix de session, Connecter/Déconnecter et état ; terminal plein cadre -->
+  <!-- Derniere modification: 2026-10-07 16:35:00 - Flèche de retour à gauche du bandeau ; présentation de l'outil d'origine : bandeau titre avec choix de session, Connecter/Déconnecter et état ; terminal plein cadre -->
 </body>
 </html>

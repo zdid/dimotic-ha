@@ -14,7 +14,7 @@ Afficher dans le navigateur une session `screen` tournant sur une machine distan
 | Où | Rôle |
 |---|---|
 | **Paramètres Techniques > Console screen** | Formulaire généré depuis `SCREEN2HTTP_UI_METADATA` : liste des sessions screen (cibles) et délais de connexion. Rien d'autre n'est configurable. |
-| **Page « Console »** (`/applications/screen2http/presentation/index.html`), accessible depuis la liste des applications | Affichage seul, présentation de l'outil d'origine : bandeau titre (titre, état, sélecteur de session — masqué s'il n'y en a qu'une —, Connecter / Déconnecter) et terminal xterm.js plein cadre. Aucun réglage. |
+| **Page « Console »** (`/applications/screen2http/presentation/index.html`), accessible depuis la liste des applications | Affichage seul, présentation de l'outil d'origine : bandeau titre (flèche de retour ← tout à gauche, vers la page principale `/` et son menu ; titre, état, sélecteur de session — masqué s'il n'y en a qu'une —, Connecter / Déconnecter) et terminal xterm.js plein cadre. Aucun réglage. |
 | **Service** (`Screen2HttpService`, process séparé) | Une connexion SSH (`ssh2`) par session ouverte depuis un navigateur ; flux du terminal relayé en Socket.io. |
 
 Menu : une seule entrée « Console screen » dans *Paramètres Techniques* (le formulaire) ; la page `index.html` est déclarée avec `id: 'dashboard'` — c'est la page de l'application, pas une sous-entrée des Paramètres (la barre latérale ne décale que les pages d'`id` autre que `dashboard`, comme pour teleinfo). Application `audience: 'configuration'`, `type: 'standalone'`, `runsAsSeparateProcess: true`, ni MQTT ni HA. Nouvelle application → arrive **désactivée** (activation dans Gestion des applications, à chaud).
