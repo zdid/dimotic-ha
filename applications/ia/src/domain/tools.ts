@@ -17,7 +17,7 @@ export const IA_TOOLS: MistralToolSchema[] = [
         type: 'object',
         properties: {
           quoi: { type: 'string', description: 'Catégorie QUOI (ex: "lumière", "température")' },
-          lieux: { type: 'array', items: { type: 'string' }, description: 'Lieux à filtrer (ex: ["salon"])' }
+          lieux: { type: 'array', items: { type: 'string' }, description: 'Lieux à filtrer. Plusieurs lieux = l\'un OU l\'autre (ex: ["salon", "cuisine"]). Un repère précis (plafonnier, chevet) avec un lieu = les deux à la fois (ex: ["plafonnier", "chambre"] ou ["plafonnier de la chambre"]).' }
         }
       }
     }
@@ -31,7 +31,7 @@ export const IA_TOOLS: MistralToolSchema[] = [
         type: 'object',
         properties: {
           quoi: { type: 'string', description: 'Catégorie QUOI (ex: "lumière")' },
-          lieux: { type: 'array', items: { type: 'string' }, description: 'Lieux à filtrer (ex: ["salon"])' }
+          lieux: { type: 'array', items: { type: 'string' }, description: 'Lieux à filtrer. Plusieurs lieux = l\'un OU l\'autre (ex: ["salon", "cuisine"]). Un repère précis (plafonnier, chevet) avec un lieu = les deux à la fois (ex: ["plafonnier", "chambre"] ou ["plafonnier de la chambre"]).' }
         },
         required: ['quoi']
       }

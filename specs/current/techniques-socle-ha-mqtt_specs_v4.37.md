@@ -1,8 +1,12 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.36  
-**Date :** 6 Octobre 2026  
+**Version :** 4.37  
+**Date :** 8 Octobre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.37** : **résolution quoi/lieux** (§8.3.2) — un repère précis (`lieu_precis`) combiné à un lieu dans un
+> tableau `lieux` restreint (ET) au lieu d'élargir (`["plafonnier", "chambre"]` = le plafonnier de la chambre) ;
+> mot vide ôté d'un terme seul (« la chambre ») ; `quoi` désignant un `lieu_precis` accepté ; repli sur le nom.
 
 > **v4.36** : **page « Paramètres généraux »** — Web-services, MQTT, Serveur Web et Journalisation sur UNE page, chacune avec son
 > propre bouton « Sauvegarder » (§10.4bis) ; **une application sans paramètre technique** n'apparaît plus dans la liste des
@@ -1564,6 +1568,15 @@ demandés (union, pas intersection, entre plusieurs éléments de `lieuTerms` �
 `fonctionnelles-planificateur_specs` §7 pour la raison : un tableau `lieux` porte aussi bien une
 phrase unique qualifiée que plusieurs lieux visés séparément).
 
+**⭐ v4.37 — combinaison des éléments de `lieuTerms`** : deux sortes de termes, traitées différemment.
+Un terme de **lieu** (nœud du graphe : lieu/père/grand-père, ex. « salon », « étage ») est une
+*alternative* — `["salon", "cuisine"]` = salon OU cuisine (union, inchangé). Un terme de
+**`lieu_precis`** (ex. « plafonnier », « chevet », qui n'est pas aussi un nœud de lieu) est un
+*qualificatif* : combiné à au moins un terme de lieu, il **restreint** (`["plafonnier", "chambre"]` =
+le plafonnier ET dans la chambre — avant, c'était tous les plafonniers plus toute la chambre) ; seuls
+entre eux, les qualificatifs restent des alternatives. Constaté en testant « le plafonnier de la
+chambre » demandé par une IA en deux éléments.
+
 Chaque terme est résolu de deux façons distinctes, **jamais combinées** :
 
 1. **Directement**, si le `lieu_precis` propre à l'entité (`attributs_taxonomie.slug_precis`) égale
@@ -1589,6 +1602,14 @@ Seulement s'il ne matche aucune entité du QUOI, il est découpé en mots (hors 
 "de/du/des/la/le/les/l/au/aux/à/et") et **chacun** doit matcher (ET, pas OU) pour qu'une entité soit
 retenue — permet "éteins le plafonnier de la chambre" (`lieu_precis` partagé + area qualifiante,
 demande utilisateur) sans dupliquer un mécanisme de recherche compound séparé.
+
+**⭐ v4.37 — compléments** : (a) un mot vide en tête d'un terme **seul** est ignoré (« la chambre » =
+« chambre », « le plafonnier » = « plafonnier ») — avant, ce cas ne donnait rien, le repli exigeant au
+moins deux mots ; (b) un `quoi` qui ne désigne aucun QUOI mais un `lieu_precis` (`quoi: "plafonnier"`)
+est traité comme ce `lieu_precis` ; (c) **dernier recours par le nom** : si rien ne correspond, tous les
+mots significatifs des termes de lieu (à défaut, le quoi) doivent figurer dans le nom ou l'identifiant
+de l'entité — pour une entité non classée dont le nom le dit (« Plafonnier bureau ») ; ignoré au-delà
+de 25 résultats (demande trop vague). Testé : `core/src/ha/sync/__tests__/HaStructureRegistry.lieux.test.ts`.
 
 ### 8.3.3 ⭐ Catalogue de lieux statique — `getLieuCatalog()` (nouveau v4.28)
 

@@ -63,6 +63,9 @@ export class HaStructureRegistry {
   // arêtes (nécessaire pour gérer correctement une suppression/reclassification d'entité).
   private lieuGraphDirty = true;
   private lieuChildren: Map<string, Set<string>> = new Map();
+  /** Tous les slugs rencontrés comme lieu/père/grand-père (jamais lieu_precis) — distingue un terme de
+   *  lieu (alternative : « salon » OU « cuisine ») d'un lieu_precis (qualificatif : « plafonnier »). */
+  private lieuNodes: Set<string> = new Set();
 
   /**
    * @param classifier - Classifieur pour déterminer les QUOI des entités
@@ -810,11 +813,52 @@ export class HaStructureRegistry {
   getEntitiesByQuoiAndLieux(quoiId: string | undefined, lieuTerms: string[]): HaStructuredEntity[] {
     this.rebuildLieuGraphIfNeeded();
 
-    const candidates = quoiId ? this.getEntitiesByQuoi(quoiId) : this.getAllEntities();
+    let candidates = quoiId ? this.getEntitiesByQuoi(quoiId) : this.getAllEntities();
+    // ⭐ 08/10/2026 — « quoi » qui n'en est pas un mais désigne un lieu_precis (ex: quoi="plafonnier") :
+    // une IA le met volontiers là. Repli : même résultat que quoi absent + lieu_precis="plafonnier".
+    if (quoiId && candidates.length === 0) {
+      const asPrecis = this.getAllEntities().filter((e) => this.matchesPrecis(e, quoiId));
+      if (asPrecis.length > 0) candidates = asPrecis;
+    }
+
+    let result = this.matchLieuTerms(candidates, lieuTerms);
+    if (result.length === 0) result = this.matchByName(quoiId, lieuTerms);
+    return result;
+  }
+
+  /**
+   * Applique les termes de lieu à des candidats.
+   *
+   * ⭐ 08/10/2026 — deux sortes de termes, combinés différemment :
+   *  - un terme de LIEU (nœud du graphe : « salon », « chambre », « rez-de-chaussée ») est une
+   *    ALTERNATIVE : ["salon", "cuisine"] = salon OU cuisine ;
+   *  - un terme de lieu_precis (« plafonnier », « chevet ») est un QUALIFICATIF : ["plafonnier",
+   *    "chambre"] = le plafonnier ET dans la chambre (et non tous les plafonniers + toute la chambre).
+   * Un mot vide initial est ôté d'un terme seul (« la chambre » = « chambre »).
+   */
+  private matchLieuTerms(candidates: HaStructuredEntity[], lieuTerms: string[]): HaStructuredEntity[] {
     if (lieuTerms.length === 0) return candidates;
 
-    const matched = new Set<HaStructuredEntity>();
+    const precisTerms: string[] = [];
+    const lieuOnly: string[] = [];
     for (const phrase of lieuTerms) {
+      const slug = this.slugifyLieu(phrase);
+      const isLieu = this.lieuNodes.has(slug);
+      const isPrecis = !isLieu && candidates.some((e) => this.matchesPrecis(e, slug));
+      (isPrecis ? precisTerms : lieuOnly).push(phrase);
+    }
+
+    // Qualificatifs seuls : alternatives entre eux, comme avant. Mélange : ils restreignent les lieux.
+    const byLieu = lieuOnly.length > 0 ? this.matchAlternatives(candidates, lieuOnly) : candidates;
+    if (precisTerms.length === 0) return byLieu;
+    const byPrecis = this.matchAlternatives(byLieu, precisTerms);
+    return byPrecis;
+  }
+
+  /** Union des entités correspondant à au moins une des phrases (sémantique historique). */
+  private matchAlternatives(candidates: HaStructuredEntity[], phrases: string[]): HaStructuredEntity[] {
+    const matched = new Set<HaStructuredEntity>();
+    for (const phrase of phrases) {
       const wholeSlug = this.slugifyLieu(phrase);
       const wholeMatches = candidates.filter((e) => this.matchesLieuTerm(e, wholeSlug));
       if (wholeMatches.length > 0) {
@@ -823,13 +867,40 @@ export class HaStructureRegistry {
       }
 
       const subTerms = this.tokenizeLieuPhrase(phrase);
-      if (subTerms.length < 2) continue;
+      if (subTerms.length === 0) continue;
       for (const entity of candidates) {
         if (subTerms.every((sub) => this.matchesLieuTerm(entity, sub))) matched.add(entity);
       }
     }
-
     return [...matched];
+  }
+
+  /**
+   * Dernier recours quand la taxonomie ne donne rien : tous les mots significatifs de la demande
+   * (quoi + lieux) doivent figurer dans le nom ou l'identifiant de l'entité. Évite qu'un
+   * « plafonnier de la chambre » introuvable parce que non classé le reste alors que son nom le dit.
+   */
+  private matchByName(quoiId: string | undefined, lieuTerms: string[]): HaStructuredEntity[] {
+    // Le quoi n'est pas exigé dans le nom (« lumière » n'apparaît pas dans « Plafonnier bureau ») :
+    // seuls les termes de lieu comptent ; sans eux, le quoi sert de dernier indice.
+    const hints = lieuTerms.length > 0 ? lieuTerms : quoiId ? [quoiId.replace(/_/g, ' ')] : [];
+    const words = hints.flatMap((phrase) => this.tokenizeLieuPhrase(phrase));
+    if (words.length === 0) return [];
+    // Repartir de toutes les entités : le quoi a pu être mal deviné, le nom tranche.
+    const pool = this.getAllEntities();
+    const haystack = (e: HaStructuredEntity): string =>
+      this.slugifyLieu(`${e.friendly_name ?? ''} ${e.entity_id}`).replace(/_/g, ' ');
+    const found = pool.filter((e) => {
+      const text = ` ${haystack(e)} `;
+      return words.every((w) => text.includes(` ${w}`) || text.includes(w));
+    });
+    // Trop de résultats = recherche trop vague pour être fiable : mieux vaut ne rien renvoyer.
+    return found.length > 0 && found.length <= 25 ? found : [];
+  }
+
+  private matchesPrecis(entity: HaStructuredEntity, termSlug: string): boolean {
+    const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
+    return typeof taxonomy?.slug_precis === 'string' && taxonomy.slug_precis === termSlug;
   }
 
   /** Un terme (déjà slugifié) matche une entité directement (son propre lieu_precis) ou via le
@@ -882,10 +953,15 @@ export class HaStructureRegistry {
     if (!this.lieuGraphDirty) return;
 
     this.lieuChildren.clear();
+    this.lieuNodes.clear();
 
     for (const entity of this.entityMap.values()) {
       const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
       if (!taxonomy) continue;
+      for (const key of ['slug_grand_pere', 'slug_pere', 'slug_lieu'] as const) {
+        const node = taxonomy[key];
+        if (typeof node === 'string' && node.length > 0) this.lieuNodes.add(node);
+      }
 
       // lieu_precis volontairement exclu : c'est un label local à l'entité (voir
       // getEntitiesByQuoiAndLieux), jamais une arête du graphe de containment.
