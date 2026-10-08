@@ -65,6 +65,11 @@ describe('getEntitiesByQuoiAndLieux — résolution quoi/lieux', () => {
     expect(ids(registry, 'lumiere', ['plafonnier', 'bureau'])).toEqual(['light.sans_taxo']);
   });
 
+  it('le repli sur le nom ne sort jamais du quoi demandé', () => {
+    // « Plafonnier salon » existe, mais n'est pas un volet : jamais renvoyé pour quoi=volet.
+    expect(ids(registry, 'temperature', ['salon'])).toEqual([]);
+  });
+
   it('lieu inconnu : rien', () => {
     expect(ids(registry, 'lumiere', ['cave'])).toEqual([]);
   });

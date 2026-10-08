@@ -1,13 +1,16 @@
 /**
  * Serveur MCP (Model Context Protocol) pour Claude Code — specs ia v1.15 §19.
  *
- * Expose à Claude Code EXACTEMENT les outils donnés à Mistral (tools.ts : lister_entites,
- * obtenir_etat, executer_action), exécutés par le même ToolExecutor — mêmes résolutions quoi/lieux,
- * même passage par planificateur pour les actions. Aucun outil supplémentaire.
+ * Expose à Claude Code les outils donnés à Mistral (tools.ts : lister_entites, obtenir_etat,
+ * executer_action — mêmes résolutions quoi/lieux, même passage par planificateur pour les actions)
+ * plus des outils de LECTURE propres à Claude Code (McpTools.ts), et lui transmet à la connexion
+ * la même vision que Mistral : catalogue quoi/lieux/macros dans les « instructions » du serveur,
+ * règles et catalogue en « ressources ».
  *
  * Transport « Streamable HTTP » simplifié et sans état : POST /mcp, une requête JSON-RPC 2.0 →
  * une réponse JSON. Pas de session, pas de flux SSE (aucune notification serveur à pousser).
- * Méthodes : initialize, notifications/initialized, ping, tools/list, tools/call.
+ * Méthodes : initialize, notifications/initialized, ping, tools/list, tools/call, resources/list,
+ * resources/read.
  *
  * Sécurité : jeton Bearer OBLIGATOIRE (le serveur ne démarre pas sans), comparaison à temps
  * constant, chaque appel d'outil journalisé (nom + arguments, jamais le jeton).
@@ -17,17 +20,38 @@ import express, { type Request, type Response } from 'express';
 import http from 'node:http';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Logger } from '../../../core/dist/exports';
-import { IA_TOOLS } from './tools';
 
 export type McpToolHandler = (name: string, args: Record<string, unknown>) => Promise<string>;
 
+export interface McpToolDef {
+  name: string;
+  description: string;
+  inputSchema: unknown;
+}
+
+export interface McpResourceDef {
+  uri: string;
+  name: string;
+  description: string;
+  mimeType: string;
+}
+
+export interface McpServerOptions {
+  host: string;
+  port: number;
+  token: string;
+  logger: Logger;
+  tools: McpToolDef[];
+  onToolCall: McpToolHandler;
+  /** Texte d'instructions renvoyé à `initialize` — recalculé à chaque connexion (catalogue à jour). */
+  getInstructions: () => string;
+  resources: McpResourceDef[];
+  /** Contenu d'une ressource, ou undefined si inconnue. */
+  readResource: (uri: string) => string | undefined;
+}
+
 const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER_INFO = { name: 'dimotic-ha', version: '1.0.0' };
-const INSTRUCTIONS =
-  "Accès à la maison (Home Assistant) via dimotic-ha. Vocabulaire QUOI/OÙ : `quoi` est une catégorie " +
-  "(ex: lumière, volet, température), `lieux` une liste de lieux (ex: [\"salon\"]). Utiliser lister_entites " +
-  "ou obtenir_etat avant executer_action pour vérifier que la cible existe : executer_action agit réellement " +
-  "sur la maison.";
 
 interface JsonRpcRequest {
   jsonrpc?: string;
@@ -43,14 +67,25 @@ export class McpHttpServer {
   private server?: http.Server;
   private readonly expectedToken: Buffer;
 
-  constructor(
-    private readonly host: string,
-    private readonly port: number,
-    token: string,
-    private readonly logger: Logger,
-    private readonly onToolCall: McpToolHandler
-  ) {
-    this.expectedToken = sha(token);
+  private readonly host: string;
+  private readonly port: number;
+  private readonly logger: Logger;
+  private readonly tools: McpToolDef[];
+  private readonly onToolCall: McpToolHandler;
+  private readonly getInstructions: () => string;
+  private readonly resources: McpResourceDef[];
+  private readonly readResource: (uri: string) => string | undefined;
+
+  constructor(options: McpServerOptions) {
+    this.host = options.host;
+    this.port = options.port;
+    this.logger = options.logger;
+    this.tools = options.tools;
+    this.onToolCall = options.onToolCall;
+    this.getInstructions = options.getInstructions;
+    this.resources = options.resources;
+    this.readResource = options.readResource;
+    this.expectedToken = sha(options.token);
     this.app.disable('x-powered-by');
     this.app.use(express.json({ limit: '256kb' }));
     this.app.post('/mcp', (req, res) => void this.handle(req, res));
@@ -104,9 +139,9 @@ export class McpHttpServer {
           const protocolVersion = SUPPORTED_PROTOCOL_VERSIONS.includes(asked) ? asked : SUPPORTED_PROTOCOL_VERSIONS[0];
           res.json(rpcResult(id, {
             protocolVersion,
-            capabilities: { tools: { listChanged: false } },
+            capabilities: { tools: { listChanged: false }, resources: { listChanged: false, subscribe: false } },
             serverInfo: SERVER_INFO,
-            instructions: INSTRUCTIONS
+            instructions: this.getInstructions()
           }));
           return;
         }
@@ -115,17 +150,27 @@ export class McpHttpServer {
           return;
         case 'tools/list':
           res.json(rpcResult(id, {
-            tools: IA_TOOLS.map((t) => ({
-              name: t.function.name,
-              description: t.function.description,
-              inputSchema: t.function.parameters
-            }))
+            tools: this.tools
           }));
           return;
+        case 'resources/list':
+          res.json(rpcResult(id, { resources: this.resources }));
+          return;
+        case 'resources/read': {
+          const uri = String(message.params?.uri ?? '');
+          const text = this.resources.some((r) => r.uri === uri) ? this.readResource(uri) : undefined;
+          if (text === undefined) {
+            res.json(rpcError(id, -32002, `Ressource inconnue : ${uri}`));
+            return;
+          }
+          const mimeType = this.resources.find((r) => r.uri === uri)?.mimeType ?? 'text/plain';
+          res.json(rpcResult(id, { contents: [{ uri, mimeType, text }] }));
+          return;
+        }
         case 'tools/call': {
           const name = String(message.params?.name ?? '');
           const args = (message.params?.arguments ?? {}) as Record<string, unknown>;
-          if (!IA_TOOLS.some((t) => t.function.name === name)) {
+          if (!this.tools.some((t) => t.name === name)) {
             res.json(rpcError(id, -32602, `Outil inconnu : ${name}`));
             return;
           }

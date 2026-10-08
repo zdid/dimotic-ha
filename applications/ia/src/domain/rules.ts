@@ -96,7 +96,8 @@ export class RulesProvider {
    * tant que le matériel ne change pas — profite donc du cache de prompt côté Mistral comme le
    * reste du message system.
    */
-  private buildCatalogText(): string {
+  /** Catalogue quoi/lieux/macros — aussi transmis à Claude Code par le serveur MCP (McpHttpServer). */
+  buildCatalogText(): string {
     const macroList = (this.getMacroNames?.() ?? []).filter((name) => name.trim().length > 0).join(', ');
     const macroLines = macroList
       ? [

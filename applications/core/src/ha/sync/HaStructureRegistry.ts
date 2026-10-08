@@ -822,7 +822,7 @@ export class HaStructureRegistry {
     }
 
     let result = this.matchLieuTerms(candidates, lieuTerms);
-    if (result.length === 0) result = this.matchByName(quoiId, lieuTerms);
+    if (result.length === 0) result = this.matchByName(candidates, quoiId, lieuTerms);
     return result;
   }
 
@@ -880,19 +880,21 @@ export class HaStructureRegistry {
    * (quoi + lieux) doivent figurer dans le nom ou l'identifiant de l'entité. Évite qu'un
    * « plafonnier de la chambre » introuvable parce que non classé le reste alors que son nom le dit.
    */
-  private matchByName(quoiId: string | undefined, lieuTerms: string[]): HaStructuredEntity[] {
+  private matchByName(candidates: HaStructuredEntity[], quoiId: string | undefined, lieuTerms: string[]): HaStructuredEntity[] {
     // Le quoi n'est pas exigé dans le nom (« lumière » n'apparaît pas dans « Plafonnier bureau ») :
     // seuls les termes de lieu comptent ; sans eux, le quoi sert de dernier indice.
     const hints = lieuTerms.length > 0 ? lieuTerms : quoiId ? [quoiId.replace(/_/g, ' ')] : [];
-    const words = hints.flatMap((phrase) => this.tokenizeLieuPhrase(phrase));
+    const words = hints.flatMap((phrase) => this.tokenizeLieuPhrase(phrase)).filter((w) => w.length >= 3);
     if (words.length === 0) return [];
-    // Repartir de toutes les entités : le quoi a pu être mal deviné, le nom tranche.
-    const pool = this.getAllEntities();
+    // ⚠️ Jamais au-delà du quoi demandé : « ferme le volet du salon » sans volet au salon ne doit pas
+    // retomber sur « Plafonnier salon » par son nom (une commande agirait sur la mauvaise entité).
+    // Sans quoi, toutes les entités sont candidates.
+    const pool = quoiId ? candidates : this.getAllEntities();
     const haystack = (e: HaStructuredEntity): string =>
       this.slugifyLieu(`${e.friendly_name ?? ''} ${e.entity_id}`).replace(/_/g, ' ');
     const found = pool.filter((e) => {
       const text = ` ${haystack(e)} `;
-      return words.every((w) => text.includes(` ${w}`) || text.includes(w));
+      return words.every((w) => text.includes(` ${w}`));
     });
     // Trop de résultats = recherche trop vague pour être fiable : mieux vaut ne rien renvoyer.
     return found.length > 0 && found.length <= 25 ? found : [];

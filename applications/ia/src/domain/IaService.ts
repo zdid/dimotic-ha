@@ -24,6 +24,7 @@ import { StructuredRouter } from './StructuredRouter';
 import { ConditionEvaluator } from './ConditionEvaluator';
 import { OllamaHttpServer } from './OllamaHttpServer';
 import { McpHttpServer } from './McpHttpServer';
+import { McpToolbox, MCP_TOOLS } from './McpTools';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
@@ -314,10 +315,108 @@ export class IaService implements IIaService {
       this.logger.warn('IaService', 'Accès MCP activé mais aucun jeton défini — serveur MCP NON démarré');
       return;
     }
-    this.mcpServer = new McpHttpServer(this.config.mcpHost, this.config.mcpPort, token, this.logger, (name, args) =>
-      this.toolExecutor.execute({ id: `mcp-${Date.now()}`, type: 'function', function: { name, arguments: args } })
-    );
+    const toolbox = new McpToolbox({
+      toolExecutor: this.toolExecutor,
+      registry: this.haBridgeClient,
+      excludedQuoiIds: () => this.config.excludedQuoiIds,
+      simulate: (phrase, useMistral) => this.simulatePhrase(phrase, useMistral)
+    });
+    this.mcpServer = new McpHttpServer({
+      host: this.config.mcpHost,
+      port: this.config.mcpPort,
+      token,
+      logger: this.logger,
+      tools: MCP_TOOLS,
+      onToolCall: (name, args) => toolbox.call(name, args),
+      getInstructions: () => this.buildMcpInstructions(),
+      resources: [
+        { uri: 'dimotic://catalogue', name: 'Catalogue de la maison', description: 'QUOI, lieux et macros connus (à jour) — la même liste que celle transmise à Mistral', mimeType: 'text/plain' },
+        { uri: 'dimotic://regles', name: 'Règles de l\'assistant Mistral', description: 'Texte des règles domotiques de Mistral (version personnalisée si elle existe). Utiles : sections 0.x (verbes, lieux, valeurs, date) ; le reste concerne le format JSON de Mistral.', mimeType: 'text/plain' }
+      ],
+      readResource: (uri) => uri === 'dimotic://catalogue' ? this.rulesProvider.buildCatalogText() : uri === 'dimotic://regles' ? this.rulesProvider.getRules() : undefined
+    });
     this.mcpServer.start();
+  }
+
+  /** Vision transmise à Claude Code à chaque connexion : mêmes listes que Mistral, recalculées. */
+  private buildMcpInstructions(): string {
+    return [
+      'Accès à la maison (Home Assistant) via dimotic-ha — la même vision que l\'assistant vocal Mistral.',
+      '',
+      'Vocabulaire QUOI/OÙ : `quoi` est une catégorie d\'appareil (lumière, volet roulant, température…), `lieux` une liste',
+      'de lieux à n\'importe quel niveau (repère précis, pièce, étage, maison). Plusieurs lieux = l\'un OU l\'autre ; un repère précis',
+      'et une pièce se donnent en UN SEUL élément : ["plafonnier de la chambre"]. "valeur" est toujours absolue (40 = 40 %).',
+      '',
+      'Outils : lister_entites / obtenir_etat / obtenir_details (lecture), diagnostiquer_resolution (pourquoi une entité ne ressort pas),',
+      'tester_phrase (simule une phrase sans rien exécuter), executer_action (AGIT RÉELLEMENT sur la maison : vérifier la cible avant).',
+      'Règles complètes de Mistral : ressource dimotic://regles ; catalogue seul : dimotic://catalogue.',
+      '',
+      this.rulesProvider.buildCatalogText()
+    ].join('\n');
+  }
+
+  /**
+   * Simulation d'une phrase pour Claude Code (outil MCP `tester_phrase`) : même chemin que
+   * handleChat() — cache, interpréteur déterministe, puis Mistral — mais RIEN n'est exécuté ni mis
+   * en cache, aucune planification créée. Mistral n'est interrogé (en dry-run) que sur demande :
+   * l'appel est facturé.
+   */
+  async simulatePhrase(phrase: string, useMistral: boolean): Promise<unknown> {
+    const question = phrase.trim();
+    if (!question) return { error: 'phrase vide' };
+    if (!this.haReady) return { error: HA_NOT_READY_MESSAGE };
+
+    const report: Record<string, unknown> = { phrase: question, execute: false };
+    const cached = this.phraseCache.get(question);
+    let outcomes: DeterministicOutcome[] | undefined = cached;
+    report.cache = Boolean(cached);
+
+    if (!outcomes && Object.keys(this.interpreterGabarits).length > 0) {
+      try {
+        outcomes = interpretDeterministic(
+          question, this.interpreterVocabulaire, this.interpreterGabarits,
+          buildLiveCatalogs(this.haBridgeClient, this.interpreterMacros, this.config.excludedQuoiIds)
+        );
+      } catch (error) {
+        report.erreur_interpreteur = String(error);
+      }
+    }
+
+    report.interpreteur = outcomes
+      ? { reconnu: true, source: cached ? 'cache' : 'interpreteur', enonces: await Promise.all(outcomes.map((o) => this.describeOutcome(o))) }
+      : { reconnu: false };
+
+    if (!outcomes && useMistral) {
+      const model = this.mistralClient.resolveModel(this.config.defaultMistralModel);
+      const result = await this.runChatRounds(this.rulesProvider.inject([{ role: 'user', content: question }]), model, {}, { dryRun: true });
+      report.mistral = result.ok
+        ? {
+            reponse: result.finalText,
+            json_structure: result.intermediateJson,
+            tokens: { prompt: result.promptTokens, completion: result.completionTokens, cache: result.cachedTokens }
+          }
+        : { erreur: result.errorMessage };
+    }
+    return report;
+  }
+
+  /** Décrit un énoncé décodé SANS l'exécuter : ce qu'il ferait, et les entités qu'il viserait. */
+  private async describeOutcome(outcome: DeterministicOutcome): Promise<unknown> {
+    const ids = async (quoi: string | undefined, lieux: string[]): Promise<string[]> =>
+      (await this.haBridgeClient.getEntitiesByQuoiAndLieux(quoi ? slugifyInterpreter(quoi) : undefined, lieux)).map((e) => e.entity_id);
+    switch (outcome.kind) {
+      case 'action':
+        return { type: 'action', ...outcome.params, entites_visees: await ids(outcome.params.quoi, outcome.params.lieux) };
+      case 'request':
+        return { type: 'interrogation', quoi: outcome.quoi, lieux: outcome.lieux, entites: await ids(outcome.quoi, outcome.lieux) };
+      case 'evenement':
+        return {
+          type: 'evenement', declencheur: { quoi: outcome.triggerQuoi, lieu: outcome.triggerLieu, etat: outcome.triggerEtat },
+          action: outcome.action, entites_declencheur: await ids(outcome.triggerQuoi, outcome.triggerLieu ? [outcome.triggerLieu] : [])
+        };
+      default:
+        return { type: 'structure', donnees: outcome.data };
+    }
   }
 
   private cleanupAssistSessions(): void {

@@ -1,8 +1,12 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.37  
+**Version :** 4.38  
 **Date :** 8 Octobre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.38** : **repli par le nom borné** (§8.3.2 v4.37 (c)) — il ne sort jamais du `quoi` demandé (sans cela « ferme le volet
+> du salon » sans volet au salon retombait sur « Plafonnier salon ») ; correspondance en début de mot, mots de 3 lettres
+> minimum.
 
 > **v4.37** : **résolution quoi/lieux** (§8.3.2) — un repère précis (`lieu_precis`) combiné à un lieu dans un
 > tableau `lieux` restreint (ET) au lieu d'élargir (`["plafonnier", "chambre"]` = le plafonnier de la chambre) ;
@@ -1606,10 +1610,12 @@ demande utilisateur) sans dupliquer un mécanisme de recherche compound séparé
 **⭐ v4.37 — compléments** : (a) un mot vide en tête d'un terme **seul** est ignoré (« la chambre » =
 « chambre », « le plafonnier » = « plafonnier ») — avant, ce cas ne donnait rien, le repli exigeant au
 moins deux mots ; (b) un `quoi` qui ne désigne aucun QUOI mais un `lieu_precis` (`quoi: "plafonnier"`)
-est traité comme ce `lieu_precis` ; (c) **dernier recours par le nom** : si rien ne correspond, tous les
-mots significatifs des termes de lieu (à défaut, le quoi) doivent figurer dans le nom ou l'identifiant
-de l'entité — pour une entité non classée dont le nom le dit (« Plafonnier bureau ») ; ignoré au-delà
-de 25 résultats (demande trop vague). Testé : `core/src/ha/sync/__tests__/HaStructureRegistry.lieux.test.ts`.
+est traité comme ce `lieu_precis` ; (c) **dernier recours par le nom** : si rien ne correspond, tous les mots significatifs (3 lettres minimum,
+correspondance en début de mot) des termes de lieu (à défaut, du quoi) doivent figurer dans le nom ou l'identifiant
+de l'entité — pour une entité dont le nom le dit mais dont le lieu n'est pas classé (« Plafonnier bureau »).
+**⚠️ v4.38 : jamais au-delà du `quoi` demandé** — avec un quoi, seules les entités de ce quoi sont candidates (sinon
+une commande « ferme le volet du salon », sans volet au salon, aurait agi sur « Plafonnier salon ») ; sans quoi, toutes
+les entités. Ignoré au-delà de 25 résultats (demande trop vague). Testé : `core/src/ha/sync/__tests__/HaStructureRegistry.lieux.test.ts`.
 
 ### 8.3.3 ⭐ Catalogue de lieux statique — `getLieuCatalog()` (nouveau v4.28)
 

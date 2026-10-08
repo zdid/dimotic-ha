@@ -1,8 +1,12 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.18
+**Version :** 1.19
 **Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.19** : **Claude Code observateur** (§19.7) — le serveur MCP transmet à la connexion la même vision que Mistral
+> (catalogue dans les instructions, règles et catalogue en ressources) et ajoute trois outils de LECTURE :
+> `obtenir_details`, `diagnostiquer_resolution`, `tester_phrase` (simulation sans exécution).
 
 > **v1.18** : **noms des macros ajoutés au catalogue injecté à Mistral** (§5) — ligne « Macros existantes »,
 > sans laquelle la classification C (exécution d'une macro) ne pouvait pas s'appuyer sur une liste.
@@ -1041,6 +1045,7 @@ mécanisme de nouvel essai ajouté, pas encore re-déclenché en réel faute d'u
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.19 | 08/10/2026 | Claude | **Claude Code observateur** (§19.7) : instructions MCP = vocabulaire + catalogue (recalculé à chaque connexion), ressources `dimotic://catalogue` et `dimotic://regles`, outils de lecture `obtenir_details` (attributs réels + classement), `diagnostiquer_resolution`, `tester_phrase` (cache → interpréteur → Mistral optionnel, rien d'exécuté) ; `McpTools.ts`. v1.18 archivée. |
 | 1.18 | 08/10/2026 | Claude | **Catalogue injecté** (§5, `RulesProvider.inject()`) : ajout de la ligne « Macros existantes » (noms exacts, cache alimenté par `planificateur:macros:list`) à la suite des listes QUOI/lieux ; sans macro connue le bloc reste identique (cache de prompt préservé) ; ajouté même si le référentiel HA est indisponible. v1.17 archivée. |
 | 1.17 | 08/10/2026 | Claude | **Règles Mistral révisées** : section 4 « déploiement à l'exécution » et exemple 3 supprimés (inutilisés depuis v1.14) ; §0.4 alignée sur §0.5 ; nouveaux §0.6 (lieux), §0.7 (valeurs absolues), §0.8 (date/heure) ; verbes acceptés et ambigus (§0.1) ; plusieurs ordres (§0.5) ; exemple 5. v1.16 archivée. |
 | 1.16 | 08/10/2026 | Claude | **Fichiers éditables à deux niveaux** (§12bis, `LayeredFiles.ts`) : `regles_mistral.txt`, `vocabulaire_interpreteur.yaml`, `gabarits_interpreteur.yaml` — copie embarquée renouvelée à chaque démarrage dans `data/ia/modele_integre/`, version modifiée dans `data/ia/personnalise/` (prioritaire) ; reprise de l'ancien fichier unique `data/ia/<nom>` ; `rulesFile` devient optionnel. v1.15 archivée. |
@@ -1110,8 +1115,36 @@ claude mcp add --transport http dimotic http://<machine>:8765/mcp \
   --header "Authorization: Bearer <jeton>"
 ```
 
+### 19.6bis Transport (v1.19)
+
+`McpHttpServer` reçoit ses outils, ses ressources et ses instructions en paramètres (`McpServerOptions`) ;
+méthodes ajoutées : `resources/list`, `resources/read` (capacité `resources`).
+
 ### 19.6 Vérifié
 
 Serveur éprouvé avec un gestionnaire factice : jeton absent/erroné → 401 ; `initialize`, `tools/list`
 (3 outils), `tools/call` (arguments transmis), notification → 202, outil inconnu → erreur, `GET` → 405.
 **Non vérifié** : exécution réelle contre Home Assistant et `planificateur`, et connexion d'un vrai Claude Code.
+
+### 19.7 Claude Code observateur (nouveau v1.19)
+
+**Principe** : Claude Code tourne sur la même machine ; il lit déjà fichiers, logs et dépôt lui-même. Le MCP n'apporte
+que ce que seul le système en marche connaît. Étape « observateur » : **aucun outil nouveau n'agit sur la maison**.
+
+**La même vision que Mistral, à la connexion** :
+- *instructions* du serveur (renvoyées à `initialize`, recalculées à chaque connexion) : vocabulaire QUOI/OÙ (lieux = OU,
+  repère précis + pièce en un seul élément, valeur toujours absolue), liste des outils, puis le catalogue quoi/lieux/macros
+  identique à celui injecté à Mistral (`RulesProvider.buildCatalogText()`, §5) ;
+- *ressources* : `dimotic://catalogue` (catalogue seul) et `dimotic://regles` (texte des règles Mistral effectif — version
+  personnalisée si elle existe, §12bis ; utiles : sections 0.x).
+
+**Outils de lecture propres à Claude Code** (`McpTools.ts`) :
+
+| Outil | Rôle |
+|---|---|
+| `obtenir_details` | entity_id, ou filtre quoi/lieux : état, **attributs réels** (luminosité, position, unité… ; bruit retiré, valeurs tronquées) et classement quoi/lieu précis/pièce/étage ; 20 entités max par défaut (50 au plus) |
+| `diagnostiquer_resolution` | pour un quoi/lieux : le quoi et chaque lieu existent-ils, combien d'entités seuls puis combinés, noms proches du catalogue en cas de faute, remarques en clair (« le lieu existe mais aucune entité de ce quoi ») |
+| `tester_phrase` | simule une phrase **sans rien exécuter ni mettre en cache** : cache, interpréteur déterministe (énoncés décodés + entités visées), et — seulement si `utiliser_mistral` est vrai, appel facturé — Mistral en dry-run (aucun `executer_action` transmis, aucune planification créée) |
+
+`executer_action` reste le seul outil qui agit, identique à Mistral. Reste hors périmètre : créer ou modifier macros et
+planifications, lecture de l'historique du planificateur (étapes suivantes éventuelles).
