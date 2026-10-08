@@ -1,0 +1,167 @@
+# Conception — Claude Code, accès au système et génération d'automatisations
+
+*Version 1.0 - 8 Octobre 2026*
+*Spécification de **conception** (aucun code nouveau — sauf ce qui est déjà livré, §3). Consigne les décisions de
+l'utilisateur du 08/10/2026 : un Claude Code par site, avec la même vision de la maison que l'assistant Mistral, des
+autorisations ouvertes au fur et à mesure du besoin, et le choix entre le planificateur et Home Assistant pour exécuter
+une automatisation. Les specs des applications concernées (`ia`, `planificateur`, socle) seront versionnées au moment de
+la mise en œuvre (§9).*
+
+---
+
+## 📌 Table des Matières
+
+1. Objet et décisions
+2. Les sites et leur organisation
+3. Ce qui existe déjà (livré)
+4. Où exécuter une automatisation : planificateur ou Home Assistant
+5. Échelle d'autorisations
+6. Lecture seule : ce qui est lu, ce qui est interdit
+7. Rédiger une automatisation Home Assistant
+8. Le planificateur, banc d'essai
+9. Specs et code impactés
+10. Points ouverts
+11. Plan de mise en œuvre
+12. Historique
+
+---
+
+## 1. Objet et décisions
+
+Décisions de l'utilisateur (08/10/2026), dans l'ordre où elles ont été prises :
+
+1. **Un Claude Code par site**, tournant sur la même machine que Home Assistant (§2).
+2. Claude Code doit avoir **la même vision du système que Mistral — et davantage** (§3).
+3. **Les autorisations sont ouvertes au fur et à mesure des besoins** — jamais d'avance (§5).
+4. Une automatisation peut s'exécuter **soit dans le planificateur, soit dans Home Assistant, au choix** (§4).
+5. Accès de Claude Code à Home Assistant : **lecture seule** pour l'instant (§6).
+6. **Par défaut : Home Assistant**, sur les deux sites. Exception ici : **les planifications basiques dans le
+   planificateur**, qui sert de banc d'essai pour le valider (§8).
+7. Le Claude Code du site distant **n'existe pas encore** : même modèle, installé plus tard.
+
+## 2. Les sites et leur organisation
+
+Deux sites, distants d'environ 500 km : celui de l'utilisateur (« ici ») et celui de sa fille. **Sur chaque site, une
+machine porte Home Assistant, un dimotic-ha et un Claude Code** (dans un `screen`, affiché dans le navigateur par
+l'application `screen2http`). Aujourd'hui seul le site « ici » a son Claude Code.
+
+Conséquences :
+- **Chaque Claude Code parle à son propre dimotic-ha, en local.** Le serveur MCP (`ia`, spec `fonctionnelles-ia` §19) reste à
+  l'écoute sur `127.0.0.1`, avec **son propre jeton** — aucun port ouvert sur le réseau, aucun VPN nécessaire pour cela.
+- **Aucun déploiement à travers les 500 km** : chaque Claude Code agit sur sa propre machine. Une erreur reste locale, et
+  l'échelle d'autorisations (§5) s'applique site par site.
+- **Propre à chaque site** : catalogue quoi/lieux (les entités), planifications, jeton, niveau d'autorisation.
+  **Commun** : code de dimotic-ha, règles embarquées, méthode de travail (mises à jour par `git pull` puis build).
+- **Piloter le Claude Code distant** passera par la console `screen2http` de son dimotic-ha — donc par un accès distant
+  sécurisé à l'interface de ce site (VPN ou équivalent, §10).
+
+## 3. Ce qui existe déjà (livré le 08/10/2026)
+
+Serveur MCP de l'application `ia` (spec `fonctionnelles-ia` v1.20, §19), désactivé par défaut, jeton Bearer obligatoire :
+
+| Capacité | Contenu |
+|---|---|
+| Mêmes outils que Mistral | `lister_entites`, `obtenir_etat`, `executer_action` (seul outil qui agit) |
+| Même vision à la connexion | catalogue quoi/lieux/macros dans les instructions ; ressources `dimotic://catalogue` et `dimotic://regles` |
+| Lecture élargie | `obtenir_details` (attributs réels, classement), `diagnostiquer_resolution`, `tester_phrase` (simulation sans exécution) |
+| Lecture du planificateur | `lire_planificateur` (statut, planifications, macros, actions reçues, commandes réellement envoyées à HA, YAML) |
+
+Aucun de ces outils n'écrit dans Home Assistant ni ne crée de planification. `executer_action` est le seul qui agit sur la
+maison, exactement comme pour Mistral.
+
+## 4. Où exécuter une automatisation : planificateur ou Home Assistant
+
+| | Planificateur | Home Assistant |
+|---|---|---|
+| Cibles | résolues **dynamiquement** (quoi/lieux) : suit un renommage ou un déplacement d'entité | `entity_id` **figés** à la rédaction : à refaire si les entités changent |
+| Robustesse | dépend de dimotic-ha | **autonome** : continue si dimotic-ha ou la connexion tombe |
+| Visibilité | interface du planificateur (liste numérotée) | interface Home Assistant et ses outils |
+| Macros, aléatoire, condition en texte libre | natifs | à traduire (scripts, templates), parfois imparfaitement |
+
+**Règle par défaut** : Home Assistant — a fortiori sur le site distant, où l'on ne peut pas intervenir : la maison doit
+continuer à fonctionner seule. **Exception** : les planifications basiques ici (§8).
+
+Deux lectures possibles de « au choix » :
+1. **Deux chemins séparés** : Claude Code rédige pour Home Assistant, ou crée une planification via le planificateur.
+   C'est le point de départ retenu.
+2. **Une description, deux cibles** : la structure du planificateur (déclencheur, conditions, actions, macros) reste la
+   source, et une « cible d'exécution » par planification (`planificateur` par défaut, ou `home_assistant`) fait générer
+   l'automatisation Home Assistant. **Non retenu à ce stade** ; à n'envisager que si le besoin se confirme. Garde-fous à
+   prévoir alors : une seule cible active à la fois (jamais deux copies), marque « géré par dimotic » dans Home
+   Assistant, régénération quand les entités changent, détection d'une modification manuelle dans Home Assistant plutôt
+   qu'un écrasement.
+
+## 5. Échelle d'autorisations
+
+Chaque niveau est ouvert **sur décision de l'utilisateur, site par site**, jamais par défaut :
+
+| Niveau | Claude Code peut… | Statut |
+|---|---|---|
+| 0 | lire Home Assistant et dimotic-ha ; proposer des automatisations en texte | **en place** |
+| 1 | déposer ses propositions dans un dossier réservé côté dimotic (jamais dans Home Assistant) | à ouvrir sur demande |
+| 2 | déployer dans Home Assistant par un outil de dimotic : sauvegarde préalable, validation de la configuration, confirmation de l'utilisateur, rechargement | à concevoir si le niveau 1 convainc |
+| 3 | cible « Home Assistant » portée directement par une planification (§4, lecture 2) | à n'envisager que si nécessaire |
+
+Les autorisations se règlent à deux endroits : côté **Claude Code** (permissions de fichiers et d'outils MCP) et côté
+**dimotic** (jeton, outils exposés). Les outils agissants (niveau 2 et suivants) devront demander confirmation.
+
+## 6. Lecture seule : ce qui est lu, ce qui est interdit
+
+Claude Code est sur la même machine que Home Assistant : il peut lire les fichiers de configuration. **Lecture seule ne
+veut pas dire inoffensif** — le dossier de configuration contient des secrets.
+
+- **Autorisé en lecture** : `automations.yaml`, `scripts.yaml`, `scenes.yaml`, `configuration.yaml`.
+- **Interdit, y compris en lecture** : `secrets.yaml` et le dossier `.storage` (jetons d'accès, authentification).
+- À régler dans les permissions de Claude Code **sur chaque machine** (règles de refus explicites).
+- Variante sans aucun accès fichiers : un outil `lire_automatisations_ha` côté dimotic, qui interroge Home Assistant par
+  son interface (à vérifier : les droits de la connexion actuelle de dimotic-ha à Home Assistant). Confort plutôt que
+  nécessité, puisque Claude Code est local sur chaque site.
+
+## 7. Rédiger une automatisation Home Assistant
+
+Flux retenu au niveau 0 : l'utilisateur décrit le besoin ; Claude Code
+1. lit l'existant (automatisations Home Assistant, `lire_planificateur`) pour éviter les doublons ;
+2. identifie les **vrais** `entity_id` (`obtenir_details`, `diagnostiquer_resolution`) ;
+3. rédige l'automatisation en YAML et la **propose** à l'utilisateur ;
+4. l'utilisateur relit et l'applique lui-même.
+
+Une automatisation destinée à l'autre site est rédigée avec le catalogue **de ce site** : ses entités diffèrent. Idée pour
+plus tard (hors décision) : faire voyager une proposition comme fichier entre les deux dimotic-ha par le mécanisme de
+diffusion des données entre machines (`techniques-diffusion-data_specs`), relue puis appliquée par le Claude Code local.
+
+## 8. Le planificateur, banc d'essai
+
+Ici, **les planifications basiques** (heure fixe, récurrence simple, délai) restent dans le planificateur : leur usage
+réel valide le planificateur avant de lui confier davantage. À observer, avec `lire_planificateur` : déclenchement à
+l'heure, commandes réellement envoyées (`commandes_ha`), anomalies, reprise après redémarrage. Critère de confiance à
+fixer par l'utilisateur (§10) avant d'élargir son périmètre.
+
+## 9. Specs et code impactés
+
+Rien d'impacté tant que l'on reste au niveau 0. Selon les niveaux ouverts : `fonctionnelles-ia` (nouveaux outils MCP,
+§19), `fonctionnelles-planificateur` (si cible Home Assistant), `techniques-socle-ha-mqtt` (si lecture/écriture
+Home Assistant par le socle), `PROMPT_PROJET` §11 (table de correspondance, à étendre à cette spec).
+
+## 10. Points ouverts
+
+1. **Accès distant sécurisé** au dimotic-ha du site de la fille (VPN ou équivalent) pour piloter son futur Claude Code.
+2. **Droits de la connexion dimotic-ha → Home Assistant** : suffisent-ils pour lire (et plus tard écrire) des
+   automatisations ?
+3. **Critère de validation du planificateur** : combien de temps / quels cas avant d'élargir son rôle ?
+4. **Niveau 1** (dossier de propositions) : emplacement, format, revue.
+5. **Sauvegarde et retour arrière** avant tout écriture dans Home Assistant (niveau 2).
+6. **Diffusion de propositions entre sites** : utile ou superflu ?
+
+## 11. Plan de mise en œuvre
+
+1. *(fait)* Serveur MCP et outils de lecture (spec `ia` §19).
+2. Règles de permissions de Claude Code (lecture limitée aux fichiers utiles, refus des secrets), sur chaque machine.
+3. Usage réel au niveau 0 ; noter les manques constatés.
+4. Selon ces manques : outil `lire_automatisations_ha`, puis niveau 1, puis niveau 2.
+5. Installation du Claude Code du site distant, avec jeton et permissions propres.
+
+## 12. Historique
+
+| Version | Date | Auteur | Changements |
+|---------|------|--------|-------------|
+| 1.0 | 08/10/2026 | Claude | Version initiale — conception issue des échanges du 08/10/2026 (aucun code nouveau). |
