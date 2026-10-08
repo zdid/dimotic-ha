@@ -1,8 +1,14 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.16
+**Version :** 1.17
 **Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.17** : **règles Mistral révisées** (`regles_mistral.txt`) — section 4 (déploiement à l'exécution, morte depuis
+> v1.14) et exemple 3 supprimés ; §0.4 alignée sur §0.5 (jamais « introuvable » sans vérification par l'outil) ;
+> ajouts : verbes acceptés et verbes ambigus (§0.1), plusieurs ordres dans une phrase (§0.5), formulation des
+> lieux (§0.6, dont « plafonnier de la chambre » en un seul élément et « tout » = `["maison"]`), valeurs
+> toujours absolues (§0.7), date/heure (§0.8). Renumérotation : généralités = §4, exemples = §5.
 
 > **v1.16** : **fichiers éditables à deux niveaux** (§12bis) — règles Mistral, vocabulaire et gabarits de
 > l'interpréteur : `data/ia/modele_integre/` (copie de la version embarquée, renouvelée à chaque démarrage)
@@ -488,7 +494,7 @@ Conséquence pour les règles (`regles_mistral.txt`) : `verbe`/`quoi` (et `valeu
 **obligatoires dans toute action**, à toute profondeur — `planificateur` refuse désormais à la
 création une action qui ne les porte pas. Les exemples 1, 2 et 4 des règles, qui ne portaient que
 `order`, ont été corrigés (et l'exemple 1 utilise la forme structurée de condition du §2.3). La
-section 4 des règles (format de déploiement à l'exécution) n'est plus utilisée.
+section 4 des règles (format de déploiement à l'exécution) n'était plus utilisée ; **supprimée en v1.17**.
 
 ## 11. Communication interne (EventBus)
 
@@ -1025,6 +1031,7 @@ mécanisme de nouvel essai ajouté, pas encore re-déclenché en réel faute d'u
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.17 | 08/10/2026 | Claude | **Règles Mistral révisées** : section 4 « déploiement à l'exécution » et exemple 3 supprimés (inutilisés depuis v1.14) ; §0.4 alignée sur §0.5 ; nouveaux §0.6 (lieux), §0.7 (valeurs absolues), §0.8 (date/heure) ; verbes acceptés et ambigus (§0.1) ; plusieurs ordres (§0.5) ; exemple 5. v1.16 archivée. |
 | 1.16 | 08/10/2026 | Claude | **Fichiers éditables à deux niveaux** (§12bis, `LayeredFiles.ts`) : `regles_mistral.txt`, `vocabulaire_interpreteur.yaml`, `gabarits_interpreteur.yaml` — copie embarquée renouvelée à chaque démarrage dans `data/ia/modele_integre/`, version modifiée dans `data/ia/personnalise/` (prioritaire) ; reprise de l'ancien fichier unique `data/ia/<nom>` ; `rulesFile` devient optionnel. v1.15 archivée. |
 | 1.15 | 08/10/2026 | Claude | **Accès MCP pour Claude Code** (§19) : serveur MCP HTTP (`McpHttpServer.ts`) exposant `lister_entites`/`obtenir_etat`/`executer_action` via le même `ToolExecutor` que Mistral ; jeton Bearer obligatoire, désactivé par défaut, appels journalisés ; réglages `mcpEnabled`/`mcpToken`/`mcpPort`/`mcpHost`. v1.14 archivée. |
 | 1.14 | 24/09/2026 | Claude | **Revue de code** (demande utilisateur, session du 24/09/2026) : (1) planification reconnue par l'interpréteur transmise avec `phrase_originale` vide — complétée avec la phrase dite (`withPhraseOriginale`) ; (2) `DeployResponder` ne consulte ni n'alimente plus `PhraseCache` (collision avec les phrases dites via HA : séquence `execution` rejouée comme commande immédiate) ; (3) décisions à déclencheur `date` jamais mises en cache ; (4) rechargement à chaud de `data/ia/config.yaml` et des YAML de l'interpréteur : surveillance du dossier (`loader.ts::watchFile`, anti-rebond 300 ms) — `fs.watch` sur le fichier devenait sourd après 1-2 remplacements par rename (vérifié) ; (5) mineurs : action Mistral en échec jamais mise en cache (`executerActionOk`), réponses planificateur du chemin interpréteur/cache en JSON (session d'assistance plus fermée sur échec), port Ollama occupé journalisé au lieu de faire planter le process, modèles intégrés résolus depuis `__dirname` (racine externe), échappement HTML des guillemets dans l'UI ; (6) démarrage subordonné au premier `ha:ready` (§17 : serveur Ollama, test/comparatif, réinterprétations), statut `haReady` affiché sur le tableau de bord ; (7) **plus de réinterprétation au déclenchement** (§10, décision utilisateur, miroir de `fonctionnelles-planificateur_specs` v1.11) : `DeployResponder` et `outcomesToExecutionSteps()` supprimés, `ConditionEvaluator` (`planificateur:condition`, vrai/faux, outils de lecture seulement) ; `regles_mistral.txt` : `verbe`/`quoi` obligatoires dans toute action, exemples 1/2/4 corrigés (modèle intégré + copie `data/ia/`). Ancienne version v1.13 archivée. |

@@ -1,7 +1,7 @@
 # Gabarits de phrase de l'interpréteur déterministe (voir specs/current/fonctionnelles-ia_specs
-# §16 et le plan de mise en œuvre — "Notation des gabarits"). Modèle versionné, copié vers
-# data/ia/gabarits_interpreteur.yaml au premier démarrage si absent (éditable à chaud ensuite, voir
-# vocabulaire.yaml pour la même convention).
+# §16 et le plan de mise en œuvre — "Notation des gabarits"). Version EMBARQUÉE, copiée à
+# chaque démarrage dans data/ia/modele_integre/ ; une version modifiée dans
+# data/ia/personnalise/gabarits_interpreteur.yaml la remplace (voir vocabulaire.yaml et specs ia §12bis).
 #
 # STATUT (26/08/2026, suite) : `jusqua`/`de` fusionnés dans `a` (mêmes alternatives de surface que
 # le legacy — "à"/"jusqu'à"/"au"/"jusqu'au"), `entre` (fenêtre, trigger.type=window), `donne`

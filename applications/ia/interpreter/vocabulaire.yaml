@@ -1,9 +1,9 @@
 # Vocabulaire de l'interpréteur déterministe (voir specs/current/fonctionnelles-ia_specs §16).
 #
-# Modèle versionné dans le dépôt — copié vers data/ia/vocabulaire_interpreteur.yaml au premier
-# démarrage si absent, puis c'est CE fichier-là (sous data/) qui fait foi et qui est éditable à
-# chaud sans reconstruire l'application. Modifier ce fichier-ci ne change rien à une installation
-# déjà démarrée une fois.
+# Version EMBARQUÉE (modèle versionné dans le dépôt). Une copie en est renouvelée à chaque démarrage
+# dans data/ia/modele_integre/ (ne pas l'éditer). Pour personnaliser : copier cette copie vers
+# data/ia/personnalise/vocabulaire_interpreteur.yaml et modifier celle-ci (rechargée à chaud) ; si ce
+# fichier personnalisé existe, il remplace la version embarquée (voir specs ia §12bis).
 
 # Groupes de verbes. `<verbe:on_off>` (dans un gabarit) matche N'IMPORTE LEQUEL des verbes du
 # groupe "on_off" et capture son nom canonique (pas le nom du groupe) — mirror volontaire des clés
