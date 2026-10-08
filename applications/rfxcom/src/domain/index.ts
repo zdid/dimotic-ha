@@ -76,6 +76,13 @@ export const RFXCOM_UI_METADATA: ModuleUiMetadata = {
           description: "Évite de créer des entités sans area assignée (HA n'applique l'area suggérée qu'une seule fois, à la création) — désactiver si les entités doivent apparaître même quand HA WebSocket est indisponible."
         },
         {
+          name: 'discoveryViaNommage',
+          label: 'Publier les découvertes via NOMMAGE',
+          type: 'boolean',
+          default: false,
+          description: "Les entités passent par l'application NOMMAGE (préfixe homeassist/) qui applique le nom court, la zone, la taxonomie et les catégories, puis les republie à HA sous les mêmes identifiants. Exige NOMMAGE activé ; sans lui, plus aucune entité RFXCOM n'apparaît dans HA. Les scènes et les émetteurs dont le QUOI n'est pas « bouton » restent publiés directement."
+        },
+        {
           name: 'radioDebug',
           label: 'Trace radio détaillée (diagnostic)',
           type: 'boolean',

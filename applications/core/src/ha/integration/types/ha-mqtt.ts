@@ -198,11 +198,26 @@ export interface IntegrationModuleStatus {
  * v2.3 §9.3, corrige l'écrasement silencieux du message de découverte quand deux bridges publient
  * pour le même objectId. Absent = ancien format inchangé (compat, ex: appels sans bridgeInstance).
  */
-export function getDiscoveryTopic(component: string, objectId: string, bridgeInstance?: string): string {
+export function getDiscoveryTopic(component: string, objectId: string, bridgeInstance?: string, prefix: string = DEFAULT_DISCOVERY_PREFIX): string {
   return bridgeInstance
-    ? `homeassistant/${component}/${bridgeInstance}/${objectId}/config`
-    : `homeassistant/${component}/${objectId}/config`;
+    ? `${prefix}/${component}/${bridgeInstance}/${objectId}/config`
+    : `${prefix}/${component}/${objectId}/config`;
 }
+
+/**
+ * QUOI d'un **émetteur** (bouton physique, télécommande) : un tel appareil porte le même lieu précis que la lumière qu'il pilote ;
+ * son nom affiché est donc le nom long (quoi + lieu précis + lieu) plutôt que le nom court. Slugs, comparés sans accents ni casse.
+ * Source unique : NOMMAGE/core (nom court, IntegrationBridge) et RFXCOM (choix du routage) s'appuient sur cette liste.
+ */
+export const EMITTER_QUOI_SLUGS: readonly string[] = ['bouton', 'telecommande'];
+
+export function isEmitterQuoi(quoi: string): boolean {
+  const slug = quoi.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return EMITTER_QUOI_SLUGS.includes(slug);
+}
+
+/** Préfixe de découverte lu directement par HA. Un module peut en demander un autre (ex. `homeassist`) pour transiter par NOMMAGE. */
+export const DEFAULT_DISCOVERY_PREFIX = 'homeassistant';
 
 /**
  * Construit le topic d'état pour un device, propre à l'espace de noms de l'application.

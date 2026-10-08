@@ -272,6 +272,56 @@ describe('IntegrationBridge', () => {
       );
     });
 
+    it('préfixe de découverte alternatif (via NOMMAGE) : topic homeassist/, ni ancien format ni taxonomie', () => {
+      eventBus.emitGeneric('integration:rfxcom:discovery', {
+        bridgeInstance: 'rfx_bridge_0001',
+        component: 'light',
+        objectId: 'recepteur_1',
+        deviceId: 'recepteur_1',
+        essential: { name: null, commandEnabled: true, attributsTaxonomie: { quoi: 'lumière' }, device: { identifiers: ['recepteur_1'], name: 'lumière---plafonnier--salon' } },
+        discoveryPrefix: 'homeassist',
+      });
+
+      const topics = mockTransportInstances[0].publishSpy.mock.calls.map((c) => c[0]);
+      expect(topics).toContain('homeassist/light/rfx_bridge_0001/recepteur_1/config');
+      expect(topics).not.toContain('homeassistant/light/recepteur_1/config'); // pas de nettoyage de l'ancien format
+      expect(topics.some((t) => String(t).endsWith('/attributs'))).toBe(false); // NOMMAGE recalcule la taxonomie
+      const payload = String(mockTransportInstances[0].publishSpy.mock.calls.find((c) => c[0] === 'homeassist/light/rfx_bridge_0001/recepteur_1/config')?.[1]);
+      expect(payload).not.toContain('json_attributes_topic');
+      expect(payload).toContain('lumière---plafonnier--salon'); // nom complet conservé pour NOMMAGE
+    });
+
+    it('retrait avec préfixe alternatif : message vide sur homeassist/ uniquement', () => {
+      eventBus.emitGeneric('integration:rfxcom:discovery:remove', {
+        bridgeInstance: 'rfx_bridge_0001', component: 'light', objectId: 'recepteur_1', discoveryPrefix: 'homeassist',
+      });
+      expect(mockTransportInstances[0].publishSpy).toHaveBeenCalledTimes(1);
+      expect(mockTransportInstances[0].publishSpy).toHaveBeenCalledWith('homeassist/light/rfx_bridge_0001/recepteur_1/config', '', 1, true);
+    });
+
+    it('passthrough : un « bouton » garde le nom long (quoi + lieu précis + lieu), les autres le nom court', () => {
+      eventBus.emitGeneric('integration:rfxcom:passthrough:discovery', {
+        bridgeInstance: 'rfx_bridge_0001', sourceTopic: 'homeassist/binary_sensor/n/b1/config',
+        payload: { device: { name: "Bouton---plafonnier--chambre d'ami--1er étage" } },
+      });
+      eventBus.emitGeneric('integration:rfxcom:passthrough:discovery', {
+        bridgeInstance: 'rfx_bridge_0001', sourceTopic: 'homeassist/light/n/l1/config',
+        payload: { device: { name: "lumière---plafonnier--chambre d'ami--1er étage" } },
+      });
+      const byTopic = (t: string) => JSON.parse(String(mockTransportInstances[0].publishSpy.mock.calls.find((c) => c[0] === t)?.[1])).device.name;
+      expect(byTopic('homeassistant/binary_sensor/n/b1/config')).toBe("Bouton Plafonnier Chambre d'ami");
+      expect(byTopic('homeassistant/light/n/l1/config')).toBe('Plafonnier');
+    });
+
+    it('passthrough : « Télécommande » est un QUOI d\'émetteur comme « bouton » (nom long)', () => {
+      eventBus.emitGeneric('integration:rfxcom:passthrough:discovery', {
+        bridgeInstance: 'rfx_bridge_0001', sourceTopic: 'homeassist/binary_sensor/n/t1/config',
+        payload: { device: { name: 'Télécommande---2--Télécommande 3--étage--maison' } },
+      });
+      const name = JSON.parse(String(mockTransportInstances[0].publishSpy.mock.calls.find((c) => c[0] === 'homeassistant/binary_sensor/n/t1/config')?.[1])).device.name;
+      expect(name).toBe('Télécommande 2 Télécommande 3');
+    });
+
     it('publie un changement d\'état sur le topic bridge_instance/deviceId', () => {
       eventBus.emitGeneric('integration:rfxcom:state', {
         bridgeInstance: 'rfx_bridge_0001',

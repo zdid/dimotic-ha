@@ -2,6 +2,8 @@
 
 Tu disposes des mêmes outils que l'assistant vocal Mistral, plus des outils de lecture :
 - `lister_entites`, `obtenir_etat`, `obtenir_details` — entités, état, attributs réels, classement ;
+- `lister_entites` renvoie la `categorie` HA de chaque entité (`principale`, `config` = réglage, `diagnostic`) ; filtre `categorie` pour
+  écarter réglages et diagnostic. L'assistant vocal Mistral, lui, ne voit que les entités principales ;
 - `diagnostiquer_resolution` — pourquoi un quoi/lieux ne ressort pas ;
 - `tester_phrase` — simule une phrase SANS rien exécuter ;
 - `lire_planificateur` — planifications, macros, actions reçues, commandes réellement envoyées à HA ;

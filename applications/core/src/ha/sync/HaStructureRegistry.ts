@@ -131,6 +131,10 @@ export class HaStructureRegistry {
       device_class?: string;
       area_id?: string;
       device_id?: string;
+      entity_category?: string | null;
+      hidden_by?: string | null;
+      disabled_by?: string | null;
+      platform?: string;
     }>
   ): HaStructuredRegistry {
     this.logger.info('ha:structure_registry', 'Initialisation du registre structuré...');
@@ -227,7 +231,7 @@ export class HaStructureRegistry {
    */
   private createStructuredEntity(
     rawEntity: HaRawEntity,
-    registryEntry?: { entity_id: string; domain: string; device_class?: string; area_id?: string; device_id?: string },
+    registryEntry?: { entity_id: string; domain: string; device_class?: string; area_id?: string; device_id?: string; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null; platform?: string },
     deviceAreaId?: string
   ): HaStructuredEntity {
     // Extraire le domaine de l'entity_id si non disponible dans le registry
@@ -251,6 +255,11 @@ export class HaStructureRegistry {
       attributes: rawEntity.attributes,
       device_id: deviceId,
       area_id: areaId,
+      // Métadonnées du registre des entités HA (jusqu'ici jetées) : permettent d'écarter les entités de réglage/diagnostic.
+      entity_category: registryEntry?.entity_category ?? null,
+      hidden_by: registryEntry?.hidden_by ?? null,
+      disabled_by: registryEntry?.disabled_by ?? null,
+      platform: registryEntry?.platform,
       quoi_ids: [], // Seront remplis par la classification
       last_updated: new Date(rawEntity.last_updated),
     };
@@ -325,7 +334,7 @@ export class HaStructureRegistry {
    */
   updateEntity(
     rawEntity: HaRawEntity,
-    registryEntry?: { entity_id: string; domain: string; device_class?: string; area_id?: string; device_id?: string }
+    registryEntry?: { entity_id: string; domain: string; device_class?: string; area_id?: string; device_id?: string; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null; platform?: string }
   ): HaStructuredEntity | undefined {
     const existing = this.entityMap.get(rawEntity.entity_id);
     
@@ -350,6 +359,11 @@ export class HaStructureRegistry {
       updatedEntity.device_class = registryEntry.device_class as any;
       updatedEntity.device_id = registryEntry.device_id;
       updatedEntity.area_id = registryEntry.area_id || device?.area_id;
+      // Métadonnées du registre : seulement si fournies (l'événement entity_registry_updated n'en porte pas toujours).
+      if (registryEntry.entity_category !== undefined) updatedEntity.entity_category = registryEntry.entity_category;
+      if (registryEntry.hidden_by !== undefined) updatedEntity.hidden_by = registryEntry.hidden_by;
+      if (registryEntry.disabled_by !== undefined) updatedEntity.disabled_by = registryEntry.disabled_by;
+      if (registryEntry.platform !== undefined) updatedEntity.platform = registryEntry.platform;
     }
 
     // Reclasser l'entité (les quoi_ids peuvent changer)
@@ -378,7 +392,7 @@ export class HaStructureRegistry {
    */
   private addNewEntity(
     rawEntity: HaRawEntity,
-    registryEntry?: { entity_id: string; domain: string; device_class?: string; area_id?: string; device_id?: string }
+    registryEntry?: { entity_id: string; domain: string; device_class?: string; area_id?: string; device_id?: string; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null; platform?: string }
   ): HaStructuredEntity {
     const structuredEntity = this.createStructuredEntity(rawEntity, registryEntry);
     const device = registryEntry?.device_id ? this.devices.get(registryEntry.device_id) : undefined;
@@ -810,7 +824,7 @@ export class HaStructureRegistry {
    * @param quoiId - ID du QUOI à filtrer, ou undefined pour ne filtrer que par lieu
    * @param lieuTerms - termes de lieu à résoudre (déjà en langage naturel, pas nécessairement slugifiés)
    */
-  getEntitiesByQuoiAndLieux(quoiId: string | undefined, lieuTerms: string[]): HaStructuredEntity[] {
+  getEntitiesByQuoiAndLieux(quoiId: string | undefined, lieuTerms: string[], includeTechnical = false): HaStructuredEntity[] {
     this.rebuildLieuGraphIfNeeded();
 
     let candidates = quoiId ? this.getEntitiesByQuoi(quoiId) : this.getAllEntities();
@@ -823,7 +837,14 @@ export class HaStructureRegistry {
 
     let result = this.matchLieuTerms(candidates, lieuTerms);
     if (result.length === 0) result = this.matchByName(candidates, quoiId, lieuTerms);
-    return result;
+    // ⭐ 08/10/2026 — par défaut, seules les entités « utilisateur » : ni réglage/diagnostic (entity_category du registre HA),
+    // ni désactivée. Ce que voit l'assistant (Mistral) est aussi ce que l'exécution des planifications cible.
+    return includeTechnical ? result : result.filter((e) => HaStructureRegistry.isUserFacing(e));
+  }
+
+  /** Entité de commande/mesure : ni `config`/`diagnostic`, ni désactivée dans HA. */
+  static isUserFacing(entity: { entity_category?: string | null; disabled_by?: string | null }): boolean {
+    return !entity.entity_category && !entity.disabled_by;
   }
 
   /**
@@ -1084,6 +1105,7 @@ export class HaStructureRegistry {
 
     const lieux = new Set<string>();
     for (const entity of this.entityMap.values()) {
+      if (entity.entity_category || entity.disabled_by) continue; // catalogue de lieux : entités « utilisateur » seulement
       const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
       if (!taxonomy) continue;
       const slugQuoi = taxonomy.slug_quoi;
@@ -1151,6 +1173,10 @@ export class HaStructureRegistry {
       device_class?: string;
       area_id?: string;
       device_id?: string;
+      entity_category?: string | null;
+      hidden_by?: string | null;
+      disabled_by?: string | null;
+      platform?: string;
     }>
   ): HaStructuredRegistry {
     this.clear();

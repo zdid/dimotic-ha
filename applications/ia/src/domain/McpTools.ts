@@ -50,6 +50,20 @@ export const HA_AUTOMATION_TOOLS: McpToolDef[] = [
   }
 ];
 
+/** lister_entites côté MCP : comme celui de Mistral + filtre de catégorie HA (réglages / diagnostic). Mistral n'est pas modifié. */
+const LISTER_ENTITES_MCP: McpToolDef = {
+  name: 'lister_entites',
+  description: "Liste les entités Home Assistant connues correspondant à un filtre QUOI/OÙ (les deux paramètres sont optionnels — absents, retourne toutes les entités). Chaque entité porte sa `categorie` HA : 'principale' (commande/mesure), 'config' (réglage : seuils, modes…) ou 'diagnostic'. `categorie` filtre dessus ; sans lui, toutes sont renvoyées (comportement habituel).",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      quoi: { type: 'string', description: 'Catégorie QUOI (ex: "lumière", "température")' },
+      lieux: { type: 'array', items: { type: 'string' }, description: 'Lieux à filtrer. Plusieurs lieux = l\'un OU l\'autre. Un repère précis avec un lieu = les deux à la fois (ex: ["plafonnier de la chambre"]).' },
+      categorie: { type: 'string', enum: ['principale', 'config', 'diagnostic', 'toutes'], description: "Ne garder que les entités de cette catégorie HA (défaut : toutes). 'principale' écarte les réglages et le diagnostic." }
+    }
+  }
+};
+
 export const MCP_ONLY_TOOLS: McpToolDef[] = [
   {
     name: 'obtenir_details',
@@ -118,7 +132,7 @@ MCP_ONLY_TOOLS.push({
 
 /** Les trois outils de Mistral, au format MCP, puis ceux propres à Claude Code. */
 export const MCP_TOOLS: McpToolDef[] = [
-  ...IA_TOOLS.map((t) => ({ name: t.function.name, description: t.function.description, inputSchema: t.function.parameters })),
+  ...IA_TOOLS.map((t) => t.function.name === 'lister_entites' ? LISTER_ENTITES_MCP : ({ name: t.function.name, description: t.function.description, inputSchema: t.function.parameters })),
   ...MCP_ONLY_TOOLS,
   ...HA_AUTOMATION_TOOLS
 ];
@@ -195,10 +209,25 @@ export class McpToolbox {
       case 'lire_automatisations_ha': return JSON.stringify(await this.readAutomations(args), null, 2);
       case 'deposer_automatisation': return JSON.stringify(await this.deps.automations.deposit(String(args.id ?? ''), args.definition, args.confirme === true), null, 2);
       case 'supprimer_automatisation': return JSON.stringify(await this.deps.automations.remove(String(args.id ?? ''), args.confirme === true), null, 2);
+      case 'lister_entites': return this.listEntities(args);
       case 'tester_phrase': return JSON.stringify(await this.deps.simulate(String(args.phrase ?? ''), args.utiliser_mistral === true), null, 2);
       default:
         return this.deps.toolExecutor.execute({ id: `mcp-${Date.now()}`, type: 'function', function: { name, arguments: args } });
     }
+  }
+
+  /** lister_entites : résolution identique à Mistral (ToolExecutor), puis catégorie HA et filtre optionnel. */
+  private async listEntities(args: Record<string, unknown>): Promise<string> {
+    if (!this.deps.registry.isAvailable()) return JSON.stringify({ error: 'référentiel HA indisponible' });
+    const quoi = typeof args.quoi === 'string' && args.quoi ? slugify(args.quoi) : undefined;
+    const lieux = Array.isArray(args.lieux) ? (args.lieux as string[]) : [];
+    // includeTechnical : côté MCP on voit TOUT (avec la catégorie) ; Mistral, lui, n'a que les entités « utilisateur ».
+    const all = await this.deps.registry.getEntitiesByQuoiAndLieux(quoi, lieux, true);
+    const wanted = typeof args.categorie === 'string' ? args.categorie : 'toutes';
+    const entities = all
+      .map((e) => ({ entity_id: e.entity_id, name: e.friendly_name, categorie: e.entity_category ?? 'principale', ...(e.disabled_by ? { desactivee_par: e.disabled_by } : {}) }))
+      .filter((e) => wanted === 'toutes' || e.categorie === wanted);
+    return JSON.stringify({ entities, ...(wanted !== 'toutes' ? { filtre_categorie: wanted, ecartees: all.length - entities.length } : {}) });
   }
 
   private async readAutomations(args: Record<string, unknown>): Promise<unknown> {
@@ -279,7 +308,8 @@ export class McpToolbox {
       ? [registry.getEntity(args.entity_id)].filter((e) => e !== undefined)
       : await registry.getEntitiesByQuoiAndLieux(
           typeof args.quoi === 'string' && args.quoi ? slugify(args.quoi) : undefined,
-          Array.isArray(args.lieux) ? (args.lieux as string[]) : []
+          Array.isArray(args.lieux) ? (args.lieux as string[]) : [],
+          true
         );
 
     return {
@@ -298,6 +328,10 @@ export class McpToolbox {
           device_class: e!.device_class,
           etat: e!.state,
           zone_ha: e!.area_id,
+          categorie: e!.entity_category ?? 'principale',
+          desactivee_par: e!.disabled_by ?? undefined,
+          masquee_par: e!.hidden_by ?? undefined,
+          integration: e!.platform,
           classement: {
             quoi: taxonomy.quoi ?? taxonomy.slug_quoi,
             lieu_precis: taxonomy.lieu_precis,
@@ -322,7 +356,7 @@ export class McpToolbox {
     const quoiCatalog = registry.getQuoiCatalog().filter((q) => !excluded.has(q.quoi_id));
     const quoiNames = quoiCatalog.map((q) => q.label || q.quoi_id);
     const lieuNames = registry.getLieuCatalog(excluded);
-    const find = (slug: string | undefined, ls: string[]) => registry.getEntitiesByQuoiAndLieux(slug, ls);
+    const find = (slug: string | undefined, ls: string[]) => registry.getEntitiesByQuoiAndLieux(slug, ls, true);
 
     const notes: string[] = [];
     const quoiInfo = quoiSlug

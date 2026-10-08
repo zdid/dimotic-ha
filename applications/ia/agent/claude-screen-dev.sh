@@ -6,6 +6,11 @@
 #   bash claude-screen-dev.sh --prepare  -> prépare seulement (CLAUDE.md, .mcp.json), sans lancer
 # Prérequis (une fois) : dans l'UI de dimotic-ha, activer l'application `ia`, puis Paramètres techniques > ia > Accès Claude Code (MCP) :
 #   activer, port 8765, adresse 127.0.0.1, jeton (openssl rand -hex 32). Mettre ce même jeton dans ~/claude-dev/.mcp_token (chmod 600).
+# Options (avant l'exécution) :
+#   --souris   laisse Claude Code gérer la souris (par DÉFAUT elle est ignorée : sinon des séquences d'échappement s'impriment à l'écran
+#              dès que le pointeur passe au-dessus du terminal)
+# Couleurs : screenrc dédié (`defbce on`, 256 couleurs) — sans lui, la couleur de fond s'écrit « sur » les pavés de couleur (affichage inversé).
+# Remonter dans l'historique : Ctrl-A puis [ (mode copie), PgUp/PgDn ou flèches, Esc pour sortir ; dans Claude Code : Ctrl+O (transcription complète).
 # Quitter sans arrêter : Ctrl-A puis D. Se rattacher : screen -r claude-dev
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,6 +18,10 @@ TPL="$HERE/claude-md"
 WORK="${CLAUDE_DEV_DIR:-$HOME/claude-dev}"
 PORT="${DIMOTIC_MCP_PORT:-8765}"
 SESSION="claude-dev"
+MOUSE=0
+args=()
+for a in "$@"; do [ "$a" = "--souris" ] && MOUSE=1 || args+=("$a"); done
+set -- "${args[@]:-}"
 
 mkdir -p "$WORK"
 {
@@ -34,6 +43,14 @@ cat > "$WORK/.mcp.json" <<JSON
   }
 }
 JSON
+# screenrc dédié : effacement avec la couleur de fond courante (bce) et 256 couleurs, sans écran alternatif parasite
+cat > "$WORK/screenrc" <<RC
+term screen-256color
+defbce on
+defscrollback 10000
+startup_message off
+altscreen on
+RC
 echo "Préparé : $WORK/CLAUDE.md et $WORK/.mcp.json"
 [ "${1:-}" = "--prepare" ] && exit 0
 
@@ -48,7 +65,7 @@ fi
 
 if ! screen -ls | grep -q "[0-9]\.${SESSION}[[:space:]]"; then
   # Le jeton est lu dans le fichier au lancement, jamais écrit dans la ligne de commande visible.
-  screen -dmS "$SESSION" bash -lc "cd '$WORK' && export DIMOTIC_MCP_TOKEN=\"\$(cat .mcp_token)\" && claude; exec bash"
+  screen -c "$WORK/screenrc" -dmS "$SESSION" bash -lc "cd '$WORK' && export DIMOTIC_MCP_TOKEN=\"\$(cat .mcp_token)\" CLAUDE_CODE_DISABLE_MOUSE=$((1-MOUSE)) && claude; printf '\\e[?1000l\\e[?1002l\\e[?1003l\\e[?1006l'; exec bash"
   echo "Session screen « $SESSION » créée (Claude Code dans $WORK)."
 fi
-[ "${1:-}" = "--detach" ] || exec screen -r "$SESSION"
+[ "${1:-}" = "--detach" ] || exec screen -c "$WORK/screenrc" -r "$SESSION"

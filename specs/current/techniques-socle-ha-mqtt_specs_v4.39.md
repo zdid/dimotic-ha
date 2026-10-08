@@ -1,8 +1,13 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.38  
+**Version :** 4.39  
 **Date :** 8 Octobre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.39** : **préfixe de découverte alternatif** (§8.5.0bis) — un module peut publier ses découvertes sur un autre préfixe que `homeassistant` (ex. `homeassist`, pour passer par NOMMAGE) ; **métadonnées du registre des entités HA conservées** (§8.3.2bis) — `entity_category` (`config`/`diagnostic`),
+> `hidden_by`, `disabled_by`, `platform` sont désormais portées par `HaStructuredEntity` (elles étaient jetées au chargement) ;
+> `getEntitiesByQuoiAndLieux()` **écarte par défaut** les entités de réglage/diagnostic et les désactivées
+> (paramètre `includeTechnical` pour les inclure), et le catalogue de lieux ne s'en alimente plus.
 
 > **v4.38** : **repli par le nom borné** (§8.3.2 v4.37 (c)) — il ne sort jamais du `quoi` demandé (sans cela « ferme le volet
 > du salon » sans volet au salon retombait sur « Plafonnier salon ») ; correspondance en début de mot, mots de 3 lettres
@@ -1617,6 +1622,23 @@ de l'entité — pour une entité dont le nom le dit mais dont le lieu n'est pas
 une commande « ferme le volet du salon », sans volet au salon, aurait agi sur « Plafonnier salon ») ; sans quoi, toutes
 les entités. Ignoré au-delà de 25 résultats (demande trop vague). Testé : `core/src/ha/sync/__tests__/HaStructureRegistry.lieux.test.ts`.
 
+
+### 8.3.2bis Entités techniques — `entity_category`, `disabled_by` (nouveau v4.39)
+
+Le registre des entités de HA (`config/entity_registry/list`) porte, pour chaque entité, `entity_category` (`config` = réglage,
+`diagnostic`, ou rien = entité principale), `hidden_by`, `disabled_by` et `platform` (intégration source). Jusqu'à v4.38 le
+core ne gardait que `entity_id`, `domain`, `device_class` et `area_id` : ces champs sont maintenant copiés sur `HaStructuredEntity`
+(chargement initial et `updateEntity`, uniquement quand le registre les fournit). Sur ha2 : 121 entités `config`, 437 `diagnostic`,
+484 désactivées par l'intégration.
+
+- `getEntitiesByQuoiAndLieux(quoi, lieux, includeTechnical = false)` : **par défaut**, ni `config`, ni `diagnostic`, ni désactivée
+  (`HaStructureRegistry.isUserFacing`). Ce que l'assistant voit est aussi ce que l'exécution des planifications cible (même fonction).
+  `includeTechnical = true` les inclut (outils MCP de Claude Code). Le paramètre traverse `HaQueryBridge`/`HaBridgeClient`.
+- `getLieuCatalog()` (registre et `HaBridgeClient`) ignore les entités techniques.
+- Les entités restent dans le référentiel et l'arbre ; seule la résolution quoi/lieux et le catalogue de lieux les écartent.
+- Une mise à jour **en direct** de la catégorie n'est pas lue dans `entity_registry_updated` (HA n'y met que les changements) : elle
+  est prise au prochain chargement complet du registre.
+
 ### 8.3.3 ⭐ Catalogue de lieux statique — `getLieuCatalog()` (nouveau v4.28)
 
 Complément naturel de `getQuoiCatalog()` (§8.3.1, déjà existant) : union dédupliquée et triée
@@ -1709,6 +1731,17 @@ responsabilité de :
   seul responsable de **construire et normaliser l'intégralité** du message de découverte HA
   (topics, bloc `device`, `availability_topic`, valeurs par défaut, etc.). Un module métier ne
   doit jamais construire lui-même un payload de découverte HA complet.
+
+
+#### 8.5.0bis Préfixe de découverte alternatif (nouveau v4.39)
+
+`DiscoveryRequestEvent` et `DiscoveryRemoveRequestEvent` portent un champ optionnel `discoveryPrefix` (défaut `homeassistant`,
+`DEFAULT_DISCOVERY_PREFIX`). Avec un autre préfixe (`homeassist`), le core publie le message de découverte sur
+`<préfixe>/<composant>/<bridgeInstance>/<objectId>/config` ; il **n'envoie ni attributs de taxonomie ni nettoyage de l'ancien format**
+(NOMMAGE recalcule la taxonomie depuis `device.name`) ; le retrait publie un message vide sur ce même topic, que NOMMAGE propage.
+`getDiscoveryTopic()`, `publishDiscovery()` et `unpublishDiscovery()` acceptent ce préfixe. Le nom court d'un appareil dont le QUOI est un QUOI d'émetteur (`EMITTER_QUOI_SLUGS` : `bouton`, `telecommande`, test `isEmitterQuoi`) est le nom long (quoi + lieu précis + lieu). Premier utilisateur : RFXCOM
+(`discoveryViaNommage`, `fonctionnelles-rfxcom` §10.2bis). Côté NOMMAGE, la comparaison `lieu_precis` / `lieu` du nom court est
+insensible à la casse, comme celle de RFXCOM.
 
 #### 8.5.1 Concept de `bridge_instance`
 
@@ -2618,6 +2651,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.39** | 08/10/2026 | Claude | **Métadonnées du registre HA conservées** (§8.3.2bis) : `entity_category`, `hidden_by`, `disabled_by`, `platform` sur `HaStructuredEntity` ; `getEntitiesByQuoiAndLieux` écarte par défaut réglages/diagnostic/désactivées (`includeTechnical`), catalogue de lieux idem. |
 | **4.36** | 06/10/2026 | Claude | **Page « Paramètres généraux »** (Web-services, MQTT, Serveur Web, Journalisation sur une page, une sauvegarde par section — §10.4bis) ; applications sans paramètre technique retirées de la liste des Paramètres Techniques et écran explicite si ouvert ; **dépôt de la carte Plan Lovelace vers le HA de `ha.ws.host`** (refus explicite sinon). v4.35 archivée. |
 | **4.34** | 01/10/2026 | Claude | **Démarrage tolérant (§7.2)** : une section `ha.ws` / `ha.mqtt` invalide désactive la connexion en mémoire au lieu de faire planter le core ; valeurs corrigeables dans l'IHM, voyants rouges, `ws_enable`/`mqtt_enable` conservés dans le fichier, section `ha` de l'IHM validée strictement. Cause : diffusion de `ha` entre noisy et noisy2 (hôte sans jeton), incident du 01/10/2026. |
 | **4.31** | 23/08/2026 | Claude | **Déploiement de dimotic-ha lui-même sur d'autres machines** (§4.3bis nouvelle, §7.1, §11.4) — nouveau `targets: DeploymentTargetConfig[]` sur le schéma config racine (`disabledApps` forcé à toutes les apps connues sauf `core` sur une machine neuve). Nouveau `CoreDeployService.ts` réutilisant le socle SSH/SCP partagé construit la session précédente pour rpigpio/teleinfo/arexx (même protocole `{targetId, action}`) — copie `compose.deploy.yaml` (pas `compose.yaml`), sème `data/core/config.yaml` uniquement s'il est absent, `docker compose pull && up -d`, attend "healthy". Remplace `docker/rebuild-and-deploy.sh` pour l'étape déploiement (build+push Docker Hub reste manuel) et automatise la procédure jusqu'ici manuelle du §11.4. Nouvelle section IHM "Déploiement" (`DeploymentManager.ts`, Web Component calqué sur `ApplicationsManager.ts` mais sans le moteur générique `type:'array'`, `core` n'en dispose pas pour sa propre config) réutilisant `TargetCards.js` (même composant que les 3 apps), étendu d'un `onDelete` optionnel. Corollaire trouvé en cours de route : `ConfigService.saveConfig()`/`setDisabledApps()` ne préservaient pas `targets` avant d'écrire — même classe de bug que l'incident `disabledApps` du 07/08/2026, corrigé préventivement avant mise en service. Testé en conditions réelles (navigateur) : ajout/suppression de cible, round-trip Socket.io, `data/core/config.yaml` réel confirmé intact (aucun champ existant écrasé). Aucun test de déploiement réel contre ha2/orangepi (machines de production). Ancienne version v4.30 archivée. |

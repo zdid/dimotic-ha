@@ -19,13 +19,18 @@ const SUBTYPE_TO_QUOI: Record<string, string> = {
 };
 
 /** QUOI déterminé depuis le type, pour les émetteurs (le subType RFXCOM — AC, X10, ... — n'influe pas sur le QUOI). */
+// ⭐ 08/10/2026 — un ÉMETTEUR (bouton ARC Lighting1, bouton Lighting2/5/6, télécommande Lighting4/Blinds1) a pour QUOI « Bouton » ou
+// « Télécommande », jamais le nom de ce qu'il pilote (« Interrupteur », « Volet ») : c'est ce QUOI qui lui donne le nom long (quoi + lieu
+// précis + lieu) et, via NOMMAGE, la même règle de nom que les autres boutons (isEmitterQuoi, core). Un récepteur Lighting1 a, comme un
+// Lighting2, un bouton en `primaryEmitter`. Ne change que le QUOI proposé aux appareils détectés À PARTIR DE MAINTENANT.
+// Rfy (Somfy) : créé à la main, il représente le volet lui-même — QUOI inchangé.
 const TYPE_TO_QUOI: Partial<Record<RfxComDeviceType, string>> = {
-  Lighting1: 'Interrupteur',
+  Lighting1: 'Bouton',
   Lighting2: 'Bouton',
   Lighting4: 'Télécommande',
-  Lighting5: 'Interrupteur',
-  Lighting6: 'Interrupteur',
-  Blinds1: 'Volet',
+  Lighting5: 'Bouton',
+  Lighting6: 'Bouton',
+  Blinds1: 'Bouton',
   Rfy: 'Volet'
 };
 

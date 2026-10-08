@@ -1,8 +1,12 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.21
+**Version :** 1.22
 **Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.22** : **entités de réglage/diagnostic** (§19.10) — Mistral ne voit plus les entités `config`/`diagnostic`/désactivées de HA
+> (résolution du core, socle v4.39 §8.3.2bis) ; côté MCP, `lister_entites` renvoie la `categorie` de chaque entité et accepte
+> un filtre `categorie`, `obtenir_details` ajoute `categorie`, `desactivee_par`, `masquee_par`, `integration`.
 
 > **v1.21** : **dépôt d'automatisations dans Home Assistant par Claude Code** (§19.9) — outils MCP `lire_automatisations_ha`,
 > `deposer_automatisation` et `supprimer_automatisation` (niveau 2 de la conception Claude Code) : aperçu sans effet par défaut,
@@ -1054,6 +1058,7 @@ mécanisme de nouvel essai ajouté, pas encore re-déclenché en réel faute d'u
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.22 | 08/10/2026 | Claude | **Entités de réglage/diagnostic** (§19.10) : écartées de la vision de Mistral ; `categorie` + filtre dans `lister_entites` (MCP), champs ajoutés à `obtenir_details`. |
 | 1.21 | 08/10/2026 | Claude | **Dépôt d'automatisations HA par Claude Code** (§19.9) : outils MCP `lire_automatisations_ha`, `deposer_automatisation`, `supprimer_automatisation`, aperçu puis confirmation, sauvegardes, anti-boucle. |
 | 1.20 | 08/10/2026 | Claude | **Lecture du planificateur** (§19.8) : outil MCP `lire_planificateur` (sections statut, planifications, macros, actions_recues, commandes_ha, yaml) via `PlannerReader` — `ia` redemande à la volée les listes que `planificateur` publie déjà (`…:get`), nouveaux `bridgedEvents` ; aucune modification de `planificateur`. v1.19 archivée. |
 | 1.19 | 08/10/2026 | Claude | **Claude Code observateur** (§19.7) : instructions MCP = vocabulaire + catalogue (recalculé à chaque connexion), ressources `dimotic://catalogue` et `dimotic://regles`, outils de lecture `obtenir_details` (attributs réels + classement), `diagnostiquer_resolution`, `tester_phrase` (cache → interpréteur → Mistral optionnel, rien d'exécuté) ; `McpTools.ts`. v1.18 archivée. |
@@ -1205,3 +1210,12 @@ Niveau 2 de l'échelle d'autorisations (`conception-claude-code-automatisations`
 **Mécanisme** : HA n'a aucune commande WebSocket pour la configuration brute d'une automatisation, seulement la route REST `/api/config/automation/config/{id}`, et seul le process `core` détient le jeton HA. `ia` émet `ha:rest:request` (`appId: 'ia'`, `domain: 'automation'`) vers `HaRestBridge` (générique, déjà utilisé par `scriptsha`) et reçoit `ia:ha:rest:result` (déclaré dans `bridgedEvents`). HA recharge les automatisations après un dépôt ou une suppression. **Aucune modification du core.** L'agent Claude Code n'a donc besoin que d'un jeton HA en lecture pour contrôler ses résultats.
 
 **Éprouvé** avec un faux bus (aperçu sans effet, dépôt, remplacement avec sauvegarde, création, suppression, id invalide, alerte de boucle). **Non vérifié** : le pont réel `ia` ↔ `core` ↔ HA, l'appel depuis Claude Code.
+
+### 19.10 Entités de réglage et de diagnostic (nouveau v1.22)
+
+HA classe ses entités (`entity_category`) : `config` (réglages : seuils, modes, mémoire de coupure…), `diagnostic`, ou aucune (commande/mesure). Le core les conserve désormais (socle v4.39 §8.3.2bis).
+
+- **Mistral** : `lister_entites`, `obtenir_etat`, `executer_action` (vérification à blanc) et le catalogue de lieux n'incluent plus les entités `config`, `diagnostic` ni désactivées. Le schéma des outils de Mistral n'est pas modifié. La résolution étant celle du core, l'exécution des planifications cible les mêmes entités.
+- **Claude Code (MCP)** : `lister_entites` renvoie pour chaque entité `categorie` (`principale`, `config`, `diagnostic`) et `desactivee_par` le cas échéant ; le paramètre `categorie` (`principale` | `config` | `diagnostic` | `toutes`, défaut `toutes`) filtre, avec `filtre_categorie` et `ecartees` en retour. `obtenir_details` ajoute `categorie`, `desactivee_par`, `masquee_par`, `integration`. Le MCP voit donc tout ; `obtenir_etat` et `executer_action` suivent la vision de Mistral.
+
+**Éprouvé** sur le HA réel (« gros ballon ») : MCP `lister_entites` = 20 entités dont 3 `config` (2 `select`, 1 `update`) ; voie Mistral (`obtenir_etat`) = 17, sans ces 3. Les `number` de seuil et les `switch` de disjoncteur de cette intégration n'ont **pas** de catégorie dans HA : ils restent visibles.

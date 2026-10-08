@@ -110,8 +110,8 @@ export class HaQueryBridge {
       }
       case 'getEntitiesByQuoiAndLieux': {
         const registry = this.requireRegistry();
-        const [quoi, lieux] = args as [string | undefined, string[] | undefined];
-        return sanitizeHaEntities(registry.getEntitiesByQuoiAndLieux(quoi, lieux ?? []));
+        const [quoi, lieux, includeTechnical] = args as [string | undefined, string[] | undefined, boolean | undefined];
+        return sanitizeHaEntities(registry.getEntitiesByQuoiAndLieux(quoi, lieux ?? [], includeTechnical === true));
       }
       case 'getQuoiCatalog': {
         return this.requireRegistry().getQuoiCatalog();

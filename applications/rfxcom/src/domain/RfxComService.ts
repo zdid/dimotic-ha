@@ -12,7 +12,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
-import { createRfxComError, getCommandTopic, computeBridgeInstance } from '../../../core/dist/exports';
+import { createRfxComError, getCommandTopic, computeBridgeInstance, isEmitterQuoi } from '../../../core/dist/exports';
 import { rfxcomConfigSchema, type RfxComConfig } from './config-schema';
 import type { RfxComDevicesConfigFile, ReceiverConfigEntry } from './devices-config-schema';
 import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult, RfxComOrderTrace, AssociatedEmitter } from './types';
@@ -832,6 +832,36 @@ export class RfxComService implements IRfxComService {
     );
   }
 
+  /** Préfixe de découverte lu par NOMMAGE (ses `discoveryTopics`, config nommage). */
+  private static readonly NOMMAGE_DISCOVERY_PREFIX = 'homeassist';
+  private readonly warnedNoDashName = new Set<string>();
+
+  /**
+   * Routage d'une découverte : directe vers HA (comportement historique) ou via NOMMAGE (`discoveryViaNommage`). Via NOMMAGE,
+   * le nom d'appareil doit être la chaîne complète `QUOI---OÙ` — NOMMAGE abandonne silencieusement un nom qui n'en est pas une :
+   * un tel nom reste donc publié directement (avertissement unique).
+   */
+  private discoveryRouting(fullName: string): { discoveryPrefix?: string; deviceName?: string } {
+    if (!this.config.discoveryViaNommage) return {};
+    if (!fullName.includes('---')) {
+      if (!this.warnedNoDashName.has(fullName)) {
+        this.warnedNoDashName.add(fullName);
+        this.logger.warn('RfxComService', `Nom « ${fullName} » sans « --- » : découverte publiée directement (NOMMAGE ne saurait pas l'analyser)`);
+      }
+      return {};
+    }
+    return { discoveryPrefix: RfxComService.NOMMAGE_DISCOVERY_PREFIX, deviceName: fullName };
+  }
+
+  /** Retrait d'une découverte : toujours sur `homeassistant/` ; en plus sur `homeassist/` si on passe par NOMMAGE (qui propage le retrait). */
+  private emitDiscoveryRemove(component: string, objectId: string): void {
+    const base = { bridgeInstance: this.effectiveBridgeInstance, component, objectId };
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, base);
+    if (this.config.discoveryViaNommage) {
+      this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, { ...base, discoveryPrefix: RfxComService.NOMMAGE_DISCOVERY_PREFIX });
+    }
+  }
+
   private publishDeviceDiscovery(device: RfxComDeviceInfo): void {
     const taxonomy = extractTaxonomy(device.name);
     const { component, deviceClass } = getDefaultComponent(device.type, device.subType);
@@ -885,12 +915,23 @@ export class RfxComService implements IRfxComService {
       return;
     }
 
+    // Un émetteur radio (Lighting1/2/4/5/6, Blinds1 : le bouton ou la télécommande) a pour QUOI « bouton » ou « télécommande »
+    // (isEmitterQuoi, core) : NOMMAGE en déduit le nom long (quoi + lieu précis + lieu). Un émetteur nommé autrement (ex. le nom de
+    // son récepteur recopié) donnerait un autre nom que RFXCOM : il reste publié directement, avec un avertissement.
+    const buttonQuoiOk = !isBouton || isEmitterQuoi(taxonomy.rawQuoi);
+    if (!buttonQuoiOk && this.config.discoveryViaNommage && !this.warnedNoDashName.has(`bouton:${device.name}`)) {
+      this.warnedNoDashName.add(`bouton:${device.name}`);
+      this.logger.warn('RfxComService', `Émetteur « ${device.name} » : le QUOI d'un émetteur doit être « bouton » ou « télécommande » — publié directement (à renommer, ex. « Bouton---… »)`);
+    }
+    const routing = buttonQuoiOk ? this.discoveryRouting(device.name) : {};
+    if (routing.deviceName && essential.device) essential.device.name = routing.deviceName;
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
       bridgeInstance: this.effectiveBridgeInstance,
       component,
       objectId: device.uniqueId,
       deviceId,
-      essential
+      essential,
+      discoveryPrefix: routing.discoveryPrefix
     });
   }
 
@@ -969,11 +1010,7 @@ export class RfxComService implements IRfxComService {
    */
   private removeDeviceDiscovery(device: RfxComDeviceInfo): void {
     const { component } = getDefaultComponent(device.type, device.subType);
-    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, {
-      bridgeInstance: this.effectiveBridgeInstance,
-      component,
-      objectId: device.uniqueId
-    });
+    this.emitDiscoveryRemove(component, device.uniqueId);
   }
 
   // ==========================================================================
@@ -1002,12 +1039,15 @@ export class RfxComService implements IRfxComService {
         set_position_template: '{"position": {{ position }} }'
       };
     }
+    const routing = this.discoveryRouting(receiver.config.name);
+    if (routing.deviceName && essential.device) essential.device.name = routing.deviceName;
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery`, {
       bridgeInstance: this.effectiveBridgeInstance,
       component,
       objectId: receiver.config.receiverId,
       deviceId: receiver.config.receiverId,
-      essential
+      essential,
+      discoveryPrefix: routing.discoveryPrefix
     });
   }
 
@@ -1060,11 +1100,7 @@ export class RfxComService implements IRfxComService {
    * récepteur (le composant dépend de son type, indisponible une fois retiré de ReceiverManager).
    */
   private removeReceiverDiscovery(receiverId: string, component: string): void {
-    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, {
-      bridgeInstance: this.effectiveBridgeInstance,
-      component,
-      objectId: receiverId
-    });
+    this.emitDiscoveryRemove(component, receiverId);
   }
 
   // ==========================================================================

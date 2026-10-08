@@ -40,7 +40,14 @@ export const rfxcomConfigSchema = z.object({
   // RFXCOM). Désactiver accepte ce risque en échange d'un démarrage qui ne dépend pas de HA WS.
   waitForHaWsBeforeDiscovery: z.boolean().default(true),
   /** Trace en hexadécimal chaque paquet reçu et émis par le transceiver (option `debug` de la bibliothèque rfxcom, journal du conteneur). Volumineux : à n'activer que pour un diagnostic. */
-  radioDebug: z.boolean().default(false)
+  radioDebug: z.boolean().default(false),
+  /**
+   * ⭐ 08/10/2026 — Publier les découvertes sur `homeassist/` (au lieu de `homeassistant/`) avec le nom d'appareil complet
+   * `QUOI---OÙ` : NOMMAGE les traite (nom court, zone, taxonomie, catégories, une seule table de règles pour toutes les sources)
+   * puis les republie lui-même sur `homeassistant/` (même topic que celui utilisé jusqu'ici → mêmes entity_id). Exige NOMMAGE actif.
+   * Les scènes (device_automation), les émetteurs dont le QUOI n'est pas « bouton » et les noms sans `---` restent publiés directement.
+   */
+  discoveryViaNommage: z.boolean().default(false)
 });
 
 export type RfxComConfig = z.infer<typeof rfxcomConfigSchema>;
@@ -53,5 +60,6 @@ export const DEFAULT_RFXCOM_CONFIG: RfxComConfig = {
   autoDiscovery: true,
   enabledHardwareProtocols: [],
   waitForHaWsBeforeDiscovery: true,
-  radioDebug: false
+  radioDebug: false,
+  discoveryViaNommage: false
 };

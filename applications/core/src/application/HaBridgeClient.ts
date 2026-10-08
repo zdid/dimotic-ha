@@ -147,6 +147,7 @@ export class HaBridgeClient {
     const excluded = excludedQuoiIds instanceof Set ? excludedQuoiIds : new Set(excludedQuoiIds ?? []);
     const lieux = new Set<string>();
     for (const entity of this.entities.values()) {
+      if (entity.entity_category || entity.disabled_by) continue; // catalogue de lieux : entités « utilisateur » seulement
       const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
       if (!taxonomy) continue;
       const slugQuoi = taxonomy.slug_quoi;
@@ -164,8 +165,9 @@ export class HaBridgeClient {
   // et état privé non exposés par HaStructureRegistry, voir son en-tête)
   // ==========================================================================
 
-  async getEntitiesByQuoiAndLieux(quoi: string | undefined, lieux: string[]): Promise<HaStructuredEntity[]> {
-    const reply = await this.request('getEntitiesByQuoiAndLieux', [quoi, lieux]);
+  /** `includeTechnical` : inclure aussi les entités de réglage/diagnostic et les désactivées (écartées par défaut). */
+  async getEntitiesByQuoiAndLieux(quoi: string | undefined, lieux: string[], includeTechnical = false): Promise<HaStructuredEntity[]> {
+    const reply = await this.request('getEntitiesByQuoiAndLieux', [quoi, lieux, includeTechnical]);
     return (reply as HaStructuredEntity[]) ?? [];
   }
 

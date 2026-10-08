@@ -1,7 +1,7 @@
 # Spécifications — Module RFXCOM
 
-**Version :** 7.0
-**Date :** 6 Octobre 2026
+**Version :** 7.1
+**Date :** 8 Octobre 2026
 **Statut :** En production
 **Type :** Application d'intégration
 **Dépend de :** `fonctionnelles-nommage_specs` (protocole de taxonomie QUOI/OÙ), `techniques-socle-ha-mqtt_specs`
@@ -112,15 +112,15 @@ Exemples : `rfxsensor_temperature_0xa5b3`, `lighting2_ac_0x02be2c02_13`, `lighti
 
 ### 3.4 QUOI automatique
 
-Le QUOI d'un device est prérempli depuis son type ; l'utilisateur peut le modifier.
+Le QUOI d'un device est prérempli depuis son type ; l'utilisateur peut le modifier. Un émetteur a pour QUOI « Bouton » (ou « Télécommande » pour Lighting4) — jamais le nom de ce qu'il pilote : c'est ce QUOI qui détermine son nom long et son passage par NOMMAGE (§10.2bis). Seul Rfy (créé à la main, il représente le volet lui-même) garde « Volet ». Modifié en v7.1 : Lighting1/5/6 et Blinds1 étaient « Interrupteur »/« Volet ».
 
 | Origine | QUOI | | Origine | QUOI |
 |---|---|---|---|---|
-| Temperature | Température | | Lighting1 | Interrupteur |
+| Temperature | Température | | Lighting1 | Bouton |
 | Humidity | Humidité | | Lighting2 | Bouton |
 | Motion | Mouvement | | Lighting4 | Télécommande |
-| Contact | Contact | | Lighting5, Lighting6 | Interrupteur |
-| Current | Courant | | Blinds1 | Volet |
+| Contact | Contact | | Lighting5, Lighting6 | Bouton |
+| Current | Courant | | Blinds1 | Bouton |
 | Power | Puissance | | | |
 
 Règle : le QUOI vient du `subType` s'il est connu, sinon du type, sinon du `subType` brut. La distinction Mouvement/Contact
@@ -523,6 +523,7 @@ autoDiscovery: true
 waitForHaWsBeforeDiscovery: true
 enabledHardwareProtocols: []        # vide = tous les protocoles gérables
 radioDebug: false                   # diagnostic : trace chaque paquet reçu et émis (§15)
+discoveryViaNommage: false          # true : découvertes via NOMMAGE (§10.5)
 ```
 
 - **`bridgeInstance`** : préfixe du nom d'instance. Le core y ajoute `_<machineId>` : `rfx_bridge_ha2_811876`. Le nom
@@ -667,6 +668,27 @@ Chaque device, récepteur et scène avec `transmitToHa: true` est publié. Champ
 
 L'état publié se limite à `{"state": "ON"}` (+ `brightness` pour une lumière variable, `position` pour un volet, et
 `signal_level`, `battery_level` quand ils sont connus). Aucune clé de taxonomie ni identifiant interne dans l'état.
+
+### 10.2bis Passage par NOMMAGE (`discoveryViaNommage`, nouveau v7.1)
+
+Par défaut (`false`), RFXCOM publie ses découvertes directement sur `homeassistant/`, avec un nom d'appareil court et sa propre
+taxonomie. Avec `discoveryViaNommage: true`, les **récepteurs** (`light`, `switch`, `cover`), les **capteurs** (RFXSensor, RFXMeter) et
+les **émetteurs dont le QUOI est « bouton » ou « télécommande »** sont publiés sur `homeassist/<composant>/<instance>/<id>/config` avec `device.name` = la
+chaîne complète `QUOI---OÙ` ; **NOMMAGE** calcule le nom court, la zone, `attributs_taxonomie` (sur son propre topic `…/attributs`) et les
+catégories, puis republie sur `homeassistant/<même suite de topic>` : même topic, même `unique_id`, donc mêmes `entity_id` qu'en direct.
+La règle de nom et de zone existe ainsi à un seul endroit. Le nom d'un bouton est le nom long (quoi + lieu précis + lieu, §3.5), règle
+reprise par le core (`isEmitterQuoi`, liste unique `EMITTER_QUOI_SLUGS` : `bouton`, `telecommande`) pour tout appareil de ce QUOI.
+
+Restent publiés **directement**, quelle que soit l'option :
+- les **émetteurs dont le QUOI n'est ni « bouton » ni « télécommande »** (ex. un émetteur auquel on a recopié le nom de son récepteur) : avertissement unique ; à renommer en `Bouton---…` pour les faire passer par NOMMAGE. Un récepteur Lighting1 a, comme un Lighting2, un émetteur : le bouton ARC (ex. `lighting1_arc_b1`), déclaré de la même manière : NOMMAGE leur donnerait un nom court différent
+  de celui de RFXCOM. Avertissement unique dans le journal ; à renommer (ex. `Bouton---…`) pour les faire passer par NOMMAGE ;
+- les **scènes** (`device_automation`, topic à segment supplémentaire que NOMMAGE n'écoute pas, et schéma sans `json_attributes_*`) ;
+- tout appareil dont le nom ne contient pas `---` (NOMMAGE l'abandonnerait en silence ; avertissement unique).
+
+Le retrait d'une entité est publié sur les deux préfixes. **NOMMAGE doit être actif** : sans lui, plus aucune entité RFXCOM de ces types
+n'apparaît dans HA. Simulation sur la configuration de stfort (83 entités) : nom court et zone identiques en direct et via NOMMAGE pour
+les 81 entités concernées (dont les 11 « Télécommande… » et les boutons) ; les 2 boutons ARC Lighting1 de stfort (`lighting1_arc_e2`, `lighting1_arc_k9`) portent encore le nom de leur récepteur (`prise---…`) : directs tant qu'ils ne sont pas renommés `Bouton---…`.
+**Non vérifié en réel.**
 
 ### 10.3 Attributs de taxonomie
 
@@ -885,6 +907,7 @@ Les erreurs de connexion au démarrage sont normales et ne bloquent pas l'applic
 ---
 
 ## 16. Limites connues
+
 
 | Limite | Effet |
 |---|---|

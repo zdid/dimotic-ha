@@ -1,6 +1,7 @@
 # Spécifications Fonctionnelles - Module RPIGPIO
 
-*Version 1.5 - 24 Septembre 2026*
+*Version 1.6 - 8 Octobre 2026*
+*v1.6 : entités sans suffixe — `ha_discovery.name: null` par broche (§2.3bis) ; l'identifiant de broche n'est plus annoncé comme nom d'entité.*
 *v1.5 : revue de code — un numéro de GPIO ne peut servir qu'à un pin (config mqtt-io invalide sinon) ; suivi de présence de l'agent reconnecté quand la config MQTT change ; `bridgeInstance` plus modifié à chaud (nouveaux topics au déploiement suivant = entités HA en double) ; liste des pins adoptée en mémoire seulement si l'écriture réussit. Décision utilisateur : l'entité HA d'un pin supprimé se supprime **manuellement dans HA** (mqtt-io ne publie jamais de retrait de découverte, et l'application rpigpio reste sans écriture MQTT).*
 *v1.4 : multi-cible standardisé (`target` singulier → `targets[]`, plafonné à 1 en pratique via
 `.max(1)`), même patron que `teleinfo`/`arexx` (demande explicite : implémentation identique dans
@@ -181,6 +182,20 @@ ha_discovery:
 ```
 mqtt-io fait un `dict.update()` (fusion non profonde) sur ce bloc — l'override **remplace**
 entièrement le device par défaut pour cette pin, sans affecter les autres.
+
+### 2.3bis Nom d'entité nul (⭐ nouveau v1.6, 08/10/2026)
+
+mqtt-io annonce à HA `name` = le `name` de la sortie, ici l'identifiant de broche (« 15 »), puis applique par-dessus le contenu de
+la section `ha_discovery` de la broche (`get_common_config`, `config.update(io_conf["ha_discovery"])`, vérifié dans mqtt-io 2.6.0).
+HA en faisait un **suffixe** du nom d'entité (`switch.relais_relais15_15`) alors que l'appareil porte déjà le QUOI---OÙ. Chaque
+broche reçoit maintenant `ha_discovery.name: null` : l'entité prend le nom de l'appareil, comme l'état principal d'un appareil
+zigbee2mqtt. Le topic de découverte (`…/<identifiant>/<broche>/config`) et le `unique_id` sont construits par mqtt-io depuis le `name` de
+la **sortie**, pas depuis ce champ : ils ne changent pas, et les `entity_id` déjà enregistrés dans HA non plus. Seuls les nouveaux
+enregistrements, et le nom affiché, changent. **Non vérifié en réel** : à contrôler au prochain déploiement.
+
+Types d'entités produits : une sortie (`direction: output`) = `switch` ; une entrée (`direction: input`) = `binary_sensor` (composant par
+défaut de mqtt-io). Aucune autre entité (ni configuration, ni diagnostic) n'est créée par broche ; les capteurs analogiques de
+mqtt-io (`sensor_inputs`) ne sont pas générés par cette application.
 
 ### 2.4 Process séparé (⭐ v1.1, 16/08/2026)
 
@@ -500,6 +515,7 @@ applications/rpigpio/
 ### 10.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.6 | 2026-10-08 | Claude | Entités sans suffixe : `ha_discovery.name: null` par broche (§2.3bis), types d'entités produits (switch / binary_sensor). |
 | 1.5 | 2026-09-24 | Claude | Revue de code : GPIO unique par pin, présence de l'agent reconnectée sur changement MQTT, `bridgeInstance` figé à chaud, mémoire alignée sur le disque en cas d'échec d'écriture. v1.4 archivée. |
 | 1.4 | 2026-08-23 | Claude | **Multi-cible standardisé** : `target` singulier → `targets[]` (`.max(1)`, id texte libre, même pattern que `teleinfo`/`arexx` et `nommage/sources`) — §2.1/§5.1/§6/§7. Deux simplifications décidées avec l'utilisateur, propagées au socle partagé : accès cible toujours en root direct (`sshUser` retiré, plus de `sudo` — `sudo NOPASSWD` jugé équivalent à root sur ce projet) et clé SSH par cible sous `data/rpigpio/ssh/<id>/` au lieu de `~/.ssh/...` (non résolu dans le conteneur Docker — vérifié Dockerfile/compose.yaml). Protocole `rpigpio:remote-op`/`rpigpio:remote-op:result` étendu avec `targetId`. Nouvelle carte de cible dans le tableau de bord (`TargetCards.js`, composant mutualisé rpigpio/teleinfo/arexx) avec instructions SSH par cible et 4 boutons Déployer/Démarrer/Arrêter/Redémarrer — remplace l'ancien bloc à cible unique. Testé au navigateur. Ancienne version v1.3 archivée. |
 | 1.3 | 2026-08-22 | Claude | **`DeployService.ts` migré sur le socle SSH/SCP partagé** `core/infrastructure/remote/` (§5.1bis) — mutualisé avec `teleinfo`, qui réimplémentait des primitives (`runSsh`/`runScp`/`shellQuote`/`expandHome`) quasi identiques. Protocole Socket.io uniformisé (§7.2) : `rpigpio:deploy`/`rpigpio:deploy:result` (sans payload) devient `rpigpio:remote-op`/`rpigpio:remote-op:result` (`{ action }`) — même mécanisme quelle que soit l'intervention distante, demande explicite de l'utilisateur en prévision de futurs scripts de start/stop/restart. `start()`/`stop()`/`restart()` ajoutés côté `DeployService`, délèguent à un `DockerContainerController` partagé — non encore exposés en IHM. Ancienne version v1.2 archivée. |

@@ -139,16 +139,18 @@ export function publishDiscovery(
   entity: HaMqttDiscoveryEntity,
   qos: 0 | 1 = 1,
   retain: boolean = true,
-  bridgeInstance?: string
+  bridgeInstance?: string,
+  prefix?: string
 ): void {
   // ⭐ fonctionnelles-supervisor_specs v2.3 §9.3 : au passage au nouveau format (node_id=bridgeInstance),
   // nettoie activement l'ancien topic (sans node_id) à CHAQUE publication — sans ça, une instance
   // déjà en production laisserait indéfiniment un message retenu orphelin sur l'ancien topic après
   // la mise à jour. Idempotent/inoffensif si l'ancien topic n'a jamais existé.
-  if (bridgeInstance) {
+  // (pas pour un préfixe alternatif : ce nettoyage ne concernait que l'ancien format du préfixe standard.)
+  if (bridgeInstance && !prefix) {
     transport.publish(getDiscoveryTopic(component, objectId), '', qos, true);
   }
-  transport.publish(getDiscoveryTopic(component, objectId, bridgeInstance), JSON.stringify(entity), qos, retain);
+  transport.publish(getDiscoveryTopic(component, objectId, bridgeInstance, prefix), JSON.stringify(entity), qos, retain);
 }
 
 /**
@@ -178,7 +180,8 @@ export function unpublishDiscovery(
   component: string,
   objectId: string,
   qos: 0 | 1 = 1,
-  bridgeInstance?: string
+  bridgeInstance?: string,
+  prefix?: string
 ): void {
-  transport.publish(getDiscoveryTopic(component, objectId, bridgeInstance), '', qos, true);
+  transport.publish(getDiscoveryTopic(component, objectId, bridgeInstance, prefix), '', qos, true);
 }

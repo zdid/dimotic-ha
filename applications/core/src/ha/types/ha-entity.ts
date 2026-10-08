@@ -151,6 +151,14 @@ export interface HaStructuredEntity {
   attributes: Record<string, unknown>;
   device_id?: string;
   area_id?: string;
+  /** Catégorie HA de l'entité (registre des entités) : 'config' (réglage), 'diagnostic', ou null (entité principale). */
+  entity_category?: string | null;
+  /** Masquée dans HA ('user' | 'integration') ou null. */
+  hidden_by?: string | null;
+  /** Désactivée dans HA ('user' | 'integration' | …) ou null. */
+  disabled_by?: string | null;
+  /** Intégration source (ex. 'mqtt', 'huawei_solar'). */
+  platform?: string;
   quoi_ids: string[]; // Résultats de la classification (peut être vide)
   last_updated: Date;
   // Références complètes (peuplées par HaStructureRegistry)
@@ -242,6 +250,9 @@ export interface HaEntityRegistryUpdatedMessage extends HaWsMessage {
       device_id?: string;
       area_id?: string;
       device_class?: string;
+      entity_category?: string | null;
+      hidden_by?: string | null;
+      disabled_by?: string | null;
     };
   };
 }

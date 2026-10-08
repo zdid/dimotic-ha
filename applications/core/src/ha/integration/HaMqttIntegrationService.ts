@@ -142,7 +142,8 @@ export class HaMqttIntegrationService {
     component: string,
     objectId: string,
     deviceId: string,
-    essential: EssentialEntityData
+    essential: EssentialEntityData,
+    discoveryPrefix?: string
   ): void {
     const transport = this.getBridgeOrWarn(moduleName, bridgeInstance);
     if (!transport) return;
@@ -154,7 +155,7 @@ export class HaMqttIntegrationService {
       component,
       objectId,
     });
-    publishDiscovery(transport, component, objectId, entity, 1, true, bridgeInstance);
+    publishDiscovery(transport, component, objectId, entity, 1, true, bridgeInstance, discoveryPrefix);
 
     if (essential.commandEnabled) {
       subscribeCommands(transport, moduleName, bridgeInstance, deviceId);
@@ -181,10 +182,11 @@ export class HaMqttIntegrationService {
    * Retire une découverte déjà publiée (voir discovery.ts::unpublishDiscovery) — à utiliser quand
    * un module désélectionne une donnée/un device qui avait déjà été annoncé à HA.
    */
-  removeDiscoveryFor(moduleName: string, bridgeInstance: string, component: string, objectId: string): void {
+  removeDiscoveryFor(moduleName: string, bridgeInstance: string, component: string, objectId: string, discoveryPrefix?: string): void {
     const transport = this.getBridgeOrWarn(moduleName, bridgeInstance);
     if (!transport) return;
-    unpublishDiscovery(transport, component, objectId, 1, bridgeInstance);
+    unpublishDiscovery(transport, component, objectId, 1, bridgeInstance, discoveryPrefix);
+    if (discoveryPrefix) return; // préfixe alternatif : pas d'ancien format à nettoyer
     // Nettoie aussi l'ancien format (sans node_id), au cas où l'entité aurait été publiée avant la
     // migration vers le nouveau format de topic (§9.3) — idempotent si jamais publié ainsi.
     unpublishDiscovery(transport, component, objectId, 1);

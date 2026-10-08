@@ -68,6 +68,12 @@ function buildPinEntry(pin: PinDefinition): Record<string, unknown> {
     inverted: pin.inverted,
     ...buildInitialFields(pin),
     ha_discovery: {
+      // ⭐ 08/10/2026 — `name: null` : sans cela mqtt-io annonce `name` = l'identifiant technique de la broche (« 15 »), et HA
+      // en fait un SUFFIXE de l'entité (switch.relais_relais15_15) alors que l'appareil porte déjà le QUOI---OÙ. Avec un nom
+      // nul, l'entité prend le nom de l'appareil, comme l'état principal d'un appareil zigbee2mqtt (name: null).
+      // Le topic de découverte et le unique_id gardent l'identifiant de broche (mqtt-io les construit depuis `name` de la
+      // sortie, pas depuis ce champ) : l'identité de l'entité, et son entity_id déjà enregistré dans HA, ne changent pas.
+      name: null,
       device: buildHaDiscoveryDevice(pin)
     }
   };

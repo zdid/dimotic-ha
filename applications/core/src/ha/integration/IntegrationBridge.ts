@@ -14,6 +14,7 @@ import type { ConfigService } from '../../infrastructure/config/ConfigService';
 import { HaMqttIntegrationService, type HaMqttBrokerConfig } from './HaMqttIntegrationService';
 import type { EssentialEntityData } from './discovery';
 import type { HaMqttStateMessage } from './types/ha-mqtt';
+import { DEFAULT_DISCOVERY_PREFIX, isEmitterQuoi } from './types/ha-mqtt';
 import type { AreaEnsureService } from '../sync/AreaEnsureService';
 
 // =============================================================================
@@ -31,12 +32,19 @@ export interface DiscoveryRequestEvent {
   objectId: string;
   deviceId: string;
   essential: EssentialEntityData;
+  /**
+   * Préfixe de découverte à utiliser à la place de `homeassistant` — typiquement `homeassist` pour que NOMMAGE traite le
+   * message (nom QUOI---OÙ, zone, taxonomie, catégorie) puis le republie lui-même sur `homeassistant/`. Sans effet de
+   * taxonomie côté module : `essential.attributsTaxonomie` est alors ignoré (NOMMAGE le recalcule depuis device.name).
+   */
+  discoveryPrefix?: string;
 }
 
 export interface DiscoveryRemoveRequestEvent {
   bridgeInstance: string;
   component: string;
   objectId: string;
+  discoveryPrefix?: string;
 }
 
 export interface StateRequestEvent {
@@ -257,7 +265,7 @@ export class IntegrationBridge {
 
     this.eventBus.onGeneric<DiscoveryRemoveRequestEvent>(`integration:${moduleName}:discovery:remove`, (data) => {
       if (!this.mqttEnabled) return;
-      this.haMqttService.removeDiscoveryFor(moduleName, data.bridgeInstance, data.component, data.objectId);
+      this.haMqttService.removeDiscoveryFor(moduleName, data.bridgeInstance, data.component, data.objectId, data.discoveryPrefix);
     });
 
     this.eventBus.onGeneric<StateRequestEvent>(`integration:${moduleName}:state`, (data) => {
@@ -296,11 +304,14 @@ export class IntegrationBridge {
         await this.areaEnsureService.ensureArea(capitalized, this.shouldWaitIndefinitelyForArea(moduleName));
       }
     }
-    this.haMqttService.publishDiscoveryFor(moduleName, data.bridgeInstance, data.component, data.objectId, data.deviceId, data.essential);
+    // Via NOMMAGE (préfixe alternatif) : la taxonomie est recalculée par NOMMAGE depuis device.name — on n'en publie pas.
+    const viaNommage = !!data.discoveryPrefix && data.discoveryPrefix !== DEFAULT_DISCOVERY_PREFIX;
+    const essential = viaNommage ? { ...data.essential, attributsTaxonomie: undefined } : data.essential;
+    this.haMqttService.publishDiscoveryFor(moduleName, data.bridgeInstance, data.component, data.objectId, data.deviceId, essential, viaNommage ? data.discoveryPrefix : undefined);
 
     // Taxonomie sur son topic dédié — seulement à la (re)découverte, jamais à chaque état (voir
     // discovery.ts::EssentialEntityData.attributsTaxonomie).
-    if (data.essential.attributsTaxonomie) {
+    if (!viaNommage && data.essential.attributsTaxonomie) {
       this.haMqttService.publishAttributesFor(moduleName, data.bridgeInstance, data.component, data.objectId, data.essential.attributsTaxonomie);
     }
   }
@@ -393,7 +404,16 @@ export class IntegrationBridge {
    */
   private buildShortDeviceName(fullName: string): string {
     const { rawQuoi, nomPrecis, nomLieu } = this.parseQuoiLieu(fullName);
-    const label = nomPrecis && nomPrecis !== nomLieu ? nomPrecis : rawQuoi;
+    // Un émetteur (« bouton », « télécommande », voir isEmitterQuoi) porte le même lieu précis que la lumière qu'il pilote : sans le quoi en préfixe les deux seraient
+    // indistinguables. Même règle que RFXCOM (taxonomy.ts::buildBoutonDisplayName) : quoi + lieu précis + lieu, en toutes lettres.
+    if (isEmitterQuoi(rawQuoi)) {
+      const parts = [rawQuoi];
+      if (nomPrecis) parts.push(nomPrecis);
+      if (nomLieu && nomLieu.toLowerCase() !== (nomPrecis ?? '').toLowerCase()) parts.push(nomLieu);
+      return parts.map((p) => this.capitalizeAreaName(p)).join(' ');
+    }
+    // Comparaison insensible à la casse, comme RFXCOM (extractTaxonomy : lieu_precis == lieu → laissé vide) : « Salon » et « salon » ne sont qu'un lieu.
+    const label = nomPrecis && nomPrecis.toLowerCase() !== (nomLieu ?? '').toLowerCase() ? nomPrecis : rawQuoi;
     return this.capitalizeAreaName(label);
   }
 
