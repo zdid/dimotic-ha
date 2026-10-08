@@ -1,5 +1,7 @@
 # Conception — Claude Code, accès au système et génération d'automatisations
 
+*Version 1.3 - 8 Octobre 2026*
+*v1.3 : **§0 État d'avancement** ajouté — ce qui est fait, éprouvé ou non, et ce qui n'est que spécifié ; à mettre à jour à chaque étape. v1.2 archivée.*
 *Version 1.2 - 8 Octobre 2026*
 *v1.2 : **diffusion et mise en place de Claude Code** (§2ter) — état réel (script Outils, écran Déploiement non réalisé), script aligné sur ces décisions, jeton Home Assistant **conservé** en option pour la mise au point ; v1.1 archivée.*
 *Version 1.1 - 8 Octobre 2026*
@@ -14,6 +16,7 @@ la mise en œuvre (§9).*
 
 ## 📌 Table des Matières
 
+0. État d'avancement
 1. Objet et décisions
 2. Les sites et leur organisation
 3. Ce qui existe déjà (livré)
@@ -26,6 +29,35 @@ la mise en œuvre (§9).*
 10. Points ouverts
 11. Plan de mise en œuvre
 12. Historique
+
+---
+
+## 0. État d'avancement (au 08/10/2026)
+
+**Légende** — 🟢 utilisé en réel · 🟡 livré dans le code, **jamais éprouvé sur la vraie maison** (testé en simulation seulement) ·
+⚪ spécifié seulement, **aucun code**. Tenir ce tableau à jour à chaque étape ; en cas de doute, il prime sur le reste du
+document pour savoir « où on en est ».
+
+| Élément | État | Où c'est décrit |
+|---|---|---|
+| Console web d'un `screen` (`screen2http`) | 🟢 | `fonctionnelles-screen2http` v1.2 |
+| Serveur MCP de `ia` : outils de Mistral + vision (instructions, ressources) | 🟡 | `fonctionnelles-ia` §19 |
+| Outils de lecture `obtenir_details`, `diagnostiquer_resolution`, `tester_phrase` | 🟡 | `fonctionnelles-ia` §19.7 |
+| Lecture du planificateur (`lire_planificateur`) | 🟡 — le pont réel entre `ia` et `planificateur` jamais vérifié | `fonctionnelles-ia` §19.8 |
+| Résolution quoi/lieux (« plafonnier de la chambre », repli par le nom borné au quoi) | 🟡 | `techniques-socle-ha-mqtt` §8.3.2 (v4.38) |
+| Fichiers éditables à deux niveaux (`modele_integre/`, `personnalise/`) | 🟡 | `fonctionnelles-ia` §12bis |
+| Règles Mistral révisées + noms de macros dans le catalogue | 🟡 | `fonctionnelles-ia` §5 ; fichier `regles_mistral.txt` |
+| Script « Agent Claude Code » (compte dédié, MCP, permissions, `claude` cherché dans le compte) | 🟡 — jamais lancé sur une vraie machine | `fonctionnelles-outils` §7.4 |
+| Pilotage à distance par Remote Control | 🟡 — repris par le script ; mode de connexion et reprise après redémarrage à vérifier | §2bis |
+| Un Claude Code par site, MCP local en `127.0.0.1` | 🟡 ici (selon l'essai) · ⚪ site distant | §2 |
+| Échelle d'autorisations : niveau 0 (lecture, propose) | 🟡 | §5 |
+| Niveaux 1, 2, 3 (dossier de propositions, déploiement dans Home Assistant, cible « Home Assistant ») | ⚪ | §5 |
+| Outil `lire_automatisations_ha` | ⚪ | §6, §10 |
+| Écran Déploiement « Agents des applications » (Claude Code déclaré par `ia`) | ⚪ | `conception-agents-distants-reglages` v1.1 |
+| Démarrage automatique de la session après redémarrage de la machine | ⚪ | §2ter, §10 |
+| Diffusion de propositions entre sites | ⚪ (idée, hors décision) | §7 |
+
+**Prochaine étape** : l'essai réel (plan §11, étape 3) — activer le MCP, lancer le script ici, noter ce qui manque.
 
 ---
 
@@ -215,6 +247,7 @@ Home Assistant par le socle), `PROMPT_PROJET` §11 (table de correspondance, à 
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.3 | 08/10/2026 | Claude | **§0 État d'avancement** (fait / éprouvé / seulement spécifié). v1.2 archivée. |
 | 1.2 | 08/10/2026 | Claude | **Diffusion et mise en place** (§2ter) : script Outils aligné (compte dédié, MCP, permissions, jeton Home Assistant facultatif **conservé**), écran Déploiement toujours à réaliser, Claude Code ajouté aux agents. v1.1 archivée. |
 | 1.1 | 08/10/2026 | Claude | **Remote Control** (§2bis) : pilotage à distance des Claude Code depuis téléphone/tablette, à la place d'un VPN vers l'interface de chaque site ; vérifications à faire (§10) ; v1.0 archivée. |
 | 1.0 | 08/10/2026 | Claude | Version initiale — conception issue des échanges du 08/10/2026 (aucun code nouveau). |
