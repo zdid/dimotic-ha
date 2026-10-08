@@ -5,15 +5,17 @@
  */
 
 import * as fs from 'node:fs';
+import { effectivePath, watchLayered, type LayeredFile } from './LayeredFiles';
 import type { Logger, HaBridgeClient } from '../../../core/dist/exports';
 import type { OllamaMessage } from './types';
 
 export class RulesProvider {
   private rules = '';
-  private watcher?: fs.FSWatcher;
+  private watchers: fs.FSWatcher[] = [];
 
   constructor(
-    private readonly filePath: string,
+    // Deux niveaux (LayeredFiles.ts) : version personnalisée si elle existe, sinon copie de l'embarquée.
+    private readonly file: LayeredFile,
     private readonly logger: Logger,
     private readonly registry: HaBridgeClient,
     // Callback plutôt qu'une valeur figée : lu à CHAQUE appel de buildCatalogText(), reflète donc
@@ -24,27 +26,31 @@ export class RulesProvider {
   ) {}
 
   load(): void {
-    try {
-      this.rules = fs.readFileSync(this.filePath, 'utf8');
-      this.logger.info('RulesProvider', `Règles chargées depuis ${this.filePath} (${this.rules.length} caractères)`);
-    } catch (error) {
-      this.logger.error('RulesProvider', `Impossible de lire ${this.filePath}: ${error}`);
-      this.rules = '';
+    this.readRules();
+    this.watchers.forEach((w) => w.close());
+    this.watchers = watchLayered(this.file, () => {
+      this.logger.info('RulesProvider', 'Changement détecté, rechargement des règles');
+      this.readRules();
+    });
+    if (this.watchers.length === 0) {
+      this.logger.warn('RulesProvider', 'Surveillance des fichiers de règles indisponible');
     }
+  }
 
-    this.watcher?.close();
+  private readRules(): void {
+    const filePath = effectivePath(this.file);
     try {
-      this.watcher = fs.watch(this.filePath, () => {
-        this.logger.info('RulesProvider', 'Changement détecté, rechargement des règles');
-        this.load();
-      });
+      this.rules = fs.readFileSync(filePath, 'utf8');
+      this.logger.info('RulesProvider', `Règles chargées depuis ${filePath} (${this.rules.length} caractères)`);
     } catch (error) {
-      this.logger.warn('RulesProvider', `Surveillance du fichier de règles indisponible: ${error}`);
+      this.logger.error('RulesProvider', `Impossible de lire ${filePath}: ${error}`);
+      this.rules = '';
     }
   }
 
   stop(): void {
-    this.watcher?.close();
+    this.watchers.forEach((w) => w.close());
+    this.watchers = [];
   }
 
   getRules(): string {

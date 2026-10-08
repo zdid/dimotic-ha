@@ -89,7 +89,7 @@ export const iaConfigSchema = z.object({
   // n'existe pas encore) : data/ est le seul répertoire monté/persistant en déploiement Docker
   // (voir techniques-socle-ha-mqtt_specs §11) — un fichier sous applications/ n'y serait pas
   // éditable sans reconstruire l'image.
-  rulesFile: z.string().min(1).default('../../data/ia/regles_mistral.txt'),
+  rulesFile: z.string().default(''),
 
   // Délais d'attente pour les échanges de corrélation avec planificateur
   commandTimeoutMs: z.number().int().positive().default(2000),
@@ -142,7 +142,7 @@ export const DEFAULT_IA_CONFIG: IaConfig = {
     { provider: 'anthropic', model: 'claude-sonnet-5', label: 'Claude Sonnet' }
   ],
   ollamaHttpPort: 11434,
-  rulesFile: '../../data/ia/regles_mistral.txt',
+  rulesFile: '',
   commandTimeoutMs: 2000,
   toolExecuteTimeoutMs: 20000,
   excludedQuoiIds: ['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge']

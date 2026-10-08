@@ -1,8 +1,13 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.15
+**Version :** 1.16
 **Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.16** : **fichiers éditables à deux niveaux** (§12bis) — règles Mistral, vocabulaire et gabarits de
+> l'interpréteur : `data/ia/modele_integre/` (copie de la version embarquée, renouvelée à chaque démarrage)
+> et `data/ia/personnalise/` (version modifiée, prioritaire). Une mise à jour de l'application atteint
+> enfin les installations existantes.
 
 > **v1.15** : **Accès MCP pour Claude Code** (§19, nouveau) — les trois outils donnés à Mistral
 > (`lister_entites`, `obtenir_etat`, `executer_action`) exposés à Claude Code par un serveur MCP HTTP
@@ -524,6 +529,35 @@ de clé dédiée par modèle comparé. Non exposé dans l'UI générique (même 
 `mistralRateLimits`/`excludedQuoiIds`, un type de champ "liste d'objets" n'y étant pas praticable) —
 éditable directement dans `data/ia/config.yaml`.
 
+### 12bis. Fichiers éditables à deux niveaux (nouveau v1.16)
+
+**Problème corrigé** : le modèle embarqué (règles Mistral, vocabulaire et gabarits de l'interpréteur)
+était copié UNE fois vers `data/ia/` au premier démarrage, puis jamais renouvelé — une mise à jour des
+règles n'atteignait donc jamais une installation déjà démarrée.
+
+| Emplacement | Contenu | Écrit par |
+|---|---|---|
+| `data/ia/modele_integre/<fichier>` | copie de la version embarquée | le code, **à chaque démarrage** (si le contenu diffère) — ne jamais l'éditer |
+| `data/ia/personnalise/<fichier>` | version modifiée par l'utilisateur | l'utilisateur seul, jamais touchée par le code |
+
+**Version utilisée** : la personnalisée si elle existe, sinon la copie de l'embarquée. Surveillance à
+chaud des deux niveaux : créer, modifier ou **supprimer** la version personnalisée rebascule sans
+redémarrage. Pour personnaliser : copier le fichier de `modele_integre/` vers `personnalise/`, puis le
+modifier. Supprimer le fichier personnalisé = suivre de nouveau la version embarquée.
+
+Fichiers concernés : `regles_mistral.txt`, `vocabulaire_interpreteur.yaml`, `gabarits_interpreteur.yaml`
+(`LayeredFiles.ts` ; modèles embarqués dans `applications/ia/rules/` et `applications/ia/interpreter/`).
+
+**Reprise de l'existant** (à chaque démarrage, pour chaque fichier) : l'ancien fichier unique
+`data/ia/<fichier>` identique à la version embarquée actuelle est une copie intacte → retiré ; différent
+→ **déplacé** vers `personnalise/` (jamais supprimé : il peut porter des modifications) avec un
+avertissement dans la log — ce peut aussi être une copie intacte d'une version plus ancienne, auquel cas
+le supprimer pour suivre l'embarquée.
+
+**`rulesFile`** devient optionnel (défaut vide). Vide, ou l'ancienne valeur par défaut
+`../../data/ia/regles_mistral.txt` : emplacement géré ci-dessus. Autre valeur : chemin (absolu, ou
+relatif à `applications/ia/`) de la version personnalisée, à la place de `personnalise/`.
+
 ## 13. UI
 
 Tableau de bord : joignabilité de l'API Mistral (et des fournisseurs généralistes activés), statut
@@ -991,6 +1025,7 @@ mécanisme de nouvel essai ajouté, pas encore re-déclenché en réel faute d'u
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.16 | 08/10/2026 | Claude | **Fichiers éditables à deux niveaux** (§12bis, `LayeredFiles.ts`) : `regles_mistral.txt`, `vocabulaire_interpreteur.yaml`, `gabarits_interpreteur.yaml` — copie embarquée renouvelée à chaque démarrage dans `data/ia/modele_integre/`, version modifiée dans `data/ia/personnalise/` (prioritaire) ; reprise de l'ancien fichier unique `data/ia/<nom>` ; `rulesFile` devient optionnel. v1.15 archivée. |
 | 1.15 | 08/10/2026 | Claude | **Accès MCP pour Claude Code** (§19) : serveur MCP HTTP (`McpHttpServer.ts`) exposant `lister_entites`/`obtenir_etat`/`executer_action` via le même `ToolExecutor` que Mistral ; jeton Bearer obligatoire, désactivé par défaut, appels journalisés ; réglages `mcpEnabled`/`mcpToken`/`mcpPort`/`mcpHost`. v1.14 archivée. |
 | 1.14 | 24/09/2026 | Claude | **Revue de code** (demande utilisateur, session du 24/09/2026) : (1) planification reconnue par l'interpréteur transmise avec `phrase_originale` vide — complétée avec la phrase dite (`withPhraseOriginale`) ; (2) `DeployResponder` ne consulte ni n'alimente plus `PhraseCache` (collision avec les phrases dites via HA : séquence `execution` rejouée comme commande immédiate) ; (3) décisions à déclencheur `date` jamais mises en cache ; (4) rechargement à chaud de `data/ia/config.yaml` et des YAML de l'interpréteur : surveillance du dossier (`loader.ts::watchFile`, anti-rebond 300 ms) — `fs.watch` sur le fichier devenait sourd après 1-2 remplacements par rename (vérifié) ; (5) mineurs : action Mistral en échec jamais mise en cache (`executerActionOk`), réponses planificateur du chemin interpréteur/cache en JSON (session d'assistance plus fermée sur échec), port Ollama occupé journalisé au lieu de faire planter le process, modèles intégrés résolus depuis `__dirname` (racine externe), échappement HTML des guillemets dans l'UI ; (6) démarrage subordonné au premier `ha:ready` (§17 : serveur Ollama, test/comparatif, réinterprétations), statut `haReady` affiché sur le tableau de bord ; (7) **plus de réinterprétation au déclenchement** (§10, décision utilisateur, miroir de `fonctionnelles-planificateur_specs` v1.11) : `DeployResponder` et `outcomesToExecutionSteps()` supprimés, `ConditionEvaluator` (`planificateur:condition`, vrai/faux, outils de lecture seulement) ; `regles_mistral.txt` : `verbe`/`quoi` obligatoires dans toute action, exemples 1/2/4 corrigés (modèle intégré + copie `data/ia/`). Ancienne version v1.13 archivée. |
 | 1.13 | 27/08/2026 | Claude | **Lieu unique déduit du `quoi`** (§16.6bis) : quand une phrase ne capture aucun lieu et que le `quoi` reconnu n'existe qu'à un seul `lieu_principal` distinct dans toute la maison ("allume le poêle"), ce lieu est utilisé automatiquement — prioritaire sur `context.lieuOrigine` (signal plus spécifique, et de toute façon non branché en pratique, §16.6). Niveau `lieu_principal`, pas `lieu_precis` (deux entités du même quoi dans la même pièce à des `lieu_precis` différents comptent pour un seul lieu). Nouveau `liveCatalogs.ts::buildQuoiUniqueLieu()` (même mécanisme que `buildLieuxComposes()`, dérivé à chaque reconstruction du catalogue, jamais figé) ; nouvelle fonction `resolveDefaultLieu()` centralisant la priorité, appliquée dans `buildActionParams` et la clause action de `si_alors` — volontairement PAS appliquée au gabarit `donne` (une interrogation sans lieu a plus de sens en listant toutes les instances). Vérifié en conditions réelles : "allume le poele" → `lieux:["salle à manger"]` (seul poêle de la maison réelle), 0 token. Corpus de test étendu à 59 cas. Demande utilisateur explicite, session du 27/08/2026. Ancienne version v1.12 archivée. |

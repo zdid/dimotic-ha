@@ -80,7 +80,7 @@ export const IA_UI_METADATA: ModuleUiMetadata = {
       icon: '📡',
       fields: [
         { name: 'ollamaHttpPort', label: 'Port HTTP', type: 'number', default: 11434 },
-        { name: 'rulesFile', label: 'Fichier de règles domotiques', type: 'string', default: '../../data/ia/regles_mistral.txt', description: 'Chemin relatif à applications/ia/ (défaut : sous data/ia/, éditable sans reconstruire — copié automatiquement depuis le modèle intégré au premier démarrage si absent), ou chemin absolu.' }
+        { name: 'rulesFile', label: 'Fichier de règles personnalisé (optionnel)', type: 'string', default: '', description: "Vide (recommandé) : les règles utilisées sont data/ia/personnalise/regles_mistral.txt si ce fichier existe, sinon la version embarquée (copie renouvelée à chaque démarrage dans data/ia/modele_integre/). Pour personnaliser : copier le fichier de modele_integre/ vers personnalise/ puis le modifier. Renseigner ici un chemin (absolu, ou relatif à applications/ia/) remplace data/ia/personnalise/." }
       ]
     }
   ]

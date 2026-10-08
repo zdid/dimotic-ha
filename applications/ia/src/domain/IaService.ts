@@ -37,7 +37,8 @@ import {
   type GabaritDef,
   type DeterministicOutcome
 } from './interpreter/index';
-import { ensureSeeded, watchFile } from './interpreter/loader';
+import { watchFile } from './interpreter/loader';
+import { layeredFile, effectivePath, prepareLayeredFile, watchLayered, type LayeredFile } from './LayeredFiles';
 import { buildLiveCatalogs } from './liveCatalogs';
 import { PhraseCache } from './PhraseCache';
 import { InterpreterMetrics } from './InterpreterMetrics';
@@ -45,6 +46,9 @@ import { InterpreterMetrics } from './InterpreterMetrics';
 /** Dossier de l'application qui tourne (src/domain ou dist/domain → deux niveaux au-dessus) —
  *  ⭐ 24/09/2026 : modèles intégrés trouvés aussi depuis la racine externe `data/applications/ia`. */
 const APP_TEMPLATES_DIR = path.resolve(__dirname, '..', '..');
+
+/** Ancienne valeur par défaut du réglage `rulesFile` (avant les deux niveaux, specs v1.16 §12bis). */
+const LEGACY_DEFAULT_RULES_FILE = '../../data/ia/regles_mistral.txt';
 
 const MAX_TOOL_ROUNDS = 5;
 
@@ -135,8 +139,7 @@ export class IaService implements IIaService {
   private interpreterVocabulaire: Vocabulaire = { verbeGroupes: {}, enums: {}, motsIgnores: [], separateurs: [] };
   private interpreterGabarits: Record<string, GabaritDef> = {};
   private interpreterMacros: string[] = [];
-  private vocabulaireWatcher?: fs.FSWatcher;
-  private gabaritsWatcher?: fs.FSWatcher;
+  private interpreterWatchers: fs.FSWatcher[] = [];
   // ⭐ 26/08/2026, demande utilisateur — cache des 100 dernières phrases résolues + compteurs
   // cache/interpréteur/Mistral — pour les phrases dites (HA, test). ⭐ 24/09/2026 : plus de
   // réinterprétation au déclenchement (DeployResponder supprimé, voir ConditionEvaluator).
@@ -158,7 +161,8 @@ export class IaService implements IIaService {
   ) {
     this.config = iaConfigSchema.parse(configProvider.getAppConfig());
     this.mistralClient = new MistralClient(() => this.config, this.logger);
-    this.rulesProvider = new RulesProvider(this.resolveRulesPath(), this.logger, this.haBridgeClient, () => this.config.excludedQuoiIds);
+    this.prepareDataFiles();
+    this.rulesProvider = new RulesProvider(this.rulesFileDef, this.logger, this.haBridgeClient, () => this.config.excludedQuoiIds);
     this.toolExecutor = new ToolExecutor(this.eventBus, this.logger, this.haBridgeClient, this.config.toolExecuteTimeoutMs);
     this.structuredRouter = new StructuredRouter(this.eventBus, this.logger, this.config.commandTimeoutMs);
     this.conditionEvaluator = new ConditionEvaluator(
@@ -168,47 +172,40 @@ export class IaService implements IIaService {
     );
   }
 
-  private resolveRulesPath(): string {
-    // `rulesFile` relatif reste résolu depuis `applications/ia` (convention documentée du champ,
-    // défaut `../../data/ia/...`) ; le MODÈLE intégré, lui, est pris là où tourne réellement le
-    // code (APP_TEMPLATES_DIR) — y compris depuis la racine externe `data/applications/ia`.
-    const appRoot = path.join(process.env.PROJECT_ROOT || process.cwd(), 'applications', 'ia');
-    const resolved = path.isAbsolute(this.config.rulesFile) ? this.config.rulesFile : path.join(appRoot, this.config.rulesFile);
-    // Modèle intégré (toujours présent, fait partie du code applicatif) — sert uniquement
-    // d'amorce si le fichier réellement utilisé (par défaut sous data/ia/, voir config-schema.ts)
-    // n'existe pas encore, ex: premier démarrage sur une machine neuve (déploiement Docker,
-    // data/ vide). N'écrase jamais un fichier déjà présent à l'emplacement cible.
-    this.ensureRulesFileSeeded(resolved, path.join(APP_TEMPLATES_DIR, 'rules', 'regles_mistral.txt'));
-    return resolved;
-  }
+  /**
+   * Fichiers éditables à deux niveaux (LayeredFiles.ts, specs v1.16 §12bis) : règles Mistral,
+   * vocabulaire et gabarits de l'interpréteur. La copie de la version embarquée est renouvelée à
+   * chaque démarrage ; la version personnalisée (data/ia/personnalise/) l'emporte si elle existe.
+   * Le MODÈLE embarqué est pris là où tourne réellement le code (APP_TEMPLATES_DIR) — y compris
+   * depuis la racine externe `data/applications/ia`.
+   */
+  private rulesFileDef!: LayeredFile;
+  private vocabulaireFileDef!: LayeredFile;
+  private gabaritsFileDef!: LayeredFile;
 
-  /** Chemins des fichiers YAML de l'interpréteur — même amorçage que `resolveRulesPath()`
-   *  ci-dessus (modèle intégré sous `applications/ia/interpreter/`, copié vers `data/ia/` au
-   *  premier démarrage si absent, jamais écrasé ensuite). */
-  private resolveInterpreterPath(dataFileName: string, templateFileName: string): string {
+  private prepareDataFiles(): void {
     const dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia');
-    const resolved = path.join(dataDir, dataFileName);
-    ensureSeeded(resolved, path.join(APP_TEMPLATES_DIR, 'interpreter', templateFileName));
-    return resolved;
+    // `rulesFile` : ancien réglage. Vide ou ancienne valeur par défaut = emplacement géré
+    // (personnalise/) ; une autre valeur explicite reste le chemin de la version personnalisée.
+    const explicit = this.config.rulesFile && this.config.rulesFile !== LEGACY_DEFAULT_RULES_FILE
+      ? (path.isAbsolute(this.config.rulesFile)
+          ? this.config.rulesFile
+          : path.join(process.env.PROJECT_ROOT || process.cwd(), 'applications', 'ia', this.config.rulesFile))
+      : undefined;
+    this.rulesFileDef = layeredFile(dataDir, 'regles_mistral.txt', path.join(APP_TEMPLATES_DIR, 'rules', 'regles_mistral.txt'), explicit);
+    this.vocabulaireFileDef = layeredFile(dataDir, 'vocabulaire_interpreteur.yaml', path.join(APP_TEMPLATES_DIR, 'interpreter', 'vocabulaire.yaml'));
+    this.gabaritsFileDef = layeredFile(dataDir, 'gabarits_interpreteur.yaml', path.join(APP_TEMPLATES_DIR, 'interpreter', 'gabarits.yaml'));
+    for (const file of [this.rulesFileDef, this.vocabulaireFileDef, this.gabaritsFileDef]) {
+      prepareLayeredFile(file, this.logger);
+    }
   }
 
   private loadInterpreterFiles(): void {
     try {
-      this.interpreterVocabulaire = loadVocabulaire(this.resolveInterpreterPath('vocabulaire_interpreteur.yaml', 'vocabulaire.yaml'));
-      this.interpreterGabarits = loadGabarits(this.resolveInterpreterPath('gabarits_interpreteur.yaml', 'gabarits.yaml'));
+      this.interpreterVocabulaire = loadVocabulaire(effectivePath(this.vocabulaireFileDef));
+      this.interpreterGabarits = loadGabarits(effectivePath(this.gabaritsFileDef));
     } catch (error) {
       this.logger.error('IaService', `Échec du chargement du vocabulaire/gabarits de l'interpréteur: ${error}`);
-    }
-  }
-
-  private ensureRulesFileSeeded(targetPath: string, templatePath: string): void {
-    if (targetPath === templatePath || fs.existsSync(targetPath) || !fs.existsSync(templatePath)) return;
-    try {
-      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-      fs.copyFileSync(templatePath, targetPath);
-      this.logger.info('IaService', `Fichier de règles absent — amorcé depuis le modèle intégré vers ${targetPath}`);
-    } catch (error) {
-      this.logger.error('IaService', `Échec de la copie du modèle de règles vers ${targetPath}: ${error}`);
     }
   }
 
@@ -252,14 +249,16 @@ export class IaService implements IIaService {
 
     // ⭐ 26/08/2026 — interpréteur déterministe (specs §16).
     this.loadInterpreterFiles();
-    this.vocabulaireWatcher = watchFile(this.resolveInterpreterPath('vocabulaire_interpreteur.yaml', 'vocabulaire.yaml'), () => {
-      this.logger.info('IaService', 'Vocabulaire interpréteur modifié, rechargement');
-      this.loadInterpreterFiles();
-    });
-    this.gabaritsWatcher = watchFile(this.resolveInterpreterPath('gabarits_interpreteur.yaml', 'gabarits.yaml'), () => {
-      this.logger.info('IaService', 'Gabarits interpréteur modifiés, rechargement');
-      this.loadInterpreterFiles();
-    });
+    this.interpreterWatchers = [
+      ...watchLayered(this.vocabulaireFileDef, () => {
+        this.logger.info('IaService', 'Vocabulaire interpréteur modifié, rechargement');
+        this.loadInterpreterFiles();
+      }),
+      ...watchLayered(this.gabaritsFileDef, () => {
+        this.logger.info('IaService', 'Gabarits interpréteur modifiés, rechargement');
+        this.loadInterpreterFiles();
+      })
+    ];
     // Relais déjà émis par planificateur pour son propre tableau de bord (PlanificateurService.ts)
     // — jamais interrogé à la demande, juste mis en cache ici (bridgedEvents, voir domain/index.ts).
     this.eventBus.onGeneric<Array<{ name: string }>>('planificateur:macros:list', (macros) => {
@@ -332,8 +331,8 @@ export class IaService implements IIaService {
     this.logger.info('IaService', 'Arrêt du service ia...');
     this.rulesProvider.stop();
     this.configWatcher?.close();
-    this.vocabulaireWatcher?.close();
-    this.gabaritsWatcher?.close();
+    this.interpreterWatchers.forEach((w) => w.close());
+    this.interpreterWatchers = [];
     this.ollamaServer?.stop();
     this.mcpServer?.stop();
     if (this.assistSessionsCleanupTimer) clearInterval(this.assistSessionsCleanupTimer);
