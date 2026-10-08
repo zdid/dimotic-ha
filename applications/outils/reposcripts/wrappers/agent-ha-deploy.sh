@@ -74,12 +74,17 @@ sed_escape() { printf '%s' "$1" | sed -e 's/[\\|&]/\\&/g'; }
 render_section() {
   sed -e "s|{{TARGET_HOST}}|$(sed_escape "$TARGET_HOST")|g" \
       -e "s|{{HA_URL}}|$(sed_escape "$HA_URL")|g" \
-      -e "s|{{HA_CONFIG_DIR}}|$(sed_escape "$HA_CONFIG_DIR")|g" "$1"
+      -e "s|{{HA_CONFIG_DIR}}|$(sed_escape "$HA_CONFIG_DIR")|g" \
+      -e "s|{{HA_TOKEN_FILE}}|$(sed_escape "$HA_TOKEN_FILE_SHOWN")|g" "$1"
 }
 
 # Écrit le CLAUDE.md sur la sortie standard. Variables attendues : TPL_DIR, HAS_MCP, HAS_HA_TOKEN,
 # HA_CONFIG_DIR, HA_URL, TARGET_HOST.
 render_claude_md() {
+  # Jeton HA : ./ha_token (installé par ce script) ; sinon ~/.ha_token si c'est celui qui est déjà en place sur la machine.
+  HA_TOKEN_FILE_SHOWN="./ha_token"
+  local uhome; uhome="$(getent passwd "${CLAUDE_USER:-}" 2>/dev/null | cut -d: -f6)"
+  if [ ! -f "$REMOTE_DIR/ha_token" ] && [ -n "$uhome" ] && [ -f "$uhome/.ha_token" ]; then HA_TOKEN_FILE_SHOWN="~/.ha_token"; fi
   printf '<!-- agent-claude-md v%s — généré le %s par agent-ha-deploy -->\n\n' \
     "$(tr -d '[:space:]' < "$TPL_DIR/VERSION")" "$(date +%Y-%m-%d)"
   render_section "$TPL_DIR/00-role.md"; echo
@@ -87,6 +92,8 @@ render_claude_md() {
   if [ -n "$HA_CONFIG_DIR" ]; then render_section "$TPL_DIR/20-ha-config.md"; echo; fi
   if [ "$HAS_HA_TOKEN" = 1 ]; then render_section "$TPL_DIR/30-ha-direct.md"; echo; fi
   render_section "$TPL_DIR/90-securite.md"
+  # Section « Site » (connaissances propres à la machine) : site.md à côté du CLAUDE.md, jamais écrasé par le modèle.
+  if [ -s "$REMOTE_DIR/site.md" ]; then echo; cat "$REMOTE_DIR/site.md"; fi
 }
 
 if [ "${1:-}" = "--remote-exec" ]; then

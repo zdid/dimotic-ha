@@ -26,6 +26,7 @@ import { OllamaHttpServer } from './OllamaHttpServer';
 import { McpHttpServer } from './McpHttpServer';
 import { McpToolbox, MCP_TOOLS } from './McpTools';
 import { PlannerReader } from './PlannerReader';
+import { HaAutomationClient } from './HaAutomationClient';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
@@ -321,7 +322,8 @@ export class IaService implements IIaService {
       registry: this.haBridgeClient,
       excludedQuoiIds: () => this.config.excludedQuoiIds,
       simulate: (phrase, useMistral) => this.simulatePhrase(phrase, useMistral),
-      planner: new PlannerReader(this.eventBus)
+      planner: new PlannerReader(this.eventBus),
+      automations: new HaAutomationClient(this.eventBus, this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia'))
     });
     this.mcpServer = new McpHttpServer({
       host: this.config.mcpHost,
@@ -352,6 +354,8 @@ export class IaService implements IIaService {
       'Outils : lister_entites / obtenir_etat / obtenir_details (lecture), diagnostiquer_resolution (pourquoi une entité ne ressort pas),',
       'lire_planificateur (planifications, macros, actions reçues, commandes réellement envoyées à HA), tester_phrase (simule une',
       'phrase sans rien exécuter), executer_action (AGIT RÉELLEMENT sur la maison : vérifier la cible avant).',
+      'Automatisations HA : lire_automatisations_ha (liste, définition, sauvegardes), deposer_automatisation et supprimer_automatisation',
+      '(AGISSENT sur HA : sans confirme:true ils ne renvoient qu\'un aperçu — le montrer à l\'utilisateur et n\'envoyer confirme:true qu\'après son accord).',
       'Règles complètes de Mistral : ressource dimotic://regles ; catalogue seul : dimotic://catalogue.',
       '',
       this.rulesProvider.buildCatalogText()

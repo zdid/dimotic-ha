@@ -12,6 +12,43 @@ import type { McpToolDef } from './McpHttpServer';
 import { IA_TOOLS } from './tools';
 import type { ToolExecutor } from './ToolExecutor';
 import type { PlannerReader, PlannerSection } from './PlannerReader';
+import type { HaAutomationClient } from './HaAutomationClient';
+
+const CONFIRM_PROP = { type: 'boolean', description: 'false/absent = APERÇU seulement (rien n\'est modifié). true = exécute, À N\'UTILISER QU\'APRÈS l\'accord explicite de l\'utilisateur sur l\'aperçu.' };
+
+/** Outils d'écriture des automatisations HA (niveau 2) : aperçu d'abord, sauvegarde avant remplacement. */
+export const HA_AUTOMATION_TOOLS: McpToolDef[] = [
+  {
+    name: 'lire_automatisations_ha',
+    description: 'Lit les automatisations de Home Assistant (lecture seule). Sans paramètre : liste (id, nom, état, dernière exécution). Avec id : définition complète. Avec sauvegardes=true : sauvegardes disponibles (et leur contenu si fichier est donné).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Identifiant de configuration de l\'automatisation (champ id, pas l\'entity_id)' },
+        sauvegardes: { type: 'boolean', description: 'Lister les sauvegardes faites avant remplacement/suppression (filtrées par id si donné)' },
+        fichier: { type: 'string', description: 'Nom d\'un fichier de sauvegarde à lire (avec sauvegardes=true)' }
+      }
+    }
+  },
+  {
+    name: 'deposer_automatisation',
+    description: 'DÉPOSE (crée ou remplace) une automatisation dans Home Assistant, puis recharge les automatisations. Sans confirme:true, renvoie seulement un aperçu et ne modifie RIEN. L\'existant est sauvegardé avant remplacement. Respecte l\'anti-boucle : from/to explicites, mode single, condition de garde.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Identifiant stable de l\'automatisation (lettres, chiffres, _ et -)' },
+        definition: { type: 'object', description: 'Définition JSON de l\'automatisation, comme son YAML : alias, description, mode, trigger(s), condition(s), action(s)' },
+        confirme: CONFIRM_PROP
+      },
+      required: ['id', 'definition']
+    }
+  },
+  {
+    name: 'supprimer_automatisation',
+    description: 'SUPPRIME une automatisation de Home Assistant. Sans confirme:true, renvoie seulement un aperçu. La définition est sauvegardée avant suppression.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Identifiant de configuration' }, confirme: CONFIRM_PROP }, required: ['id'] }
+  }
+];
 
 export const MCP_ONLY_TOOLS: McpToolDef[] = [
   {
@@ -82,7 +119,8 @@ MCP_ONLY_TOOLS.push({
 /** Les trois outils de Mistral, au format MCP, puis ceux propres à Claude Code. */
 export const MCP_TOOLS: McpToolDef[] = [
   ...IA_TOOLS.map((t) => ({ name: t.function.name, description: t.function.description, inputSchema: t.function.parameters })),
-  ...MCP_ONLY_TOOLS
+  ...MCP_ONLY_TOOLS,
+  ...HA_AUTOMATION_TOOLS
 ];
 
 const NOISY_ATTRIBUTES = new Set(['entity_picture', 'icon', 'supported_features', 'attribution', 'friendly_name', 'editable', 'restored', 'attributs_taxonomie']);
@@ -142,6 +180,8 @@ export interface McpToolboxDeps {
   simulate: (phrase: string, useMistral: boolean) => Promise<unknown>;
   /** Lecture du planificateur (PlannerReader). */
   planner: PlannerReader;
+  /** Automatisations HA (lecture / dépôt / suppression, via le pont REST du core). */
+  automations: HaAutomationClient;
 }
 
 export class McpToolbox {
@@ -152,10 +192,31 @@ export class McpToolbox {
       case 'obtenir_details': return JSON.stringify(await this.details(args), null, 2);
       case 'diagnostiquer_resolution': return JSON.stringify(await this.diagnose(args), null, 2);
       case 'lire_planificateur': return JSON.stringify(await this.readPlanner(args), null, 2);
+      case 'lire_automatisations_ha': return JSON.stringify(await this.readAutomations(args), null, 2);
+      case 'deposer_automatisation': return JSON.stringify(await this.deps.automations.deposit(String(args.id ?? ''), args.definition, args.confirme === true), null, 2);
+      case 'supprimer_automatisation': return JSON.stringify(await this.deps.automations.remove(String(args.id ?? ''), args.confirme === true), null, 2);
       case 'tester_phrase': return JSON.stringify(await this.deps.simulate(String(args.phrase ?? ''), args.utiliser_mistral === true), null, 2);
       default:
         return this.deps.toolExecutor.execute({ id: `mcp-${Date.now()}`, type: 'function', function: { name, arguments: args } });
     }
+  }
+
+  private async readAutomations(args: Record<string, unknown>): Promise<unknown> {
+    const automations = this.deps.automations;
+    const id = typeof args.id === 'string' && args.id.trim() ? args.id.trim() : undefined;
+    if (args.sauvegardes === true) {
+      if (typeof args.fichier === 'string' && args.fichier) {
+        const content = automations.readBackup(args.fichier);
+        return content === undefined ? { error: `sauvegarde « ${args.fichier} » introuvable` } : { fichier: args.fichier, definition: content };
+      }
+      return { sauvegardes: automations.listBackups(id) };
+    }
+    if (id) {
+      const read = await automations.get(id);
+      return read.ok ? { id, definition: read.config } : { error: read.error };
+    }
+    const list = automations.list();
+    return { total: list.length, automatisations: list };
   }
 
   private async readPlanner(args: Record<string, unknown>): Promise<unknown> {

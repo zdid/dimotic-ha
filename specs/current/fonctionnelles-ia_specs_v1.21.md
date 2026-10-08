@@ -1,8 +1,13 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.20
+**Version :** 1.21
 **Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.21** : **dépôt d'automatisations dans Home Assistant par Claude Code** (§19.9) — outils MCP `lire_automatisations_ha`,
+> `deposer_automatisation` et `supprimer_automatisation` (niveau 2 de la conception Claude Code) : aperçu sans effet par défaut,
+> `confirme: true` après accord de l'utilisateur, sauvegarde avant remplacement/suppression, alerte anti-boucle ; passage par le
+> pont REST du core (`HaRestBridge`), l'agent n'a plus besoin d'un jeton HA en écriture.
 
 > **v1.20** : **lecture du planificateur par Claude Code** (§19.8) — outil MCP `lire_planificateur` (planifications, macros,
 > actions reçues de l'assistant, commandes réellement envoyées à HA, YAML), en lecture seule, sans rien changer côté
@@ -1049,6 +1054,7 @@ mécanisme de nouvel essai ajouté, pas encore re-déclenché en réel faute d'u
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.21 | 08/10/2026 | Claude | **Dépôt d'automatisations HA par Claude Code** (§19.9) : outils MCP `lire_automatisations_ha`, `deposer_automatisation`, `supprimer_automatisation`, aperçu puis confirmation, sauvegardes, anti-boucle. |
 | 1.20 | 08/10/2026 | Claude | **Lecture du planificateur** (§19.8) : outil MCP `lire_planificateur` (sections statut, planifications, macros, actions_recues, commandes_ha, yaml) via `PlannerReader` — `ia` redemande à la volée les listes que `planificateur` publie déjà (`…:get`), nouveaux `bridgedEvents` ; aucune modification de `planificateur`. v1.19 archivée. |
 | 1.19 | 08/10/2026 | Claude | **Claude Code observateur** (§19.7) : instructions MCP = vocabulaire + catalogue (recalculé à chaque connexion), ressources `dimotic://catalogue` et `dimotic://regles`, outils de lecture `obtenir_details` (attributs réels + classement), `diagnostiquer_resolution`, `tester_phrase` (cache → interpréteur → Mistral optionnel, rien d'exécuté) ; `McpTools.ts`. v1.18 archivée. |
 | 1.18 | 08/10/2026 | Claude | **Catalogue injecté** (§5, `RulesProvider.inject()`) : ajout de la ligne « Macros existantes » (noms exacts, cache alimenté par `planificateur:macros:list`) à la suite des listes QUOI/lieux ; sans macro connue le bloc reste identique (cache de prompt préservé) ; ajouté même si le référentiel HA est indisponible. v1.17 archivée. |
@@ -1179,3 +1185,23 @@ partent d'`ia` sans déclaration (app → core est générique) et atteignent `p
 
 **Éprouvé** avec un faux planificateur (réponses, expiration, donnée d'une autre planification, planificateur jamais
 répondu). **Non vérifié** : le pont réel entre les deux process.
+
+### 19.9 Dépôt d'automatisations dans Home Assistant (nouveau v1.21)
+
+Niveau 2 de l'échelle d'autorisations (`conception-claude-code-automatisations` §5), ouvert site par site sur décision de l'utilisateur.
+
+| Outil | Rôle |
+|---|---|
+| `lire_automatisations_ha` | lecture seule : liste (id, nom, état, dernière exécution), définition d'une automatisation (`id`), sauvegardes (`sauvegardes: true`, avec `fichier` pour en lire une) |
+| `deposer_automatisation` | crée ou remplace (`id`, `definition` JSON équivalente au YAML) puis recharge les automatisations |
+| `supprimer_automatisation` | supprime (`id`) |
+
+**Garde-fous** (`HaAutomationClient.ts`) :
+- **Aperçu par défaut** : sans `confirme: true`, `deposer_automatisation` et `supprimer_automatisation` ne modifient RIEN et renvoient ce qui serait créé / remplacé / supprimé. L'agent doit le montrer à l'utilisateur et ne renvoyer `confirme: true` qu'après son accord explicite.
+- **Sauvegarde avant remplacement ou suppression** : définition précédente dans `data/ia/automations-backups/<id>__<horodatage>.json` (20 par automatisation), relisible avec `lire_automatisations_ha`, redéposable pour annuler.
+- **Contrôles avant envoi** : `id` (lettres, chiffres, `_`, `-`), objet avec `alias`, `trigger(s)`, `action(s)`, `mode` valide. HA valide ensuite lui-même le schéma ; son message d'erreur est renvoyé tel quel.
+- **Anti-boucle** (incident du 18/08) : alerte si une même entité déclenche l'automatisation et en est la cible, ou si `mode` n'est pas précisé.
+
+**Mécanisme** : HA n'a aucune commande WebSocket pour la configuration brute d'une automatisation, seulement la route REST `/api/config/automation/config/{id}`, et seul le process `core` détient le jeton HA. `ia` émet `ha:rest:request` (`appId: 'ia'`, `domain: 'automation'`) vers `HaRestBridge` (générique, déjà utilisé par `scriptsha`) et reçoit `ia:ha:rest:result` (déclaré dans `bridgedEvents`). HA recharge les automatisations après un dépôt ou une suppression. **Aucune modification du core.** L'agent Claude Code n'a donc besoin que d'un jeton HA en lecture pour contrôler ses résultats.
+
+**Éprouvé** avec un faux bus (aperçu sans effet, dépôt, remplacement avec sauvegarde, création, suppression, id invalide, alerte de boucle). **Non vérifié** : le pont réel `ia` ↔ `core` ↔ HA, l'appel depuis Claude Code.
