@@ -1,8 +1,12 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.19
+**Version :** 1.20
 **Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.20** : **lecture du planificateur par Claude Code** (§19.8) — outil MCP `lire_planificateur` (planifications, macros,
+> actions reçues de l'assistant, commandes réellement envoyées à HA, YAML), en lecture seule, sans rien changer côté
+> `planificateur`.
 
 > **v1.19** : **Claude Code observateur** (§19.7) — le serveur MCP transmet à la connexion la même vision que Mistral
 > (catalogue dans les instructions, règles et catalogue en ressources) et ajoute trois outils de LECTURE :
@@ -1045,6 +1049,7 @@ mécanisme de nouvel essai ajouté, pas encore re-déclenché en réel faute d'u
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.20 | 08/10/2026 | Claude | **Lecture du planificateur** (§19.8) : outil MCP `lire_planificateur` (sections statut, planifications, macros, actions_recues, commandes_ha, yaml) via `PlannerReader` — `ia` redemande à la volée les listes que `planificateur` publie déjà (`…:get`), nouveaux `bridgedEvents` ; aucune modification de `planificateur`. v1.19 archivée. |
 | 1.19 | 08/10/2026 | Claude | **Claude Code observateur** (§19.7) : instructions MCP = vocabulaire + catalogue (recalculé à chaque connexion), ressources `dimotic://catalogue` et `dimotic://regles`, outils de lecture `obtenir_details` (attributs réels + classement), `diagnostiquer_resolution`, `tester_phrase` (cache → interpréteur → Mistral optionnel, rien d'exécuté) ; `McpTools.ts`. v1.18 archivée. |
 | 1.18 | 08/10/2026 | Claude | **Catalogue injecté** (§5, `RulesProvider.inject()`) : ajout de la ligne « Macros existantes » (noms exacts, cache alimenté par `planificateur:macros:list`) à la suite des listes QUOI/lieux ; sans macro connue le bloc reste identique (cache de prompt préservé) ; ajouté même si le référentiel HA est indisponible. v1.17 archivée. |
 | 1.17 | 08/10/2026 | Claude | **Règles Mistral révisées** : section 4 « déploiement à l'exécution » et exemple 3 supprimés (inutilisés depuis v1.14) ; §0.4 alignée sur §0.5 ; nouveaux §0.6 (lieux), §0.7 (valeurs absolues), §0.8 (date/heure) ; verbes acceptés et ambigus (§0.1) ; plusieurs ordres (§0.5) ; exemple 5. v1.16 archivée. |
@@ -1148,3 +1153,29 @@ que ce que seul le système en marche connaît. Étape « observateur » : **auc
 
 `executer_action` reste le seul outil qui agit, identique à Mistral. Reste hors périmètre : créer ou modifier macros et
 planifications, lecture de l'historique du planificateur (étapes suivantes éventuelles).
+
+### 19.8 Lecture du planificateur (nouveau v1.20)
+
+**Outil MCP `lire_planificateur`** (lecture seule — rien n'est créé, modifié ni supprimé) :
+
+| Section | Contenu |
+|---|---|
+| `statut` | nombre de macros/planifications, planifications programmées |
+| `planifications` | résumé (id, nom, active, phrase d'origine, déclencheur, prochain déclenchement, manquée, anomalie, terminée) ; avec `nom` (nom ou **numéro**) : la définition complète |
+| `macros` | nom et nombre d'étapes ; avec `nom` : la définition complète |
+| `actions_recues` | ce que `planificateur` a reçu de l'assistant (requête et réponse structurées), les plus récentes d'abord |
+| `commandes_ha` | ce qui a réellement été envoyé à Home Assistant à chaque exécution : résolu ou non, service/entité, erreur, résultat d'une condition, entité déclenchante |
+| `yaml` | YAML d'une planification (`nom` obligatoire) |
+
+`limite` (défaut 10, max 30) borne `actions_recues` et `commandes_ha`.
+
+**Mécanisme** (`PlannerReader.ts`) : `planificateur` publie déjà ces listes sur l'EventBus pour son tableau de bord et répond
+aux événements `…:get`. `ia` émet le `…:get` correspondant à chaque lecture et attend la réponse (2,5 s) ; sans réponse, il
+renvoie la dernière donnée connue avec `frais: false` et un avertissement — ou une erreur s'il n'en a jamais reçu
+(`planificateur` arrêté ou désactivé). Pour le YAML, une donnée d'une autre planification n'est jamais renvoyée. Les
+réponses de `planificateur` sont reçues par `ia` grâce à de nouveaux `bridgedEvents` (`PLANNER_READ_EVENTS`) ; les `…:get`
+partent d'`ia` sans déclaration (app → core est générique) et atteignent `planificateur` comme ses propres événements.
+**Aucune modification de `planificateur`.**
+
+**Éprouvé** avec un faux planificateur (réponses, expiration, donnée d'une autre planification, planificateur jamais
+répondu). **Non vérifié** : le pont réel entre les deux process.

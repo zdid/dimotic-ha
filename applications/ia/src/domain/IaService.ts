@@ -25,6 +25,7 @@ import { ConditionEvaluator } from './ConditionEvaluator';
 import { OllamaHttpServer } from './OllamaHttpServer';
 import { McpHttpServer } from './McpHttpServer';
 import { McpToolbox, MCP_TOOLS } from './McpTools';
+import { PlannerReader } from './PlannerReader';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
@@ -319,7 +320,8 @@ export class IaService implements IIaService {
       toolExecutor: this.toolExecutor,
       registry: this.haBridgeClient,
       excludedQuoiIds: () => this.config.excludedQuoiIds,
-      simulate: (phrase, useMistral) => this.simulatePhrase(phrase, useMistral)
+      simulate: (phrase, useMistral) => this.simulatePhrase(phrase, useMistral),
+      planner: new PlannerReader(this.eventBus)
     });
     this.mcpServer = new McpHttpServer({
       host: this.config.mcpHost,
@@ -348,7 +350,8 @@ export class IaService implements IIaService {
       'et une pièce se donnent en UN SEUL élément : ["plafonnier de la chambre"]. "valeur" est toujours absolue (40 = 40 %).',
       '',
       'Outils : lister_entites / obtenir_etat / obtenir_details (lecture), diagnostiquer_resolution (pourquoi une entité ne ressort pas),',
-      'tester_phrase (simule une phrase sans rien exécuter), executer_action (AGIT RÉELLEMENT sur la maison : vérifier la cible avant).',
+      'lire_planificateur (planifications, macros, actions reçues, commandes réellement envoyées à HA), tester_phrase (simule une',
+      'phrase sans rien exécuter), executer_action (AGIT RÉELLEMENT sur la maison : vérifier la cible avant).',
       'Règles complètes de Mistral : ressource dimotic://regles ; catalogue seul : dimotic://catalogue.',
       '',
       this.rulesProvider.buildCatalogText()

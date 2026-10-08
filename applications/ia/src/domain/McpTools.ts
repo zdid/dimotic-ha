@@ -11,6 +11,7 @@ import type { HaBridgeClient } from '../../../core/dist/exports';
 import type { McpToolDef } from './McpHttpServer';
 import { IA_TOOLS } from './tools';
 import type { ToolExecutor } from './ToolExecutor';
+import type { PlannerReader, PlannerSection } from './PlannerReader';
 
 export const MCP_ONLY_TOOLS: McpToolDef[] = [
   {
@@ -60,6 +61,24 @@ export const MCP_ONLY_TOOLS: McpToolDef[] = [
   }
 ];
 
+MCP_ONLY_TOOLS.push({
+  name: 'lire_planificateur',
+  description:
+    "Lit les données du planificateur (LECTURE SEULE, rien n'est modifié) : planifications et macros existantes, ce que le " +
+    "planificateur a reçu de l'assistant (actions_recues), et ce qui a réellement été envoyé à Home Assistant à chaque exécution " +
+    "(commandes_ha : résolu ou non, entité visée, erreur). Sections : statut, planifications, macros, actions_recues, " +
+    "commandes_ha, yaml. Sans `nom`, planifications et macros sont résumées ; avec `nom`, la définition complète.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      section: { type: 'string', enum: ['statut', 'planifications', 'macros', 'actions_recues', 'commandes_ha', 'yaml'], description: 'Donnée à lire' },
+      nom: { type: 'string', description: 'Nom (ou numéro, pour une planification) d\'une planification ou macro : définition complète. Obligatoire pour yaml.' },
+      limite: { type: 'number', description: 'Nombre maximum d\'éléments pour actions_recues et commandes_ha (défaut 10, max 30)' }
+    },
+    required: ['section']
+  }
+});
+
 /** Les trois outils de Mistral, au format MCP, puis ceux propres à Claude Code. */
 export const MCP_TOOLS: McpToolDef[] = [
   ...IA_TOOLS.map((t) => ({ name: t.function.name, description: t.function.description, inputSchema: t.function.parameters })),
@@ -96,6 +115,19 @@ function closest(term: string, candidates: string[]): string[] {
     .map((c) => c.name);
 }
 
+/** actions_recues porte `request`/`reply` en TEXTE JSON : les rendre structurés pour qu'ils se lisent. */
+function parseJsonStrings(entry: unknown): unknown {
+  if (!entry || typeof entry !== 'object') return entry;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(entry as Record<string, unknown>)) {
+    if ((key === 'request' || key === 'reply') && typeof value === 'string') {
+      try { out[key] = JSON.parse(value); continue; } catch { /* texte brut conservé */ }
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 function trimValue(value: unknown): unknown {
   if (typeof value === 'string') return value.length > 200 ? `${value.slice(0, 200)}…` : value;
   if (Array.isArray(value)) return value.length > 20 ? [...value.slice(0, 20).map(trimValue), `… (${value.length} éléments)`] : value.map(trimValue);
@@ -108,6 +140,8 @@ export interface McpToolboxDeps {
   excludedQuoiIds: () => string[];
   /** Simulation d'une phrase (IaService.simulatePhrase). */
   simulate: (phrase: string, useMistral: boolean) => Promise<unknown>;
+  /** Lecture du planificateur (PlannerReader). */
+  planner: PlannerReader;
 }
 
 export class McpToolbox {
@@ -117,10 +151,62 @@ export class McpToolbox {
     switch (name) {
       case 'obtenir_details': return JSON.stringify(await this.details(args), null, 2);
       case 'diagnostiquer_resolution': return JSON.stringify(await this.diagnose(args), null, 2);
+      case 'lire_planificateur': return JSON.stringify(await this.readPlanner(args), null, 2);
       case 'tester_phrase': return JSON.stringify(await this.deps.simulate(String(args.phrase ?? ''), args.utiliser_mistral === true), null, 2);
       default:
         return this.deps.toolExecutor.execute({ id: `mcp-${Date.now()}`, type: 'function', function: { name, arguments: args } });
     }
+  }
+
+  private async readPlanner(args: Record<string, unknown>): Promise<unknown> {
+    const section = String(args.section ?? '') as PlannerSection;
+    const nom = typeof args.nom === 'string' && args.nom.trim() ? args.nom.trim() : undefined;
+    const limit = Math.min(Math.max(Number(args.limite) || 10, 1), 30);
+    const planner = this.deps.planner;
+
+    if (section === 'yaml') {
+      if (!nom) return { error: 'nom obligatoire pour la section yaml' };
+      const read = await planner.readYaml(nom);
+      return read.data === undefined ? { error: `planificateur n'a pas fourni le YAML de « ${nom} » (inconnue, ou planificateur ne répond pas)` } : { yaml: read.data, frais: read.frais };
+    }
+    if (!['statut', 'planifications', 'macros', 'actions_recues', 'commandes_ha'].includes(section)) {
+      return { error: `section inconnue : ${section}` };
+    }
+
+    const read = await planner.read(section as Exclude<PlannerSection, 'yaml'>);
+    if (read.data === undefined) return { error: 'planificateur ne répond pas et aucune donnée connue (application arrêtée ou désactivée ?)' };
+    const meta = { frais: read.frais, recu_a: read.recu_a, ...(read.frais ? {} : { avertissement: 'planificateur n\'a pas répondu à temps : dernière donnée connue' }) };
+
+    if (section === 'statut') return { ...meta, statut: read.data };
+
+    if (section === 'planifications') {
+      const plans = (read.data as Array<Record<string, unknown>>) ?? [];
+      if (nom) {
+        const found = plans.find((p) => p.name === nom || String(p.id) === nom);
+        return found ? { ...meta, planification: found } : { ...meta, error: `planification « ${nom} » introuvable`, noms: plans.map((p) => `${p.id ?? '?'} : ${p.name}`) };
+      }
+      return {
+        ...meta,
+        total: plans.length,
+        planifications: plans.map((p) => ({
+          id: p.id, nom: p.name, active: p.active, phrase_originale: p.phrase_originale, declencheur: p.trigger,
+          prochain_declenchement: p.next_fire_at, manquee: p.missed, anomalie: p.anomalie, terminee_le: p.completed_at
+        }))
+      };
+    }
+
+    if (section === 'macros') {
+      const macros = (read.data as Array<{ name: string; steps?: unknown[] }>) ?? [];
+      if (nom) {
+        const found = macros.find((m) => m.name === nom);
+        return found ? { ...meta, macro: found } : { ...meta, error: `macro « ${nom} » introuvable`, noms: macros.map((m) => m.name) };
+      }
+      return { ...meta, total: macros.length, macros: macros.map((m) => ({ nom: m.name, etapes: m.steps?.length ?? 0 })) };
+    }
+
+    // actions_recues / commandes_ha : les plus récentes d'abord (déjà l'ordre de planificateur)
+    const list = Array.isArray(read.data) ? read.data : [];
+    return { ...meta, total: list.length, elements: list.slice(0, limit).map(parseJsonStrings) };
   }
 
   private async details(args: Record<string, unknown>): Promise<unknown> {
