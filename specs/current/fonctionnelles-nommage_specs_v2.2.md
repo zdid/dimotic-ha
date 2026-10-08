@@ -1,6 +1,6 @@
 # Spécifications — Application NOMMAGE
 
-**Version :** 2.1
+**Version :** 2.2
 **Date :** 24 Septembre 2026
 **Auteur :** Mistral Vibe / Claude
 **Statut :** En production
@@ -244,6 +244,41 @@ attributs_taxonomie:
 - **`lieu_principal`** (NOMMAGE: `nom_lieu`) est **obligatoire** et utilisé pour créer l'Area HA
 - Les autres niveaux sont **optionnels** et stockés en attributs
 - Les attributs sont **injectés** dans les entités HA via MQTT Discovery
+
+### 3.3bis ⭐ Taxonomie par entité : `quoi` de l'entité et `quoi_appareil` (nouveau v2.2)
+
+Le nom `QUOI---OÙ` est celui de l'**appareil**. Jusqu'en v2.1, toutes ses entités recevaient ce même QUOI : le capteur de puissance
+d'un lampadaire, le seuil d'un ballon ou le « mode indicateur » d'un four s'appelaient « lampadaire », « ballon », « four ». Chaque
+entité reçoit maintenant sa propre taxonomie (son topic `…/attributs`), calculée par `entity-taxonomy.ts` :
+
+| Champ | Contenu |
+|---|---|
+| `quoi_appareil` / `slug_quoi_appareil` | le QUOI de l'**appareil** (le « quoi » de son nom), toujours renseigné ; informatif, et qualificatif de résolution côté core |
+| `quoi` / `slug_quoi` | ce que l'**entité** est (ci-dessous) |
+| `lieu_precis`, `lieu_principal`, `lieu_pere`, `lieu_grand_pere` (+ slugs) | **inchangés**, jamais écrasés |
+
+`quoi` d'une entité, dans l'ordre :
+0. **entité principale** — identifiant technique `switch`, `light`, `cover`, `climate`, `lock`, `fan` (et voies `switch_l1`…), ou purement numérique
+   (broche rpigpio) — : le **QUOI de l'appareil** ;
+1. le **libellé traduit** de son identifiant technique (table de traduction §3.7 : « Disjoncteur puissance », « Mode indicateur »…) ;
+2. à défaut, la **grandeur de sa classe** (`device_class` : puissance, tension, température, pression…, même table que le repli du core
+   `quoiFromDeviceClass`) ;
+3. à défaut, son **nom brut** tel que publié (« Learn ir code », « Action »…) : il n'est **pas traduit**, et il est **compté** (ci-dessous) ;
+4. à défaut de nom, le QUOI de l'appareil.
+
+Si la grandeur obtenue est celle de l'appareil (capteur de température d'un appareil « température »), la graphie du nom de l'appareil est conservée.
+
+**Décompte des noms non traduits** (`NommageStatus.untranslated`, affiché dans l'interface sous « Noms non traduits ») : nombre
+d'identifiants techniques distincts (la table est indexée par identifiant technique), nombre d'entités concernées, et les 15 identifiants les plus
+fréquents avec leur nom brut. Il suit les republications et les retraits. Simulation sur ha2 : 14 identifiants / 18 entités (`action`, `position`,
+codes Linky `PCOUP`, `UMOY1`, `ERQ1`… `switch_learn_ir_code`).
+
+Exemples : baromètre → température, humidité, pression (`quoi_appareil` = baromètre) ; gros ballon → interrupteur principal « gros ballon »,
+« Disjoncteur puissance », « Puissance », « Tension »…
+
+Le QUOI de l'appareil reste utilisé tel quel pour la conversion `switch` → `light` (`forceLightForLumiere`), l'interface et les
+identifiants. Simulation sur les 337 déclarations `QUOI---OÙ` de ha2 : le QUOI d'entité diffère de celui de l'appareil pour 298 entités
+(surtout réglages, diagnostic et capteurs). **Non vérifié en réel.**
 
 ### 3.4 Transmission vers Home Assistant — Passthrough MQTT
 
@@ -1909,6 +1944,7 @@ mosquitto_sub -h localhost -t "$SYS/broker/subscriptions" -v
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **2.2** | 08/10/2026 | Claude | **Taxonomie par entité** (§3.3bis) : `quoi` de l'entité (libellé traduit, sinon grandeur de la classe, sinon QUOI de l'appareil) et `quoi_appareil` ; lieux inchangés. |
 | **2.1** | 24/09/2026 | Claude | **Plus de sources MQTT propres** (décision utilisateur) : écoute des préfixes de découverte via la connexion MQTT du socle, config réduite à `prefixes` (migration automatique depuis `sources[]`) ; retrait à la source propagé à HA ; taxonomies par topic (fin des doublons/croissance) ; rejeu des découvertes au retour de HA ; config relue sur disque. Voir l'en-tête v2.1 (remplace §3.1/§4.3 sur les sources). v2.0 archivée. |
 | **2.0** | 19/09/2026 | Claude | **Fusion** de `fonctionnelles-nommage_specs_v1.8.md` + `implementation-nommage_specs_v1.8.md` en ce document (Partie 1 Fonctionnel / Partie 2 Technique). Sections "Communication Inter-Applications" dupliquées (`InterAppClient`, jamais implémenté, ~800 lignes au total) retirées, remplacées par un pointeur unique. `nommage_specs_v1.0.md` volontairement **non fusionné** (protocole générique référencé par 9 documents du dépôt, hors périmètre de l'application NOMMAGE elle-même). Anciennes versions v1.7/v1.8 archivées. |
 | **1.7** | 08/09/2026 | Claude | **`sources[].mqtt.host`/`clientId` corrigés** (§4.3), en travaillant la conception "duplication config multi-machines" : `host` avait `127.0.0.1` en conditions réelles pour la source `ha2.local` (cassait tout hors du cas "même machine que le broker"), corrigé en l'IP LAN réelle + `hint` d'avertissement permanent ajouté à l'UI. `clientId` n'est plus qu'un préfixe (même mécanisme `computeBridgeInstance()`/`DIMOTIC_MACHINE_ID` que `bridgeInstance` sur arexx/evoo7/rfxcom/rpigpio) — l'unicité globale entre machines n'est plus à la charge de l'utilisateur, seule l'unicité entre sources d'une même machine le reste. `connectSource()` (implémentation) mis à jour en conséquence. |

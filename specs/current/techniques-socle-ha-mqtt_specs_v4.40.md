@@ -1,8 +1,13 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.39  
+**Version :** 4.40  
 **Date :** 8 Octobre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.40** : **`quoi_appareil`** (§8.3.2ter) — la taxonomie d'une entité porte le QUOI de l'appareil en plus de son propre `quoi` ; le repli du
+> core le reconstitue pour les appareils non gérés (nom de l'appareil nettoyé) ; il sert de qualificatif de résolution ; le catalogue de QUOI
+> de Mistral ne s'alimente que des entités visibles et des QUOI d'objet ou de grandeur ; classes `pressure`, `atmospheric_pressure` et
+> `apparent_power` ajoutées au repli.
 
 > **v4.39** : **préfixe de découverte alternatif** (§8.5.0bis) — un module peut publier ses découvertes sur un autre préfixe que `homeassistant` (ex. `homeassist`, pour passer par NOMMAGE) ; **métadonnées du registre des entités HA conservées** (§8.3.2bis) — `entity_category` (`config`/`diagnostic`),
 > `hidden_by`, `disabled_by`, `platform` sont désormais portées par `HaStructuredEntity` (elles étaient jetées au chargement) ;
@@ -1639,6 +1644,23 @@ core ne gardait que `entity_id`, `domain`, `device_class` et `area_id` : ces cha
 - Une mise à jour **en direct** de la catégorie n'est pas lue dans `entity_registry_updated` (HA n'y met que les changements) : elle
   est prise au prochain chargement complet du registre.
 
+
+### 8.3.2ter `quoi_appareil` — QUOI de l'appareil dans la taxonomie (nouveau v4.40)
+
+`attributs_taxonomie` gagne `quoi_appareil` et `slug_quoi_appareil` : le QUOI de l'**appareil**, distinct du `quoi` de l'**entité**
+(entité principale : égaux ; entité secondaire — capteur, réglage : `quoi` dit ce que l'entité est). Les lieux ne sont jamais modifiés.
+- **Appareils gérés** (NOMMAGE) : le « quoi » du nom `QUOI---OÙ` (`fonctionnelles-nommage` §3.3bis).
+- **Appareils non gérés** (repli `TaxonomyHaClassifier`, taxonomie `virtuel: true`) : le **nom de l'appareil HA nettoyé** (tiret de tête
+  retiré), même médiocre (« hasat5 ») ; `null` sans appareil ou sans nom. `lieu_precis` garde sa dérivation (nom de l'appareil + nom propre
+  de l'entité).
+- **Résolution** : un terme de lieu égal à `slug_quoi_appareil` joue le rôle de qualificatif, comme un lieu précis (`matchesPrecis`) :
+  « mode indicateur du four » = quoi « mode indicateur », lieux [« four »].
+- **Catalogue de QUOI** (celui que reçoit Mistral) : seules les entités visibles (ni `config`, `diagnostic`, ni désactivées) l'alimentent, et
+  seulement avec un QUOI d'objet (`quoi` = `quoi_appareil`, ou absence de `quoi_appareil`) ou de grandeur (classe) — jamais le libellé propre
+  d'une entité secondaire.
+- Classes ajoutées au repli : `pressure`, `atmospheric_pressure` (Pression), `apparent_power` (Puissance apparente) ; `quoiFromDeviceClass()`
+  est exportée pour NOMMAGE.
+
 ### 8.3.3 ⭐ Catalogue de lieux statique — `getLieuCatalog()` (nouveau v4.28)
 
 Complément naturel de `getQuoiCatalog()` (§8.3.1, déjà existant) : union dédupliquée et triée
@@ -2651,6 +2673,7 @@ Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **4.40** | 08/10/2026 | Claude | **`quoi_appareil`** (§8.3.2ter) : QUOI de l'appareil dans la taxonomie, repli pour les appareils non gérés, qualificatif de résolution, filtre du catalogue de QUOI, classes pression / puissance apparente. |
 | **4.39** | 08/10/2026 | Claude | **Métadonnées du registre HA conservées** (§8.3.2bis) : `entity_category`, `hidden_by`, `disabled_by`, `platform` sur `HaStructuredEntity` ; `getEntitiesByQuoiAndLieux` écarte par défaut réglages/diagnostic/désactivées (`includeTechnical`), catalogue de lieux idem. |
 | **4.36** | 06/10/2026 | Claude | **Page « Paramètres généraux »** (Web-services, MQTT, Serveur Web, Journalisation sur une page, une sauvegarde par section — §10.4bis) ; applications sans paramètre technique retirées de la liste des Paramètres Techniques et écran explicite si ouvert ; **dépôt de la carte Plan Lovelace vers le HA de `ha.ws.host`** (refus explicite sinon). v4.35 archivée. |
 | **4.34** | 01/10/2026 | Claude | **Démarrage tolérant (§7.2)** : une section `ha.ws` / `ha.mqtt` invalide désactive la connexion en mémoire au lieu de faire planter le core ; valeurs corrigeables dans l'IHM, voyants rouges, `ws_enable`/`mqtt_enable` conservés dans le fichier, section `ha` de l'IHM validée strictement. Cause : diffusion de `ha` entre noisy et noisy2 (hôte sans jeton), incident du 01/10/2026. |

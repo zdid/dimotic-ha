@@ -334,6 +334,7 @@ export class McpToolbox {
           integration: e!.platform,
           classement: {
             quoi: taxonomy.quoi ?? taxonomy.slug_quoi,
+            quoi_appareil: taxonomy.quoi_appareil,
             lieu_precis: taxonomy.lieu_precis,
             lieu: taxonomy.lieu_principal,
             lieu_pere: taxonomy.lieu_pere,

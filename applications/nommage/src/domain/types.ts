@@ -197,6 +197,17 @@ export interface NommageStatus {
   // ⭐ Nombre d'entrées traitées par jour, sur les 5 derniers jours (plus ancien → plus récent),
   // toujours 5 éléments (0 si aucune entrée ce jour-là)
   dailyCounts: DailyCount[];
+  // ⭐ Noms d'entité sans traduction (leur QUOI est leur nom brut) : à traduire dans le fichier de traductions (§3.7)
+  untranslated: UntranslatedSummary;
+}
+
+export interface UntranslatedSummary {
+  /** Identifiants techniques distincts sans traduction (la table est indexée par identifiant technique). */
+  objectIds: number;
+  /** Entités concernées (un même identifiant peut exister sur plusieurs appareils). */
+  entities: number;
+  /** Les identifiants les plus fréquents (jusqu'à 15) avec leur nombre d'entités, pour savoir quoi traduire en premier. */
+  top: Array<{ objectId: string; name: string; entities: number }>;
 }
 
 /**

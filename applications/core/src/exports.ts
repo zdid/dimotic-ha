@@ -205,7 +205,7 @@ export { HaWsClient } from './ha/sync/HaWsClient';
 export { HaStateRegistry } from './ha/sync/HaStateRegistry';
 export { HaStructureRegistry } from './ha/sync/HaStructureRegistry';
 export { DefaultHaClassifier } from './ha/sync/DefaultHaClassifier';
-export { TaxonomyHaClassifier } from './ha/sync/TaxonomyHaClassifier';
+export { TaxonomyHaClassifier, quoiFromDeviceClass } from './ha/sync/TaxonomyHaClassifier';
 export { QUI_CATALOG as quiCatalog } from './ha/sync/quiCatalog';
 
 // Commandes HA

@@ -18,6 +18,8 @@
  */
 
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
+import { quoiFromDeviceClass } from '../../../core/dist/exports';
+import { buildEntityTaxonomy } from './entity-taxonomy';
 import type { INommageMqttIntegrationService } from '../ha/integration/nommage/NommageMqttIntegrationService';
 import { nommageConfigSchema, discoveryTopicsFor, type NommageConfig } from './config-schema';
 import { TranslationsRepository } from './translations/TranslationsRepository';
@@ -29,8 +31,7 @@ import type {
   NommageStatus,
   PassthroughDiscoveryEvent,
   PassthroughPublishEvent,
-  DailyCount
-} from './types';
+  DailyCount, UntranslatedSummary } from './types';
 
 // ============================================================================
 // Constantes
@@ -64,6 +65,8 @@ export interface INommageService {
 
 export class NommageService implements INommageService {
   private parsedCount: number = 0;
+  // topic source -> entité dont le QUOI est un nom brut (sans traduction) ; sert au décompte « non traduits » du statut
+  private untranslatedByTopic: Map<string, { objectId: string; name: string }> = new Map();
   private lastParsedAt: Date | null = null;
   /** ⭐ 24/09/2026 — une entrée PAR TOPIC de découverte (avant : tableau qui recevait une entrée à
    *  chaque message, doublons à chaque redémarrage de HA, croissance sans limite). */
@@ -80,7 +83,8 @@ export class NommageService implements INommageService {
     parsedMessagesCount: 0,
     error: undefined,
     sources: [],
-    dailyCounts: []
+    dailyCounts: [],
+    untranslated: { objectIds: 0, entities: 0, top: [] }
   };
 
   private config: NommageConfig;
@@ -339,6 +343,7 @@ export class NommageService implements INommageService {
       bridgeInstance: BRIDGE_INSTANCE, topic: attributesTopic, payload: '', qos: 1, retain: true
     });
     this.relayed.delete(data.topic);
+    this.untranslatedByTopic.delete(data.topic);
     this.taxonomyStructures.delete(data.topic);
     this.logger.info('NommageService', `[${data.sourceId}] Entité retirée à la source — retirée de HA (${haTopic.join('/')})`);
     this.scheduleTaxonomyEmit();
@@ -525,10 +530,27 @@ export class NommageService implements INommageService {
         json_attributes_template: '{{ value_json | tojson }}'
       };
 
+      // Taxonomie de l'ENTITÉ : QUOI de l'entité (libellé traduit, sinon grandeur de sa classe, sinon QUOI de l'appareil) et
+      // `quoi_appareil`; lieux inchangés (voir entity-taxonomy.ts). `parsed` reste celui de l'appareil (forceLightForLumiere, UI).
+      const entity = buildEntityTaxonomy({
+        deviceTaxonomy: parsed.haAttributes.attributs_taxonomie as Record<string, unknown>,
+        translatedLabel: translated,
+        isPrimary: NommageService.PRIMARY_OBJECT_ID.test(objectId ?? ''),
+        rawName: typeof discoveryMessage.payload.name === 'string' ? discoveryMessage.payload.name : undefined,
+        deviceClass: typeof payload.device_class === 'string' ? payload.device_class : undefined,
+        quoiFromClass: quoiFromDeviceClass,
+        slugify: (t) => this.slugify(t)
+      });
+      if (entity.untranslated) {
+        this.untranslatedByTopic.set(discoveryMessage.topic, { objectId: objectId ?? '', name: String(discoveryMessage.payload.name) });
+      } else {
+        this.untranslatedByTopic.delete(discoveryMessage.topic);
+      }
+      const entityAttributs = { attributs_taxonomie: entity.taxonomy };
       const publishEvent: PassthroughPublishEvent & { bridgeInstance: string } = {
         bridgeInstance: BRIDGE_INSTANCE,
         topic: attributesTopic,
-        payload: parsed.haAttributes,
+        payload: entityAttributs,
         qos: 1,
         retain: true
       };
@@ -559,6 +581,9 @@ export class NommageService implements INommageService {
   // (présent côté HA pour distinguer "config"/"diagnostic") n'est PAS fiable seul : "do_not_disturb"
   // n'en porte pas dans la définition Zigbee2MQTT de ce modèle, alors que "child_lock" oui.
   private static readonly LIGHT_ELIGIBLE_OBJECT_ID = /^switch(_l\d+)?$/;
+  /** États principaux d'un appareil (identifiant technique) : leur QUOI d'entité reste celui de l'appareil. */
+  // + identifiant purement numérique : broche rpigpio (mqtt-io), état principal de son appareil.
+  private static readonly PRIMARY_OBJECT_ID = /^(?:(?:switch|light|cover|climate|lock|fan)(?:_l\d+)?|\d+)$/;
 
   /**
    * Remplace le composant `switch` par `light` dans un topic de découverte MQTT HA
@@ -628,6 +653,24 @@ export class NommageService implements INommageService {
   // Émission des événements Socket.io
   // ==========================================================================
 
+  /** Décompte des noms d'entité sans traduction (leur QUOI est leur nom brut) — à compléter dans le fichier de traductions. */
+  private getUntranslatedSummary(): UntranslatedSummary {
+    const byId = new Map<string, { name: string; entities: number }>();
+    for (const { objectId, name } of this.untranslatedByTopic.values()) {
+      const entry = byId.get(objectId) ?? { name, entities: 0 };
+      entry.entities++;
+      byId.set(objectId, entry);
+    }
+    return {
+      objectIds: byId.size,
+      entities: this.untranslatedByTopic.size,
+      top: [...byId.entries()]
+        .sort((a, b) => b[1].entities - a[1].entities || a[0].localeCompare(b[0]))
+        .slice(0, 15)
+        .map(([objectId, v]) => ({ objectId, name: v.name, entities: v.entities }))
+    };
+  }
+
   private emitStatus(): void {
     this.status = {
       ...this.status,
@@ -638,7 +681,8 @@ export class NommageService implements INommageService {
       lastParsedAt: this.lastParsedAt || undefined,
       error: undefined,
       sources: this.mqttService.getSourceStatuses(),
-      dailyCounts: this.getDailyCountsLastDays()
+      dailyCounts: this.getDailyCountsLastDays(),
+      untranslated: this.getUntranslatedSummary()
     };
 
     this.eventBus.emit('nommage:status', this.status);
@@ -752,7 +796,8 @@ export class NommageService implements INommageService {
       lastParsedAt: this.lastParsedAt || undefined,
       error: undefined,
       sources: this.mqttService.getSourceStatuses(),
-      dailyCounts: this.getDailyCountsLastDays()
+      dailyCounts: this.getDailyCountsLastDays(),
+      untranslated: this.getUntranslatedSummary()
     };
   }
 

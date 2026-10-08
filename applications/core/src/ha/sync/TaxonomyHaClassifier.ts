@@ -24,6 +24,10 @@ import type { IHaClassifier, HaQuoiDefinition } from '../types/ha-structure';
 interface AttributsTaxonomie {
   quoi?: string | null;
   slug_quoi?: string | null;
+  /** QUOI de l'APPAREIL (le « quoi » de son nom QUOI---OÙ, ou à défaut le nom de l'appareil HA) — ⭐ 08/10/2026. Pour une entité
+   *  principale il vaut `quoi` ; pour une entité secondaire (capteur, réglage), `quoi` dit ce que l'ENTITÉ est. Informatif. */
+  quoi_appareil?: string | null;
+  slug_quoi_appareil?: string | null;
   lieu_principal?: string | null;
   slug_lieu?: string | null;
   lieu_precis?: string | null;
@@ -49,6 +53,9 @@ const DEVICE_CLASS_QUOI_MAP: Record<string, QuoiFallback> = {
   current: { quoi_id: 'amperage', label: 'Ampérage' },
   energy: { quoi_id: 'energie', label: 'Énergie' },
   voltage: { quoi_id: 'tension', label: 'Tension' },
+  apparent_power: { quoi_id: 'puissance_apparente', label: 'Puissance apparente' },
+  pressure: { quoi_id: 'pression', label: 'Pression' },
+  atmospheric_pressure: { quoi_id: 'pression', label: 'Pression' },
   illuminance: { quoi_id: 'luminosite', label: 'Luminosité' },
   motion: { quoi_id: 'presence', label: 'Présence' },
   occupancy: { quoi_id: 'presence', label: 'Présence' },
@@ -81,20 +88,31 @@ const DOMAIN_QUOI_MAP: Record<string, QuoiFallback> = {
 // Lieu par défaut pour une entité sans zone HA assignée (taxonomie virtuelle uniquement).
 const DEFAULT_LIEU = 'maison';
 
+/** QUOI déduit de la classe d'une entité (puissance, tension…) — source unique, partagée avec NOMMAGE pour les capteurs d'un appareil géré. */
+export function quoiFromDeviceClass(deviceClass: string | undefined | null): { quoi_id: string; label: string } | undefined {
+  return deviceClass ? DEVICE_CLASS_QUOI_MAP[deviceClass] : undefined;
+}
+
+function slugifyQuoi(text: string): string {
+  return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').replace(/_+/g, '_');
+}
+
 export class TaxonomyHaClassifier implements IHaClassifier {
   private readonly catalog = new Map<string, HaQuoiDefinition>();
 
   classify(entity: HaStructuredEntity): string[] {
     const existing = entity.attributes?.attributs_taxonomie as AttributsTaxonomie | undefined;
     if (existing?.slug_quoi) {
-      this.registerQuoi(existing.slug_quoi, existing.quoi || existing.slug_quoi);
+      // Le catalogue de QUOI (celui que voit Mistral) ne s'alimente que des entités visibles : un réglage ou un diagnostic
+      // (`entity_category`) ou une entité désactivée n'y ajoute pas son libellé (« disjoncteur puissance », « compte à rebours »…).
+      if (this.isUserFacing(entity) && this.isCatalogQuoi(existing)) this.registerQuoi(existing.slug_quoi, existing.quoi || existing.slug_quoi);
       return [existing.slug_quoi];
     }
 
     const fallback = this.resolveFallback(entity);
     if (!fallback) return [];
 
-    this.registerQuoi(fallback.quoi_id, fallback.label);
+    if (this.isUserFacing(entity)) this.registerQuoi(fallback.quoi_id, fallback.label);
 
     if (!entity.attributes?.attributs_taxonomie) {
       // Pas de zone HA assignée : "maison" plutôt que null — une entité reste rattachée à un
@@ -103,6 +121,7 @@ export class TaxonomyHaClassifier implements IHaClassifier {
       // quand disponible — corrige un titre affichant le slug non mis en forme (06/08/2026).
       const lieu = entity.area?.name || entity.area_id || DEFAULT_LIEU;
       const lieuPrecis = this.deriveLieuPrecis(entity);
+      const quoiAppareil = this.deriveQuoiAppareil(entity);
       const virtualTaxonomy: AttributsTaxonomie = {
         quoi: fallback.label,
         slug_quoi: fallback.quoi_id,
@@ -110,6 +129,10 @@ export class TaxonomyHaClassifier implements IHaClassifier {
         slug_lieu: entity.area_id || lieu,
         lieu_precis: lieuPrecis,
         slug_precis: lieuPrecis,
+        // Appareil non géré par dimotic : son nom (nettoyé) tient lieu de QUOI de l'appareil, même quand ce nom est médiocre
+        // (« hasat5 ») — à corriger dans HA. Absent sans appareil ou sans nom.
+        quoi_appareil: quoiAppareil,
+        slug_quoi_appareil: quoiAppareil ? slugifyQuoi(quoiAppareil) : null,
         lieu_pere: null,
         slug_pere: null,
         lieu_grand_pere: null,
@@ -145,6 +168,28 @@ export class TaxonomyHaClassifier implements IHaClassifier {
    * jusqu'ici par HaStructuredEntity) — repli sur `null` si le schéma ne correspond pas
    * (entité sans device, ou friendly_name qui ne commence pas par device.name).
    */
+  /**
+   * Un QUOI entre au catalogue de Mistral s'il désigne un OBJET (entité principale : `quoi` = `quoi_appareil`, ou taxonomie sans
+   * `quoi_appareil`) ou une grandeur connue (classe : puissance, tension…). Le libellé propre d'une entité secondaire
+   * (« disjoncteur puissance », « mode indicateur ») n'y figure pas : on le trouve par l'appareil (`quoi_appareil`), pas en le listant.
+   */
+  private isCatalogQuoi(t: AttributsTaxonomie): boolean {
+    if (!t.slug_quoi_appareil || t.slug_quoi === t.slug_quoi_appareil) return true;
+    return Object.values(DEVICE_CLASS_QUOI_MAP).some((q) => q.quoi_id === t.slug_quoi);
+  }
+
+  private isUserFacing(entity: HaStructuredEntity): boolean {
+    return !entity.entity_category && !entity.disabled_by;
+  }
+
+  /** Nom de l'appareil HA nettoyé (sans tiret de tête), sans le nom propre de l'entité — null si inconnu. */
+  private deriveQuoiAppareil(entity: HaStructuredEntity): string | null {
+    const deviceName = entity.device?.name?.trim();
+    if (!deviceName) return null;
+    const cleaned = deviceName.replace(/^[-_\s]+/, '').trim();
+    return cleaned || null;
+  }
+
   private deriveLieuPrecis(entity: HaStructuredEntity): string | null {
     const deviceName = entity.device?.name?.trim();
     if (!deviceName) return null;

@@ -923,7 +923,10 @@ export class HaStructureRegistry {
 
   private matchesPrecis(entity: HaStructuredEntity, termSlug: string): boolean {
     const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
-    return typeof taxonomy?.slug_precis === 'string' && taxonomy.slug_precis === termSlug;
+    // ⭐ 08/10/2026 — le QUOI de l'appareil (`slug_quoi_appareil`) sert aussi de qualificatif : « mode indicateur du four »,
+    // « puissance du gros ballon » désignent une entité secondaire par l'appareil qui la porte, sans toucher au lieu précis.
+    return (typeof taxonomy?.slug_precis === 'string' && taxonomy.slug_precis === termSlug)
+      || (typeof taxonomy?.slug_quoi_appareil === 'string' && taxonomy.slug_quoi_appareil === termSlug);
   }
 
   /** Un terme (déjà slugifié) matche une entité directement (son propre lieu_precis) ou via le
@@ -932,6 +935,7 @@ export class HaStructureRegistry {
     const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
     const precis = taxonomy?.slug_precis;
     if (typeof precis === 'string' && precis === termSlug) return true;
+    if (typeof taxonomy?.slug_quoi_appareil === 'string' && taxonomy.slug_quoi_appareil === termSlug) return true;
 
     const lieu = (typeof taxonomy?.slug_lieu === 'string' && taxonomy.slug_lieu) || entity.area_id;
     return lieu !== undefined && this.collectLieuSubtree(termSlug).has(lieu);

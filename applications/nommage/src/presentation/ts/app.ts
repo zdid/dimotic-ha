@@ -45,6 +45,7 @@ interface NommageStatus {
   error?: string;
   sources: SourceStatus[];
   dailyCounts: DailyCount[];
+  untranslated?: { objectIds: number; entities: number; top: Array<{ objectId: string; name: string; entities: number }> };
 }
 
 interface DiscoveryParsedEvent {
@@ -216,6 +217,16 @@ function updateStatusDisplay(status: NommageStatus): void {
   
   if (parsedCountEl) {
     parsedCountEl.textContent = String(status.parsedMessagesCount);
+  }
+
+  // Noms d'entité sans traduction (leur QUOI est leur nom brut) : décompte + les plus fréquents en info-bulle
+  const untranslatedEl = $('untranslated-count');
+  if (untranslatedEl) {
+    const u = status.untranslated;
+    untranslatedEl.textContent = u ? `${u.objectIds} (${u.entities} entités)` : '0';
+    untranslatedEl.title = u && u.top.length > 0
+      ? 'À traduire (identifiant technique → nom brut) :\n' + u.top.map((t) => `${t.objectId} → ${t.name} (${t.entities})`).join('\n')
+      : 'Aucun nom non traduit';
   }
   
   if (lastParsedEl) {

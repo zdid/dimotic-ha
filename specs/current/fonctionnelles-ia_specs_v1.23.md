@@ -1,8 +1,11 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.22
+**Version :** 1.23
 **Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.23** : **`quoi_appareil`** (§19.11) — `obtenir_details` (MCP) affiche `classement.quoi_appareil` ; le catalogue de QUOI transmis à
+> Mistral ne contient plus le libellé des entités secondaires (socle v4.40 §8.3.2ter).
 
 > **v1.22** : **entités de réglage/diagnostic** (§19.10) — Mistral ne voit plus les entités `config`/`diagnostic`/désactivées de HA
 > (résolution du core, socle v4.39 §8.3.2bis) ; côté MCP, `lister_entites` renvoie la `categorie` de chaque entité et accepte
@@ -1058,6 +1061,7 @@ mécanisme de nouvel essai ajouté, pas encore re-déclenché en réel faute d'u
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.23 | 08/10/2026 | Claude | **`quoi_appareil`** (§19.11) : champ affiché par `obtenir_details` ; catalogue de QUOI de Mistral filtré. |
 | 1.22 | 08/10/2026 | Claude | **Entités de réglage/diagnostic** (§19.10) : écartées de la vision de Mistral ; `categorie` + filtre dans `lister_entites` (MCP), champs ajoutés à `obtenir_details`. |
 | 1.21 | 08/10/2026 | Claude | **Dépôt d'automatisations HA par Claude Code** (§19.9) : outils MCP `lire_automatisations_ha`, `deposer_automatisation`, `supprimer_automatisation`, aperçu puis confirmation, sauvegardes, anti-boucle. |
 | 1.20 | 08/10/2026 | Claude | **Lecture du planificateur** (§19.8) : outil MCP `lire_planificateur` (sections statut, planifications, macros, actions_recues, commandes_ha, yaml) via `PlannerReader` — `ia` redemande à la volée les listes que `planificateur` publie déjà (`…:get`), nouveaux `bridgedEvents` ; aucune modification de `planificateur`. v1.19 archivée. |
@@ -1219,3 +1223,10 @@ HA classe ses entités (`entity_category`) : `config` (réglages : seuils, modes
 - **Claude Code (MCP)** : `lister_entites` renvoie pour chaque entité `categorie` (`principale`, `config`, `diagnostic`) et `desactivee_par` le cas échéant ; le paramètre `categorie` (`principale` | `config` | `diagnostic` | `toutes`, défaut `toutes`) filtre, avec `filtre_categorie` et `ecartees` en retour. `obtenir_details` ajoute `categorie`, `desactivee_par`, `masquee_par`, `integration`. Le MCP voit donc tout ; `obtenir_etat` et `executer_action` suivent la vision de Mistral.
 
 **Éprouvé** sur le HA réel (« gros ballon ») : MCP `lister_entites` = 20 entités dont 3 `config` (2 `select`, 1 `update`) ; voie Mistral (`obtenir_etat`) = 17, sans ces 3. Les `number` de seuil et les `switch` de disjoncteur de cette intégration n'ont **pas** de catégorie dans HA : ils restent visibles.
+
+### 19.11 `quoi_appareil` (nouveau v1.23)
+
+`obtenir_details` renvoie, dans `classement`, `quoi_appareil` en plus de `quoi` : le QUOI de l'appareil (« gros ballon », « baromètre ») quand
+`quoi` dit ce que l'entité est (« disjoncteur puissance », « pression »). Pour une entité principale, les deux sont égaux. Un terme de lieu égal
+au QUOI de l'appareil qualifie la résolution (« mode indicateur du four ») ; le catalogue transmis à Mistral n'énumère pas les libellés des entités
+secondaires. Détails : socle v4.40 §8.3.2ter, nommage v2.2 §3.3bis. **Non vérifié en réel** (rien de déployé au moment de l'écriture).
