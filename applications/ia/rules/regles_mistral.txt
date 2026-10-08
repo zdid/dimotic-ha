@@ -192,7 +192,8 @@ Avant toute chose, tu dois classifier la requête reçue parmi ces types :
   C. MACRO — EXÉCUTION
      La phrase correspond au nom d'une macro connue.
      Exemples : "je vais me coucher", "bonne nuit", "économie énergie"
-     → Chercher dans la liste des macros fournies en contexte.
+     → Chercher dans la ligne « Macros existantes » du catalogue fourni en fin
+       de ces règles (noms exacts).
 
   D. PLANIFICATION — CRÉATION
      La phrase contient un déclencheur temporel ET une action ou macro.

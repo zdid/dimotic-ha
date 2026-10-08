@@ -1,8 +1,11 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.17
+**Version :** 1.18
 **Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.18** : **noms des macros ajoutés au catalogue injecté à Mistral** (§5) — ligne « Macros existantes »,
+> sans laquelle la classification C (exécution d'une macro) ne pouvait pas s'appuyer sur une liste.
 
 > **v1.17** : **règles Mistral révisées** (`regles_mistral.txt`) — section 4 (déploiement à l'exécution, morte depuis
 > v1.14) et exemple 3 supprimés ; §0.4 alignée sur §0.5 (jamais « introuvable » sans vérification par l'outil) ;
@@ -262,6 +265,13 @@ antérieur inchangé). Quand présent, `inject()` construit un bloc de texte
 l'ajoute à la suite du contenu de `regles_mistral.txt` dans le message system, **à chaque appel** —
 contenu identique tant que le matériel ne change pas, donc même bénéfice de cache de prompt côté
 Mistral que le reste du message system.
+
+**⭐ v1.18 — Macros** : le bloc injecté comporte aussi, quand `planificateur` en a publié, une ligne
+`Macros existantes (noms exacts) : …` (cache local `interpreterMacros`, alimenté par le relais
+`planificateur:macros:list`, déjà utilisé par l'interpréteur §16). Sans elle Mistral ne disposait
+d'aucune liste pour reconnaître l'exécution d'une macro (classification C des règles). Aucune macro
+connue → bloc inchangé (même cache de prompt) ; la ligne est ajoutée même si le référentiel HA n'est
+pas encore disponible.
 
 **Effet mesuré en direct** : "allume la salle" (précédemment refusé à tort par un
 `quoi_introuvable` halluciné, §8) se résout désormais correctement dès le premier round, sans avoir
@@ -1031,6 +1041,7 @@ mécanisme de nouvel essai ajouté, pas encore re-déclenché en réel faute d'u
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.18 | 08/10/2026 | Claude | **Catalogue injecté** (§5, `RulesProvider.inject()`) : ajout de la ligne « Macros existantes » (noms exacts, cache alimenté par `planificateur:macros:list`) à la suite des listes QUOI/lieux ; sans macro connue le bloc reste identique (cache de prompt préservé) ; ajouté même si le référentiel HA est indisponible. v1.17 archivée. |
 | 1.17 | 08/10/2026 | Claude | **Règles Mistral révisées** : section 4 « déploiement à l'exécution » et exemple 3 supprimés (inutilisés depuis v1.14) ; §0.4 alignée sur §0.5 ; nouveaux §0.6 (lieux), §0.7 (valeurs absolues), §0.8 (date/heure) ; verbes acceptés et ambigus (§0.1) ; plusieurs ordres (§0.5) ; exemple 5. v1.16 archivée. |
 | 1.16 | 08/10/2026 | Claude | **Fichiers éditables à deux niveaux** (§12bis, `LayeredFiles.ts`) : `regles_mistral.txt`, `vocabulaire_interpreteur.yaml`, `gabarits_interpreteur.yaml` — copie embarquée renouvelée à chaque démarrage dans `data/ia/modele_integre/`, version modifiée dans `data/ia/personnalise/` (prioritaire) ; reprise de l'ancien fichier unique `data/ia/<nom>` ; `rulesFile` devient optionnel. v1.15 archivée. |
 | 1.15 | 08/10/2026 | Claude | **Accès MCP pour Claude Code** (§19) : serveur MCP HTTP (`McpHttpServer.ts`) exposant `lister_entites`/`obtenir_etat`/`executer_action` via le même `ToolExecutor` que Mistral ; jeton Bearer obligatoire, désactivé par défaut, appels journalisés ; réglages `mcpEnabled`/`mcpToken`/`mcpPort`/`mcpHost`. v1.14 archivée. |

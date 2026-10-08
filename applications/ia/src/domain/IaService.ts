@@ -162,7 +162,7 @@ export class IaService implements IIaService {
     this.config = iaConfigSchema.parse(configProvider.getAppConfig());
     this.mistralClient = new MistralClient(() => this.config, this.logger);
     this.prepareDataFiles();
-    this.rulesProvider = new RulesProvider(this.rulesFileDef, this.logger, this.haBridgeClient, () => this.config.excludedQuoiIds);
+    this.rulesProvider = new RulesProvider(this.rulesFileDef, this.logger, this.haBridgeClient, () => this.config.excludedQuoiIds, () => this.interpreterMacros);
     this.toolExecutor = new ToolExecutor(this.eventBus, this.logger, this.haBridgeClient, this.config.toolExecuteTimeoutMs);
     this.structuredRouter = new StructuredRouter(this.eventBus, this.logger, this.config.commandTimeoutMs);
     this.conditionEvaluator = new ConditionEvaluator(

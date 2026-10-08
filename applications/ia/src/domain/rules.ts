@@ -22,7 +22,12 @@ export class RulesProvider {
     // toujours la config `ia` courante — y compris après un rechargement à chaud
     // (IaService.excludedQuoiIds, surveillance de data/ia/config.yaml) sans que RulesProvider
     // n'ait besoin d'être reconstruit ni notifié explicitement.
-    private readonly getExcludedQuoiIds?: () => string[]
+    private readonly getExcludedQuoiIds?: () => string[],
+    // ⭐ 08/10/2026 — noms des macros connues de `planificateur` (cache alimenté par le relais
+    // `planificateur:macros:list`, IaService) : sans eux Mistral ne peut pas reconnaître
+    // l'exécution d'une macro (classification C des règles) — les règles lui disent de les chercher
+    // « en contexte », qu'aucune autre source ne lui fournissait.
+    private readonly getMacroNames?: () => string[]
   ) {}
 
   load(): void {
@@ -92,7 +97,18 @@ export class RulesProvider {
    * reste du message system.
    */
   private buildCatalogText(): string {
-    if (!this.registry.isAvailable()) return '';
+    const macroList = (this.getMacroNames?.() ?? []).filter((name) => name.trim().length > 0).join(', ');
+    const macroLines = macroList
+      ? [
+          '',
+          `Macros existantes (noms exacts) : ${macroList}`,
+          '',
+          'Si la phrase correspond au nom d\'une de ces macros, c\'est une exécution de macro',
+          '(classification C des règles).'
+        ]
+      : [];
+
+    if (!this.registry.isAvailable()) return macroLines.length > 0 ? macroLines.slice(1).join('\n') : '';
 
     // Config `ia` (excludedQuoiIds, config-schema.ts) — quoi pas adressables par une commande
     // domotique (déclencheurs physiques, accessoires, infrastructure technique), et dont le lieu
@@ -105,7 +121,7 @@ export class RulesProvider {
       .map((q) => q.label || q.quoi_id)
       .join(', ');
     const lieuxList = this.registry.getLieuCatalog(excluded).join(', ');
-    if (!quoiList && !lieuxList) return '';
+    if (!quoiList && !lieuxList) return macroLines.length > 0 ? macroLines.slice(1).join('\n') : '';
 
     return [
       '━━━ CATALOGUE CONNU DE LA MAISON (à jour, vérité de terrain) ━━━',
@@ -116,7 +132,8 @@ export class RulesProvider {
       '',
       'Utilise cette liste pour vérifier qu\'un quoi ou un lieu existe AVANT de répondre',
       '"quoi_introuvable" (section 0.4) — si le terme y figure, ne réponds jamais cette erreur',
-      'sans avoir d\'abord appelé lister_entites/obtenir_etat pour le résoudre réellement.'
+      'sans avoir d\'abord appelé lister_entites/obtenir_etat pour le résoudre réellement.',
+      ...macroLines
     ].join('\n');
   }
 }
