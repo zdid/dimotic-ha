@@ -1,6 +1,7 @@
 # Conception — Claude Code, accès au système et génération d'automatisations
 
-*Version 1.0 - 8 Octobre 2026*
+*Version 1.1 - 8 Octobre 2026*
+*v1.1 : accès distant au Claude Code par **Remote Control** (§2bis, §10) à la place d'un VPN vers l'interface du site ; v1.0 archivée.*
 *Spécification de **conception** (aucun code nouveau — sauf ce qui est déjà livré, §3). Consigne les décisions de
 l'utilisateur du 08/10/2026 : un Claude Code par site, avec la même vision de la maison que l'assistant Mistral, des
 autorisations ouvertes au fur et à mesure du besoin, et le choix entre le planificateur et Home Assistant pour exécuter
@@ -52,8 +53,29 @@ Conséquences :
   l'échelle d'autorisations (§5) s'applique site par site.
 - **Propre à chaque site** : catalogue quoi/lieux (les entités), planifications, jeton, niveau d'autorisation.
   **Commun** : code de dimotic-ha, règles embarquées, méthode de travail (mises à jour par `git pull` puis build).
-- **Piloter le Claude Code distant** passera par la console `screen2http` de son dimotic-ha — donc par un accès distant
-  sécurisé à l'interface de ce site (VPN ou équivalent, §10).
+- **Piloter un Claude Code à distance** (depuis le téléphone ou la tablette, ou pour celui du site de la fille) : voir §2bis
+  — Remote Control, sans accès réseau à l'interface du site.
+
+## 2bis. Piloter Claude Code à distance — Remote Control
+
+**Décision de l'utilisateur (08/10/2026)** : piloter les Claude Code à distance, depuis le téléphone ou la tablette, par
+**Remote Control**, plutôt que par un accès réseau (VPN) à l'interface de chaque site.
+
+- **Principe** : la session Claude Code **continue de tourner sur la machine de Home Assistant** ; l'application Claude Code
+  (téléphone, tablette, web) la pilote. Lancement, dans un terminal et dans le dossier de travail : `claude remote-control`
+  (la forme `/remote…` depuis une session n'a pas été confirmée — seule cette commande figure dans la documentation).
+- **Ce qui ne change pas** : Claude Code étant local, le serveur MCP de `ia` reste en `127.0.0.1` ; les permissions, le
+  jeton et l'échelle d'autorisations (§5) restent ceux de la machine. La session peut rester dans un `screen`.
+- **`screen2http`** reste un second accès (console web dans dimotic-ha), utile en secours ; il n'est plus nécessaire pour
+  atteindre le site distant.
+- **Limites** : la session s'arrête si la machine est éteinte ou le processus tué ; sur le site distant, un redémarrage
+  demande de relancer la commande, sauf démarrage automatique (à prévoir).
+- **Sécurité** : quiconque accède au compte Claude de l'utilisateur peut piloter ce Claude Code, donc atteindre les outils
+  MCP, `executer_action` compris. Les outils agissants restent en « demander à chaque fois » (§5), **surtout sur le site
+  distant** ; les règles de refus des secrets (§6) s'appliquent de la même façon.
+- **À vérifier avant de s'y fier** : comment la connexion s'établit entre la machine et l'application (la documentation
+  consultée ne le précise pas) — en particulier qu'aucun port n'a à être ouvert sur le site ; la reprise après un
+  redémarrage de la machine.
 
 ## 3. Ce qui existe déjà (livré le 08/10/2026)
 
@@ -144,7 +166,8 @@ Home Assistant par le socle), `PROMPT_PROJET` §11 (table de correspondance, à 
 
 ## 10. Points ouverts
 
-1. **Accès distant sécurisé** au dimotic-ha du site de la fille (VPN ou équivalent) pour piloter son futur Claude Code.
+1. **Remote Control** (§2bis) : vérifier le mode de connexion réel (aucun port à ouvrir ?) et la reprise après redémarrage de
+   la machine ; décider si `executer_action` doit rester en confirmation systématique sur tout accès à distance.
 2. **Droits de la connexion dimotic-ha → Home Assistant** : suffisent-ils pour lire (et plus tard écrire) des
    automatisations ?
 3. **Critère de validation du planificateur** : combien de temps / quels cas avant d'élargir son rôle ?
@@ -158,10 +181,11 @@ Home Assistant par le socle), `PROMPT_PROJET` §11 (table de correspondance, à 
 2. Règles de permissions de Claude Code (lecture limitée aux fichiers utiles, refus des secrets), sur chaque machine.
 3. Usage réel au niveau 0 ; noter les manques constatés.
 4. Selon ces manques : outil `lire_automatisations_ha`, puis niveau 1, puis niveau 2.
-5. Installation du Claude Code du site distant, avec jeton et permissions propres.
+5. Installation du Claude Code du site distant, avec jeton et permissions propres, lancé en Remote Control (§2bis).
 
 ## 12. Historique
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.1 | 08/10/2026 | Claude | **Remote Control** (§2bis) : pilotage à distance des Claude Code depuis téléphone/tablette, à la place d'un VPN vers l'interface de chaque site ; vérifications à faire (§10) ; v1.0 archivée. |
 | 1.0 | 08/10/2026 | Claude | Version initiale — conception issue des échanges du 08/10/2026 (aucun code nouveau). |
