@@ -70,16 +70,6 @@ if [ "${1:-}" = "--remote-exec" ]; then
     exit 1
   fi
 
-  if ! command -v claude >/dev/null 2>&1; then
-    if ! command -v npm >/dev/null 2>&1; then
-      echo "ERREUR : 'claude' introuvable et npm absent — impossible d'installer automatiquement." >&2
-      echo "Installez Node.js d'abord (ex: https://github.com/nodesource/distributions)." >&2
-      exit 1
-    fi
-    echo "'claude' introuvable — installation automatique (npm install -g @anthropic-ai/claude-code)..."
-    npm install -g @anthropic-ai/claude-code
-  fi
-
   # --- Compte d'exécution : dédié, sans sudo --------------------------------------------
   RUN_AS=""
   if [ -n "$CLAUDE_USER" ]; then
@@ -102,6 +92,36 @@ if [ "${1:-}" = "--remote-exec" ]; then
       "$@"
     fi
   }
+
+  # Claude Code est normalement installé DANS le compte dédié (installeur natif : ~/.local/bin, ou npm
+  # utilisateur) — pas dans le PATH de root. On le cherche donc d'abord là (PATH de connexion du
+  # compte, puis emplacements usuels), ensuite dans le PATH global ; installation en dernier recours.
+  find_claude() {
+    local p="" home="" c
+    p="$(as_claude bash -lc 'command -v claude' 2>/dev/null || true)"
+    if [ -z "$p" ] && [ -n "$RUN_AS" ]; then
+      home="$(getent passwd "$RUN_AS" | cut -d: -f6)"
+      for c in "$home/.local/bin/claude" "$home/.claude/local/claude" "$home/.npm-global/bin/claude" "$home/node_modules/.bin/claude"; do
+        if [ -x "$c" ]; then p="$c"; break; fi
+      done
+    fi
+    if [ -z "$p" ]; then p="$(command -v claude 2>/dev/null || true)"; fi
+    printf '%s' "$p"
+  }
+  CLAUDE_BIN="$(find_claude)"
+  if [ -z "$CLAUDE_BIN" ]; then
+    if command -v npm >/dev/null 2>&1; then
+      echo "'claude' introuvable — installation globale (npm install -g @anthropic-ai/claude-code)..."
+      npm install -g @anthropic-ai/claude-code
+      CLAUDE_BIN="$(find_claude)"
+    fi
+  fi
+  if [ -z "$CLAUDE_BIN" ]; then
+    echo "ERREUR : 'claude' introuvable (ni pour le compte '${RUN_AS:-$TARGET_USER}', ni globalement) et npm absent." >&2
+    echo "Installez Claude Code sous ce compte (voir https://code.claude.com/docs), puis relancez ce script." >&2
+    exit 1
+  fi
+  echo "Claude Code : $CLAUDE_BIN"
 
   if as_claude screen -ls 2>/dev/null | grep -qE "\.${SESSION_NAME}[[:space:]]"; then
     echo "ERREUR : une session screen nommée '$SESSION_NAME' existe déjà pour ce compte." >&2
@@ -227,7 +247,7 @@ EOF
     chown -R "$RUN_AS":"$RUN_AS" "$REMOTE_DIR"
   fi
 
-  as_claude bash -c "cd '$REMOTE_DIR' && screen -dmS '$SESSION_NAME' claude remote-control --permission-mode '$PERMISSION_MODE' --name '$SESSION_NAME'"
+  as_claude bash -lc "cd '$REMOTE_DIR' && screen -dmS '$SESSION_NAME' '$CLAUDE_BIN' remote-control --permission-mode '$PERMISSION_MODE' --name '$SESSION_NAME'"
 
   sleep 1
   if ! as_claude screen -ls 2>/dev/null | grep -qE "\.${SESSION_NAME}[[:space:]]"; then

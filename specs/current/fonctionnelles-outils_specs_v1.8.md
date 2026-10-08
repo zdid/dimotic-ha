@@ -1,8 +1,11 @@
 # Spécifications Fonctionnelles — Application OUTILS
 
-**Version :** 1.7
+**Version :** 1.8
 **Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/outils`
+
+> **v1.8 (08/10/2026)** — script « Agent Claude Code » (§7.4) : Claude Code est **cherché dans le compte dédié** (installation
+> habituelle : `~/.local/bin`), plus seulement dans le PATH de `root`.
 
 > **v1.7 (08/10/2026)** — script « Agent Claude Code » (`agent-ha-deploy`, §7.4) **aligné sur la conception Claude Code** :
 > compte Linux dédié sans sudo, liaison avec le serveur MCP de dimotic-ha, permissions posées (lecture seule sur la
@@ -342,6 +345,12 @@ dépose par `scp` sur la machine visée, s'y exécute par `ssh`, puis lance `cla
 
 Au moins l'un de `MCP_TOKEN` / `HA_TOKEN` est obligatoire ; `HA_URL` l'est avec `HA_TOKEN`.
 
+**Où est Claude Code** (⭐ v1.8) : installé normalement **dans le compte dédié** (installeur natif, `~/.local/bin/claude`, ou
+npm utilisateur). Le script le cherche dans cet ordre : PATH de connexion du compte → emplacements usuels du compte
+(`~/.local/bin`, `~/.claude/local`, `~/.npm-global/bin`) → PATH global ; à défaut, installation globale par npm si présent,
+sinon arrêt avec un message demandant de l'installer sous le compte. Le chemin trouvé est affiché et utilisé tel quel pour lancer
+le `screen`, dans un shell de connexion du compte.
+
 **Ce que la machine reçoit** (`/dimotic-ha-addons/agent-ha/`, propriété du compte dédié, mode 700) :
 - `.mcp.json` (600) : serveur MCP « dimotic », en-tête `Authorization: Bearer …` ;
 - `.claude/settings.json` (600) : `allow` = lecture des quatre fichiers de configuration ; `ask` =
@@ -430,6 +439,7 @@ l'historique git (commit d'avant le 29/09/2026).
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.8 | 08/10/2026 | Claude | **Claude Code cherché dans le compte dédié** (§7.4) — PATH de connexion, `~/.local/bin`, `~/.claude/local`, `~/.npm-global/bin`, puis PATH global ; installation npm globale seulement en dernier recours ; lancement par chemin résolu dans un shell de connexion. v1.7 archivée. |
 | 1.7 | 08/10/2026 | Claude | **Script « Agent Claude Code » aligné sur la conception** (§7.4) : compte dédié sans sudo (`CLAUDE_USER`), liaison avec le serveur MCP de dimotic-ha (`MCP_TOKEN`/`MCP_URL`), permissions posées (lecture seule sur la configuration Home Assistant via `HA_CONFIG_DIR`, secrets exclus, confirmation d'`executer_action`), jeton Home Assistant **facultatif** (conservé pour contrôler des résultats), copie du script supprimée après exécution. v1.6 archivée. |
 | 1.6 | 07/10/2026 | Claude | Script « Carte SD » : **fail2ban + durcissement SSH** dans l'image et par machine (champs `SSH_DURCISSEMENT`, `FAIL2BAN_IGNOREIP`), **Orange Pi Zero 2 / 4 Pro** (image officielle fournie à la main, `IMAGE_ORANGEPI`, mode `opi-machine`, image à une partition) (§7.2) ; **Docker activé explicitement au démarrage** dans l'image (get.docker.com échoue dans un chroot) ; **en cas d'échec de construction l'image est conservée** (`*.echec`) et les commandes d'un terminal interactif dedans (mode `shell` de `prepare-sd-card.sh`, local ou `ssh -t`) sont affichées. v1.5 archivée. |
 | 1.5 | 30/09/2026 | Claude | Version de l'image : format unique `X.Y.Z` proposé/affiché/saisi (`v` accepté), tag git `vX.Y.Z` (§7.1). v1.4 archivée. |
