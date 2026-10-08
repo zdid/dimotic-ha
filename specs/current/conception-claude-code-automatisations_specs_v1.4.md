@@ -1,5 +1,7 @@
 # Conception — Claude Code, accès au système et génération d'automatisations
 
+*Version 1.4 - 8 Octobre 2026*
+*v1.4 : **le `CLAUDE.md` de l'agent devient un modèle versionné du dépôt** (§2quater) — mis au point dans le Claude Code de développement, embarqué avec dimotic-ha, redéposé sur la machine Home Assistant à chaque évolution ; v1.3 archivée.*
 *Version 1.3 - 8 Octobre 2026*
 *v1.3 : **§0 État d'avancement** ajouté — ce qui est fait, éprouvé ou non, et ce qui n'est que spécifié ; à mettre à jour à chaque étape. v1.2 archivée.*
 *Version 1.2 - 8 Octobre 2026*
@@ -48,6 +50,7 @@ document pour savoir « où on en est ».
 | Fichiers éditables à deux niveaux (`modele_integre/`, `personnalise/`) | 🟡 | `fonctionnelles-ia` §12bis |
 | Règles Mistral révisées + noms de macros dans le catalogue | 🟡 | `fonctionnelles-ia` §5 ; fichier `regles_mistral.txt` |
 | Script « Agent Claude Code » (compte dédié, MCP, permissions, `claude` cherché dans le compte) | 🟡 — jamais lancé sur une vraie machine | `fonctionnelles-outils` §7.4 |
+| Modèle versionné du `CLAUDE.md` de l'agent + mode « mettre à jour le CLAUDE.md » | 🟡 | §2quater ; `fonctionnelles-outils` §7.4 |
 | Pilotage à distance par Remote Control | 🟡 — repris par le script ; mode de connexion et reprise après redémarrage à vérifier | §2bis |
 | Un Claude Code par site, MCP local en `127.0.0.1` | 🟡 ici (selon l'essai) · ⚪ site distant | §2 |
 | Échelle d'autorisations : niveau 0 (lecture, propose) | 🟡 | §5 |
@@ -134,6 +137,27 @@ lui-même ; les jetons, le catalogue et les permissions sont propres à la machi
 `screen`, niveau d'autorisation), relayer les actions communes par l'application `ia`, et reprendre dans cet écran la
 logique du script (qui restera utilisable seul). La session ne redémarre pas toute seule avec la machine : démarrage
 automatique à décider.
+
+## 2quater. Le `CLAUDE.md` de l'agent : source unique, versionnée, redéposable (⭐ v1.4)
+
+**Décision de l'utilisateur (08/10/2026)** : le `CLAUDE.md` qui guide le Claude Code de la machine Home Assistant est **mis au point dans
+le Claude Code de développement**, **déposé dans le dépôt dimotic-ha pour être embarqué**, et **redéposé sur la machine Home Assistant au fur
+et à mesure de sa mise au point**.
+
+- **Source unique** : `applications/ia/agent/claude-md/` — sections `00-role`, `10-dimotic-mcp`, `20-ha-config`, `30-ha-direct`,
+  `90-securite`, fichier `VERSION`, `LISEZ-MOI.md`. Avant : texte en dur dans le script Outils, sans version ni spec.
+- **Embarqué** : le dossier fait partie du dépôt et de l'image ; le script « Agent Claude Code » le déclare (`@outils:bundle`) et le dépose
+  sur la machine.
+- **Version visible** : `VERSION` (à incrémenter à chaque modification du texte) figure en première ligne du `CLAUDE.md` rendu — on voit d'un coup
+  d'œil si une machine est à jour.
+- **Cycle de mise au point** : (1) modifier les sections dans le Claude Code de développement, incrémenter `VERSION`, `git pull`/commit sur
+  `main` ; (2) sur la machine d'où l'on pilote, `git pull origin main` ; (3) application Outils → script « Agent Claude Code », mode
+  **`mettre_a_jour_claude_md`** → seul le `CLAUDE.md` est réécrit (ni jeton à ressaisir, ni session touchée) ; (4) le prochain démarrage de la
+  session Claude Code le prend en compte.
+- **Un modèle, des machines** : les sections sont communes aux deux sites ; seuls les valeurs (adresse, dossier de configuration) et le choix
+  des sections (MCP relié ? jeton Home Assistant ?) sont propres à la machine, mémorisés dans `agent.conf` (sans secret).
+- **À prévoir avec l'écran Déploiement** : comparer la version du modèle à celle lue sur la machine, proposer « Mettre à jour ».
+- **Distinct du `CLAUDE.md` de la racine du dépôt**, qui règle le **développement** de dimotic-ha (specs immuables, sauvegardes, build).
 
 ## 3. Ce qui existe déjà (livré le 08/10/2026)
 
@@ -247,6 +271,7 @@ Home Assistant par le socle), `PROMPT_PROJET` §11 (table de correspondance, à 
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.4 | 08/10/2026 | Claude | **Le `CLAUDE.md` de l'agent = modèle versionné du dépôt** (§2quater) : source unique, embarqué, version visible, mode de mise à jour sans réinstallation. v1.3 archivée. |
 | 1.3 | 08/10/2026 | Claude | **§0 État d'avancement** (fait / éprouvé / seulement spécifié). v1.2 archivée. |
 | 1.2 | 08/10/2026 | Claude | **Diffusion et mise en place** (§2ter) : script Outils aligné (compte dédié, MCP, permissions, jeton Home Assistant facultatif **conservé**), écran Déploiement toujours à réaliser, Claude Code ajouté aux agents. v1.1 archivée. |
 | 1.1 | 08/10/2026 | Claude | **Remote Control** (§2bis) : pilotage à distance des Claude Code depuis téléphone/tablette, à la place d'un VPN vers l'interface de chaque site ; vérifications à faire (§10) ; v1.0 archivée. |

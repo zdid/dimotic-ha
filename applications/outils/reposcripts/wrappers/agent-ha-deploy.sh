@@ -19,6 +19,10 @@
 # Le jeton Home Assistant reste FACULTATIF : il sert aux phases de mise au point, pour contrôler un
 # résultat directement dans Home Assistant (états, historique, journal). Vide = pas d'accès direct.
 #
+# @outils:bundle applications/ia/agent/claude-md => claude-md
+# @outils:select MODE = installer, mettre_a_jour_claude_md
+# @outils:default MODE = installer
+# @outils:hint MODE = installer : tout (compte, liaison MCP, permissions, CLAUDE.md, session). mettre_a_jour_claude_md : réécrit SEULEMENT le CLAUDE.md d'une installation existante (version du dépôt) — ne touche ni au compte, ni aux jetons, ni à la session ; prise en compte au prochain démarrage de la session Claude Code.
 # @outils:hint TARGET_HOST = Adresse de la machine visée — normalement celle que vous utilisez pour accéder à cette page (voir la barre d'adresse de votre navigateur).
 # @outils:default TARGET_USER = root
 # @outils:hint CLAUDE_USER = Compte Linux dédié qui exécutera Claude Code (créé s'il n'existe pas, sans sudo). Vide = exécuter sous le compte de connexion (déconseillé).
@@ -35,6 +39,7 @@
 
 set -euo pipefail
 
+MODE="__MODE__"
 TARGET_HOST="__TARGET_HOST__"
 TARGET_USER="__TARGET_USER__"
 CLAUDE_USER="__CLAUDE_USER__"
@@ -61,10 +66,54 @@ json_list() {
   printf '%s' "$out"
 }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# --- Modèle du CLAUDE.md (source unique : applications/ia/agent/claude-md/, voir son LISEZ-MOI.md) ----------
+sed_escape() { printf '%s' "$1" | sed -e 's/[\\|&]/\\&/g'; }
+
+render_section() {
+  sed -e "s|{{TARGET_HOST}}|$(sed_escape "$TARGET_HOST")|g" \
+      -e "s|{{HA_URL}}|$(sed_escape "$HA_URL")|g" \
+      -e "s|{{HA_CONFIG_DIR}}|$(sed_escape "$HA_CONFIG_DIR")|g" "$1"
+}
+
+# Écrit le CLAUDE.md sur la sortie standard. Variables attendues : TPL_DIR, HAS_MCP, HAS_HA_TOKEN,
+# HA_CONFIG_DIR, HA_URL, TARGET_HOST.
+render_claude_md() {
+  printf '<!-- agent-claude-md v%s — généré le %s par agent-ha-deploy -->\n\n' \
+    "$(tr -d '[:space:]' < "$TPL_DIR/VERSION")" "$(date +%Y-%m-%d)"
+  render_section "$TPL_DIR/00-role.md"; echo
+  if [ "$HAS_MCP" = 1 ]; then render_section "$TPL_DIR/10-dimotic-mcp.md"; echo; fi
+  if [ -n "$HA_CONFIG_DIR" ]; then render_section "$TPL_DIR/20-ha-config.md"; echo; fi
+  if [ "$HAS_HA_TOKEN" = 1 ]; then render_section "$TPL_DIR/30-ha-direct.md"; echo; fi
+  render_section "$TPL_DIR/90-securite.md"
+}
+
 if [ "${1:-}" = "--remote-exec" ]; then
   # =====================================================================================
   # Exécuté SUR LA MACHINE CIBLE (relancé par le bloc local ci-dessous, via ssh)
   # =====================================================================================
+  TPL_DIR="$SCRIPT_DIR/claude-md"
+
+  if [ "$MODE" = "mettre_a_jour_claude_md" ]; then
+    # Réécrit SEULEMENT le CLAUDE.md d'une installation existante, avec les choix mémorisés à
+    # l'installation (agent.conf — aucun secret). Ne touche ni au compte, ni aux jetons, ni au screen.
+    if [ ! -f "$REMOTE_DIR/agent.conf" ]; then
+      echo "ERREUR : aucune installation trouvée ($REMOTE_DIR/agent.conf absent) — lancez d'abord le mode « installer »." >&2
+      exit 1
+    fi
+    # shellcheck disable=SC1091
+    . "$REMOTE_DIR/agent.conf"
+    OLD_VERSION="$(sed -n 's/.*agent-claude-md v\([0-9][0-9.]*\).*/\1/p' "$REMOTE_DIR/CLAUDE.md" 2>/dev/null | head -1)"
+    render_claude_md > "$REMOTE_DIR/CLAUDE.md.new"
+    mv "$REMOTE_DIR/CLAUDE.md.new" "$REMOTE_DIR/CLAUDE.md"
+    if [ -n "$CLAUDE_USER" ]; then chown "$CLAUDE_USER":"$CLAUDE_USER" "$REMOTE_DIR/CLAUDE.md"; fi
+    NEW_VERSION="$(tr -d '[:space:]' < "$TPL_DIR/VERSION")"
+    echo "CLAUDE.md mis à jour : v${OLD_VERSION:-inconnue} -> v${NEW_VERSION}  ($REMOTE_DIR/CLAUDE.md)"
+    echo "Pris en compte au prochain démarrage de la session Claude Code (la session en cours garde l'ancien texte)."
+    exit 0
+  fi
+
   if ! command -v screen >/dev/null 2>&1; then
     echo "ERREUR : 'screen' introuvable sur cette machine. Installez-le : apt install screen" >&2
     exit 1
@@ -173,75 +222,17 @@ if [ "${1:-}" = "--remote-exec" ]; then
 
   # --- CLAUDE.md ------------------------------------------------------------------------
   # Chargé automatiquement comme instructions projet à l'ouverture d'une session dans ce répertoire.
+  # Rendu à partir du modèle versionné du dépôt (claude-md/, déposé à côté de ce script).
+  HAS_MCP=0; if [ -n "$MCP_TOKEN" ]; then HAS_MCP=1; fi
+  HAS_HA_TOKEN=0; if [ -n "$HA_TOKEN" ]; then HAS_HA_TOKEN=1; fi
+  render_claude_md > "$REMOTE_DIR/CLAUDE.md"
+
+  # Choix de l'installation (aucun secret) — relus par le mode « mettre_a_jour_claude_md ».
   {
-    cat <<EOF
-# Rôle et règles de cet agent
-
-Tu es l'agent Claude Code de cette maison (machine : ${TARGET_HOST}). Niveau d'autorisation actuel :
-**niveau 0 — tu LIS et tu PROPOSES.** Tu n'écris jamais dans la configuration de Home Assistant et tu ne
-déploies rien toi-même : pour une automatisation, tu rédiges le YAML, tu le soumets, l'utilisateur
-l'applique. Toute action qui agit sur la maison (lumières, volets, chauffage, serrures…) se confirme
-avec l'utilisateur avant d'être exécutée.
-
-EOF
-    if [ -n "$MCP_TOKEN" ]; then
-      cat <<EOF
-## dimotic-ha (serveur MCP « dimotic »)
-
-Tu disposes des mêmes outils que l'assistant vocal Mistral, plus des outils de lecture :
-- \`lister_entites\`, \`obtenir_etat\`, \`obtenir_details\` — entités, état, attributs réels, classement ;
-- \`diagnostiquer_resolution\` — pourquoi un quoi/lieux ne ressort pas ;
-- \`tester_phrase\` — simule une phrase SANS rien exécuter ;
-- \`lire_planificateur\` — planifications, macros, actions reçues, commandes réellement envoyées à HA ;
-- \`executer_action\` — AGIT RÉELLEMENT sur la maison (confirmation demandée à chaque appel).
-
-Le vocabulaire (quoi/lieux, valeurs absolues, un lieu précis et sa pièce en UN seul élément) et le
-catalogue de cette maison te sont transmis à la connexion ; règles complètes : ressource
-\`dimotic://regles\`. Le catalogue est propre à CETTE maison : n'y suppose pas les entités d'un autre site.
-
-EOF
-    fi
-    if [ -n "$HA_CONFIG_DIR" ]; then
-      cat <<EOF
-## Configuration de Home Assistant (lecture seule)
-
-Dossier : \`${HA_CONFIG_DIR}\` — tu peux lire \`automations.yaml\`, \`scripts.yaml\`, \`scenes.yaml\`,
-\`configuration.yaml\` pour connaître l'existant et éviter les doublons. \`secrets.yaml\` et \`.storage\`
-sont interdits ; tu n'écris rien dans ce dossier.
-
-EOF
-    fi
-    if [ -n "$HA_TOKEN" ]; then
-      cat <<EOF
-## Accès direct à Home Assistant — pour CONTRÔLER des résultats
-
-- URL : ${HA_URL}
-- Jeton (Long-Lived Access Token) : fichier \`./ha_token\` à côté de ce CLAUDE.md — ne l'affiche jamais
-  en clair, ne le commite jamais, ne le partage jamais avec un service tiers.
-- Usage prévu : **lecture** pour vérifier ce qu'on vient de mettre au point (états, historique, journal).
-- Tout appel qui modifie quelque chose (services, configuration, automatisations) se confirme avec
-  l'utilisateur AVANT, comme pour executer_action.
-
-\`\`\`bash
-# États / un état
-curl -s -H "Authorization: Bearer \$(cat ha_token)" "${HA_URL}/api/states"
-curl -s -H "Authorization: Bearer \$(cat ha_token)" "${HA_URL}/api/states/light.salon"
-# Historique d'une entité depuis une date
-curl -s -H "Authorization: Bearer \$(cat ha_token)" "${HA_URL}/api/history/period/2026-10-08T00:00:00?filter_entity_id=light.salon"
-# Journal
-curl -s -H "Authorization: Bearer \$(cat ha_token)" "${HA_URL}/api/logbook"
-\`\`\`
-
-EOF
-    fi
-    cat <<EOF
-## Sécurité
-
-- Ne colle jamais un jeton (dimotic, Home Assistant) dans une réponse, un commit ou un service tiers.
-- Un jeton Home Assistant donne un accès COMPLET au compte qui l'a créé, sans expiration.
-- Toute action à impact réel ou difficile à annuler : confirme d'abord.
-EOF
-  } > "$REMOTE_DIR/CLAUDE.md"
+    printf 'TARGET_HOST=%q\nCLAUDE_USER=%q\nHA_URL=%q\nHA_CONFIG_DIR=%q\nHAS_MCP=%q\nHAS_HA_TOKEN=%q\n' \
+      "$TARGET_HOST" "$CLAUDE_USER" "$HA_URL" "$HA_CONFIG_DIR" "$HAS_MCP" "$HAS_HA_TOKEN"
+  } > "$REMOTE_DIR/agent.conf"
+  chmod 600 "$REMOTE_DIR/agent.conf"
 
   if [ -n "$RUN_AS" ]; then
     chown -R "$RUN_AS":"$RUN_AS" "$REMOTE_DIR"
@@ -298,11 +289,25 @@ if [ -z "$TARGET_HOST" ]; then
   echo "ERREUR : TARGET_HOST est vide — renseignez-le dans le formulaire Outils." >&2
   exit 1
 fi
-if [ -z "$MCP_TOKEN" ] && [ -z "$HA_TOKEN" ]; then
+# Modèle du CLAUDE.md : à côté du script (archive Outils) ou, lancé depuis le dépôt, dans applications/ia/agent.
+TPL_SRC=""
+for c in "$SCRIPT_DIR/claude-md" "$SCRIPT_DIR/../../../ia/agent/claude-md"; do
+  if [ -f "$c/VERSION" ]; then TPL_SRC="$c"; break; fi
+done
+if [ -z "$TPL_SRC" ]; then
+  echo "ERREUR : modèle du CLAUDE.md introuvable (claude-md/) — régénérez le script depuis l'application Outils." >&2
+  exit 1
+fi
+if [ "$MODE" != "installer" ] && [ "$MODE" != "mettre_a_jour_claude_md" ]; then
+  echo "ERREUR : MODE inconnu « $MODE » (installer ou mettre_a_jour_claude_md)." >&2
+  exit 1
+fi
+
+if [ "$MODE" = "installer" ] && [ -z "$MCP_TOKEN" ] && [ -z "$HA_TOKEN" ]; then
   echo "ERREUR : ni MCP_TOKEN ni HA_TOKEN — Claude Code n'aurait accès à rien. Renseignez au moins l'un des deux." >&2
   exit 1
 fi
-if [ -n "$HA_TOKEN" ] && [ -z "$HA_URL" ]; then
+if [ "$MODE" = "installer" ] && [ -n "$HA_TOKEN" ] && [ -z "$HA_URL" ]; then
   echo "ERREUR : HA_TOKEN renseigné mais HA_URL vide — renseignez l'adresse de Home Assistant." >&2
   exit 1
 fi
@@ -318,6 +323,9 @@ fi
 echo "Dépôt sur ${TARGET_USER}@${TARGET_HOST}..."
 ssh "${TARGET_USER}@${TARGET_HOST}" "mkdir -p '${REMOTE_DIR}' && chmod 700 '${REMOTE_DIR}'"
 scp -q "$0" "${TARGET_USER}@${TARGET_HOST}:${REMOTE_DIR}/agent-ha-deploy.sh"
+# Modèle du CLAUDE.md (aucun secret) : remplacé à chaque fois, et conservé sur la machine.
+ssh "${TARGET_USER}@${TARGET_HOST}" "rm -rf '${REMOTE_DIR}/claude-md'"
+scp -q -r "$TPL_SRC" "${TARGET_USER}@${TARGET_HOST}:${REMOTE_DIR}/claude-md"
 # La copie déposée contient les jetons saisis : supprimée dès la fin, succès ou échec.
 ssh "${TARGET_USER}@${TARGET_HOST}" \
   "chmod 600 '${REMOTE_DIR}/agent-ha-deploy.sh'; bash '${REMOTE_DIR}/agent-ha-deploy.sh' --remote-exec; rc=\$?; rm -f '${REMOTE_DIR}/agent-ha-deploy.sh'; exit \$rc"

@@ -1,8 +1,12 @@
 # Spécifications Fonctionnelles — Application OUTILS
 
-**Version :** 1.8
+**Version :** 1.9
 **Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/outils`
+
+> **v1.9 (08/10/2026)** — script « Agent Claude Code » (§7.4) : le `CLAUDE.md` n'est plus écrit en dur dans le script mais **rendu à partir d'un
+> modèle versionné du dépôt** (`applications/ia/agent/claude-md/`, embarqué dans l'archive) ; nouveau **mode `mettre_a_jour_claude_md`** qui
+> ne réécrit que ce fichier sur une installation existante.
 
 > **v1.8 (08/10/2026)** — script « Agent Claude Code » (§7.4) : Claude Code est **cherché dans le compte dédié** (installation
 > habituelle : `~/.local/bin`), plus seulement dans le PATH de `root`.
@@ -342,8 +346,18 @@ dépose par `scp` sur la machine visée, s'y exécute par `ssh`, puis lance `cla
 | `HA_URL` / `HA_TOKEN` | **facultatifs** — accès direct à l'API Home Assistant pour **contrôler des résultats** pendant la mise au point (décision du 08/10/2026 : conservé). Compte HA dédié non-administrateur recommandé ; le jeton donne un accès complet au compte qui l'a créé |
 | `HA_CONFIG_DIR` | facultatif, chemin absolu — lecture autorisée de `automations.yaml`, `scripts.yaml`, `scenes.yaml`, `configuration.yaml` ; `secrets.yaml` et `.storage` interdits ; aucune écriture |
 | `SESSION_NAME`, `PERMISSION_MODE` | nom du `screen` ; `manual` (défaut) ou `acceptEdits` |
+| `MODE` (⭐ v1.9) | `installer` (défaut) : tout. `mettre_a_jour_claude_md` : réécrit **seulement** le `CLAUDE.md` d'une installation existante — ni le compte, ni les jetons, ni la session ne sont touchés ; aucun jeton à ressaisir |
 
 Au moins l'un de `MCP_TOKEN` / `HA_TOKEN` est obligatoire ; `HA_URL` l'est avec `HA_TOKEN`.
+
+**Modèle du `CLAUDE.md`** (⭐ v1.9) : source unique `applications/ia/agent/claude-md/` (sections `00-role`, `10-dimotic-mcp`,
+`20-ha-config`, `30-ha-direct`, `90-securite`, fichier `VERSION`, `LISEZ-MOI.md`), déclarée par `@outils:bundle` — le script téléchargé est
+donc une archive auto-extractible qui embarque le modèle ; lancé depuis un clone du dépôt, il le trouve à côté. Il dépose le modèle
+sur la machine (`/dimotic-ha-addons/agent-ha/claude-md/`, remplacé à chaque exécution, aucun secret) et y rend le `CLAUDE.md`. Variables
+de rendu : `{{TARGET_HOST}}`, `{{HA_URL}}`, `{{HA_CONFIG_DIR}}`. Sections incluses selon les choix : `10` si le MCP est relié, `20` si un
+dossier de configuration est donné, `30` si un jeton Home Assistant est donné. La première ligne du fichier rendu porte la version
+(`<!-- agent-claude-md vX.Y.Z — généré le … -->`). Les choix d'installation sans secret sont mémorisés dans `agent.conf` (600), relus par
+le mode `mettre_a_jour_claude_md`. Un `CLAUDE.md` modifié est **pris en compte au prochain démarrage de la session** Claude Code.
 
 **Où est Claude Code** (⭐ v1.8) : installé normalement **dans le compte dédié** (installeur natif, `~/.local/bin/claude`, ou
 npm utilisateur). Le script le cherche dans cet ordre : PATH de connexion du compte → emplacements usuels du compte
@@ -439,6 +453,7 @@ l'historique git (commit d'avant le 29/09/2026).
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.9 | 08/10/2026 | Claude | **Modèle versionné du `CLAUDE.md`** (§7.4) : `applications/ia/agent/claude-md/`, embarqué par `@outils:bundle`, rendu sur la machine ; nouveau mode `mettre_a_jour_claude_md` (réécrit seulement le `CLAUDE.md`, sans ressaisir de jeton) ; `agent.conf` mémorise les choix sans secret. v1.8 archivée. |
 | 1.8 | 08/10/2026 | Claude | **Claude Code cherché dans le compte dédié** (§7.4) — PATH de connexion, `~/.local/bin`, `~/.claude/local`, `~/.npm-global/bin`, puis PATH global ; installation npm globale seulement en dernier recours ; lancement par chemin résolu dans un shell de connexion. v1.7 archivée. |
 | 1.7 | 08/10/2026 | Claude | **Script « Agent Claude Code » aligné sur la conception** (§7.4) : compte dédié sans sudo (`CLAUDE_USER`), liaison avec le serveur MCP de dimotic-ha (`MCP_TOKEN`/`MCP_URL`), permissions posées (lecture seule sur la configuration Home Assistant via `HA_CONFIG_DIR`, secrets exclus, confirmation d'`executer_action`), jeton Home Assistant **facultatif** (conservé pour contrôler des résultats), copie du script supprimée après exécution. v1.6 archivée. |
 | 1.6 | 07/10/2026 | Claude | Script « Carte SD » : **fail2ban + durcissement SSH** dans l'image et par machine (champs `SSH_DURCISSEMENT`, `FAIL2BAN_IGNOREIP`), **Orange Pi Zero 2 / 4 Pro** (image officielle fournie à la main, `IMAGE_ORANGEPI`, mode `opi-machine`, image à une partition) (§7.2) ; **Docker activé explicitement au démarrage** dans l'image (get.docker.com échoue dans un chroot) ; **en cas d'échec de construction l'image est conservée** (`*.echec`) et les commandes d'un terminal interactif dedans (mode `shell` de `prepare-sd-card.sh`, local ou `ssh -t`) sont affichées. v1.5 archivée. |
