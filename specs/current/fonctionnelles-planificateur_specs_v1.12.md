@@ -1,7 +1,7 @@
 # Spécifications Fonctionnelles — Application PLANIFICATEUR
 
-**Version :** 1.11
-**Date :** 24 Septembre 2026
+**Version :** 1.12
+**Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/planificateur`
 
 > **v1.11** : **Refonte du déclenchement** (§6, décision utilisateur du 24/09/2026) — la phrase n'est
@@ -414,6 +414,14 @@ Si le verbe n'est pas connu de cette table (ambigu, nouveau, non encore prévu) 
 création depuis v1.11 (§4) ; aucune entité trouvée au moment de l'exécution : commande tracée en
 échec, rien envoyé (§8 — plus de repli).
 
+
+### 7.x ⭐ v1.12 — entités visées : réglages, diagnostic et entités désactivées exclus
+
+La résolution quoi/lieux (`HaBridgeClient.getEntitiesByQuoiAndLieux`, socle v4.40 §8.3.2bis) **écarte par défaut** les entités de catégorie `config` ou
+`diagnostic` et les entités désactivées dans HA : une action (« éteins le gros ballon ») ne cible que les entités « utilisateur ». Ce qu'`ia` simule
+et ce que `planificateur` exécute proviennent de la même fonction : ils visent les mêmes entités. Un QUOI d'entité secondaire (« disjoncteur puissance »,
+« compte à rebours ») ne confond plus l'entité principale d'un appareil avec ses réglages (`quoi_appareil`, §8.3.2ter). **Vérifié en simulation** sur
+ha2 (« éteins le gros ballon » : 17 entités avant, 1 maintenant) ; aucune planification de production n'existe sur ha2 ni stfort.
 ## 8. Exécution des actions
 
 Étape `wait` : attente (§6). Étape `action` : appel de service HA résolu (§7) via
@@ -530,6 +538,7 @@ dashboard déjà ouvert jusqu'à un rafraîchissement manuel.
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.12 | 08/10/2026 | Claude | Résolution des entités visées : réglages, diagnostic et entités désactivées exclus par défaut (§7.x). |
 | 1.11 | 24/09/2026 | Claude | **Refonte du déclenchement** (§6, décision utilisateur) : plus de réinterprétation de la phrase par Mistral au déclenchement ni de `resolvedCache` — la structure `action` décidée à la création est exécutée et recalculée en code à chaque fois (`ExecutionEngine.run`) ; conditions évaluées en code (soleil via suncalc, numérique, état simple, `conditions.ts`), sinon question vrai/faux à `ia` (`planificateur:condition`, remplace `planificateur:deploy`) ; « éteins-la » cible l'entité déclenchante en code. **Repli `processConversation` supprimé** (§8 — l'agent de conversation de HA est `ia`, risque de boucle). Revue de code : validation à la réception + commandes exécutables obligatoires (§4, entrée invalide qui empoisonnait toutes les écritures) ; `activer`/`modifier` repartent d'une échéance recalculée, `modifier` ne renomme plus, recréation sous un nom existant désarme l'ancienne (§4) ; `state_change` sur vrai passage d'état seulement + reprise des attentes après `ha:ready` (§3.2/§5.1) ; `window` respecte les jours et exécute l'inverse à `to`, `duration` démarre tout de suite avec inverse en fin (§3.1) ; trigger `sun` attend la position GPS et réessaie (§3.1bis) ; forme structurée des conditions acceptée par le schéma ; macro dite (`macro_ref`) exécutée au lieu d'être refusée ; UI : journal des conditions/commandes non exécutées, échappement HTML. Ancienne version v1.10 archivée. |
 | 1.10 | 26/08/2026 | Claude | **Nouveau déclencheur `sun`** (§3.1bis) : lever/coucher du soleil, offset signé optionnel, réutilise `days`/`except_days` du trigger `recurrence`. Calcul réel via `suncalc` (nouvelle dépendance) plutôt qu'une lecture de `sun.sun` de HA — celui-ci ne donne que le PROCHAIN lever/coucher, insuffisant combiné à un filtre de jours restrictif (ex. "tous les week-ends" : calculer le coucher de samedi prochain depuis un dimanche demande une date arbitraire). Position GPS lue une fois via nouveau `HaBridgeClient.getHaConfig()` (`HaWsClient.getHaConfig()` → `getConfig()` de `home-assistant-js-websocket`, déjà un helper haut niveau de la bibliothèque) et mise en cache indéfiniment ; `scheduler.ts` reste pur/synchrone (position déjà résolue injectée en paramètre, jamais d'appel réseau dans `triggerToMs()`). `isRecurring()` inclut `'sun'` — mêmes garanties de reprise après coupure que les autres déclencheurs récurrents (§5.1). Demande utilisateur explicite ("le lever et le coucher de soleil sont utilisés dans toutes les implémentations de ma domotique, sauf chez moi") — reprend le calcul déjà résolu par l'utilisateur dans son ancien système (même bibliothèque `suncalc`, retrouvée dans `zdidnodedomoutil/heurelevercouchersoleil.js`). Voir aussi `fonctionnelles-ia_specs_v1.12.md` §16.4 pour le gabarit d'interprétation correspondant. Validé par test unitaire déterministe (marche jour-par-jour, offset, filtre de jours, 9 cas) et sanity-check `suncalc` réel (Paris) ; le round-trip `getHaConfig()` → position GPS réelle pas encore confirmé en conditions réelles (redémarrage local effectué, a rencontré une fois la course démarrage/authentification WS déjà connue côté `ExecutionEngine` — mécanisme de nouvel essai automatique ajouté en conséquence). Session du 26/08/2026. Ancienne version v1.9 archivée. |
 | 1.9 | 26/08/2026 | Claude | **Correctif §5.1** : un trigger récurrent manqué au-delà de la fenêtre de rattrapage (`catchUpWindowSeconds`) n'était jamais reprogrammé — `resumeOrSchedule()` marquait `missed: true` mais seul le cas non récurrent poursuivait le cycle (`completed_at`), un récurrent manqué restait actif sans minuteur indéfiniment. Corrigé : reprogrammation immédiate pour la prochaine occurrence dans ce cas (`schedulerRuntime.schedule()`, `next_fire_at` recalculé depuis maintenant). Bug réel signalé par l'utilisateur ("éteindre toutes les lumières tous les jours à 2h30", plus jamais déclenchée après un arrêt de service au moment précis du tir), vérifié corrigé en conditions réelles sur la planification concernée (`handler.ts:150-165`, commit `17a9069`). |

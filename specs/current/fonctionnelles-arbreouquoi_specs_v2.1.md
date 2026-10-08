@@ -1,7 +1,7 @@
 # Spécifications — Application ARBREOUQUOI
 
-**Version :** 2.0
-**Date :** 19 Septembre 2026
+**Version :** 2.1
+**Date :** 8 Octobre 2026
 **Auteur :** Mistral Vibe / Claude
 **Statut :** En développement
 **Type :** Application standalone
@@ -130,6 +130,13 @@ L'objectif principal de **ARBREOUQUOI** est de fournir une **visualisation inter
 | **Classification QUOI** | Tous les tags QUOI de l'entité | ⭐⭐⭐ |
 | **Entités Associées** | Entités du même QUOI ou de la même Area | ⭐⭐ |
 | **Attributs** | Tous les attributs de l'entité | ⭐ |
+
+**⭐ v2.1 — QUOI d'entité et QUOI d'appareil.** L'arbre regroupe les entités par leur `quoi` (taxonomie de l'**entité**). Depuis nommage v2.3 / socle v4.40, le
+`quoi` d'une entité secondaire dit ce qu'elle est (« Puissance », « Tension », « Mode indicateur ») et non plus le QUOI de son appareil : un appareil
+dont les capteurs et réglages étaient tous sous « gros ballon » se répartit désormais sur plusieurs groupes (« Puissance », « Disjoncteur puissance »…),
+l'interrupteur principal restant sous « gros ballon ». `attributs_taxonomie.quoi_appareil` (QUOI de l'appareil, ou nom de l'appareil HA pour un appareil non
+géré) est disponible dans le détail d'une entité. Les entités `config`, `diagnostic` ou désactivées sont toujours affichées dans l'arbre (seule la
+résolution de Mistral et le catalogue de QUOI les écartent). **Non vérifié sur l'affichage.**
 
 ### 2.6 Configuration
 

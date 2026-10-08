@@ -1,6 +1,6 @@
 # Spécifications — Application NOMMAGE
 
-**Version :** 2.2
+**Version :** 2.3
 **Date :** 24 Septembre 2026
 **Auteur :** Mistral Vibe / Claude
 **Statut :** En production
@@ -352,6 +352,12 @@ devenir explicitement `null` : ce sont deux comportements différents pour HA �
 }
 ```
 
+**⭐ v2.3 — nom d'appareil des émetteurs.** Le nom court d'appareil est calculé par le core (`IntegrationBridge.buildShortDeviceName`) : lieu précis,
+à défaut le QUOI. Pour un appareil dont le QUOI est un **QUOI d'émetteur** (`bouton`, `télécommande` — `isEmitterQuoi`, liste unique `EMITTER_QUOI_SLUGS`
+du core), c'est le **nom long** : quoi + lieu précis + lieu (« Bouton Plafonnier Chambre d'ami »), car un bouton porte le même lieu précis que la lumière
+qu'il pilote. Même règle que RFXCOM en publication directe (`fonctionnelles-rfxcom` §3.5), ce qui permet à RFXCOM de passer par NOMMAGE (§10.2bis).
+Comparaison précis/lieu insensible à la casse. Voir `techniques-socle-ha-mqtt` §8.5.0bis.
+
 ### 3.5 Interface Utilisateur
 
 **Description :** UI minimale pour visualiser le statut et les activités.
@@ -615,6 +621,10 @@ client Socket.io, voir §7 `guide-nouvelle-application_specs`) :
 ```
 
 ---
+
+**⭐ v2.3 — décompte des noms non traduits.** `NommageStatus.untranslated` : `{ objectIds, entities, top[] }` — nombre d'identifiants techniques distincts
+sans traduction (§3.3bis), nombre d'entités concernées, et jusqu'à 15 identifiants les plus fréquents (`objectId`, `name` brut, `entities`). Affiché par
+l'interface sous « Noms non traduits » (total + info-bulle). Mis à jour à chaque republication et à chaque retrait.
 
 ## 5. Flux de Traitement
 
@@ -1944,6 +1954,7 @@ mosquitto_sub -h localhost -t "$SYS/broker/subscriptions" -v
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| **2.3** | 08/10/2026 | Claude | Statut : champ `untranslated` (§4.4) ; nom d'appareil des émetteurs `bouton`/`télécommande` en nom long (§3.4). |
 | **2.2** | 08/10/2026 | Claude | **Taxonomie par entité** (§3.3bis) : `quoi` de l'entité (libellé traduit, sinon grandeur de la classe, sinon QUOI de l'appareil) et `quoi_appareil` ; lieux inchangés. |
 | **2.1** | 24/09/2026 | Claude | **Plus de sources MQTT propres** (décision utilisateur) : écoute des préfixes de découverte via la connexion MQTT du socle, config réduite à `prefixes` (migration automatique depuis `sources[]`) ; retrait à la source propagé à HA ; taxonomies par topic (fin des doublons/croissance) ; rejeu des découvertes au retour de HA ; config relue sur disque. Voir l'en-tête v2.1 (remplace §3.1/§4.3 sur les sources). v2.0 archivée. |
 | **2.0** | 19/09/2026 | Claude | **Fusion** de `fonctionnelles-nommage_specs_v1.8.md` + `implementation-nommage_specs_v1.8.md` en ce document (Partie 1 Fonctionnel / Partie 2 Technique). Sections "Communication Inter-Applications" dupliquées (`InterAppClient`, jamais implémenté, ~800 lignes au total) retirées, remplacées par un pointeur unique. `nommage_specs_v1.0.md` volontairement **non fusionné** (protocole générique référencé par 9 documents du dépôt, hors périmètre de l'application NOMMAGE elle-même). Anciennes versions v1.7/v1.8 archivées. |

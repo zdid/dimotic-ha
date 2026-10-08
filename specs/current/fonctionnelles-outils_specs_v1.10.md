@@ -1,6 +1,6 @@
 # Spécifications Fonctionnelles — Application OUTILS
 
-**Version :** 1.9
+**Version :** 1.10
 **Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/outils`
 
@@ -354,10 +354,12 @@ Au moins l'un de `MCP_TOKEN` / `HA_TOKEN` est obligatoire ; `HA_URL` l'est avec 
 `20-ha-config`, `30-ha-direct`, `90-securite`, fichier `VERSION`, `LISEZ-MOI.md`), déclarée par `@outils:bundle` — le script téléchargé est
 donc une archive auto-extractible qui embarque le modèle ; lancé depuis un clone du dépôt, il le trouve à côté. Il dépose le modèle
 sur la machine (`/dimotic-ha-addons/agent-ha/claude-md/`, remplacé à chaque exécution, aucun secret) et y rend le `CLAUDE.md`. Variables
-de rendu : `{{TARGET_HOST}}`, `{{HA_URL}}`, `{{HA_CONFIG_DIR}}`. Sections incluses selon les choix : `10` si le MCP est relié, `20` si un
+de rendu : `{{TARGET_HOST}}`, `{{HA_URL}}`, `{{HA_CONFIG_DIR}}`, `{{HA_TOKEN_FILE}}` (⭐ v1.10 : `./ha_token` si le script l'a installé, sinon `~/.ha_token` quand c'est le fichier déjà en place sur la machine). Sections incluses selon les choix : `10` si le MCP est relié, `20` si un
 dossier de configuration est donné, `30` si un jeton Home Assistant est donné. La première ligne du fichier rendu porte la version
 (`<!-- agent-claude-md vX.Y.Z — généré le … -->`). Les choix d'installation sans secret sont mémorisés dans `agent.conf` (600), relus par
 le mode `mettre_a_jour_claude_md`. Un `CLAUDE.md` modifié est **pris en compte au prochain démarrage de la session** Claude Code.
+
+**Section « Site »** (⭐ v1.10) : si `site.md` existe à côté du `CLAUDE.md` sur la machine (copie de `applications/ia/agent/claude-md/sites/<machine>.md` : connaissances propres au site et niveau d'autorisation — `ha2.md`, `dev.md`), il est **ajouté à la fin** du `CLAUDE.md` rendu. Il n'est jamais écrasé par une installation ni par le mode `mettre_a_jour_claude_md`. Modèle `VERSION` 1.2.1 (rôle : niveau 0 par défaut, « sauf indication contraire de la section Site »).
 
 **Où est Claude Code** (⭐ v1.8) : installé normalement **dans le compte dédié** (installeur natif, `~/.local/bin/claude`, ou
 npm utilisateur). Le script le cherche dans cet ordre : PATH de connexion du compte → emplacements usuels du compte
@@ -453,6 +455,7 @@ l'historique git (commit d'avant le 29/09/2026).
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.10 | 08/10/2026 | Claude | Script « Agent Claude Code » : section « Site » (`site.md`) ajoutée au `CLAUDE.md` rendu, variable `{{HA_TOKEN_FILE}}` (`~/.ha_token` si déjà en place) (§7.4). |
 | 1.9 | 08/10/2026 | Claude | **Modèle versionné du `CLAUDE.md`** (§7.4) : `applications/ia/agent/claude-md/`, embarqué par `@outils:bundle`, rendu sur la machine ; nouveau mode `mettre_a_jour_claude_md` (réécrit seulement le `CLAUDE.md`, sans ressaisir de jeton) ; `agent.conf` mémorise les choix sans secret. v1.8 archivée. |
 | 1.8 | 08/10/2026 | Claude | **Claude Code cherché dans le compte dédié** (§7.4) — PATH de connexion, `~/.local/bin`, `~/.claude/local`, `~/.npm-global/bin`, puis PATH global ; installation npm globale seulement en dernier recours ; lancement par chemin résolu dans un shell de connexion. v1.7 archivée. |
 | 1.7 | 08/10/2026 | Claude | **Script « Agent Claude Code » aligné sur la conception** (§7.4) : compte dédié sans sudo (`CLAUDE_USER`), liaison avec le serveur MCP de dimotic-ha (`MCP_TOKEN`/`MCP_URL`), permissions posées (lecture seule sur la configuration Home Assistant via `HA_CONFIG_DIR`, secrets exclus, confirmation d'`executer_action`), jeton Home Assistant **facultatif** (conservé pour contrôler des résultats), copie du script supprimée après exécution. v1.6 archivée. |
