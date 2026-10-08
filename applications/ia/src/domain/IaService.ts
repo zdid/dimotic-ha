@@ -23,6 +23,7 @@ import { ToolExecutor } from './ToolExecutor';
 import { StructuredRouter } from './StructuredRouter';
 import { ConditionEvaluator } from './ConditionEvaluator';
 import { OllamaHttpServer } from './OllamaHttpServer';
+import { McpHttpServer } from './McpHttpServer';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
@@ -123,6 +124,7 @@ export class IaService implements IIaService {
   private readonly assistSessions = new Map<string, { messages: OllamaMessage[]; lastUsedAt: number }>();
   private assistSessionsCleanupTimer?: ReturnType<typeof setInterval>;
   private ollamaServer?: OllamaHttpServer;
+  private mcpServer?: McpHttpServer;
   private readonly recentExchanges: Exchange[] = [];
   private configWatcher?: fs.FSWatcher;
 
@@ -285,6 +287,7 @@ export class IaService implements IIaService {
       this.resolveHaReady();
       this.ollamaServer = new OllamaHttpServer(this.config, this.logger, (body, res) => this.handleChat(body, res));
       this.ollamaServer.start();
+      this.startMcpServer();
       this.logger.info('IaService', 'Référentiel HA chargé — ia ouvert (serveur Ollama, test, réinterprétations)');
       this.emitStatus();
     };
@@ -304,6 +307,20 @@ export class IaService implements IIaService {
     });
   }
 
+  /** Accès MCP pour Claude Code (specs v1.15 §19) : jamais sans jeton, jamais sans activation explicite. */
+  private startMcpServer(): void {
+    if (!this.config.mcpEnabled) return;
+    const token = this.config.mcpToken?.trim();
+    if (!token) {
+      this.logger.warn('IaService', 'Accès MCP activé mais aucun jeton défini — serveur MCP NON démarré');
+      return;
+    }
+    this.mcpServer = new McpHttpServer(this.config.mcpHost, this.config.mcpPort, token, this.logger, (name, args) =>
+      this.toolExecutor.execute({ id: `mcp-${Date.now()}`, type: 'function', function: { name, arguments: args } })
+    );
+    this.mcpServer.start();
+  }
+
   private cleanupAssistSessions(): void {
     const cutoff = Date.now() - ASSIST_SESSION_TTL_MS;
     for (const [id, session] of this.assistSessions) {
@@ -318,6 +335,7 @@ export class IaService implements IIaService {
     this.vocabulaireWatcher?.close();
     this.gabaritsWatcher?.close();
     this.ollamaServer?.stop();
+    this.mcpServer?.stop();
     if (this.assistSessionsCleanupTimer) clearInterval(this.assistSessionsCleanupTimer);
     this.logger.info('IaService', 'Service ia arrêté');
   }

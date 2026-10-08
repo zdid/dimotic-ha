@@ -1,8 +1,12 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.14
-**Date :** 24 Septembre 2026
+**Version :** 1.15
+**Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
+
+> **v1.15** : **Accès MCP pour Claude Code** (§19, nouveau) — les trois outils donnés à Mistral
+> (`lister_entites`, `obtenir_etat`, `executer_action`) exposés à Claude Code par un serveur MCP HTTP
+> à jeton, désactivé par défaut. Aucun outil supplémentaire, aucune nouvelle voie vers la maison.
 
 > **v1.14** : **Revue de code du 24/09/2026 — cache de phrases corrigé** (§16.10) : le cache ne sert
 > plus qu'aux phrases DITES (HA, test du tableau de bord), plus aux déclenchements (`DeployResponder`)
@@ -987,6 +991,7 @@ mécanisme de nouvel essai ajouté, pas encore re-déclenché en réel faute d'u
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.15 | 08/10/2026 | Claude | **Accès MCP pour Claude Code** (§19) : serveur MCP HTTP (`McpHttpServer.ts`) exposant `lister_entites`/`obtenir_etat`/`executer_action` via le même `ToolExecutor` que Mistral ; jeton Bearer obligatoire, désactivé par défaut, appels journalisés ; réglages `mcpEnabled`/`mcpToken`/`mcpPort`/`mcpHost`. v1.14 archivée. |
 | 1.14 | 24/09/2026 | Claude | **Revue de code** (demande utilisateur, session du 24/09/2026) : (1) planification reconnue par l'interpréteur transmise avec `phrase_originale` vide — complétée avec la phrase dite (`withPhraseOriginale`) ; (2) `DeployResponder` ne consulte ni n'alimente plus `PhraseCache` (collision avec les phrases dites via HA : séquence `execution` rejouée comme commande immédiate) ; (3) décisions à déclencheur `date` jamais mises en cache ; (4) rechargement à chaud de `data/ia/config.yaml` et des YAML de l'interpréteur : surveillance du dossier (`loader.ts::watchFile`, anti-rebond 300 ms) — `fs.watch` sur le fichier devenait sourd après 1-2 remplacements par rename (vérifié) ; (5) mineurs : action Mistral en échec jamais mise en cache (`executerActionOk`), réponses planificateur du chemin interpréteur/cache en JSON (session d'assistance plus fermée sur échec), port Ollama occupé journalisé au lieu de faire planter le process, modèles intégrés résolus depuis `__dirname` (racine externe), échappement HTML des guillemets dans l'UI ; (6) démarrage subordonné au premier `ha:ready` (§17 : serveur Ollama, test/comparatif, réinterprétations), statut `haReady` affiché sur le tableau de bord ; (7) **plus de réinterprétation au déclenchement** (§10, décision utilisateur, miroir de `fonctionnelles-planificateur_specs` v1.11) : `DeployResponder` et `outcomesToExecutionSteps()` supprimés, `ConditionEvaluator` (`planificateur:condition`, vrai/faux, outils de lecture seulement) ; `regles_mistral.txt` : `verbe`/`quoi` obligatoires dans toute action, exemples 1/2/4 corrigés (modèle intégré + copie `data/ia/`). Ancienne version v1.13 archivée. |
 | 1.13 | 27/08/2026 | Claude | **Lieu unique déduit du `quoi`** (§16.6bis) : quand une phrase ne capture aucun lieu et que le `quoi` reconnu n'existe qu'à un seul `lieu_principal` distinct dans toute la maison ("allume le poêle"), ce lieu est utilisé automatiquement — prioritaire sur `context.lieuOrigine` (signal plus spécifique, et de toute façon non branché en pratique, §16.6). Niveau `lieu_principal`, pas `lieu_precis` (deux entités du même quoi dans la même pièce à des `lieu_precis` différents comptent pour un seul lieu). Nouveau `liveCatalogs.ts::buildQuoiUniqueLieu()` (même mécanisme que `buildLieuxComposes()`, dérivé à chaque reconstruction du catalogue, jamais figé) ; nouvelle fonction `resolveDefaultLieu()` centralisant la priorité, appliquée dans `buildActionParams` et la clause action de `si_alors` — volontairement PAS appliquée au gabarit `donne` (une interrogation sans lieu a plus de sens en listant toutes les instances). Vérifié en conditions réelles : "allume le poele" → `lieux:["salle à manger"]` (seul poêle de la maison réelle), 0 token. Corpus de test étendu à 59 cas. Demande utilisateur explicite, session du 27/08/2026. Ancienne version v1.12 archivée. |
 | 1.12 | 26/08/2026 | Claude | **Gabarit `soleil`** (§16.4, lever/coucher du soleil, demande utilisateur — "utilisé dans toutes les implémentations domotiques sauf chez moi") : pattern `"(<duree#offset> <enum:avant_apres#direction>)? (au|a|à)? <enum:lever_coucher#sunevent>"`, composable avec les fragments de jours existants (`leweekend`, `touslesjours`...). Produit `trigger.type: 'sun'`, calculé réellement côté `planificateur` via `suncalc` (voir sa spec) — pas une lecture de `sun.sun` de HA, qui ne donne que le PROCHAIN lever/coucher, insuffisant combiné à un filtre de jours (ex. "tous les week-ends" — calculer le coucher de samedi prochain depuis un dimanche demande une date arbitraire). Précédemment listé "hors périmètre" (v1.10/v1.11), l'utilisateur avait déjà résolu ce même problème dans son ancien système via la même bibliothèque (`suncalc`, retrouvé dans `zdidnodedomoutil/heurelevercouchersoleil.js`). **Correctif jours FR→EN trouvé en préparant ce gabarit** : les enums `jour`/`week_end`/`jours_ouvres` de `vocabulaire.yaml` capturaient des valeurs françaises (`lundi`, `samedi`...) alors que `scheduler.ts::triggerToMs` (et `regles_mistral.txt`, déjà) attendent des clés anglaises 3 lettres (`mon`, `sat`...) — un filtre de jour produit par l'interpréteur ne matchait *jamais* aucun jour côté `planificateur` avant ce correctif (silencieusement inopérant, pas d'erreur visible). Second bug lié corrigé au passage : `touslesjours`+`jours_ouvres` ne posait aucun filtre du tout (capture sous la mauvaise clé, `#jours` manquant). Corpus de test étendu à 58 cas. Toutes demandes utilisateur, session du 26/08/2026. Ancienne version v1.11 archivée. |
@@ -1002,3 +1007,58 @@ mécanisme de nouvel essai ajouté, pas encore re-déclenché en réel faute d'u
 | 1.2 | 23/07/2026 | Claude | Nouvelle §4 "Difficultés protocolaires connues" : balises markdown autour du JSON, fragmentation des `tool_calls` en streaming, réconciliation des deux formats de requête Ollama, signal interne à ne pas laisser fuiter vers HA, en-tête anti-buffering, forme d'erreur Ollama en cas d'échec Mistral. |
 | 1.1 | 23/07/2026 | Claude | Clarification : l'action immédiate ne produit jamais de JSON structuré — ne transite jamais par `planificateur` (précision alors correcte, la mécanique exacte a été révisée en v1.3 ci-dessus). |
 | 1.0 | 23/07/2026 | Claude | Version initiale — spécification de l'application avant implémentation. |
+
+## 19. Accès MCP pour Claude Code (nouveau v1.15)
+
+### 19.1 Objet
+
+Donner à Claude Code, depuis une machine du réseau local, **les mêmes accès à la maison que ceux donnés
+à Mistral** (§7) — ni plus, ni moins : `lister_entites`, `obtenir_etat`, `executer_action`, avec le
+vocabulaire QUOI/OÙ. Les schémas viennent du même fichier (`tools.ts`) et les appels passent par le même
+`ToolExecutor` : lecture via `HaBridgeClient` (graphe de lieux, §7 v1.7), action via
+`planificateur` (`ia:tool:execute`, §8) — le point d'exécution unique n'est pas contourné.
+
+### 19.2 Serveur
+
+`McpHttpServer.ts`, dans le process `ia`, démarré en même temps que le serveur Ollama (une fois HA
+prêt, §17). Protocole **MCP, transport HTTP sans état** : `POST /mcp`, une requête JSON-RPC 2.0 → une
+réponse JSON ; méthodes `initialize`, `ping`, `tools/list`, `tools/call` ; notifications acquittées en
+`202`. Pas de session, pas de flux SSE (`GET`/`DELETE` → `405`). Versions de protocole acceptées :
+`2025-06-18`, `2025-03-26`, `2024-11-05`. Un outil inconnu est refusé (`-32602`) ; une erreur d'exécution
+revient en résultat `isError`.
+
+### 19.3 Sécurité
+
+- **Désactivé par défaut** (`mcpEnabled: false`). Activé **sans jeton**, le serveur ne démarre pas
+  (avertissement dans la log).
+- **Jeton Bearer obligatoire** sur chaque requête (`Authorization: Bearer <jeton>`), comparé à temps
+  constant ; refus → `401` + avertissement (adresse source, jamais le jeton).
+- Chaque `tools/call` est **journalisé** (nom + arguments).
+- **Réseau local uniquement** : `executer_action` agit réellement sur la maison. Ne jamais exposer ce
+  port sur Internet. `mcpHost` : `0.0.0.0` (réseau local, défaut) ou `127.0.0.1` (cette machine).
+- Les sessions cloud de Claude Code n'atteignent pas le réseau local : hors périmètre.
+
+### 19.4 Configuration (`data/ia/config.yaml`, section « Accès Claude Code (MCP) » de Paramètres Techniques)
+
+| Champ | Défaut | Rôle |
+|---|---|---|
+| `mcpEnabled` | `false` | Active le serveur MCP |
+| `mcpToken` | — | Jeton d'accès (rangé en `secrets_config.yaml`), ex. `openssl rand -hex 32` |
+| `mcpPort` | `8765` | Port d'écoute |
+| `mcpHost` | `0.0.0.0` | Adresse d'écoute |
+
+Pris en compte au redémarrage de l'application `ia`. En Docker (réseau hôte), aucun mappage de port à
+ajouter.
+
+### 19.5 Brancher Claude Code
+
+```bash
+claude mcp add --transport http dimotic http://<machine>:8765/mcp \
+  --header "Authorization: Bearer <jeton>"
+```
+
+### 19.6 Vérifié
+
+Serveur éprouvé avec un gestionnaire factice : jeton absent/erroné → 401 ; `initialize`, `tools/list`
+(3 outils), `tools/call` (arguments transmis), notification → 202, outil inconnu → erreur, `GET` → 405.
+**Non vérifié** : exécution réelle contre Home Assistant et `planificateur`, et connexion d'un vrai Claude Code.

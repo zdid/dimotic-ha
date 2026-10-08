@@ -64,6 +64,17 @@ export const IA_UI_METADATA: ModuleUiMetadata = {
       ]
     },
     {
+      title: 'Accès Claude Code (MCP)',
+      description: "Donne à Claude Code les mêmes outils que Mistral (lister_entites, obtenir_etat, executer_action — ce dernier agit réellement sur la maison). Désactivé par défaut ; ne démarre que si activé ET jeton défini. Réseau local uniquement : ne jamais exposer ce port sur Internet. Changement pris en compte au redémarrage de l'application IA. Côté Claude Code : claude mcp add --transport http dimotic http://<machine>:<port>/mcp --header \"Authorization: Bearer <jeton>\"",
+      icon: '🔌',
+      fields: [
+        { name: 'mcpEnabled', label: 'Activer l\'accès MCP', type: 'boolean', default: false },
+        { name: 'mcpToken', label: 'Jeton d\'accès', type: 'password', storage: 'secret', hint: 'Chaîne secrète longue (ex: openssl rand -hex 32). Obligatoire.' },
+        { name: 'mcpPort', label: 'Port MCP', type: 'number', default: 8765 },
+        { name: 'mcpHost', label: 'Adresse d\'écoute', type: 'string', default: '0.0.0.0', hint: '127.0.0.1 = cette machine seulement ; 0.0.0.0 = tout le réseau local' }
+      ]
+    },
+    {
       title: 'Serveur Ollama émulé',
       description: 'Port dédié, indépendant du port web du socle.',
       icon: '📡',

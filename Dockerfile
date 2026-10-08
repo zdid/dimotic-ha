@@ -144,7 +144,9 @@ USER node
 #   11434 : ia — serveur HTTP émulant le protocole Ollama pour l'intégration HA (configurable,
 #           data/ia/config.yaml) — ⚠️ collision possible avec un vrai serveur Ollama sur le même
 #           hôte (même port par défaut), voir compose.yaml.
-EXPOSE 8087 49161 11434
+#   8765  : ia — serveur MCP pour Claude Code (désactivé par défaut, jeton obligatoire,
+#           réseau local uniquement — fonctionnelles-ia_specs §19)
+EXPOSE 8087 49161 11434 8765
 
 # ⭐ 25/08/2026 : lit web.port dans data/core/config.yaml plutôt qu'un port codé en dur — bug réel
 # constaté sur stfort (l'ancien système dimotic legacy occupe déjà 8080 sur cette machine,

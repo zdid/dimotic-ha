@@ -75,6 +75,14 @@ export const iaConfigSchema = z.object({
 
   ollamaHttpPort: z.number().int().positive().default(11434),
 
+  // ⭐ Accès MCP pour Claude Code (specs v1.15 §19) — mêmes 3 outils que ceux donnés à Mistral
+  // (lister_entites, obtenir_etat, executer_action), exposés en MCP (HTTP) sur un port dédié.
+  // Désactivé par défaut ; ne démarre que si activé ET jeton défini (jamais d'accès sans jeton).
+  mcpEnabled: z.boolean().default(false),
+  mcpPort: z.number().int().min(1).max(65535).default(8765),
+  mcpHost: z.string().default('0.0.0.0'),
+  mcpToken: z.string().optional(),
+
   // Chemin relatif à la racine de l'application (applications/ia/), sauf s'il est absolu — voir
   // IaService.resolveRulesPath()/ensureRulesFileSeeded(). Par défaut sous data/ia/ (pas
   // applications/ia/rules/, qui reste le modèle intégré utilisé pour amorcer ce fichier s'il
@@ -122,6 +130,9 @@ export const DEFAULT_IA_CONFIG: IaConfig = {
     'mistral-large-latest': { requestsPerSecond: 0.25, tokensPerMinute: 400000 }
   },
   provider: 'mistral',
+  mcpEnabled: false,
+  mcpPort: 8765,
+  mcpHost: '0.0.0.0',
   anthropicBaseUrl: 'https://api.anthropic.com/v1',
   defaultAnthropicModel: 'claude-haiku-4-5-20251001',
   compareModels: [
