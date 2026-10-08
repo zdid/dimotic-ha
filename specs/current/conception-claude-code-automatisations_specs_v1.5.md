@@ -1,5 +1,7 @@
 # Conception — Claude Code, accès au système et génération d'automatisations
 
+*Version 1.5 - 8 Octobre 2026*
+*v1.5 : **mise à jour de l'état d'avancement (§0, §5, §10)** d'après les commits du Claude Code de développement (`3e9780f`, `ac9f07b`, `27d3233` : outils MCP de dépôt d'automatisations, CLAUDE.md v1.2.x avec sections de site, script de lancement sur la machine de dév) ; v1.4 archivée.*
 *Version 1.4 - 8 Octobre 2026*
 *v1.4 : **le `CLAUDE.md` de l'agent devient un modèle versionné du dépôt** (§2quater) — mis au point dans le Claude Code de développement, embarqué avec dimotic-ha, redéposé sur la machine Home Assistant à chaque évolution ; v1.3 archivée.*
 *Version 1.3 - 8 Octobre 2026*
@@ -43,24 +45,30 @@ document pour savoir « où on en est ».
 | Élément | État | Où c'est décrit |
 |---|---|---|
 | Console web d'un `screen` (`screen2http`) | 🟢 | `fonctionnelles-screen2http` v1.2 |
-| Serveur MCP de `ia` : outils de Mistral + vision (instructions, ressources) | 🟡 | `fonctionnelles-ia` §19 |
-| Outils de lecture `obtenir_details`, `diagnostiquer_resolution`, `tester_phrase` | 🟡 | `fonctionnelles-ia` §19.7 |
+| Serveur MCP de `ia` : outils de Mistral + vision (instructions, ressources) | 🟢 — utilisé sur la machine de développement, branchée au Home Assistant réel de ha2 (`fonctionnelles-ia` §19.10 « éprouvé sur le HA réel », `sites/dev.md`) | `fonctionnelles-ia` §19 |
+| Outils de lecture `lister_entites` (avec `categorie`), `obtenir_details` (avec `quoi_appareil`) | 🟢 — éprouvés sur le HA réel | `fonctionnelles-ia` §19.7, §19.10, §19.11 |
+| Outils de lecture `diagnostiquer_resolution`, `tester_phrase` | 🟡 | `fonctionnelles-ia` §19.7 |
 | Lecture du planificateur (`lire_planificateur`) | 🟡 — le pont réel entre `ia` et `planificateur` jamais vérifié | `fonctionnelles-ia` §19.8 |
 | Résolution quoi/lieux (« plafonnier de la chambre », repli par le nom borné au quoi) | 🟡 | `techniques-socle-ha-mqtt` §8.3.2 (v4.38) |
 | Fichiers éditables à deux niveaux (`modele_integre/`, `personnalise/`) | 🟡 | `fonctionnelles-ia` §12bis |
 | Règles Mistral révisées + noms de macros dans le catalogue | 🟡 | `fonctionnelles-ia` §5 ; fichier `regles_mistral.txt` |
 | Script « Agent Claude Code » (compte dédié, MCP, permissions, `claude` cherché dans le compte) | 🟡 — jamais lancé sur une vraie machine | `fonctionnelles-outils` §7.4 |
-| Modèle versionné du `CLAUDE.md` de l'agent + mode « mettre à jour le CLAUDE.md » | 🟡 | §2quater ; `fonctionnelles-outils` §7.4 |
+| Modèle versionné du `CLAUDE.md` de l'agent (v1.2.1) + mode « mettre à jour le CLAUDE.md » | 🟡 | §2quater ; `fonctionnelles-outils` §7.4 |
+| Section « Site » du `CLAUDE.md` (`sites/ha2.md`, `sites/dev.md`, `site.md` sur la machine, jamais écrasé) | 🟡 — rédigée d'après les specs, « à vérifier » signalé dans le texte | `applications/ia/agent/claude-md/LISEZ-MOI.md` |
+| Lancement de Claude Code sur la machine de développement (`claude-screen-dev.sh`, `screen`, `.mcp.json`, CLAUDE.md + section « dev ») | 🟡 | `applications/ia/agent/claude-screen-dev.sh` |
 | Pilotage à distance par Remote Control | 🟡 — repris par le script ; mode de connexion et reprise après redémarrage à vérifier | §2bis |
 | Un Claude Code par site, MCP local en `127.0.0.1` | 🟡 ici (selon l'essai) · ⚪ site distant | §2 |
-| Échelle d'autorisations : niveau 0 (lecture, propose) | 🟡 | §5 |
-| Niveaux 1, 2, 3 (dossier de propositions, déploiement dans Home Assistant, cible « Home Assistant ») | ⚪ | §5 |
-| Outil `lire_automatisations_ha` | ⚪ | §6, §10 |
+| Échelle d'autorisations : niveau 0 (lecture, propose) | 🟢 | §5 |
+| Niveau 2 : dépôt d'automatisations dans Home Assistant (`lire_automatisations_ha`, `deposer_automatisation`, `supprimer_automatisation` ; aperçu puis confirmation, sauvegarde, anti-boucle) | 🟡 — éprouvé avec un faux bus ; pont réel `ia` ↔ `core` ↔ HA et appel depuis Claude Code à vérifier ; ouvert sur ha2 (niveau 2) et sur « dev » (niveau 2 d'essai, ids `test_dev_`) | `fonctionnelles-ia` §19.9 |
+| Niveau 1 (dossier de propositions) | ⚪ — sauté : le niveau 2 encadré par aperçu et sauvegarde le remplace | §5 |
+| Niveau 3 (cible « Home Assistant » portée par une planification) | ⚪ | §5 |
 | Écran Déploiement « Agents des applications » (Claude Code déclaré par `ia`) | ⚪ | `conception-agents-distants-reglages` v1.1 |
 | Démarrage automatique de la session après redémarrage de la machine | ⚪ | §2ter, §10 |
 | Diffusion de propositions entre sites | ⚪ (idée, hors décision) | §7 |
 
-**Prochaine étape** : l'essai réel (plan §11, étape 3) — activer le MCP, lancer le script ici, noter ce qui manque.
+**Prochaine étape** : l'essai réel du dépôt d'automatisations (ids `test_dev_`, automatisations inoffensives, sur la machine de dév) puis sur ha2 ; noter ce qui manque. Remarque : le dimotic-ha de la machine de développement est branché sur le Home Assistant **réel** de ha2 — tout ce qui s'y fait agit sur la production.
+
+*(Statuts de cette version établis d'après les specs et les commits du Claude Code de développement ; à corriger par l'utilisateur s'ils ne reflètent pas l'usage réel.)*
 
 ---
 
@@ -202,8 +210,8 @@ Chaque niveau est ouvert **sur décision de l'utilisateur, site par site**, jama
 | Niveau | Claude Code peut… | Statut |
 |---|---|---|
 | 0 | lire Home Assistant et dimotic-ha ; proposer des automatisations en texte | **en place** |
-| 1 | déposer ses propositions dans un dossier réservé côté dimotic (jamais dans Home Assistant) | à ouvrir sur demande |
-| 2 | déployer dans Home Assistant par un outil de dimotic : sauvegarde préalable, validation de la configuration, confirmation de l'utilisateur, rechargement | à concevoir si le niveau 1 convainc |
+| 1 | déposer ses propositions dans un dossier réservé côté dimotic (jamais dans Home Assistant) | **sauté** (v1.5) — remplacé par le niveau 2 encadré |
+| 2 | déployer dans Home Assistant par un outil de dimotic : sauvegarde préalable, validation de la configuration, confirmation de l'utilisateur, rechargement | **outils livrés** (`fonctionnelles-ia` §19.9) ; ouvert site par site : ha2 = niveau 2, dev = niveau 2 d'essai |
 | 3 | cible « Home Assistant » portée directement par une planification (§4, lecture 2) | à n'envisager que si nécessaire |
 
 Les autorisations se règlent à deux endroits : côté **Claude Code** (permissions de fichiers et d'outils MCP) et côté
@@ -250,7 +258,7 @@ Home Assistant par le socle), `PROMPT_PROJET` §11 (table de correspondance, à 
 
 1. **Remote Control** (§2bis) : vérifier le mode de connexion réel (aucun port à ouvrir ?) et la reprise après redémarrage de
    la machine ; décider si `executer_action` doit rester en confirmation systématique sur tout accès à distance.
-2. **Droits de la connexion dimotic-ha → Home Assistant** : suffisent-ils pour lire (et plus tard écrire) des
+2. *(traité en v1.5 : le dépôt passe par le pont REST du core, `HaRestBridge` — `fonctionnelles-ia` §19.9 ; l'agent n'a pas besoin d'un jeton en écriture ; à vérifier en réel)* **Droits de la connexion dimotic-ha → Home Assistant** : suffisent-ils pour lire (et plus tard écrire) des
    automatisations ?
 3. **Critère de validation du planificateur** : combien de temps / quels cas avant d'élargir son rôle ?
 4. **Niveau 1** (dossier de propositions) : emplacement, format, revue.
@@ -271,6 +279,7 @@ Home Assistant par le socle), `PROMPT_PROJET` §11 (table de correspondance, à 
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.5 | 08/10/2026 | Claude | **État d'avancement mis à jour** (§0, §5, §10) d'après les commits du Claude Code de développement : outils MCP de dépôt d'automatisations (niveau 2), CLAUDE.md v1.2.1 + sections de site, `claude-screen-dev.sh`, MCP et lecture éprouvés en réel. v1.4 archivée. |
 | 1.4 | 08/10/2026 | Claude | **Le `CLAUDE.md` de l'agent = modèle versionné du dépôt** (§2quater) : source unique, embarqué, version visible, mode de mise à jour sans réinstallation. v1.3 archivée. |
 | 1.3 | 08/10/2026 | Claude | **§0 État d'avancement** (fait / éprouvé / seulement spécifié). v1.2 archivée. |
 | 1.2 | 08/10/2026 | Claude | **Diffusion et mise en place** (§2ter) : script Outils aligné (compte dédié, MCP, permissions, jeton Home Assistant facultatif **conservé**), écran Déploiement toujours à réaliser, Claude Code ajouté aux agents. v1.1 archivée. |
