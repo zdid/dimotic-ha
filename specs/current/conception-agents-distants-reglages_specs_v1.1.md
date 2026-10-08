@@ -1,5 +1,7 @@
 # Conception — Agents distants sur l'écran Déploiement, page « Réglages » du core
 
+*Version 1.1 - 8 Octobre 2026*
+*v1.1 : **Claude Code** ajouté aux agents concernés (§3) — déclaré par l'application `ia`, mis en place par le script « Agent Claude Code » de l'application Outils en attendant l'écran ; voir `conception-claude-code-automatisations` §2ter. v1.0 archivée.*
 *Version 1.0 - 3 Octobre 2026*
 *Spécification de **conception** (aucun code écrit). Rassemble les décisions de l'utilisateur du 03/10/2026 :
 un seul écran pour déployer et suivre les agents des applications, liens croisés, paramétrage de la sauvegarde
@@ -63,6 +65,13 @@ Menu « Paramètres techniques » cible : **Site · Réglages · Déploiement ·
 | **DDSU666-H** (compteurmodbus) | agent Python, lecture Modbus RTU | systemd | noisy (installé **à la main** le 01/10/2026) | à ajouter (`compteurmodbus/<cible>/agent/status`) |
 | arexx | envoi BS-1000 / pilote TL-500 (`deploy-sender.sh`, `DriversBundle`) | systemd / cron | RPi1, ha2 | à vérifier |
 | sauvegarde | script de sauvegarde + cron + secret | cron | toutes les machines couvertes | `status.json` lu par SSH |
+| **ia** (⭐ v1.1) | **Claude Code** (agent de mise au point et d'automatisation, un par site) | `screen` sous compte dédié | ici ; site distant à venir | à définir (session Remote Control visible, `ia` joignable en MCP) |
+
+**Claude Code** (⭐ v1.1) : mis en place aujourd'hui par le script « Agent Claude Code » de l'application Outils
+(`fonctionnelles-outils` §7.4), sans passer par cet écran. Cible : le déclarer ici comme agent de l'application `ia`
+(machine, version de Claude Code installée, état du `screen`, jeton MCP propre à la machine, niveau d'autorisation),
+avec les actions communes (Déployer · Démarrer · Arrêter · Voir la log · Retirer). Voir
+`conception-claude-code-automatisations` §2ter.
 
 **DDSU666-H** : ce déploiement est **à créer** — le service tourne sur noisy depuis le 01/10/2026 mais a été posé à la
 main (`/root/ddsu666h-mqtt.py`, `/etc/systemd/system/ddsu666h-mqtt.service`, broker local `192.168.1.62` depuis le

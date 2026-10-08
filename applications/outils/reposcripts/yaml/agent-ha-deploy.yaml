@@ -3,7 +3,10 @@ title: "Agent Claude Code — déploiement sur Home Assistant (SSH)"
 description: >-
   Génère un script qui se dépose lui-même (scp) sur la machine visée — normalement celle d'où
   vous téléchargez ce script — puis s'y exécute (ssh) pour lancer Claude Code dans un screen
-  détaché, briefé sur une instance Home Assistant donnée, accessible ensuite via le Remote
+  détaché, sous un compte Linux dédié sans sudo, relié au serveur MCP de dimotic-ha de cette
+  machine (mêmes outils que Mistral + lecture du planificateur) et, facultativement, à l'API
+  Home Assistant pour contrôler des résultats. Lecture seule sur la configuration de Home
+  Assistant, secrets exclus, confirmation avant toute action ; accessible ensuite via le Remote
   Control de Claude Code depuis un téléphone/autre poste.
 filename: agent-ha-deploy.sh
 requiresSudo: false

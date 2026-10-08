@@ -1,8 +1,12 @@
 # Spécifications Fonctionnelles — Application OUTILS
 
-**Version :** 1.6
-**Date :** 7 Octobre 2026
+**Version :** 1.7
+**Date :** 8 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/outils`
+
+> **v1.7 (08/10/2026)** — script « Agent Claude Code » (`agent-ha-deploy`, §7.4) **aligné sur la conception Claude Code** :
+> compte Linux dédié sans sudo, liaison avec le serveur MCP de dimotic-ha, permissions posées (lecture seule sur la
+> configuration de Home Assistant, secrets exclus, confirmation avant toute action), jeton Home Assistant **facultatif**.
 
 > **v1.6 (07/10/2026)** — script « Carte SD / clé USB » (§7.2) : **fail2ban et durcissement SSH** installés dans l'image
 > (comme stfort : root par clé seulement, mot de passe refusé sauf pour l'utilisateur du profil, fail2ban sur le journal
@@ -234,7 +238,7 @@ moteur partagé n'est pas supprimé (il peut servir à d'autres scripts).
 |----|-------|------|------|
 | `prepare-sd-card` | Préparer et écrire une carte SD/clé USB Raspberry Pi | oui | ⭐ v1.2 — voir §7.2 (archive auto-extractible). Remplace « 1/2 — Préparer » et « 2/2 — Flasher » (`flash-sd-card`, retiré). |
 | `duckdns-caddy` | Accès externe (DuckDNS + Caddy) | oui | Domaines DuckDNS + reverse proxy HTTPS |
-| `agent-ha-deploy` | Agent Claude Code — déploiement sur Home Assistant (SSH) | non | Préparation d'un agent sur une machine HA |
+| `agent-ha-deploy` | Agent Claude Code — déploiement sur Home Assistant (SSH) | non | ⭐ v1.7 — voir §7.4 : Claude Code dans un `screen`, compte dédié, MCP dimotic-ha, Remote Control. |
 | `build-all` | Compiler toutes les applications dimotic-ha | non | ⭐ 25/09/2026 — compilation locale : core puis chaque application (serveur + écrans), option `npm install`, arrêt et nom de la première application en échec. **Sans** `npm prune` (réservé à l'image Docker) |
 | `commit-push-docker` | Commit + push + tag + build Docker | non | Voir §7.1 |
 
@@ -322,6 +326,42 @@ e2fsprogs file openssl`).
 Rien n'est installé au premier démarrage : il ne fait que la configuration propre à la machine
 (pas besoin d'Internet pour démarrer ; WiFi requis seulement pour être joignable).
 
+### 7.4 « Agent Claude Code — déploiement sur Home Assistant (SSH) » (⭐ v1.7)
+
+Spec de conception : `conception-claude-code-automatisations` (échelle d'autorisations §5, lecture seule §6). Le script se
+dépose par `scp` sur la machine visée, s'y exécute par `ssh`, puis lance `claude remote-control` dans un `screen` détaché.
+
+| Champ | Rôle |
+|---|---|
+| `TARGET_HOST` / `TARGET_USER` | machine visée et compte de connexion SSH (défaut `root`) |
+| `CLAUDE_USER` | compte Linux **dédié** qui exécute Claude Code (défaut `claude`) : créé s'il n'existe pas, **refusé s'il est dans `sudo`/`wheel`/`root`** ; vide = compte de connexion (déconseillé) |
+| `MCP_TOKEN` / `MCP_URL` | jeton et adresse du serveur MCP de dimotic-ha de **cette** machine (`fonctionnelles-ia` §19 ; défaut `http://127.0.0.1:8765/mcp`) ; vide = pas de liaison |
+| `HA_URL` / `HA_TOKEN` | **facultatifs** — accès direct à l'API Home Assistant pour **contrôler des résultats** pendant la mise au point (décision du 08/10/2026 : conservé). Compte HA dédié non-administrateur recommandé ; le jeton donne un accès complet au compte qui l'a créé |
+| `HA_CONFIG_DIR` | facultatif, chemin absolu — lecture autorisée de `automations.yaml`, `scripts.yaml`, `scenes.yaml`, `configuration.yaml` ; `secrets.yaml` et `.storage` interdits ; aucune écriture |
+| `SESSION_NAME`, `PERMISSION_MODE` | nom du `screen` ; `manual` (défaut) ou `acceptEdits` |
+
+Au moins l'un de `MCP_TOKEN` / `HA_TOKEN` est obligatoire ; `HA_URL` l'est avec `HA_TOKEN`.
+
+**Ce que la machine reçoit** (`/dimotic-ha-addons/agent-ha/`, propriété du compte dédié, mode 700) :
+- `.mcp.json` (600) : serveur MCP « dimotic », en-tête `Authorization: Bearer …` ;
+- `.claude/settings.json` (600) : `allow` = lecture des quatre fichiers de configuration ; `ask` =
+  `mcp__dimotic__executer_action` (confirmation à chaque appel) ; `deny` = lecture de `secrets.yaml` et `.storage/**`,
+  **écriture** dans le dossier de configuration. Ces règles sont une barrière « au mieux » : la barrière réelle est le
+  compte dédié et les droits de fichiers ;
+- `ha_token` (600), seulement si `HA_TOKEN` est renseigné ;
+- `CLAUDE.md` : rôle (niveau 0 : lit et propose, n'écrit pas dans Home Assistant), outils de dimotic-ha, accès direct
+  (lecture, avec confirmation avant toute modification), sécurité.
+
+**Première mise en œuvre** (une fois, en SSH puis `su - <compte> -c 'screen -r <session>'`) : connexion Claude.ai, confiance
+du dossier, **approbation du serveur MCP du projet**, activation du Remote Control ; détacher par `Ctrl-A D`. Ensuite
+la session se retrouve dans l'application Claude Code (onglet « Code ») du même compte Claude.ai.
+
+**Limites** : la session s'arrête si la machine redémarre (relancer le script) ; la copie du script déposée (elle contient les
+jetons saisis) est **supprimée dès la fin**, succès ou échec ; un jeton contenant un guillemet ou un `$` n'est pas pris en
+charge (valeurs insérées telles quelles dans le script). Éprouvé en simulation (`screen`/`claude`/`useradd` simulés) : création du
+compte, fichiers et droits, JSON valides, refus d'un compte sudo, validations locales. **Non vérifié** : exécution réelle sur
+une machine et lancement effectif de Claude Code.
+
 ### 7.3 (retiré en v1.4)
 
 Le script « Configurer un appareil Tasmota (à distance) » (v1.3) est retiré : l'application `tasmota`
@@ -390,6 +430,7 @@ l'historique git (commit d'avant le 29/09/2026).
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.7 | 08/10/2026 | Claude | **Script « Agent Claude Code » aligné sur la conception** (§7.4) : compte dédié sans sudo (`CLAUDE_USER`), liaison avec le serveur MCP de dimotic-ha (`MCP_TOKEN`/`MCP_URL`), permissions posées (lecture seule sur la configuration Home Assistant via `HA_CONFIG_DIR`, secrets exclus, confirmation d'`executer_action`), jeton Home Assistant **facultatif** (conservé pour contrôler des résultats), copie du script supprimée après exécution. v1.6 archivée. |
 | 1.6 | 07/10/2026 | Claude | Script « Carte SD » : **fail2ban + durcissement SSH** dans l'image et par machine (champs `SSH_DURCISSEMENT`, `FAIL2BAN_IGNOREIP`), **Orange Pi Zero 2 / 4 Pro** (image officielle fournie à la main, `IMAGE_ORANGEPI`, mode `opi-machine`, image à une partition) (§7.2) ; **Docker activé explicitement au démarrage** dans l'image (get.docker.com échoue dans un chroot) ; **en cas d'échec de construction l'image est conservée** (`*.echec`) et les commandes d'un terminal interactif dedans (mode `shell` de `prepare-sd-card.sh`, local ou `ssh -t`) sont affichées. v1.5 archivée. |
 | 1.5 | 30/09/2026 | Claude | Version de l'image : format unique `X.Y.Z` proposé/affiché/saisi (`v` accepté), tag git `vX.Y.Z` (§7.1). v1.4 archivée. |
 | 1.4 | 29/09/2026 | Claude | Script « Configurer un appareil Tasmota (à distance) » retiré (§7.3), repris par l'application `tasmota`. v1.3 archivée. |

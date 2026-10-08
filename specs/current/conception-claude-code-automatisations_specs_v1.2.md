@@ -1,5 +1,7 @@
 # Conception — Claude Code, accès au système et génération d'automatisations
 
+*Version 1.2 - 8 Octobre 2026*
+*v1.2 : **diffusion et mise en place de Claude Code** (§2ter) — état réel (script Outils, écran Déploiement non réalisé), script aligné sur ces décisions, jeton Home Assistant **conservé** en option pour la mise au point ; v1.1 archivée.*
 *Version 1.1 - 8 Octobre 2026*
 *v1.1 : accès distant au Claude Code par **Remote Control** (§2bis, §10) à la place d'un VPN vers l'interface du site ; v1.0 archivée.*
 *Spécification de **conception** (aucun code nouveau — sauf ce qui est déjà livré, §3). Consigne les décisions de
@@ -76,6 +78,30 @@ Conséquences :
 - **À vérifier avant de s'y fier** : comment la connexion s'établit entre la machine et l'application (la documentation
   consultée ne le précise pas) — en particulier qu'aucun port n'a à être ouvert sur le site ; la reprise après un
   redémarrage de la machine.
+
+## 2ter. Diffusion et mise en place de Claude Code (⭐ v1.2)
+
+**Décision de l'utilisateur (08/10/2026)** : la mise en place de Claude Code sur une machine relève de dimotic-ha
+(écran Déploiement) ; le **jeton Home Assistant direct est conservé** en option, pour les phases de mise au point complexes
+où l'on demande à Claude Code de contrôler des résultats directement dans Home Assistant.
+
+**État réel** :
+- *Aujourd'hui* : le script « Agent Claude Code » de l'application Outils (`fonctionnelles-outils` §7.4) — dépose,
+  installe, lance `claude remote-control` dans un `screen`. Aligné en v1.7 d'Outils sur ces décisions : compte Linux
+  dédié sans sudo (refus d'un compte sudo), liaison avec le serveur MCP de dimotic-ha de la machine, permissions posées
+  (lecture limitée aux quatre fichiers de configuration, secrets et `.storage` refusés, aucune écriture, confirmation
+  d'`executer_action`), jeton Home Assistant et dossier de configuration **facultatifs**.
+- *Écran Déploiement « Agents des applications »* (`conception-agents-distants-reglages` §5) : **conçu, pas réalisé**.
+  Claude Code y est ajouté (v1.1 de cette conception) comme agent de l'application `ia`.
+
+**Diffusion sur les deux sites** : le même script sert pour chaque machine, avec son **propre** jeton MCP et ses propres
+chemins. Rien n'est partagé entre sites sauf le code de dimotic-ha (mises à jour par `git pull` puis build) et le script
+lui-même ; les jetons, le catalogue et les permissions sont propres à la machine. Le site distant : même script, plus tard.
+
+**À prévoir quand l'écran Déploiement existera** : déclarer l'agent (machine, version de Claude Code installée, état du
+`screen`, niveau d'autorisation), relayer les actions communes par l'application `ia`, et reprendre dans cet écran la
+logique du script (qui restera utilisable seul). La session ne redémarre pas toute seule avec la machine : démarrage
+automatique à décider.
 
 ## 3. Ce qui existe déjà (livré le 08/10/2026)
 
@@ -181,11 +207,14 @@ Home Assistant par le socle), `PROMPT_PROJET` §11 (table de correspondance, à 
 2. Règles de permissions de Claude Code (lecture limitée aux fichiers utiles, refus des secrets), sur chaque machine.
 3. Usage réel au niveau 0 ; noter les manques constatés.
 4. Selon ces manques : outil `lire_automatisations_ha`, puis niveau 1, puis niveau 2.
-5. Installation du Claude Code du site distant, avec jeton et permissions propres, lancé en Remote Control (§2bis).
+5. *(fait, non éprouvé sur machine)* Script « Agent Claude Code » aligné (§2ter). Installation du Claude Code du site
+   distant avec ce script, jeton et permissions propres, lancé en Remote Control (§2bis) ; essai réel du script ici d'abord.
+6. Déclarer Claude Code comme agent de `ia` dans l'écran Déploiement quand celui-ci existera ; démarrage automatique de la session.
 
 ## 12. Historique
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.2 | 08/10/2026 | Claude | **Diffusion et mise en place** (§2ter) : script Outils aligné (compte dédié, MCP, permissions, jeton Home Assistant facultatif **conservé**), écran Déploiement toujours à réaliser, Claude Code ajouté aux agents. v1.1 archivée. |
 | 1.1 | 08/10/2026 | Claude | **Remote Control** (§2bis) : pilotage à distance des Claude Code depuis téléphone/tablette, à la place d'un VPN vers l'interface de chaque site ; vérifications à faire (§10) ; v1.0 archivée. |
 | 1.0 | 08/10/2026 | Claude | Version initiale — conception issue des échanges du 08/10/2026 (aucun code nouveau). |
