@@ -1,7 +1,7 @@
 # Spécifications — Application NOMMAGE
 
-**Version :** 2.3
-**Date :** 24 Septembre 2026
+**Version :** 2.4
+**Date :** 11 Octobre 2026
 **Auteur :** Mistral Vibe / Claude
 **Statut :** En production
 **Type :** Application d'intégration
@@ -272,6 +272,11 @@ Si la grandeur obtenue est celle de l'appareil (capteur de température d'un app
 d'identifiants techniques distincts (la table est indexée par identifiant technique), nombre d'entités concernées, et les 15 identifiants les plus
 fréquents avec leur nom brut. Il suit les republications et les retraits. Simulation sur ha2 : 14 identifiants / 18 entités (`action`, `position`,
 codes Linky `PCOUP`, `UMOY1`, `ERQ1`… `switch_learn_ir_code`).
+
+**⭐ v2.4 — liste des noms non traduits dans un fichier.** NOMMAGE écrit `data/nommage/noms-non-traduits.txt` : un identifiant par ligne, **sans doublon** (un
+même identifiant présent sur plusieurs appareils n'apparaît qu'une fois), triés, au format `identifiant: nom brut  # n entité(s)` — prêt à être recopié dans le
+fichier de traductions. Le fichier est réécrit au plus une fois par seconde (même cadence que la taxonomie), seulement si son contenu change ; une erreur
+d'écriture est signalée par un avertissement sans interrompre le relais. Vérifié à la compilation ; **pas encore éprouvé en réel** (NOMMAGE tourne sur ha2).
 
 Exemples : baromètre → température, humidité, pression (`quoi_appareil` = baromètre) ; gros ballon → interrupteur principal « gros ballon »,
 « Disjoncteur puissance », « Puissance », « Tension »…

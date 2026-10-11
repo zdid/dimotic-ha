@@ -22,6 +22,8 @@ import { quoiFromDeviceClass } from '../../../core/dist/exports';
 import { buildEntityTaxonomy } from './entity-taxonomy';
 import type { INommageMqttIntegrationService } from '../ha/integration/nommage/NommageMqttIntegrationService';
 import { nommageConfigSchema, discoveryTopicsFor, type NommageConfig } from './config-schema';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { TranslationsRepository } from './translations/TranslationsRepository';
 import type {
   DiscoveryMessage,
@@ -717,7 +719,33 @@ export class NommageService implements INommageService {
     this.taxonomyEmitTimer = setTimeout(() => {
       this.taxonomyEmitTimer = undefined;
       this.emitTaxonomyStructure();
+      this.writeUntranslatedFile();
     }, 1000);
+  }
+
+  /** Liste des identifiants sans traduction (un par identifiant, sans doublon) dans data/nommage/noms-non-traduits.txt,
+   *  réécrite seulement si son contenu change. Format `identifiant: nom brut  # n entité(s)`, à copier dans le fichier de traductions. */
+  private lastUntranslatedFile = '';
+  private writeUntranslatedFile(): void {
+    const byId = new Map<string, { name: string; entities: number }>();
+    for (const { objectId, name } of this.untranslatedByTopic.values()) {
+      const entry = byId.get(objectId) ?? { name, entities: 0 };
+      entry.entities++;
+      byId.set(objectId, entry);
+    }
+    const lines = [...byId.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([id, v]) => `${id}: ${v.name}  # ${v.entities} entité${v.entities > 1 ? 's' : ''}`);
+    const content = lines.length > 0 ? lines.join('\n') + '\n' : '';
+    if (content === this.lastUntranslatedFile) return;
+    try {
+      const file = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'nommage', 'noms-non-traduits.txt');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, content);
+      this.lastUntranslatedFile = content;
+    } catch (err) {
+      this.logger.warn('NommageService', `Écriture de noms-non-traduits.txt impossible : ${(err as Error).message}`);
+    }
   }
 
   private emitPersistentEvents(): void {
