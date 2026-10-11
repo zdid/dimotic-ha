@@ -43,13 +43,14 @@ Sur ha2, en Docker, répertoire `/docker/<service>/` (compose.yaml + config) :
 - **Root** : tu n'as **pas** d'accès root automatique. Si une action l'exige (édition hors de ton périmètre, redémarrage d'un service, installation d'un paquet), **dis précisément la commande et pourquoi**, puis attends que l'utilisateur l'exécute (`su -` / `sudo`, avec mot de passe). Ne tente jamais de contourner (clé root, `docker` pour monter `/`, etc.).
 - **Droits évolutifs** : les droits de ce compte seront ajustés avec toi selon ce dont tu as besoin. Quand un droit te manque, demande-le en listant la commande exacte et l'usage ; ne détourne pas un autre accès.
 - **Accès à HA** : directement par l'API native de HA, en REST (`http://localhost:8123/api/...`) ou WebSocket (`ws://localhost:8123/api/websocket`), avec un **jeton longue durée dédié** stocké dans **`~/.ha_token`** (`chmod 600`, jamais dans un dépôt, jamais affiché dans une réponse) — ce chemin remplace `./ha_token` cité plus haut. Pas de passage par dimotic-ha : il n'expose pas d'API pour un client tiers et son jeton n'est pas le tien.
-- **Outil** : `~/automatismes/tools/ha_ws.py '<json>'` (client WebSocket, lit `~/.ha_token`, pour LIRE), ex. `ha_ws.py '{"type":"config/area_registry/list"}'`.
+- **Droits du jeton** : vérifié le 10/10/2026, ce jeton a les droits **administrateur** de HA : techniquement il peut écrire (tableaux de bord `lovelace/config/save`, préférences Énergie `energy/save_prefs`, etc.). Ne dis donc jamais « je n'ai qu'un accès en lecture » sans l'avoir testé. La **lecture seule est une règle d'usage**, pas une limite technique : n'écris en direct dans HA que sur demande explicite de l'utilisateur, après avoir **sauvegardé** la configuration lue juste avant (dossier de sauvegardes de ton site), et relis le résultat. Les automatismes passent toujours par les outils MCP ci-dessous.
+- **Outil** : `~/automatismes/tools/ha_ws.py '<json>'` (client WebSocket, lit `~/.ha_token`, pour LIRE par défaut), ex. `ha_ws.py '{"type":"config/area_registry/list"}'`.
 - **Dimotic-ha** : lecture seule. Pour les règles en langage naturel, utiliser le planificateur ou `ia` via leur interface, avec l'utilisateur.
 
 ### Déposer un automatisme dans HA (par les outils MCP de dimotic, jamais par les fichiers ni en direct)
 
 Les fichiers de `/docker/homeassistant/config` appartiennent à root : **tu ne les modifies pas**. Le dépôt passe par le serveur MCP « dimotic »
-(le jeton HA en écriture reste côté dimotic-ha ; le tien sert à LIRE) :
+(les écritures d'automatismes passent par dimotic-ha, qui sauvegarde et protège contre les boucles ; ton jeton sert à LIRE par défaut, voir « Droits du jeton ») :
 1. `lire_automatisations_ha` : inventaire de l'existant (évite les doublons) ; `sauvegardes: true` pour retrouver une version antérieure.
 2. `deposer_automatisation(id, definition)` **sans** `confirme` : renvoie un APERÇU (rien n'est modifié) et des avertissements (anti-boucle, mode). Montre-le à l'utilisateur.
 3. Après son accord explicite seulement : même appel avec `confirme: true`. dimotic sauvegarde l'existant, dépose, HA valide le schéma et recharge.
