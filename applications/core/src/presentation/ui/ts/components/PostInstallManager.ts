@@ -23,7 +23,8 @@ const SERVICE_LABELS: Record<string, string> = {
   whisper: 'Whisper (reconnaissance vocale)',
   piper: 'Piper (synthèse vocale)',
   wakeword: 'openWakeWord (mot-clé)',
-  ollama: 'Ollama (agent de conversation IA)'
+  ollama: 'Ollama (agent de conversation IA)',
+  notifygroup: 'Groupe de notification des administrateurs'
 };
 
 const createTemplate = (): HTMLTemplateElement => {
@@ -145,6 +146,18 @@ const createTemplate = (): HTMLTemplateElement => {
           <div class="field"><label for="ollama-model">Modèle</label><input type="text" id="ollama-model" placeholder="ex: mistral-small"></div>
         </div>
         <p class="service-hint">Choisir un modèle réellement présent sur ce serveur (vérifiable via son propre écran de configuration) — un nom qui n'existe pas y échouera.</p>
+      </div>
+
+      <div class="service-block">
+        <div class="service-header">
+          <input type="checkbox" id="chk-notifygroup">
+          <span>📱 Groupe de notification des administrateurs</span>
+        </div>
+        <div class="service-fields">
+          <div class="field"><label for="notifygroup-name">Nom du groupe</label><input type="text" id="notifygroup-name" value="Administrateurs" readonly disabled title="Nom imposé : les scripts de scriptsha envoient leurs notifications à notify.administrateurs"></div>
+          <div class="field"><label for="notifygroup-entities">Appareils (notify.…)</label><input type="text" id="notifygroup-entities" placeholder="vide = tous les appareils mobiles ; sinon notify.s24, notify.s10e"></div>
+        </div>
+        <p class="service-hint">Crée une entité de notification unique (notify.administrateurs, à utiliser avec le service notify.send_message) qui prévient tous les téléphones d'un coup. Le nom est imposé (les scripts de scriptsha envoient à ce groupe) ; un groupe de même nom déjà présent n'est pas recréé. Il faut avoir installé l'application HA sur les téléphones.</p>
       </div>
 
       <button type="button" class="apply-btn" id="apply-btn">Installer la sélection</button>
@@ -272,6 +285,13 @@ export class PostInstallManager extends HTMLElement {
     }
     if (this.checked('chk-ollama')) {
       requests.push({ kind: 'ollama', url: this.field('ollama-url'), model: this.field('ollama-model') || undefined });
+    }
+
+    if (this.checked('chk-notifygroup')) {
+      requests.push({
+        kind: 'notifygroup',
+        entities: this.field('notifygroup-entities').split(/[\s,;]+/).filter((e) => e.length > 0)
+      });
     }
 
     if (requests.length === 0) return;

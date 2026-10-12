@@ -1,8 +1,12 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.41  
+**Version :** 4.42  
 **Date :** 12 Octobre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.42** : **Services post-installation de HA — groupe de notification des administrateurs** (§13bis) — nouveau service `notifygroup` (`HaPostInstallService`) :
+> crée dans HA, par l'assistant de configuration du helper « Groupe » (REST `/api/config/config_entries/flow`, handler `group`, menu `notify`), une entité
+> `notify.<nom>` (appelée par le service `notify.send_message`) qui prévient plusieurs téléphones d'un coup. Idempotent, 4 tests.
 
 > **v4.41** : **Affichage sur téléphone** (§13) — sous 768 px de large, les marges cumulées (page, conteneur de modules, bloc de contenu, page
 > d'application) sont réduites pour que le contenu occupe toute la place ; les blocs de code retournent à la ligne ; le contenu laisse la place au
@@ -2605,6 +2609,17 @@ Un module qui affiche un terminal plein cadre (`.s2h-root`) supprime en plus le 
 (souvent 20 à 24 px, avec un `max-width` de 800 à 1600 px) doivent suivre la même règle sous 768 px.
 
 ---
+
+## 13bis. Services post-installation de HA (`HaPostInstallService`)
+
+Page « Services post-installation » du cœur : formulaire coché par service, envoi `core:post-install:apply`, un résultat par service. Chaque service passe par l'assistant
+de configuration de HA (`POST /api/config/config_entries/flow`, jeton de `ha.ws`) : `mqtt`, `whisper` / `piper` / `wakeword` (handler `wyoming`), `ollama` (connexion puis sous-entrée
+« agent de conversation »), et **⭐ v4.42 `notifygroup`**.
+
+**`notifygroup` — groupe de notification des administrateurs.** Champ : `entities` (entités `notify.*` ; vide = tous les `notify.*` de HA, c'est-à-dire les appareils mobiles de l'application HA). **Le nom est imposé : « Administrateurs »** (constante `NOTIFY_GROUP_NAME`, champ affiché en lecture seule, un `name` reçu est ignoré), parce que les scripts de scriptsha envoient leurs notifications à `notify.administrateurs`. Déroulé : si une entrée du domaine `group` porte déjà ce titre (insensible à la casse), rien n'est recréé ; sinon flux `group` → étape de menu
+`next_step_id: notify` → formulaire `{ name, entities, hide_members: false }`. Résultat : une **entité** `notify.<nom>` (pas un service `notify.<nom>` de l'ancien style) qui envoie à tous les membres via `notify.send_message`. **Vérifié en réel sur ha2 le 12/10/2026** : groupe « Administrateurs » créé, entité `notify.administrateurs` avec trois membres (`notify.telephone_de_didier`, `notify.s10e`, `notify.s24_de_francoise`). Aucun numéro de téléphone n'est géré : les
+membres sont les appareils où l'application HA est installée (pas de SMS). Vérifié sur ha2 : le menu du helper « Groupe » propose bien `notify`, le formulaire demande nom, entités `notify.*` et « masquer les membres » ;
+à cette date ha2 n'avait aucun groupe de notification, trois appareils mobiles (S10e, S24 de Françoise, SM-G970F) et deux administrateurs (didier, Françoise). Tests : `HaPostInstallService.notifygroup.test.ts`.
 
 ## 14. Dépendances NPM
 

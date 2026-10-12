@@ -33,7 +33,10 @@
 import type { ConfigService } from '../infrastructure/config/ConfigService';
 import type { Logger } from '../infrastructure/logger';
 
-export type PostInstallServiceKind = 'mqtt' | 'whisper' | 'piper' | 'wakeword' | 'ollama';
+/** Nom du groupe de notification des administrateurs — fixe : `notify.administrateurs` est la cible des scripts de scriptsha. */
+export const NOTIFY_GROUP_NAME = 'Administrateurs';
+
+export type PostInstallServiceKind = 'mqtt' | 'whisper' | 'piper' | 'wakeword' | 'ollama' | 'notifygroup';
 
 export interface PostInstallRequest {
   kind: PostInstallServiceKind;
@@ -43,6 +46,8 @@ export interface PostInstallRequest {
   password?: string;
   url?: string;
   model?: string;
+  /** `notifygroup` : entités `notify.*` qui composent le groupe (vide = tous les `notify.*` de HA). Le nom est imposé (`NOTIFY_GROUP_NAME`). */
+  entities?: string[];
 }
 
 export interface PostInstallResult {
@@ -100,6 +105,9 @@ export class HaPostInstallService {
       }
       if (request.kind === 'mqtt') {
         return await this.installMqtt(baseUrl, ha.token, request);
+      }
+      if (request.kind === 'notifygroup') {
+        return await this.installNotifyGroup(baseUrl, ha.token, request);
       }
       return await this.installWyoming(baseUrl, ha.token, request);
     } catch (error) {
@@ -172,6 +180,48 @@ export class HaPostInstallService {
       return { kind: 'ollama', success: false, error: `Connexion créée mais agent de conversation en échec: ${subResult.error}` };
     }
     return { kind: 'ollama', success: true, title: `${entryResult.title} + agent de conversation (${request.model})` };
+  }
+
+  /**
+   * ⭐ 12/10/2026 — Groupe de notification des administrateurs (ex. les téléphones de la maison) : une entité
+   * `notify.<nom>` (à utiliser avec le service `notify.send_message`) qui prévient tous les appareils d'un coup. Vérifié sur ha2 : HA propose « Notify » dans l'assistant
+   * du helper « Groupe » (handler `group`, menu → `notify`, puis nom + entités `notify.*` + masquer les membres).
+   * Idempotent : un groupe de même nom déjà présent n'est pas recréé. Sans entités fournies, on prend tous les
+   * `notify.*` connus de HA (appareils mobiles de l'application HA).
+   */
+  private async installNotifyGroup(baseUrl: string, token: string, request: PostInstallRequest): Promise<PostInstallResult> {
+    // Nom imposé (non modifiable) : les scripts de scriptsha envoient leurs notifications à `notify.administrateurs`.
+    const name = NOTIFY_GROUP_NAME;
+    const headers = { Authorization: `Bearer ${token}` };
+
+    const existing = await fetch(`${baseUrl}/api/config/config_entries/entry?domain=group`, { headers });
+    if (existing.ok) {
+      const entries = (await existing.json()) as Array<{ title?: string }>;
+      if (entries.some((e) => (e.title || '').trim().toLowerCase() === name.toLowerCase())) {
+        return { kind: 'notifygroup', success: true, title: `groupe « ${name} » déjà présent — rien à faire` };
+      }
+    }
+
+    let entities = (request.entities || []).map((e) => e.trim()).filter((e) => e.length > 0);
+    if (entities.length === 0) {
+      const states = await fetch(`${baseUrl}/api/states`, { headers });
+      if (!states.ok) throw new Error(`HTTP ${states.status} sur /api/states`);
+      entities = ((await states.json()) as Array<{ entity_id: string }>).map((s) => s.entity_id).filter((id) => id.startsWith('notify.'));
+    }
+    if (entities.length === 0) {
+      return { kind: 'notifygroup', success: false, error: "Aucune entité notify.* à regrouper (installer d'abord l'application HA sur au moins un téléphone)." };
+    }
+
+    const init = await this.postFlow<FlowInitResponse>(baseUrl, token, '/api/config/config_entries/flow', { handler: 'group' });
+    const menu = await this.postFlow<FlowStepResponse>(baseUrl, token, `/api/config/config_entries/flow/${init.flow_id}`, { next_step_id: 'notify' });
+    if (menu.type !== 'form') return this.toResult('notifygroup', menu);
+    const step = await this.postFlow<FlowStepResponse>(baseUrl, token, `/api/config/config_entries/flow/${init.flow_id}`, {
+      name,
+      entities,
+      hide_members: false
+    });
+    const result = this.toResult('notifygroup', step);
+    return result.success ? { ...result, title: `${result.title ?? name} (${entities.length} appareil(s) : ${entities.join(', ')})` } : result;
   }
 
   private toResult(kind: PostInstallServiceKind, step: FlowStepResponse): PostInstallResult {
