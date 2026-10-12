@@ -88,3 +88,18 @@ SINSTS: Puissance inst.
 URMS1: Tension P1
 IRMS1: Courant P1
 PREF: Puiss. souscrite
+
+# Noms jusque-là non traduits (liste noms-non-traduits.txt, 12/10/2026) — Linky (téléinformation Enedis)
+ERQ1: Énergie réactive Q1
+ERQ2: Énergie réactive Q2
+ERQ3: Énergie réactive Q3
+ERQ4: Énergie réactive Q4
+PCOUP: Puiss. coupure
+UMOY1: Tension moy. P1
+meter_serial_number: Adresse du compteur
+RELAIS: État des relais
+# Noms génériques
+action: Action
+position: Position
+version: Version
+switch_learn_ir_code: Apprentissage code infrarouge
