@@ -1,6 +1,6 @@
 # Conception — HAPLAN directement dans Home Assistant
 
-*Version 1.0 — 12 Octobre 2026 — **conception uniquement, aucun code écrit.** Décisions de l'utilisateur du 12/10/2026 : (1) l'outil de création des plans de dimotic-ha est **remplacé** par un outil intégré à HA ; (2) les écrans ESP32 doivent continuer à être alimentés — **moyen à trouver** ; (3) les **plans existants et les positions d'objets** sont repris.*
+*Version 1.1 — 12 Octobre 2026 — **conception ; seul le squelette de l'intégration est écrit (v0.0.1).** Décisions du 12/10/2026 (v1.1) : dépôt **`zdid/dimotic-ha-plans`** (public), domaine HA **`dimotic_plans`** (figé), intitulé du menu **« Plans »** avec titre et icône réglables (*Configurer*), icône `mdi:floor-plan`, panneau réservé aux administrateurs ; HAPLAN de dimotic-ha reste en place jusqu'à la bascule (phase 5). Décisions de l'utilisateur du 12/10/2026 : (1) l'outil de création des plans de dimotic-ha est **remplacé** par un outil intégré à HA ; (2) les écrans ESP32 doivent continuer à être alimentés — **moyen à trouver** ; (3) les **plans existants et les positions d'objets** sont repris.*
 
 ## 1. Objet
 
@@ -20,7 +20,7 @@ Points faibles connus : les positions sont liées à l'**`entity_id`**, qui chan
 
 ## 3. Architecture cible
 
-**Intégration `haplan`** (dépôt à créer, par ex. `dimotic-ha-haplan`) :
+**Intégration `haplan`** (dépôt `zdid/dimotic-ha-plans`, créé le 12/10/2026) :
 - **Stockage** : `Store` de HA (`.storage/haplan.floorplans`) — mêmes données que le YAML actuel, plus un identifiant stable par position (voir §5). Images : fichiers dans `config/haplan/images/`, servis par la route statique de l'intégration (téléversement par une vue HTTP réservée aux administrateurs).
 - **API WebSocket** (administrateurs) : `haplan/floorplans/list|save|delete`, `haplan/image/upload`, `haplan/export` (voir §4).
 - **Panneau « Plans »** : éditeur repris de `src/presentation/haplan/` ; `DataService.ts` remplacé par un accès à `hass` : états (`hass.states`), commandes (`hass.callService`), pièces et appareils (registres de HA), taxonomie lue dans l'attribut `attributs_taxonomie` des entités (posé par nommage).
@@ -41,7 +41,7 @@ L'outil Python lit des fichiers. Trois voies :
 
 ## 6. Phases proposées
 
-1. **Dépôt + stockage + import** (plans, images, positions) et affichage en lecture dans un panneau (positions fidèles).
+1. **Dépôt + stockage** ✅ (v0.0.1 : squelette, panneau « Plans », stockage `.storage/dimotic_plans.floorplans`, commande `dimotic_plans/floorplans/list`), puis **import** (plans, images, positions) et affichage en lecture dans le panneau (positions fidèles).
 2. **Commande des objets** dans le panneau (états, clics) — remplace l'accès par dimotic-ha.
 3. **Éditeur** : déplacer, ajouter, supprimer des objets et des textes, créer/supprimer un plan, téléverser une image.
 4. **Export + `--source ha`** pour les écrans ESP32 ; essai de bout en bout sur un écran.
