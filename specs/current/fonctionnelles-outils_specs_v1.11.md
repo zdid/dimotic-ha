@@ -1,8 +1,11 @@
 # Spécifications Fonctionnelles — Application OUTILS
 
-**Version :** 1.10
-**Date :** 8 Octobre 2026
+**Version :** 1.11
+**Date :** 12 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/outils`
+
+> **v1.11 (12/10/2026)** — script « Agent Claude Code » (§7.4) : **Claude Code sans suivi de la souris** dans le compte dédié — `export CLAUDE_CODE_DISABLE_MOUSE=1` ajouté (idempotent) à `~/.bashrc` du compte, et `env CLAUDE_CODE_DISABLE_MOUSE=1` dans la commande de lancement du screen. Raison : dans un terminal web (console HA, SCREEN2HTTP) les clics laissaient la fin d'une séquence (`60;46m`) dans la saisie ; un Claude Code relancé à la main dans le screen n'avait pas la variable. Ne concerne que les nouvelles installations (mode « installer »).
+> **v1.11 (suite, 12/10/2026)** — même script : nouveau champ facultatif **`DIMOTIC_DATA_DIR`** (défaut `/docker/dimotic-ha/data`, vide = aucun accès) : le compte dédié reçoit la **lecture/écriture des données de dimotic-ha par ACL** (`setfacl -R -m u:<compte>:rwX`, puis `-R -d` pour les futurs fichiers ; paquet `acl` installé au besoin), PUIS un **refus explicite** (`u:<compte>:---`, y compris par défaut pour les dossiers) sur les secrets : `secrets_*`, `.mcp_token`, `id_ed25519`/`id_rsa`, `sauvegarde/config.yaml`, `core/machine_ssh/`, `outils/saved-values/`. L'ordre est impératif (le refus passe en dernier). Un refus nommé l'emporte sur des droits « autres » en 644 (cas réel constaté sur ha2 : quatre `secrets_config.yaml` lisibles par tous). Le modèle du `CLAUDE.md` passe en 1.2.3 (site ha2 : données de dimotic-ha modifiables, secrets exclus, code jamais). Pour une installation existante : poser les ACL à la main puis lancer le mode « mettre_a_jour_claude_md ».
 
 > **v1.9 (08/10/2026)** — script « Agent Claude Code » (§7.4) : le `CLAUDE.md` n'est plus écrit en dur dans le script mais **rendu à partir d'un
 > modèle versionné du dépôt** (`applications/ia/agent/claude-md/`, embarqué dans l'archive) ; nouveau **mode `mettre_a_jour_claude_md`** qui
@@ -456,6 +459,7 @@ l'historique git (commit d'avant le 29/09/2026).
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
 | 1.10 | 08/10/2026 | Claude | Script « Agent Claude Code » : section « Site » (`site.md`) ajoutée au `CLAUDE.md` rendu, variable `{{HA_TOKEN_FILE}}` (`~/.ha_token` si déjà en place) (§7.4). |
+| 1.11 | 12/10/2026 | Claude | Script « Agent Claude Code » : souris de Claude Code désactivée (`CLAUDE_CODE_DISABLE_MOUSE=1` dans `~/.bashrc` du compte dédié et dans la commande de lancement du screen). Champ `DIMOTIC_DATA_DIR` : ACL lecture/écriture sur les données de dimotic-ha, secrets refusés ; modèle `CLAUDE.md` 1.2.3. |
 | 1.9 | 08/10/2026 | Claude | **Modèle versionné du `CLAUDE.md`** (§7.4) : `applications/ia/agent/claude-md/`, embarqué par `@outils:bundle`, rendu sur la machine ; nouveau mode `mettre_a_jour_claude_md` (réécrit seulement le `CLAUDE.md`, sans ressaisir de jeton) ; `agent.conf` mémorise les choix sans secret. v1.8 archivée. |
 | 1.8 | 08/10/2026 | Claude | **Claude Code cherché dans le compte dédié** (§7.4) — PATH de connexion, `~/.local/bin`, `~/.claude/local`, `~/.npm-global/bin`, puis PATH global ; installation npm globale seulement en dernier recours ; lancement par chemin résolu dans un shell de connexion. v1.7 archivée. |
 | 1.7 | 08/10/2026 | Claude | **Script « Agent Claude Code » aligné sur la conception** (§7.4) : compte dédié sans sudo (`CLAUDE_USER`), liaison avec le serveur MCP de dimotic-ha (`MCP_TOKEN`/`MCP_URL`), permissions posées (lecture seule sur la configuration Home Assistant via `HA_CONFIG_DIR`, secrets exclus, confirmation d'`executer_action`), jeton Home Assistant **facultatif** (conservé pour contrôler des résultats), copie du script supprimée après exécution. v1.6 archivée. |

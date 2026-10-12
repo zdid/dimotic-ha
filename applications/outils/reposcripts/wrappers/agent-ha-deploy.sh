@@ -33,6 +33,8 @@
 # @outils:hint HA_URL = Facultatif — adresse de l'instance Home Assistant pour contrôler des résultats directement (ex: http://192.168.1.19:8123). Vide = pas d'accès direct.
 # @outils:hint HA_TOKEN = Facultatif — jeton HA (Profil -> Sécurité -> Jetons d'accès de longue durée). ATTENTION : accès COMPLET au compte qui l'a créé, sans expiration — compte HA dédié non-administrateur recommandé. Vide = pas d'accès direct.
 # @outils:hint HA_CONFIG_DIR = Facultatif — dossier de configuration de Home Assistant sur la machine visée (ex: /docker/homeassistant/config). Renseigné : lecture autorisée de automations.yaml, scripts.yaml, scenes.yaml, configuration.yaml ; secrets.yaml et .storage interdits ; aucune écriture.
+# @outils:hint DIMOTIC_DATA_DIR = Facultatif — dossier de données de dimotic-ha sur la machine visée (ex: /docker/dimotic-ha/data). Renseigné : le compte dédié reçoit la lecture/écriture de ce dossier par ACL (setfacl, paquet « acl », installé au besoin) ; les secrets (secrets_*, sauvegarde/config.yaml, core/machine_ssh, outils/saved-values) sont refusés explicitement. Vide = aucun accès aux données de dimotic-ha.
+# @outils:default DIMOTIC_DATA_DIR = /docker/dimotic-ha/data
 # @outils:default SESSION_NAME = agent-ha
 # @outils:select PERMISSION_MODE = manual, acceptEdits
 # @outils:default PERMISSION_MODE = manual
@@ -48,6 +50,7 @@ MCP_URL="__MCP_URL__"
 HA_URL="__HA_URL__"
 HA_TOKEN="__HA_TOKEN__"
 HA_CONFIG_DIR="__HA_CONFIG_DIR__"
+DIMOTIC_DATA_DIR="__DIMOTIC_DATA_DIR__"
 SESSION_NAME="__SESSION_NAME__"
 PERMISSION_MODE="__PERMISSION_MODE__"
 
@@ -139,6 +142,52 @@ if [ "${1:-}" = "--remote-exec" ]; then
       exit 1
     fi
     RUN_AS="$CLAUDE_USER"
+  fi
+
+  # --- Claude Code sans suivi de la souris (⭐ 12/10/2026) ---------------------------------
+  # Dans un terminal web (console HA / SCREEN2HTTP) les clics et la molette arrivent à Claude Code sous forme de
+  # séquences qu'il ne sait pas lire : leur fin (« 60;46m ») s'inscrit dans la saisie. On désactive donc le suivi
+  # de la souris pour tout Claude Code lancé dans ce compte, y compris relancé à la main dans le screen
+  # (shell interactif -> ~/.bashrc). Idempotent ; ne touche que le compte dédié.
+  if [ -n "$RUN_AS" ]; then
+    CLAUDE_HOME="$(getent passwd "$RUN_AS" | cut -d: -f6)"
+    if [ -n "$CLAUDE_HOME" ] && ! grep -qs 'CLAUDE_CODE_DISABLE_MOUSE' "$CLAUDE_HOME/.bashrc" 2>/dev/null; then
+      printf '\n# Claude Code sans suivi de la souris (terminal web : les clics laissent des restes dans la saisie)\nexport CLAUDE_CODE_DISABLE_MOUSE=1\n' >> "$CLAUDE_HOME/.bashrc"
+      chown "$RUN_AS":"$RUN_AS" "$CLAUDE_HOME/.bashrc"
+      echo "Souris de Claude Code désactivée pour le compte '$RUN_AS' ($CLAUDE_HOME/.bashrc)."
+    fi
+  fi
+
+  # --- Données de dimotic-ha : lecture/écriture par ACL, secrets refusés (⭐ 12/10/2026) -------------------
+  # Le compte dédié n'est ni propriétaire ni dans le groupe des données : on lui donne rwX par ACL (pour les
+  # fichiers présents, puis par défaut pour les futurs), PUIS on lui retire tout accès aux secrets — dans cet
+  # ordre, sinon rwX annulerait le refus. Un refus nommé l'emporte même sur des droits « autres » en 644.
+  if [ -n "$RUN_AS" ] && [ -n "$DIMOTIC_DATA_DIR" ]; then
+    DIMOTIC_DATA_DIR="${DIMOTIC_DATA_DIR%/}"
+    if [ ! -d "$DIMOTIC_DATA_DIR" ]; then
+      echo "AVERTISSEMENT : DIMOTIC_DATA_DIR ($DIMOTIC_DATA_DIR) introuvable — aucun accès accordé aux données de dimotic-ha." >&2
+    else
+      if ! command -v setfacl >/dev/null 2>&1; then
+        echo "'setfacl' absent — installation du paquet 'acl'..."
+        if command -v apt-get >/dev/null 2>&1; then apt-get install -y acl >/dev/null
+        elif command -v apk >/dev/null 2>&1; then apk add acl >/dev/null
+        else echo "ERREUR : installez le paquet 'acl' (setfacl) puis relancez ce script." >&2; exit 1; fi
+      fi
+      setfacl -R -m "u:${RUN_AS}:rwX" "$DIMOTIC_DATA_DIR"
+      setfacl -R -d -m "u:${RUN_AS}:rwX" "$DIMOTIC_DATA_DIR"
+      SECRET_FILES=(); SECRET_DIRS=()
+      while IFS= read -r -d '' f; do SECRET_FILES+=("$f"); done < <(find "$DIMOTIC_DATA_DIR" -type f \( -name 'secrets_*' -o -name '.mcp_token' -o -name 'id_ed25519' -o -name 'id_rsa' \) -print0)
+      if [ -f "$DIMOTIC_DATA_DIR/sauvegarde/config.yaml" ]; then SECRET_FILES+=("$DIMOTIC_DATA_DIR/sauvegarde/config.yaml"); fi
+      for d in "$DIMOTIC_DATA_DIR/core/machine_ssh" "$DIMOTIC_DATA_DIR/outils/saved-values"; do
+        if [ -d "$d" ]; then SECRET_DIRS+=("$d"); fi
+      done
+      if [ "${#SECRET_FILES[@]}" -gt 0 ]; then setfacl -m "u:${RUN_AS}:---" "${SECRET_FILES[@]}"; fi
+      if [ "${#SECRET_DIRS[@]}" -gt 0 ]; then
+        setfacl -R -m "u:${RUN_AS}:---" "${SECRET_DIRS[@]}"
+        setfacl -R -d -m "u:${RUN_AS}:---" "${SECRET_DIRS[@]}"
+      fi
+      echo "Données de dimotic-ha : lecture/écriture pour '$RUN_AS' ($DIMOTIC_DATA_DIR), ${#SECRET_FILES[@]} fichier(s) et ${#SECRET_DIRS[@]} dossier(s) de secrets refusés."
+    fi
   fi
 
   as_claude() {
@@ -245,7 +294,7 @@ if [ "${1:-}" = "--remote-exec" ]; then
     chown -R "$RUN_AS":"$RUN_AS" "$REMOTE_DIR"
   fi
 
-  as_claude bash -lc "cd '$REMOTE_DIR' && screen -dmS '$SESSION_NAME' '$CLAUDE_BIN' remote-control --permission-mode '$PERMISSION_MODE' --name '$SESSION_NAME'"
+  as_claude bash -lc "cd '$REMOTE_DIR' && screen -dmS '$SESSION_NAME' env CLAUDE_CODE_DISABLE_MOUSE=1 '$CLAUDE_BIN' remote-control --permission-mode '$PERMISSION_MODE' --name '$SESSION_NAME'"
 
   sleep 1
   if ! as_claude screen -ls 2>/dev/null | grep -qE "\.${SESSION_NAME}[[:space:]]"; then
