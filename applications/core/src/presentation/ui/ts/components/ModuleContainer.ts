@@ -43,6 +43,21 @@ const createTemplate = (): HTMLTemplateElement => {
          règles de style non partagées — seules les variables CSS personnalisées traversent la
          frontière, d'où var() ici plutôt qu'une couleur en dur, pour rester cohérent avec le reste
          de l'interface). */
+      /* ⭐ 12/10/2026, demande utilisateur : sur téléphone, le contenu doit occuper toute la place
+         disponible — les marges cumulées (main 16 + conteneur 20 + contenu 20 + page 24 px) en
+         mangeaient 80 px de chaque côté sur 375 px de large (43 %). Les blocs de code retournent
+         à la ligne au lieu de déborder. */
+      @media (max-width: 768px) {
+        .module-container { padding: 4px; min-height: 0; }
+        .module-content { padding: 10px; border-radius: 6px; }
+        #accueil-view { padding: 0.25rem !important; max-width: none !important; }
+        /* Console screen (screen2http) : pas de cadre autour, elle occupe toute la surface. */
+        .module-container:has(.s2h-root) { padding: 0; }
+        .module-content:has(.s2h-root) { padding: 0; background: none; box-shadow: none; border-radius: 0; }
+        pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
+        input, select, textarea { max-width: 100%; }
+      }
+
       a { color: var(--color-link, #5dade2); }
       a:visited { color: var(--color-link-visited, #af7ac5); }
       a:hover { color: var(--color-accent, #e94560); }

@@ -1,8 +1,13 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.40  
-**Date :** 8 Octobre 2026  
+**Version :** 4.41  
+**Date :** 12 Octobre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.41** : **Affichage sur téléphone** (§13) — sous 768 px de large, les marges cumulées (page, conteneur de modules, bloc de contenu, page
+> d'application) sont réduites pour que le contenu occupe toute la place ; les blocs de code retournent à la ligne ; le contenu laisse la place au
+> bouton ☰ du tiroir de navigation. Les applications doivent faire de même pour leurs propres marges (vérifié : cœur et SCREEN2HTTP ; Outils
+> et Arbre Où Quoi restent à reprendre, Arbre Où Quoi déborde de l'écran).
 
 > **v4.40** : **`quoi_appareil`** (§8.3.2ter) — la taxonomie d'une entité porte le QUOI de l'appareil en plus de son propre `quoi` ; le repli du
 > core le reconstitue pour les appareils non gérés (nom de l'appareil nettoyé) ; il sert de qualificatif de résolution ; le catalogue de QUOI
@@ -2593,6 +2598,11 @@ Interface minimaliste et fonctionnelle. Fichier `ui/style.css` partagé entre to
 | `/logs` | Flux de logs en temps réel via `app:log` |
 
 Les applications dérivées ajoutent leurs propres pages dans l'UI sans modifier les pages du socle.
+
+**⭐ v4.41 — Téléphone (largeur ≤ 768 px).** Principe : le contenu occupe toute la place disponible. Le cœur ramène `main-content` à 8 px de marge
+(plus 44 px en haut pour le bouton ☰), `module-container` à 4 px et `module-content` à 10 px, et la page Accueil à 4 px ; `pre`/`code` passent à la ligne.
+Un module qui affiche un terminal plein cadre (`.s2h-root`) supprime en plus le cadre du bloc de contenu (`:has`). Les marges propres à chaque application
+(souvent 20 à 24 px, avec un `max-width` de 800 à 1600 px) doivent suivre la même règle sous 768 px.
 
 ---
 
