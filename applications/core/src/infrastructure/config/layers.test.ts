@@ -122,6 +122,16 @@ describe('writeLayered', () => {
     expect(read(path.join(dir, 'machine_config.yaml'))).toEqual({ port: 'p' });
   });
 
+  it('écrit le fichier des secrets en 0600 (propriétaire seul), même quand il existait déjà en 0664', () => {
+    const dir = path.join(root, 'app');
+    write(path.join(dir, 'secrets_config.yaml'), { wifi: { password: 'p' } });
+    fs.chmodSync(path.join(dir, 'secrets_config.yaml'), 0o664);
+    writeLayered(dir, { wifi: { ssid: 'z', password: 'q' }, port: 'p' }, { secrets: ['wifi.password'], machine: ['port'] });
+    expect(fs.statSync(path.join(dir, 'secrets_config.yaml')).mode & 0o777).toBe(0o600);
+    // les autres fichiers gardent les droits habituels (non restreints)
+    expect(fs.statSync(path.join(dir, 'config.yaml')).mode & 0o077).not.toBe(0);
+  });
+
   it('supprime un fichier machine/secrets devenu vide', () => {
     const dir = path.join(root, 'app');
     write(path.join(dir, 'config.yaml'), {});

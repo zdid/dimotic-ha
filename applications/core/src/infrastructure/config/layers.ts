@@ -100,11 +100,14 @@ function readYamlObject(file: string): Obj | undefined {
   return parsed;
 }
 
-function writeYamlAtomic(file: string, data: Obj, tmpSuffix = '.tmp'): void {
+function writeYamlAtomic(file: string, data: Obj, tmpSuffix = '.tmp', mode?: number): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}${tmpSuffix}`;
   try {
-    fs.writeFileSync(tmp, yaml.dump(data, YAML_DUMP_OPTIONS), 'utf-8');
+    // ⭐ 12/10/2026 — `mode` : les secrets sont créés en 0600 (propriétaire seul). Sans cela le fichier naissait en 0664 et
+    // héritait des ACL par défaut du dossier de données (ex. rwX pour le compte de Claude Code) : un secret créé après la
+    // pose des ACL devenait lisible. Avec un mode 0600, le masque d'ACL tombe à --- et ces droits hérités ne donnent rien.
+    fs.writeFileSync(tmp, yaml.dump(data, YAML_DUMP_OPTIONS), { encoding: 'utf-8', ...(mode !== undefined ? { mode } : {}) });
     fs.renameSync(tmp, file);
   } catch (error) {
     try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch { /* rien */ }
@@ -240,7 +243,7 @@ export function writeLayered(dir: string, data: Obj, decl: LayerDeclaration = {}
   }
   writeYamlAtomic(files.common, out.common, tmpSuffix);
   for (const layer of ['machine', 'secrets'] as const) {
-    if (Object.keys(out[layer]).length > 0) writeYamlAtomic(files[layer], out[layer], tmpSuffix);
+    if (Object.keys(out[layer]).length > 0) writeYamlAtomic(files[layer], out[layer], tmpSuffix, layer === 'secrets' ? 0o600 : undefined);
     else if (fs.existsSync(files[layer])) fs.unlinkSync(files[layer]);
   }
 }

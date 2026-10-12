@@ -1,8 +1,10 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.42  
+**Version :** 4.43  
 **Date :** 12 Octobre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.43** : **Fichiers de secrets créés en 0600** (`secrets_config.yaml`, `layers.ts::writeYamlAtomic`) — propriétaire seul. Avant : 0664, donc un secret créé après la pose d'ACL par défaut sur `data/` (ex. `rwX` pour le compte de Claude Code) devenait lisible par ce compte (constaté sur ha2 : clé Mistral de `ia`). Avec 0600 le masque d'ACL tombe à `---` et les droits hérités ne donnent rien.
 
 > **v4.42** : **Services post-installation de HA — groupe de notification des administrateurs** (§13bis) — nouveau service `notifygroup` (`HaPostInstallService`) :
 > crée dans HA, par l'assistant de configuration du helper « Groupe » (REST `/api/config/config_entries/flow`, handler `group`, menu `notify`), une entité
