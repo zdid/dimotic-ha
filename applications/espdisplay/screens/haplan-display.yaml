@@ -1,0 +1,64 @@
+# ⭐ 12/10/2026 — écran ASSEMBLÉ depuis la bibliothèque espdisplay (voir bibliotheque/README.md) : ce fichier ne contient plus
+# que l'identité de l'écran (nom, clé API) et la liste des éléments (`packages:`). Le commentaire ci-dessous date de l'écran
+# monolithique ; la procédure « COLLER ICI » n'a plus cours.
+#
+# =============================================================================
+# haplan-display.yaml — écran mural 800x480 (carte Sunton ESP32-8048S070C, variante tactile
+# capacitive GT911) affichant TOUS les plans HAPLAN (navigation tactile, une page LVGL par plan)
+# avec les icônes/valeurs des entités HA en direct, et tactile pour basculer lumières/
+# interrupteurs/VMC/ballon/radiateur/volets directement sur l'écran (pas les thermostats —
+# contrôle plus fin, hors écran).
+#
+# Prérequis avant de compiler :
+# 1. Générer l'image + le fragment de widgets pour tous les plans :
+#      cd applications/haplan/tools && python3 generate_esphome_floorplan.py --all
+#    -> produit esphome/floorplan_<page>_800x480.png (un par plan) et esphome/floorplan_pages.yaml
+# 2. Copier le bloc sous "pages_fragment:" de floorplan_pages.yaml comme valeur de `lvgl: pages:`
+#    ci-dessous (remplace le commentaire "COLLER ICI"), et coller les blocs `image:`/`text_sensor:`/
+#    `sensor:` du même fichier aux emplacements correspondants (fusion manuelle volontaire — évite
+#    un système d'include qui masquerait les erreurs de fusion).
+#
+# ⚠️ Syntaxe des widgets LVGL (composant ESPHome relativement récent, syntaxe qui évolue) :
+# vérifier contre la doc ESPHome de la version installée si `esphome compile` échoue sur le
+# bloc `lvgl:`.
+#
+# ⚠️ APRÈS le flash, l'écran affiche le plan mais AUCUNE pastille ne se met à jour tant que
+# l'appareil n'a pas été apparié comme intégration ESPHome dans Home Assistant lui-même (Paramètres
+# > Appareils et services > Ajouter une intégration > ESPHome, host = IP du device, clé = celle du
+# secret api_<nom> ci-dessous) — sans ce pairage, le serveur API du device tourne et répond au ping,
+# mais HA ne s'y connecte jamais comme client et ne pousse donc aucun état. Piège découvert le
+# 13/08/2026 après avoir déjà écarté pinout/logger UART comme causes (les deux étaient de vrais bugs
+# distincts, corrigés avant de trouver celui-ci — voir historique/mémoire du projet pour le détail).
+#
+# ⚠️ Le tactile (tap pour basculer une lumière/interrupteur/etc.) déclenche bien l'action côté
+# device (vérifié par log) mais HA la refuse SILENCIEUSEMENT tant que "Autoriser les appels de
+# service" (allow_service_calls) n'est pas activé sur l'intégration ESPHome du device — décoché par
+# défaut pour des raisons de sécurité. Paramètres > Appareils et services > Plan HAPLAN >
+# Configurer. Piège découvert le 13/08/2026 après avoir déjà écarté clickable:true (nécessaire
+# mais pas suffisant) et le pinout tactile (bon du premier coup, voir plus bas) comme causes.
+# =============================================================================
+
+esphome:
+  name: haplan-display
+  friendly_name: "Plan HAPLAN"
+
+# Connexion native à HA — permet aux composants `homeassistant_sensor`/`homeassistant_text_sensor`
+# ci-dessous de suivre l'état de n'importe quelle entité par son entity_id, sans avoir à connaître
+# le topic MQTT sous-jacent (généré par RFXCOM/AREXX/NOMMAGE/zigbee2mqtt selon la source réelle).
+api:
+  encryption:
+    key: !secret api_haplan-display
+
+# Assemblage : base matérielle, éléments communs, puis les pages dans l'ordre d'affichage.
+packages:
+  base: !include bibliotheque/bases/sunton-8048s070c.yaml
+  communs: !include bibliotheque/communs/haplan-display-communs.yaml
+  page_original: !include bibliotheque/pages/original.yaml
+  page_rez_de_chauss_e: !include bibliotheque/pages/rez-de-chauss-e.yaml
+  page_premier: !include bibliotheque/pages/premier.yaml
+  page_energie_direct: !include bibliotheque/pages/energie-direct.yaml
+  page_ballons_chauffe: !include bibliotheque/pages/ballons-chauffe.yaml
+  page_thermostats: !include bibliotheque/pages/thermostats.yaml
+  page_clim_salle: !include bibliotheque/pages/clim-salle.yaml
+  page_clim_bureau: !include bibliotheque/pages/clim-bureau.yaml
+  page_clim_ami: !include bibliotheque/pages/clim-ami.yaml

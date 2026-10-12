@@ -1,0 +1,475 @@
+# Page LVGL « page_premier » — élément de bibliothèque espdisplay (extrait de haplan-display.yaml le 12/10/2026).
+# Contient la page et les capteurs HA, images et polices qu'elle seule utilise.
+
+image:
+  - file: "floorplan_premier_800x480.png"
+    id: floorplan_bg_premier
+    type: RGB565
+text_sensor:
+  - platform: homeassistant
+    id: ha_premier_light_lumiere_plafonnier_chambre_de_jo_1er_etage
+    entity_id: light.lumiere_plafonnier_chambre_de_jo_1er_etage
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_light_lumiere_plafonnier_chambre_de_jo_1er_etage
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_light_lumiere_plafonnier_toilettes_du_haut_1er_etage
+    entity_id: light.lumiere_plafonnier_toilettes_du_haut_1er_etage
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_light_lumiere_plafonnier_toilettes_du_haut_1er_etage
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_light_lumiere_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_l1
+    entity_id: light.lumiere_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_l1
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_light_lumiere_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_l1
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_switch_gros_ballon_maison_maison_rez_de_chaussee
+    entity_id: switch.gros_ballon_maison_maison_rez_de_chaussee
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_switch_gros_ballon_maison_maison_rez_de_chaussee
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_light_lumiere_leds_chambre_de_jo_1er_etage
+    entity_id: light.lumiere_leds_chambre_de_jo_1er_etage
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_light_lumiere_leds_chambre_de_jo_1er_etage
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_light_lumiere_chevets_chambre_de_jo_1er_etage_l2
+    entity_id: light.lumiere_chevets_chambre_de_jo_1er_etage_l2
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_light_lumiere_chevets_chambre_de_jo_1er_etage_l2
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_light_lumiere_chevets_chambre_de_jo_1er_etage_l1
+    entity_id: light.lumiere_chevets_chambre_de_jo_1er_etage_l1
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_light_lumiere_chevets_chambre_de_jo_1er_etage_l1
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_switch_petit_ballon_maison_maison_rez_de_chaussee
+    entity_id: switch.petit_ballon_maison_maison_rez_de_chaussee
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_switch_petit_ballon_maison_maison_rez_de_chaussee
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_light_lumiere_terrasse_terrasse_rez_de_chaussee
+    entity_id: light.lumiere_terrasse_terrasse_rez_de_chaussee
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_light_lumiere_terrasse_terrasse_rez_de_chaussee
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_light_chambre_plafonnier
+    entity_id: light.chambre_plafonnier
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_light_chambre_plafonnier
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_light_escalier_couloir
+    entity_id: light.escalier_couloir
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_light_escalier_couloir
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_light_bureau_plafonnier
+    entity_id: light.bureau_plafonnier
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_light_bureau_plafonnier
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_light_grenier_petit_grenier
+    entity_id: light.grenier_petit_grenier
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_light_grenier_petit_grenier
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+  - platform: homeassistant
+    id: ha_premier_light_chambre_d_ami_ancien_plafonnier
+    entity_id: light.chambre_d_ami_ancien_plafonnier
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: icon_premier_light_chambre_d_ami_ancien_plafonnier
+          text_color: !lambda |-
+            return (x == "on" || x == "open" || x == "heat" || x == "cool")
+              ? lv_color_hex(0xFFC107) : lv_color_hex(0x9E9E9E);
+sensor:
+  - platform: homeassistant
+    id: ha_premier_sensor_barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_humidity
+    entity_id: sensor.barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_humidity
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_premier_sensor_barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_humidity
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f", x);
+            return std::string(buf);
+  - platform: homeassistant
+    id: ha_premier_sensor_barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_temperature
+    entity_id: sensor.barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_temperature
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_premier_sensor_barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_temperature
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f", x);
+            return std::string(buf);
+lvgl:
+  pages:
+    - id: page_premier
+      widgets:
+        - obj:
+            id: full_screen_clear_premier
+            x: 0
+            y: 0
+            width: 800
+            height: 480
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_width: 0
+            radius: 0
+        - image:
+            src: floorplan_bg_premier
+            x: 0
+            y: 0
+            width: 800
+            height: 480
+        - label:
+            id: icon_premier_light_lumiere_plafonnier_chambre_de_jo_1er_etage
+            x: 494
+            y: 96
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: light.toggle
+                  data:
+                    entity_id: light.lumiere_plafonnier_chambre_de_jo_1er_etage
+        - label:
+            id: icon_premier_light_lumiere_plafonnier_toilettes_du_haut_1er_etage
+            x: 469
+            y: 396
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: light.toggle
+                  data:
+                    entity_id: light.lumiere_plafonnier_toilettes_du_haut_1er_etage
+        - label:
+            id: icon_premier_light_lumiere_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_l1
+            x: 388
+            y: 386
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: light.toggle
+                  data:
+                    entity_id: light.lumiere_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_l1
+        - label:
+            id: icon_premier_switch_gros_ballon_maison_maison_rez_de_chaussee
+            x: 237
+            y: 283
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: switch.toggle
+                  data:
+                    entity_id: switch.gros_ballon_maison_maison_rez_de_chaussee
+        - label:
+            id: icon_premier_light_lumiere_leds_chambre_de_jo_1er_etage
+            x: 333
+            y: 31
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: light.toggle
+                  data:
+                    entity_id: light.lumiere_leds_chambre_de_jo_1er_etage
+        - label:
+            id: icon_premier_light_lumiere_chevets_chambre_de_jo_1er_etage_l2
+            x: 414
+            y: 216
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: light.toggle
+                  data:
+                    entity_id: light.lumiere_chevets_chambre_de_jo_1er_etage_l2
+        - label:
+            id: icon_premier_light_lumiere_chevets_chambre_de_jo_1er_etage_l1
+            x: 420
+            y: 137
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: light.toggle
+                  data:
+                    entity_id: light.lumiere_chevets_chambre_de_jo_1er_etage_l1
+        - label:
+            id: icon_premier_switch_petit_ballon_maison_maison_rez_de_chaussee
+            x: 163
+            y: 322
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: switch.toggle
+                  data:
+                    entity_id: switch.petit_ballon_maison_maison_rez_de_chaussee
+        - label:
+            id: icon_premier_light_lumiere_terrasse_terrasse_rez_de_chaussee
+            x: 442
+            y: 5
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: light.toggle
+                  data:
+                    entity_id: light.lumiere_terrasse_terrasse_rez_de_chaussee
+        - label:
+            id: icon_premier_light_chambre_plafonnier
+            x: 649
+            y: 91
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: light.toggle
+                  data:
+                    entity_id: light.chambre_plafonnier
+        - label:
+            id: icon_premier_light_escalier_couloir
+            x: 487
+            y: 264
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: light.toggle
+                  data:
+                    entity_id: light.escalier_couloir
+        - label:
+            id: icon_premier_light_bureau_plafonnier
+            x: 635
+            y: 285
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: light.toggle
+                  data:
+                    entity_id: light.bureau_plafonnier
+        - label:
+            id: icon_premier_light_grenier_petit_grenier
+            x: 193
+            y: 70
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: light.toggle
+                  data:
+                    entity_id: light.grenier_petit_grenier
+        - label:
+            id: icon_premier_light_chambre_d_ami_ancien_plafonnier
+            x: 322
+            y: 170
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x9E9E9E
+            bg_opa: TRANSP
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: light.toggle
+                  data:
+                    entity_id: light.chambre_d_ami_ancien_plafonnier
+        - label:
+            id: icon_premier_sensor_barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_humidity
+            x: 356
+            y: 318
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0x00BCD4
+            bg_opa: TRANSP
+        - label:
+            id: lbl_premier_sensor_barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_humidity
+            x: 392
+            y: 318
+            width: 130
+            height: 32
+            text: "--"
+            text_align: LEFT
+            text_color: 0xFFFFFF
+            text_font: font_sensor
+            bg_opa: TRANSP
+        - label:
+            id: icon_premier_sensor_barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_temperature
+            x: 360
+            y: 292
+            width: 32
+            height: 32
+            text_align: CENTER
+            text_font: font_icons
+            text: ""
+            text_color: 0xF44336
+            bg_opa: TRANSP
+        - label:
+            id: lbl_premier_sensor_barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_temperature
+            x: 396
+            y: 292
+            width: 130
+            height: 32
+            text: "--"
+            text_align: LEFT
+            text_color: 0xFFFFFF
+            text_font: font_sensor
+            bg_opa: TRANSP

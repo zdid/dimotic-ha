@@ -1,0 +1,399 @@
+# Page LVGL « page_energie_direct » — élément de bibliothèque espdisplay (extrait de haplan-display.yaml le 12/10/2026).
+# Contient la page et les capteurs HA, images et polices qu'elle seule utilise.
+
+font:
+  - file: "fa-solid-900.ttf"
+    id: font_energy_icons
+    size: 34
+    glyphs: ["\uf185", "\uf0e7", "\uf015", "\uf241"]
+  - file: "fa-solid-900.ttf"
+    id: font_energy_arrow
+    size: 30
+    glyphs: ["\uf061", "\uf060", "\uf062", "\uf063"]
+  - file: "gfonts://Roboto"
+    id: font_energy_value
+    size: 26
+    glyphs: "0123456789.-WkV% "
+  - file: "gfonts://Roboto"
+    id: font_energy_text
+    size: 20
+    glyphs: " -ABCDMRSVacdeghilnoprstuÉé"
+sensor:
+  - platform: homeassistant
+    id: ha_energie_solar
+    entity_id: sensor.emma_puissance_de_sortie_des_panneaux
+    internal: true
+    on_value:
+      - logger.log:
+          format: "energie solar = %.1f"
+          args: ['x']
+      - lvgl.label.update:
+          id: energie_valeur_solar
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            if (fabsf(x) >= 1000.0f) snprintf(buf, sizeof(buf), "%.2f kW", fabsf(x) / 1000.0f);
+            else snprintf(buf, sizeof(buf), "%.0f W", fabsf(x));
+            return std::string(buf);
+      - lvgl.label.update:
+          id: energie_fleche_solar
+          text: !lambda 'return x > 10.0f ? std::string("\xef\x81\xa3") : std::string("");'
+  - platform: homeassistant
+    id: ha_energie_grid
+    entity_id: sensor.emma_puissance_active
+    internal: true
+    on_value:
+      - logger.log:
+          format: "energie grid = %.1f"
+          args: ['x']
+      - lvgl.label.update:
+          id: energie_valeur_grid
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            if (fabsf(x) >= 1000.0f) snprintf(buf, sizeof(buf), "%.2f kW", fabsf(x) / 1000.0f);
+            else snprintf(buf, sizeof(buf), "%.0f W", fabsf(x));
+            return std::string(buf);
+      - lvgl.label.update:
+          id: energie_fleche_grid
+          text: !lambda 'return x > 10.0f ? std::string("\xef\x81\xa1") : (x < -10.0f ? std::string("\xef\x81\xa0") : std::string(""));'
+      - lvgl.label.update:
+          id: energie_legende_grid
+          text: !lambda 'return x > 10.0f ? std::string("Achat") : (x < -10.0f ? std::string("Vente") : std::string("Réseau"));'
+  - platform: homeassistant
+    id: ha_energie_home
+    entity_id: sensor.emma_puissance_de_soutiree
+    internal: true
+    on_value:
+      - logger.log:
+          format: "energie home = %.1f"
+          args: ['x']
+      - lvgl.label.update:
+          id: energie_valeur_home
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            if (fabsf(x) >= 1000.0f) snprintf(buf, sizeof(buf), "%.2f kW", fabsf(x) / 1000.0f);
+            else snprintf(buf, sizeof(buf), "%.0f W", fabsf(x));
+            return std::string(buf);
+      - lvgl.label.update:
+          id: energie_fleche_home
+          text: !lambda 'return x > 10.0f ? std::string("\xef\x81\xa1") : std::string("");'
+  - platform: homeassistant
+    id: ha_energie_battery
+    entity_id: sensor.batteries_puissance_de_charge_decharge
+    internal: true
+    on_value:
+      - logger.log:
+          format: "energie battery = %.1f"
+          args: ['x']
+      - lvgl.label.update:
+          id: energie_valeur_battery
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            if (fabsf(x) >= 1000.0f) snprintf(buf, sizeof(buf), "%.2f kW", fabsf(x) / 1000.0f);
+            else snprintf(buf, sizeof(buf), "%.0f W", fabsf(x));
+            return std::string(buf);
+      - lvgl.label.update:
+          id: energie_fleche_battery
+          text: !lambda 'return x > 10.0f ? std::string("\xef\x81\xa3") : (x < -10.0f ? std::string("\xef\x81\xa2") : std::string(""));'
+      - lvgl.label.update:
+          id: energie_legende_battery
+          text: !lambda 'return x > 10.0f ? std::string("Charge") : (x < -10.0f ? std::string("Décharge") : std::string("Repos"));'
+  - platform: homeassistant
+    id: ha_energie_soc
+    entity_id: sensor.batteries_etat_de_la_capacite
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: energie_soc
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[12];
+            snprintf(buf, sizeof(buf), "%.0f %%", x);
+            return std::string(buf);
+lvgl:
+  pages:
+    - id: page_energie_direct
+      widgets:
+        - obj:
+            id: full_screen_clear_energie_direct
+            x: 0
+            y: 0
+            width: 800
+            height: 480
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_width: 0
+            radius: 0
+        - label:
+            id: energie_titre
+            x: 0
+            y: 8
+            width: 800
+            height: 30
+            text_align: CENTER
+            text_font: font_energy_text
+            text: "Énergie en direct"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - line:
+            id: energie_trait_solar
+            points:
+              - 400, 115
+              - 400, 255
+            line_width: 3
+            line_color: 0x444444
+        - line:
+            id: energie_trait_grid
+            points:
+              - 150, 255
+              - 400, 255
+            line_width: 3
+            line_color: 0x444444
+        - line:
+            id: energie_trait_home
+            points:
+              - 650, 255
+              - 400, 255
+            line_width: 3
+            line_color: 0x444444
+        - line:
+            id: energie_trait_battery
+            points:
+              - 400, 395
+              - 400, 255
+            line_width: 3
+            line_color: 0x444444
+        - obj:
+            id: energie_cercle_solar
+            x: 335
+            y: 50
+            width: 130
+            height: 130
+            radius: 65
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_color: 0xFFC107
+            border_width: 4
+        - label:
+            id: energie_icone_solar
+            x: 370
+            y: 62
+            width: 60
+            height: 40
+            text_align: CENTER
+            text_font: font_energy_icons
+            text: ""
+            text_color: 0xFFC107
+            bg_opa: TRANSP
+        - label:
+            id: energie_valeur_solar
+            x: 340
+            y: 107
+            width: 120
+            height: 32
+            text_align: CENTER
+            text_font: font_energy_value
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: energie_legende_solar
+            x: 340
+            y: 143
+            width: 120
+            height: 26
+            text_align: CENTER
+            text_font: font_energy_text
+            text: "Solaire"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: energie_fleche_solar
+            x: 380
+            y: 180
+            width: 40
+            height: 40
+            text_align: CENTER
+            text_font: font_energy_arrow
+            text: ""
+            text_color: 0xFFC107
+            bg_opa: TRANSP
+        - obj:
+            id: energie_cercle_grid
+            x: 85
+            y: 190
+            width: 130
+            height: 130
+            radius: 65
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_color: 0x9C27B0
+            border_width: 4
+        - label:
+            id: energie_icone_grid
+            x: 120
+            y: 202
+            width: 60
+            height: 40
+            text_align: CENTER
+            text_font: font_energy_icons
+            text: ""
+            text_color: 0x9C27B0
+            bg_opa: TRANSP
+        - label:
+            id: energie_valeur_grid
+            x: 90
+            y: 247
+            width: 120
+            height: 32
+            text_align: CENTER
+            text_font: font_energy_value
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: energie_legende_grid
+            x: 90
+            y: 283
+            width: 120
+            height: 26
+            text_align: CENTER
+            text_font: font_energy_text
+            text: "--"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: energie_fleche_grid
+            x: 270
+            y: 235
+            width: 40
+            height: 40
+            text_align: CENTER
+            text_font: font_energy_arrow
+            text: ""
+            text_color: 0x9C27B0
+            bg_opa: TRANSP
+        - obj:
+            id: energie_cercle_home
+            x: 585
+            y: 190
+            width: 130
+            height: 130
+            radius: 65
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_color: 0x2196F3
+            border_width: 4
+        - label:
+            id: energie_icone_home
+            x: 620
+            y: 202
+            width: 60
+            height: 40
+            text_align: CENTER
+            text_font: font_energy_icons
+            text: ""
+            text_color: 0x2196F3
+            bg_opa: TRANSP
+        - label:
+            id: energie_valeur_home
+            x: 590
+            y: 247
+            width: 120
+            height: 32
+            text_align: CENTER
+            text_font: font_energy_value
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: energie_legende_home
+            x: 590
+            y: 283
+            width: 120
+            height: 26
+            text_align: CENTER
+            text_font: font_energy_text
+            text: "Maison"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: energie_fleche_home
+            x: 490
+            y: 235
+            width: 40
+            height: 40
+            text_align: CENTER
+            text_font: font_energy_arrow
+            text: ""
+            text_color: 0x2196F3
+            bg_opa: TRANSP
+        - obj:
+            id: energie_cercle_battery
+            x: 335
+            y: 330
+            width: 130
+            height: 130
+            radius: 65
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_color: 0x4CAF50
+            border_width: 4
+        - label:
+            id: energie_icone_battery
+            x: 370
+            y: 342
+            width: 60
+            height: 40
+            text_align: CENTER
+            text_font: font_energy_icons
+            text: ""
+            text_color: 0x4CAF50
+            bg_opa: TRANSP
+        - label:
+            id: energie_valeur_battery
+            x: 340
+            y: 387
+            width: 120
+            height: 32
+            text_align: CENTER
+            text_font: font_energy_value
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: energie_legende_battery
+            x: 340
+            y: 423
+            width: 120
+            height: 26
+            text_align: CENTER
+            text_font: font_energy_text
+            text: "--"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: energie_fleche_battery
+            x: 380
+            y: 302
+            width: 40
+            height: 40
+            text_align: CENTER
+            text_font: font_energy_arrow
+            text: ""
+            text_color: 0x4CAF50
+            bg_opa: TRANSP
+        - label:
+            id: energie_soc
+            x: 477
+            y: 379
+            width: 110
+            height: 32
+            text_align: LEFT
+            text_font: font_energy_value
+            text: "--"
+            text_color: 0x4CAF50
+            bg_opa: TRANSP

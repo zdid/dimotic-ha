@@ -1,0 +1,430 @@
+# Page LVGL « page_thermostats » — élément de bibliothèque espdisplay (extrait de haplan-display.yaml le 12/10/2026).
+# Contient la page et les capteurs HA, images et polices qu'elle seule utilise.
+
+text_sensor:
+  - platform: homeassistant
+    id: poele_state
+    entity_id: climate.salle_a_manger_poele
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: poele_mode
+          text: !lambda 'if (x == "unavailable") return std::string("Indisponible"); if (x == "off") return std::string("Arrêt"); if (x == "heat") return std::string("Chauffage"); if (x == "cool") return std::string("Froid"); if (x == "auto") return std::string("Auto"); if (x == "dry") return std::string("Déshumid."); if (x == "fan_only") return std::string("Ventil."); if (x == "heat_cool") return std::string("Auto"); return x;'
+      - lvgl.widget.update:
+          id: poele_onoff
+          border_color: !lambda 'return (x != "off" && x != "unavailable" && x != "unknown") ? lv_color_hex(0x4CAF50) : lv_color_hex(0x666666);'
+  - platform: homeassistant
+    id: pac_state
+    entity_id: climate.infra_evoo7_control_thermostat
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: pac_mode
+          text: !lambda 'if (x == "unavailable") return std::string("Indisponible"); if (x == "off") return std::string("Arrêt"); if (x == "heat") return std::string("Chauffage"); if (x == "cool") return std::string("Froid"); if (x == "auto") return std::string("Auto"); if (x == "dry") return std::string("Déshumid."); if (x == "fan_only") return std::string("Ventil."); if (x == "heat_cool") return std::string("Auto"); return x;'
+      - lvgl.widget.update:
+          id: pac_onoff
+          border_color: !lambda 'return (x != "off" && x != "unavailable" && x != "unknown") ? lv_color_hex(0x4CAF50) : lv_color_hex(0x666666);'
+sensor:
+  - platform: homeassistant
+    id: poele_cur
+    entity_id: climate.salle_a_manger_poele
+    attribute: current_temperature
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: poele_temp
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°C", x);
+            return std::string(buf);
+  - platform: homeassistant
+    id: poele_tgt
+    entity_id: climate.salle_a_manger_poele
+    attribute: temperature
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: poele_cons
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°C", x);
+            return std::string(buf);
+  - platform: homeassistant
+    id: pac_cur
+    entity_id: climate.infra_evoo7_control_thermostat
+    attribute: current_temperature
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: pac_temp
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°C", x);
+            return std::string(buf);
+  - platform: homeassistant
+    id: pac_tgt
+    entity_id: climate.infra_evoo7_control_thermostat
+    attribute: temperature
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: pac_cons
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°C", x);
+            return std::string(buf);
+lvgl:
+  pages:
+    - id: page_thermostats
+      widgets:
+        - obj:
+            id: full_screen_clear_thermostats
+            x: 0
+            y: 0
+            width: 800
+            height: 480
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_width: 0
+            radius: 0
+        - label:
+            id: thermostats_titre
+            x: 0
+            y: 8
+            width: 800
+            height: 30
+            text_align: CENTER
+            text_font: font_clim_title
+            text: "Thermostats"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - obj:
+            id: poele_carte
+            x: 80
+            y: 48
+            width: 310
+            height: 380
+            radius: 16
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_color: 0xFF9800
+            border_width: 3
+        - label:
+            id: poele_nom
+            x: 80
+            y: 56
+            width: 310
+            height: 30
+            text_align: CENTER
+            text_font: font_clim_title
+            text: "Poêle"
+            text_color: 0xFF9800
+            bg_opa: TRANSP
+        - label:
+            id: poele_leg_temp
+            x: 80
+            y: 96
+            width: 310
+            height: 24
+            text_align: CENTER
+            text_font: font_clim_text
+            text: "Température"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: poele_temp
+            x: 80
+            y: 120
+            width: 310
+            height: 58
+            text_align: CENTER
+            text_font: font_clim_value
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: poele_leg_cons
+            x: 80
+            y: 188
+            width: 310
+            height: 24
+            text_align: CENTER
+            text_font: font_clim_text
+            text: "Consigne"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: poele_cons
+            x: 180
+            y: 214
+            width: 110
+            height: 58
+            text_align: CENTER
+            text_font: font_clim_value
+            text: "--"
+            text_color: 0xFF9800
+            bg_opa: TRANSP
+        - label:
+            id: poele_moins
+            x: 100
+            y: 214
+            width: 80
+            height: 64
+            text_align: CENTER
+            text_font: font_clim_value
+            pad_top: 4
+            text: "-"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+            radius: 14
+            border_width: 3
+            border_color: 0x888888
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.salle_a_manger_poele
+                    temperature: !lambda |-
+                      float t = id(poele_tgt).state;
+                      if (std::isnan(t)) t = 15.0f;
+                      t = t - 0.5f;
+                      if (t < 15.0f) t = 15.0f;
+                      if (t > 25.0f) t = 25.0f;
+                      char buf[12]; snprintf(buf, sizeof(buf), "%.1f", t); return std::string(buf);
+        - label:
+            id: poele_plus
+            x: 290
+            y: 214
+            width: 80
+            height: 64
+            text_align: CENTER
+            text_font: font_clim_value
+            pad_top: 4
+            text: "+"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+            radius: 14
+            border_width: 3
+            border_color: 0x888888
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.salle_a_manger_poele
+                    temperature: !lambda |-
+                      float t = id(poele_tgt).state;
+                      if (std::isnan(t)) t = 15.0f;
+                      t = t + 0.5f;
+                      if (t < 15.0f) t = 15.0f;
+                      if (t > 25.0f) t = 25.0f;
+                      char buf[12]; snprintf(buf, sizeof(buf), "%.1f", t); return std::string(buf);
+        - label:
+            id: poele_mode
+            x: 80
+            y: 284
+            width: 310
+            height: 28
+            text_align: CENTER
+            text_font: font_clim_text
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: poele_onoff
+            x: 100
+            y: 328
+            width: 270
+            height: 80
+            text_align: CENTER
+            text_font: font_clim_text
+            pad_top: 26
+            text: "Marche / Arrêt"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+            radius: 14
+            border_width: 3
+            border_color: 0x666666
+            clickable: true
+            on_click:
+              - if:
+                  condition:
+                    lambda: 'return id(poele_state).state != "off";'
+                  then:
+                    - homeassistant.service:
+                        service: climate.turn_off
+                        data:
+                          entity_id: climate.salle_a_manger_poele
+                  else:
+                    - homeassistant.service:
+                        service: climate.turn_on
+                        data:
+                          entity_id: climate.salle_a_manger_poele
+        - obj:
+            id: pac_carte
+            x: 410
+            y: 48
+            width: 310
+            height: 380
+            radius: 16
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_color: 0x2196F3
+            border_width: 3
+        - label:
+            id: pac_nom
+            x: 410
+            y: 56
+            width: 310
+            height: 30
+            text_align: CENTER
+            text_font: font_clim_title
+            text: "Pompe à chaleur"
+            text_color: 0x2196F3
+            bg_opa: TRANSP
+        - label:
+            id: pac_leg_temp
+            x: 410
+            y: 96
+            width: 310
+            height: 24
+            text_align: CENTER
+            text_font: font_clim_text
+            text: "Température"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: pac_temp
+            x: 410
+            y: 120
+            width: 310
+            height: 58
+            text_align: CENTER
+            text_font: font_clim_value
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: pac_leg_cons
+            x: 410
+            y: 188
+            width: 310
+            height: 24
+            text_align: CENTER
+            text_font: font_clim_text
+            text: "Consigne"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: pac_cons
+            x: 510
+            y: 214
+            width: 110
+            height: 58
+            text_align: CENTER
+            text_font: font_clim_value
+            text: "--"
+            text_color: 0x2196F3
+            bg_opa: TRANSP
+        - label:
+            id: pac_moins
+            x: 430
+            y: 214
+            width: 80
+            height: 64
+            text_align: CENTER
+            text_font: font_clim_value
+            pad_top: 4
+            text: "-"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+            radius: 14
+            border_width: 3
+            border_color: 0x888888
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.infra_evoo7_control_thermostat
+                    temperature: !lambda |-
+                      float t = id(pac_tgt).state;
+                      if (std::isnan(t)) t = 10.0f;
+                      t = t - 0.5f;
+                      if (t < 10.0f) t = 10.0f;
+                      if (t > 30.0f) t = 30.0f;
+                      char buf[12]; snprintf(buf, sizeof(buf), "%.1f", t); return std::string(buf);
+        - label:
+            id: pac_plus
+            x: 620
+            y: 214
+            width: 80
+            height: 64
+            text_align: CENTER
+            text_font: font_clim_value
+            pad_top: 4
+            text: "+"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+            radius: 14
+            border_width: 3
+            border_color: 0x888888
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.infra_evoo7_control_thermostat
+                    temperature: !lambda |-
+                      float t = id(pac_tgt).state;
+                      if (std::isnan(t)) t = 10.0f;
+                      t = t + 0.5f;
+                      if (t < 10.0f) t = 10.0f;
+                      if (t > 30.0f) t = 30.0f;
+                      char buf[12]; snprintf(buf, sizeof(buf), "%.1f", t); return std::string(buf);
+        - label:
+            id: pac_mode
+            x: 410
+            y: 284
+            width: 310
+            height: 28
+            text_align: CENTER
+            text_font: font_clim_text
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: pac_onoff
+            x: 430
+            y: 328
+            width: 270
+            height: 80
+            text_align: CENTER
+            text_font: font_clim_text
+            pad_top: 26
+            text: "Marche / Arrêt"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+            radius: 14
+            border_width: 3
+            border_color: 0x666666
+            clickable: true
+            on_click:
+              - if:
+                  condition:
+                    lambda: 'return id(pac_state).state != "off";'
+                  then:
+                    - homeassistant.service:
+                        service: climate.turn_off
+                        data:
+                          entity_id: climate.infra_evoo7_control_thermostat
+                  else:
+                    - homeassistant.service:
+                        service: climate.turn_on
+                        data:
+                          entity_id: climate.infra_evoo7_control_thermostat

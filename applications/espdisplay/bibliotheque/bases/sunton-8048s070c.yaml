@@ -1,0 +1,185 @@
+# Base matérielle : carte Sunton ESP32-8048S070C (ESP32-S3, 800x480, tactile capacitif GT911).
+# Élément de bibliothèque espdisplay — extrait de haplan-display.yaml le 12/10/2026 (découpage fidèle).
+# Contient aussi la couche LVGL commune à tous les écrans de ce modèle (veille du rétroéclairage, flèches de
+# navigation entre pages) ; les pages viennent d'autres éléments de la bibliothèque.
+
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+  # Le board générique "esp32-s3-devkitc-1" suppose par défaut 4 Mo de flash — cette carte en a
+  # réellement 16, d'où flash_size explicite + table de partitions élargie (2 slots OTA à 6 Mo
+  # au lieu de ~1,8 Mo par défaut : nécessaire avec plusieurs plans embarqués à la fois — chaque
+  # image de fond pèse ~768 Ko brute, x3 plans + widgets/abonnements HA x3 aussi).
+  flash_size: 16MB
+  partitions: partitions-haplan.csv
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# OTA (mise à jour par WiFi) — validé en direct le 13/08/2026 (upload réseau ~10s, sans câble USB).
+# Réutilise ota_password, déjà présent dans secrets.yaml pour les autres appareils de ce parc
+# ESPHome (hasat3/4/5). Seul le tout premier flash doit encore se faire par USB (pour embarquer la
+# capacité OTA elle-même) ; les mises à jour suivantes peuvent passer par
+# `esphome run haplan-display.yaml --device <ip-ou-nom.local>`.
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+logger:
+  # Forcé sur l'UART matériel (broches câblées au CH340) — sur ESP32-S3 avec framework esp-idf,
+  # ESPHome peut par défaut router les logs vers USB_SERIAL_JTAG (USB natif interne, invisible sur
+  # le port CH340) plutôt que UART0 : découvert le 13/08/2026 après plusieurs captures série
+  # vides malgré un appareil qui tournait visiblement (rétroéclairage, image affichés).
+  hardware_uart: UART0
+
+# -----------------------------------------------------------------------------
+# Tactile — dalle capacitive GT911 (I2C), variante "C" de la carte 8048S070. Pinout issu de la
+# même définition de carte PlatformIO que le pinout RGB (voir plus haut), pas deviné.
+# -----------------------------------------------------------------------------
+i2c:
+  sda: GPIO19
+  scl: GPIO20
+  frequency: 400kHz
+
+# -----------------------------------------------------------------------------
+# Écran RGB parallèle 800x480 — pinout VÉRIFIÉ ET VALIDÉ sur carte physique le 13/08/2026, recoupé
+# avec 3 sources indépendantes qui s'accordent : espboards.dev, github.com/clowrey/
+# esphome-sunton-esp32-8048s070c, et une définition de carte PlatformIO ("esp32-8048S070C")
+# retrouvée dans un projet antérieur de l'utilisateur sur cette même carte physique — cette
+# dernière donne aussi le pinout tactile ci-dessous (i2c:/touchscreen:), donc jamais deviné.
+# -----------------------------------------------------------------------------
+display:
+  - platform: rpi_dpi_rgb
+    id: main_lcd
+    update_interval: never  # LVGL pilote les rafraîchissements, pas de polling périodique
+    # auto_clear_enabled: true est REFUSÉ par ESPHome avec LVGL ("not compatible with LVGL") —
+    # LVGL gère lui-même l'effacement/redessin. false est donc obligatoire ici ; l'hypothèse
+    # d'un résidu PSRAM du flash précédent (testée le 13/08/2026) n'était pas la bonne piste,
+    # voir plus bas pour la vraie cause des anciennes icônes visibles derrière les nouvelles.
+    auto_clear_enabled: false
+    invert_colors: true
+    dimensions:
+      width: 800
+      height: 480
+    color_order: RGB
+    de_pin: 41
+    hsync_pin: 39
+    vsync_pin: 40
+    pclk_pin: 42
+    pclk_frequency: 12MHz
+    data_pins:
+      red: [14, 21, 47, 48, 45]
+      green: [9, 46, 3, 8, 16, 1]
+      blue: [15, 7, 6, 5, 4]
+
+# Rétroéclairage — GPIO2, confirmé par la même définition de carte que le pinout RGB ci-dessus.
+output:
+  - platform: ledc
+    pin: 2
+    id: backlight_pwm
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Rétroéclairage écran"
+    id: backlight
+    restore_mode: ALWAYS_ON
+
+touchscreen:
+  # Sans interrupt_pin/reset_pin — CONFIRMÉ nécessaire et suffisant le 13/08/2026 (mode polling
+  # plutôt qu'interruption). Un premier essai avec interrupt_pin/reset_pin compilait et détectait
+  # bien le GT911 en I2C (bus scan OK), mais ne générait jamais aucun événement tactile — cohérent
+  # avec un bug d'init Reset/INT documenté sur le dépôt ESPHome (issue #15019). Repéré par analogie
+  # avec un exemple ESPHome réellement fonctionnel (github.com/jtenniswood/esphome-lvgl, carte
+  # GT911 différente mais même contrôleur), qui s'en passe et lie juste le composant à l'écran via
+  # `display:`. Une fois le tactile détecté, il fallait ENCORE deux choses pour qu'un tap agisse
+  # vraiment sur une entité HA (voir `clickable: true` sur les icônes plus bas, et l'avertissement
+  # allow_service_calls en en-tête de fichier) — trois causes distinctes, trouvées une par une.
+  platform: gt911
+  id: touch_gt911
+  display: main_lcd
+  # Repère de debug tactile demandé par l'utilisateur (13/08/2026) — gardé en PERMANENCE (décision
+  # utilisateur, pas juste temporaire) : le marqueur "X" rouge montre où le doigt a vraiment
+  # touché, ce qui explique visuellement pourquoi un tap "raté" (à côté d'une icône de 24px) ne
+  # déclenche rien. Le texte des coordonnées x/y (touch_debug_label) a été retiré le 14/08/2026,
+  # l'appli étant jugée au point — seul le X reste. Widget déclaré sur top_layer (pas par page)
+  # pour rester visible/actif quel que soit le plan affiché.
+  on_touch:
+    # Rallume le rétroéclairage à chaque tap — sert aussi de "réveil" après extinction pour
+    # inactivité (voir lvgl:on_idle: plus bas). Le tout premier tap qui réveille l'écran agit
+    # AUSSI sur l'icône sous le doigt s'il y en a une (LVGL ne fait pas la distinction) — accepté
+    # pour cette première version, à revoir si ça pose un problème en usage réel.
+    - light.turn_on: backlight
+    - lvgl.widget.update:
+        id: touch_marker
+        x: !lambda return touch.x - 8;
+        y: !lambda return touch.y - 8;
+
+lvgl:
+  displays:
+    - main_lcd
+  touchscreens:
+    - touch_gt911
+  # Rétroéclairage éteint après 30s d'inactivité tactile (pas une vraie veille ESP — le composant
+  # LVGL, le WiFi et les états HA continuent de tourner et de se mettre à jour en arrière-plan,
+  # seul le rétroéclairage s'éteint) ; rallumé au premier tap (voir touchscreen:on_touch: plus
+  # haut). Demande utilisateur 14/08/2026, même comportement qu'un petit écran précédent de
+  # l'utilisateur. Le minuteur d'inactivité LVGL se réarme automatiquement à chaque tap, donc
+  # aucune logique supplémentaire n'est nécessaire côté "on_wake".
+  on_idle:
+    - timeout: 30s
+      then:
+        - light.turn_off: backlight
+  # Couche toujours au-dessus de la page affichée, quelle qu'elle soit — sert pour le repère de
+  # debug tactile (permanent, voir touchscreen:on_touch: plus haut) et la navigation entre plans
+  # (flèches gauche/droite, circulaire : depuis le dernier plan, "suivant" revient au premier).
+  top_layer:
+    widgets:
+      - label:
+          id: touch_marker
+          x: -20
+          y: -20
+          width: 16
+          height: 16
+          text: "X"
+          text_color: 0xFF0000
+      - label:
+          # Taille x2,5 par rapport au premier essai ("4 fois trop petites", retour utilisateur
+          # 13/08/2026) — vraie flèche Font Awesome (font_nav, 40px) plutôt qu'un simple "<"/">"
+          # de police par défaut.
+          id: nav_prev
+          x: 0
+          y: 200
+          width: 60
+          height: 80
+          text_font: font_nav
+          text: ""
+          text_color: 0xFFFFFF
+          text_align: CENTER
+          bg_color: 0x000000
+          bg_opa: 50%
+          clickable: true
+          on_click:
+            - lvgl.page.previous:
+      - label:
+          id: nav_next
+          x: 740
+          y: 200
+          width: 60
+          height: 80
+          text_font: font_nav
+          text: ""
+          text_color: 0xFFFFFF
+          text_align: CENTER
+          bg_color: 0x000000
+          bg_opa: 50%
+          clickable: true
+          on_click:
+            - lvgl.page.next:

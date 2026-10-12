@@ -1,0 +1,504 @@
+# Page LVGL « page_ballons_chauffe » — élément de bibliothèque espdisplay (extrait de haplan-display.yaml le 12/10/2026).
+# Contient la page et les capteurs HA, images et polices qu'elle seule utilise.
+
+font:
+  - file: "fa-solid-900.ttf"
+    id: font_ballons_icon
+    size: 40
+    glyphs: ["\uf773", "\uf06d"]
+  - file: "gfonts://Roboto"
+    id: font_ballons_title
+    size: 24
+    glyphs: " -0123456789:ACEGIMNOPSUabcdefhilmnoprstu«»éê"
+  - file: "gfonts://Roboto"
+    id: font_ballons_text
+    size: 20
+    glyphs: " -0123456789:ACEGIMNOPSUabcdefhilmnoprstu«»éê"
+  - file: "gfonts://Roboto"
+    id: font_ballons_value
+    size: 40
+    glyphs: "0123456789.-WkV% "
+text_sensor:
+  - platform: homeassistant
+    id: ha_ballons_cmd_gros
+    entity_id: switch.gros_ballon_maison_maison_rez_de_chaussee
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: ballons_val_commande_gros
+          text: !lambda 'return x == "on" ? std::string("Marche") : std::string("Arrêt");'
+  - platform: homeassistant
+    id: ha_ballons_chauffe_gros
+    entity_id: binary_sensor.gros_ballon_en_chauffe
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: ballons_val_chauffe_gros
+          text: !lambda 'return x == "on" ? std::string("Oui") : std::string("Non");'
+      - lvgl.label.update:
+          id: ballons_icone_gros
+          text: !lambda 'return x == "on" ? std::string("\xef\x81\xad") : std::string("\xef\x9d\xb3");'
+          text_color: !lambda 'return x == "on" ? lv_color_hex(0xFF5722) : lv_color_hex(0x2196F3);'
+  - platform: homeassistant
+    id: ha_ballons_cmd_petit
+    entity_id: switch.petit_ballon_maison_maison_rez_de_chaussee
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: ballons_val_commande_petit
+          text: !lambda 'return x == "on" ? std::string("Marche") : std::string("Arrêt");'
+  - platform: homeassistant
+    id: ha_ballons_chauffe_petit
+    entity_id: binary_sensor.petit_ballon_en_chauffe
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: ballons_val_chauffe_petit
+          text: !lambda 'return x == "on" ? std::string("Oui") : std::string("Non");'
+      - lvgl.label.update:
+          id: ballons_icone_petit
+          text: !lambda 'return x == "on" ? std::string("\xef\x81\xad") : std::string("\xef\x9d\xb3");'
+          text_color: !lambda 'return x == "on" ? lv_color_hex(0xFF5722) : lv_color_hex(0xFF9800);'
+  - platform: homeassistant
+    id: ha_ballons_btn_premier
+    entity_id: input_boolean.petit_ballon_en_premier
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: ballons_btn_premier
+          text: !lambda 'return x == "on" ? std::string("En premier : Petit ballon") : std::string("En premier : Gros ballon");'
+      - lvgl.widget.update:
+          id: ballons_btn_premier
+          border_color: !lambda 'return x == "on" ? lv_color_hex(0x4CAF50) : lv_color_hex(0x666666);'
+  - platform: homeassistant
+    id: ha_ballons_btn_unique
+    entity_id: input_boolean.un_seul_ballon
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: ballons_btn_unique
+          text: !lambda 'return x == "on" ? std::string("Un seul ballon : OUI") : std::string("Un seul ballon : NON");'
+      - lvgl.widget.update:
+          id: ballons_btn_unique
+          border_color: !lambda 'return x == "on" ? lv_color_hex(0x4CAF50) : lv_color_hex(0x666666);'
+sensor:
+  - platform: homeassistant
+    id: ha_ballons_puissance_gros
+    entity_id: sensor.gros_ballon_maison_maison_rez_de_chaussee_power
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: ballons_puissance_gros
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            if (fabsf(x) >= 1000.0f) snprintf(buf, sizeof(buf), "%.2f kW", x / 1000.0f);
+            else snprintf(buf, sizeof(buf), "%.0f W", x);
+            return std::string(buf);
+  - platform: homeassistant
+    id: ha_ballons_duree_on_gros
+    entity_id: sensor.maison_gros_ballon_duree_sur_on_aujourd_hui
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: ballons_val_duree_on_gros
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            int t = (int) roundf(x * 60.0f);
+            char buf[12];
+            snprintf(buf, sizeof(buf), "%dh%02d", t / 60, t % 60);
+            return std::string(buf);
+  - platform: homeassistant
+    id: ha_ballons_duree_chauffe_gros
+    entity_id: sensor.gros_ballon_duree_de_chauffe_aujourd_hui
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: ballons_val_duree_chauffe_gros
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            int t = (int) roundf(x * 60.0f);
+            char buf[12];
+            snprintf(buf, sizeof(buf), "%dh%02d", t / 60, t % 60);
+            return std::string(buf);
+  - platform: homeassistant
+    id: ha_ballons_puissance_petit
+    entity_id: sensor.petit_ballon_maison_maison_rez_de_chaussee_power
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: ballons_puissance_petit
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            if (fabsf(x) >= 1000.0f) snprintf(buf, sizeof(buf), "%.2f kW", x / 1000.0f);
+            else snprintf(buf, sizeof(buf), "%.0f W", x);
+            return std::string(buf);
+  - platform: homeassistant
+    id: ha_ballons_duree_on_petit
+    entity_id: sensor.maison_petit_ballon_duree_sur_on_aujourd_hui
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: ballons_val_duree_on_petit
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            int t = (int) roundf(x * 60.0f);
+            char buf[12];
+            snprintf(buf, sizeof(buf), "%dh%02d", t / 60, t % 60);
+            return std::string(buf);
+  - platform: homeassistant
+    id: ha_ballons_duree_chauffe_petit
+    entity_id: sensor.petit_ballon_duree_de_chauffe_aujourd_hui
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: ballons_val_duree_chauffe_petit
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            int t = (int) roundf(x * 60.0f);
+            char buf[12];
+            snprintf(buf, sizeof(buf), "%dh%02d", t / 60, t % 60);
+            return std::string(buf);
+lvgl:
+  pages:
+    - id: page_ballons_chauffe
+      widgets:
+        - obj:
+            id: full_screen_clear_ballons_chauffe
+            x: 0
+            y: 0
+            width: 800
+            height: 480
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_width: 0
+            radius: 0
+        - label:
+            id: ballons_titre
+            x: 0
+            y: 8
+            width: 800
+            height: 30
+            text_align: CENTER
+            text_font: font_ballons_title
+            text: "Chauffe des ballons"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - obj:
+            id: ballons_carte_gros
+            x: 80
+            y: 48
+            width: 310
+            height: 272
+            radius: 16
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_color: 0x2196F3
+            border_width: 3
+        - label:
+            id: ballons_nom_gros
+            x: 80
+            y: 54
+            width: 310
+            height: 30
+            text_align: CENTER
+            text_font: font_ballons_title
+            text: "Gros ballon"
+            text_color: 0x2196F3
+            bg_opa: TRANSP
+        - label:
+            id: ballons_icone_gros
+            x: 205
+            y: 88
+            width: 60
+            height: 46
+            text_align: CENTER
+            text_font: font_ballons_icon
+            text: ""
+            text_color: 0x777777
+            bg_opa: TRANSP
+        - label:
+            id: ballons_puissance_gros
+            x: 80
+            y: 134
+            width: 310
+            height: 48
+            text_align: CENTER
+            text_font: font_ballons_value
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: ballons_leg_commande_gros
+            x: 96
+            y: 188
+            width: 160
+            height: 26
+            text_align: LEFT
+            text_font: font_ballons_text
+            text: "Commande"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: ballons_val_commande_gros
+            x: 250
+            y: 188
+            width: 124
+            height: 26
+            text_align: RIGHT
+            text_font: font_ballons_text
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: ballons_leg_chauffe_gros
+            x: 96
+            y: 214
+            width: 160
+            height: 26
+            text_align: LEFT
+            text_font: font_ballons_text
+            text: "Chauffe réelle"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: ballons_val_chauffe_gros
+            x: 250
+            y: 214
+            width: 124
+            height: 26
+            text_align: RIGHT
+            text_font: font_ballons_text
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: ballons_leg_duree_on_gros
+            x: 96
+            y: 240
+            width: 160
+            height: 26
+            text_align: LEFT
+            text_font: font_ballons_text
+            text: "Sur « on »"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: ballons_val_duree_on_gros
+            x: 250
+            y: 240
+            width: 124
+            height: 26
+            text_align: RIGHT
+            text_font: font_ballons_text
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: ballons_leg_duree_chauffe_gros
+            x: 96
+            y: 266
+            width: 160
+            height: 26
+            text_align: LEFT
+            text_font: font_ballons_text
+            text: "Chauffe"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: ballons_val_duree_chauffe_gros
+            x: 250
+            y: 266
+            width: 124
+            height: 26
+            text_align: RIGHT
+            text_font: font_ballons_text
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - obj:
+            id: ballons_carte_petit
+            x: 410
+            y: 48
+            width: 310
+            height: 272
+            radius: 16
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_color: 0xFF9800
+            border_width: 3
+        - label:
+            id: ballons_nom_petit
+            x: 410
+            y: 54
+            width: 310
+            height: 30
+            text_align: CENTER
+            text_font: font_ballons_title
+            text: "Petit ballon"
+            text_color: 0xFF9800
+            bg_opa: TRANSP
+        - label:
+            id: ballons_icone_petit
+            x: 535
+            y: 88
+            width: 60
+            height: 46
+            text_align: CENTER
+            text_font: font_ballons_icon
+            text: ""
+            text_color: 0x777777
+            bg_opa: TRANSP
+        - label:
+            id: ballons_puissance_petit
+            x: 410
+            y: 134
+            width: 310
+            height: 48
+            text_align: CENTER
+            text_font: font_ballons_value
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: ballons_leg_commande_petit
+            x: 426
+            y: 188
+            width: 160
+            height: 26
+            text_align: LEFT
+            text_font: font_ballons_text
+            text: "Commande"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: ballons_val_commande_petit
+            x: 580
+            y: 188
+            width: 124
+            height: 26
+            text_align: RIGHT
+            text_font: font_ballons_text
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: ballons_leg_chauffe_petit
+            x: 426
+            y: 214
+            width: 160
+            height: 26
+            text_align: LEFT
+            text_font: font_ballons_text
+            text: "Chauffe réelle"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: ballons_val_chauffe_petit
+            x: 580
+            y: 214
+            width: 124
+            height: 26
+            text_align: RIGHT
+            text_font: font_ballons_text
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: ballons_leg_duree_on_petit
+            x: 426
+            y: 240
+            width: 160
+            height: 26
+            text_align: LEFT
+            text_font: font_ballons_text
+            text: "Sur « on »"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: ballons_val_duree_on_petit
+            x: 580
+            y: 240
+            width: 124
+            height: 26
+            text_align: RIGHT
+            text_font: font_ballons_text
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: ballons_leg_duree_chauffe_petit
+            x: 426
+            y: 266
+            width: 160
+            height: 26
+            text_align: LEFT
+            text_font: font_ballons_text
+            text: "Chauffe"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: ballons_val_duree_chauffe_petit
+            x: 580
+            y: 266
+            width: 124
+            height: 26
+            text_align: RIGHT
+            text_font: font_ballons_text
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: ballons_ordre_titre
+            x: 80
+            y: 330
+            width: 640
+            height: 26
+            text_align: CENTER
+            text_font: font_ballons_text
+            text: "Ordre de chauffe"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: ballons_btn_premier
+            x: 80
+            y: 360
+            width: 310
+            height: 88
+            text_align: CENTER
+            text_font: font_ballons_title
+            pad_top: 28
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+            radius: 14
+            border_width: 3
+            border_color: 0x666666
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: input_boolean.toggle
+                  data:
+                    entity_id: input_boolean.petit_ballon_en_premier
+        - label:
+            id: ballons_btn_unique
+            x: 410
+            y: 360
+            width: 310
+            height: 88
+            text_align: CENTER
+            text_font: font_ballons_title
+            pad_top: 28
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+            radius: 14
+            border_width: 3
+            border_color: 0x666666
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: input_boolean.toggle
+                  data:
+                    entity_id: input_boolean.un_seul_ballon

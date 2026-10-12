@@ -1,0 +1,257 @@
+# Page LVGL « page_clim_salle » — élément de bibliothèque espdisplay (extrait de haplan-display.yaml le 12/10/2026).
+# Contient la page et les capteurs HA, images et polices qu'elle seule utilise.
+
+text_sensor:
+  - platform: homeassistant
+    id: clim_salle_state
+    entity_id: climate.153931629788358_climate
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: clim_salle_mode
+          text: !lambda 'if (x == "unavailable") return std::string("Indisponible"); if (x == "off") return std::string("Arrêt"); if (x == "heat") return std::string("Chauffage"); if (x == "cool") return std::string("Froid"); if (x == "auto") return std::string("Auto"); if (x == "dry") return std::string("Déshumid."); if (x == "fan_only") return std::string("Ventil."); if (x == "heat_cool") return std::string("Auto"); return x;'
+      - lvgl.widget.update:
+          id: clim_salle_onoff
+          border_color: !lambda 'return (x != "off" && x != "unavailable" && x != "unknown") ? lv_color_hex(0x4CAF50) : lv_color_hex(0x666666);'
+sensor:
+  - platform: homeassistant
+    id: clim_salle_cur
+    entity_id: climate.153931629788358_climate
+    attribute: current_temperature
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: clim_salle_temp
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°C", x);
+            return std::string(buf);
+  - platform: homeassistant
+    id: clim_salle_tgt
+    entity_id: climate.153931629788358_climate
+    attribute: temperature
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: clim_salle_cons
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°C", x);
+            return std::string(buf);
+lvgl:
+  pages:
+    - id: page_clim_salle
+      widgets:
+        - obj:
+            id: full_screen_clear_clim_salle
+            x: 0
+            y: 0
+            width: 800
+            height: 480
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_width: 0
+            radius: 0
+        - label:
+            id: clim_salle_titre
+            x: 0
+            y: 8
+            width: 800
+            height: 30
+            text_align: CENTER
+            text_font: font_clim_title
+            text: "Climatisation 1/3"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - obj:
+            id: clim_salle_carte
+            x: 120
+            y: 48
+            width: 560
+            height: 380
+            radius: 16
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_color: 0x00BCD4
+            border_width: 3
+        - label:
+            id: clim_salle_nom
+            x: 120
+            y: 56
+            width: 560
+            height: 30
+            text_align: CENTER
+            text_font: font_clim_title
+            text: "Salle"
+            text_color: 0x00BCD4
+            bg_opa: TRANSP
+        - label:
+            id: clim_salle_leg_temp
+            x: 120
+            y: 96
+            width: 560
+            height: 24
+            text_align: CENTER
+            text_font: font_clim_text
+            text: "Température"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: clim_salle_temp
+            x: 120
+            y: 120
+            width: 560
+            height: 58
+            text_align: CENTER
+            text_font: font_clim_value
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: clim_salle_leg_cons
+            x: 120
+            y: 188
+            width: 560
+            height: 24
+            text_align: CENTER
+            text_font: font_clim_text
+            text: "Consigne"
+            text_color: 0xBBBBBB
+            bg_opa: TRANSP
+        - label:
+            id: clim_salle_cons
+            x: 220
+            y: 214
+            width: 360
+            height: 58
+            text_align: CENTER
+            text_font: font_clim_value
+            text: "--"
+            text_color: 0x00BCD4
+            bg_opa: TRANSP
+        - label:
+            id: clim_salle_moins
+            x: 140
+            y: 214
+            width: 80
+            height: 64
+            text_align: CENTER
+            text_font: font_clim_value
+            pad_top: 4
+            text: "-"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+            radius: 14
+            border_width: 3
+            border_color: 0x888888
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.153931629788358_climate
+                    temperature: !lambda |-
+                      float t = id(clim_salle_tgt).state;
+                      if (std::isnan(t)) t = 16.0f;
+                      t = t - 0.5f;
+                      if (t < 16.0f) t = 16.0f;
+                      if (t > 30.0f) t = 30.0f;
+                      char buf[12]; snprintf(buf, sizeof(buf), "%.1f", t); return std::string(buf);
+        - label:
+            id: clim_salle_plus
+            x: 580
+            y: 214
+            width: 80
+            height: 64
+            text_align: CENTER
+            text_font: font_clim_value
+            pad_top: 4
+            text: "+"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+            radius: 14
+            border_width: 3
+            border_color: 0x888888
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.153931629788358_climate
+                    temperature: !lambda |-
+                      float t = id(clim_salle_tgt).state;
+                      if (std::isnan(t)) t = 16.0f;
+                      t = t + 0.5f;
+                      if (t < 16.0f) t = 16.0f;
+                      if (t > 30.0f) t = 30.0f;
+                      char buf[12]; snprintf(buf, sizeof(buf), "%.1f", t); return std::string(buf);
+        - label:
+            id: clim_salle_mode
+            x: 120
+            y: 284
+            width: 560
+            height: 28
+            text_align: CENTER
+            text_font: font_clim_text
+            text: "--"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+        - label:
+            id: clim_salle_onoff
+            x: 140
+            y: 328
+            width: 250
+            height: 80
+            text_align: CENTER
+            text_font: font_clim_text
+            pad_top: 26
+            text: "Marche / Arrêt"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+            radius: 14
+            border_width: 3
+            border_color: 0x666666
+            clickable: true
+            on_click:
+              - if:
+                  condition:
+                    lambda: 'return id(clim_salle_state).state != "off";'
+                  then:
+                    - homeassistant.service:
+                        service: climate.turn_off
+                        data:
+                          entity_id: climate.153931629788358_climate
+                  else:
+                    - homeassistant.service:
+                        service: climate.turn_on
+                        data:
+                          entity_id: climate.153931629788358_climate
+        - label:
+            id: clim_salle_modebtn
+            x: 410
+            y: 328
+            width: 250
+            height: 80
+            text_align: CENTER
+            text_font: font_clim_text
+            pad_top: 26
+            text: "Mode"
+            text_color: 0xFFFFFF
+            bg_opa: TRANSP
+            radius: 14
+            border_width: 3
+            border_color: 0x666666
+            clickable: true
+            on_click:
+              - homeassistant.service:
+                  service: climate.set_hvac_mode
+                  data:
+                    entity_id: climate.153931629788358_climate
+                    hvac_mode: !lambda |-
+                      static const char* modes[] = {"cool", "heat", "auto", "dry", "fan_only"};
+                      const std::string cur = id(clim_salle_state).state;
+                      int n = 5; int i = -1;
+                      for (int k = 0; k < n; k++) if (cur == modes[k]) i = k;
+                      return std::string(modes[(i + 1) % n]);
