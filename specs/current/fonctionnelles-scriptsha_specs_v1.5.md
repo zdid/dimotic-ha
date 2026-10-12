@@ -1,5 +1,6 @@
 # Spécifications Fonctionnelles - Module Scripts HA (scriptsha)
 
+*v1.5 : notifications des scripts intégrés envoyées au groupe `notify.administrateurs` (plus de placeholder `notify.mobile_app_TON_TELEPHONE`) — mis à jour aussi dans HA de ha2 (piles faibles, objets indisponibles).*
 *Version 1.4 - 29 Septembre 2026 — **rapport « indisponibles + piles » remplacé par deux scripts intégrés** (§9bis).*
 
 *Version 1.3 - 24 Septembre 2026*
@@ -399,7 +400,7 @@ existantes au moment de la création de `scriptsha`. `scriptsha` suit le code r�
 ## 9bis. Scripts intégrés livrés avec l'application (v1.4)
 
 Déposés au démarrage s'ils sont absents (jamais réécrits ensuite ; une divergence est seulement signalée) ;
-service de notification `notify.mobile_app_TON_TELEPHONE`, à remplacer après déploiement. **Aucun n'est
+notification envoyée au **groupe `notify.administrateurs`** (service `notify.send_message`, v1.5 : plus de téléphone à renseigner ; le groupe est créé par le service post-installation « Groupe de notification des administrateurs », nom imposé). **Aucun n'est
 déployé dans HA automatiquement.**
 
 | Identifiant | Rôle |

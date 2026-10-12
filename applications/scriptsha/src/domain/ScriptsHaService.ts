@@ -187,8 +187,8 @@ action:
 
 // ⭐ 29/09/2026 (demande utilisateur) — l'ancien rapport unique « indisponibles + piles faibles » est
 // remplacé par DEUX scripts : un pour les objets à pile, un pour les objets RFXCOM / Tasmota / Zigbee
-// indisponibles. Contenu statique ; service notify `notify.mobile_app_TON_TELEPHONE`, placeholder à
-// remplacer après déploiement (un seul téléphone par machine). Reconnaissance vérifiée sur le vrai HA
+// indisponibles. Contenu statique ; notification envoyée au groupe `notify.administrateurs` (12/10/2026 :
+// remplace le placeholder `notify.mobile_app_TON_TELEPHONE` ; groupe créé par le service post-installation « notifygroup »). Reconnaissance vérifiée sur le vrai HA
 // (rendu par /api/template) : RFXCOM et Tasmota par le fabricant de l'appareil (`manufacturer`),
 // Zigbee par l'identifiant d'appareil `zigbee2mqtt_…`. Nom = celui de l'appareil (dédoublonné, plusieurs
 // entités par appareil) suivi de sa pièce.
@@ -232,7 +232,9 @@ action:
   - condition: template
     value_template: >
       {{ (piles.pct | count > 0) or (piles.mv | count > 0) or (piles.faible | count > 0) }}
-  - service: notify.mobile_app_TON_TELEPHONE
+  - service: notify.send_message
+    target:
+      entity_id: notify.administrateurs
     data:
       title: "Piles faibles"
       message: >
@@ -294,7 +296,9 @@ action:
   - condition: template
     value_template: >
       {{ (indisponibles.rfxcom | count > 0) or (indisponibles.tasmota | count > 0) or (indisponibles.zigbee | count > 0) }}
-  - service: notify.mobile_app_TON_TELEPHONE
+  - service: notify.send_message
+    target:
+      entity_id: notify.administrateurs
     data:
       title: "Objets indisponibles"
       message: >
