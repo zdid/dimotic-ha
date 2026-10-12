@@ -473,8 +473,8 @@ export class NommageService implements INommageService {
 
     // ⭐ 12/08/2026 (demande utilisateur, config ha.forceLightForLumiere) — un QUOI "lumière"
     // relayé en tant que composant `switch` (source ne connaissant que les capacités physiques du
-    // device, pas notre taxonomie) est republié en `light` : seul le topic de découverte change de
-    // composant, le payload traverse tel quel (compatible avec les deux schémas). Les autres
+    // device, pas notre taxonomie) est republié en `light` : le topic de découverte change de
+    // composant, et `value_template` devient `state_value_template` (switchPayloadToLight, 12/10/2026). Les autres
     // entités du même device (select/number de config) ne sont jamais concernées, seul le composant
     // effectivement `switch` l'est.
     const effectiveTopic = (this.config.ha.forceLightForLumiere && parsed.quoi.slug === 'lumiere')
@@ -484,6 +484,7 @@ export class NommageService implements INommageService {
     if (effectiveTopic !== discoveryMessage.topic) {
       this.logger.info('NommageService',
         `[${discoveryMessage.sourceId}] QUOI "lumière" sur un composant switch — republié en light (${discoveryMessage.topic} → ${effectiveTopic})`);
+      payload = NommageService.switchPayloadToLight(payload);
     }
 
     // name explicite (ex: zigbee2mqtt "Linkquality") traverse HA sans jamais être traduit, et une
@@ -586,6 +587,23 @@ export class NommageService implements INommageService {
   /** États principaux d'un appareil (identifiant technique) : leur QUOI d'entité reste celui de l'appareil. */
   // + identifiant purement numérique : broche rpigpio (mqtt-io), état principal de son appareil.
   private static readonly PRIMARY_OBJECT_ID = /^(?:(?:switch|light|cover|climate|lock|fan)(?:_l\d+)?|\d+)$/;
+
+  /**
+   * Adapte une découverte `switch` au schéma `light` (basic) de HA : un switch lit son état avec `value_template`, une
+   * light avec `state_value_template` — sans ce renommage, la light reçoit le JSON complet de la source (ex. Zigbee2MQTT
+   * `{"state":"ON",…}`), ne le reconnaît jamais comme ON/OFF et reste `unknown` (constaté sur ha2 le 12/10/2026). Formes
+   * longue et abrégée ; un `state_value_template` déjà présent est gardé.
+   */
+  static switchPayloadToLight(payload: Record<string, unknown>): Record<string, unknown> {
+    const out = { ...payload };
+    for (const [from, to] of [['value_template', 'state_value_template'], ['val_tpl', 'stat_val_tpl']] as const) {
+      if (from in out) {
+        if (!('state_value_template' in out) && !('stat_val_tpl' in out)) out[to] = out[from];
+        delete out[from];
+      }
+    }
+    return out;
+  }
 
   /**
    * Remplace le composant `switch` par `light` dans un topic de découverte MQTT HA

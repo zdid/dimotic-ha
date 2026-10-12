@@ -1,5 +1,11 @@
 # Liste des problèmes à résoudre
 
+## 🐛 nommage — interrupteurs Zigbee republiés en « light » : état jamais lu par HA (constaté 12/10/2026, ha2) — CORRIGÉ et VÉRIFIÉ en réel le 12/10 (nommage spec v2.5, racine externe sur ha2 ; à publier en image Docker)
+- **Symptôme** : `light.lumiere_plafonnier_chambre_de_jo_1er_etage`, `…chevets…_l1`/`_l2`, `…leds…`, toilettes du haut, salle de bain du haut… restent `unknown` dans HA (historique : jamais on/off depuis au moins le 05/10). La **commande passe** (essai réel 12/10 17:55 : L1 OFF→ON vu dans Zigbee2MQTT), mais l'état revient sans être lu → icône grisée, et un clic envoie toujours `turn_on` (impossible d'éteindre depuis le plan ; « L1/L2 ne marchent jamais » vu de HA).
+- **Cause** : `NommageService.emitPassthroughDiscovery` (option `ha.forceLightForLumiere`, 12/08/2026, commit cc62069) change seulement le composant du topic `switch`→`light` et laisse le payload tel quel. Le payload Zigbee2MQTT de `switch` lit l'état avec `value_template` (`{{ value_json.state }}`, `{{ value_json.state_l1 }}`) ; le schéma `light` de HA (basic) ne connaît que `state_value_template` → payload JSON comparé à `ON`/`OFF` → jamais reconnu. Le commentaire « compatible avec les deux schémas » est faux.
+- **Correctif fait** : à la conversion en `light`, renommer `value_template` en `state_value_template` (si absent) ; test ; spec nommage nouvelle version ; déploiement par la racine externe `data/applications/nommage` ; relance à chaud de nommage pour redéclarer ; vérifier l'icône sur le plan. Vérifier aussi les autres sources (rfxcom, rpigpio) passant par la même conversion.
+- **À côté (pas nommage)** : appareils déclarés `offline` par Zigbee2MQTT le 12/10 : lumière terrasse, bande LED plan de travail cuisine, baromètres salles de bain haut et bas, infrarouge radiateur salle de bain du haut (portée/piles/alimentation à vérifier sur place) ; baromètre bibliothèque à 10 % de pile.
+
 
 
 
