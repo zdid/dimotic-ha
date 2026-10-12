@@ -725,7 +725,7 @@ export class NommageService implements INommageService {
 
   /** Liste des identifiants sans traduction (un par identifiant, sans doublon) dans data/nommage/noms-non-traduits.txt,
    *  réécrite seulement si son contenu change. Format `identifiant: nom brut  # n entité(s)`, à copier dans le fichier de traductions. */
-  private lastUntranslatedFile = '';
+  private lastUntranslatedFile: string | null = null;
   private writeUntranslatedFile(): void {
     const byId = new Map<string, { name: string; entities: number }>();
     for (const { objectId, name } of this.untranslatedByTopic.values()) {
