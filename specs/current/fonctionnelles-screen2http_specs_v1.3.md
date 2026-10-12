@@ -1,6 +1,7 @@
 # Spécifications Fonctionnelles - Application SCREEN2HTTP
 
-*Version 1.2 - 7 Octobre 2026*
+*Version 1.3 - 12 Octobre 2026*
+*v1.3 : téléphone — console sur toute la surface, bandeau sur deux lignes ; barre de touches de défilement de `screen` (Défiler = Ctrl-A Échap, ↑ ↓, Page ↑/↓ = Ctrl-B/Ctrl-F, Échap) ; déplacements de souris filtrés (les clics et la molette restent transmis).*
 *v1.2 : page Console reprend la présentation de l'outil d'origine — bandeau titre sombre de 42 px (titre, état, choix de session, Connecter/Déconnecter) + terminal plein cadre ; connexion automatique à l'ouverture, reconnexion automatique (3 s) après une vraie coupure. v1.1 archivée.*
 *v1.1 : clé SSH par défaut = celle de l'utilisateur qui lance l'application (plus la clé unique de l'installation) ; plus d'entrée « Console » décalée dans Paramètres Techniques (la page Console est la page de l'application, `id: 'dashboard'`). v1.0 archivée.*
 *v1.0 : première version — portage de l'outil autonome https://github.com/zdid/screen2http (Express + ws + ssh2 + xterm.js, une seule session, configuration `config.yaml` locale) dans le socle : paramétrage dans Paramètres Techniques, affichage dans une page de l'application, plusieurs sessions possibles.*
@@ -89,3 +90,14 @@ xterm.js est servi par l'application elle-même (pas de CDN : le réseau local n
 - `npm run build` et `npm run build:ui` sans erreur.
 - Service éprouvé contre un faux serveur SSH (ssh2 `Server`) : ouverture, pty aux bonnes dimensions, commande `screen -xS <nom filtré>`, sortie relayée, saisie renvoyée, redimensionnement transmis, fermeture.
 - **Non vérifié** : affichage de la page dans le navigateur avec le core complet, et connexion à un vrai `screen`.
+
+## 8. Téléphone, défilement et souris (v1.3)
+
+- **Surface.** Sous 768 px, la console embarquée occupe `100dvh − 56 px` (le bouton ☰ de l'hôte), sans cadre arrondi, et le bloc de contenu de l'hôte n'a plus de
+  marge ni de fond autour d'elle. Le bandeau passe à la ligne (la ligne des actions prend toute la largeur, le sélecteur de session s'étire).
+- **Barre de touches** sous le bandeau, pour défiler dans `screen` sans clavier physique : **Défiler** (`Ctrl-A` puis `Échap`, entrée dans le mode copie/défilement), **↑** / **↓**
+  (`ESC [ A` / `ESC [ B`), **Page ↑** / **Page ↓** (`Ctrl-B` / `Ctrl-F`), **Échap** (sortie du mode). Les séquences sont décrites dans l'attribut `data-seq` (`\x01`, `\x1b`…) et
+  envoyées par `screen2http:input` seulement si la session est connectée. Les boutons ne prennent pas le focus (pas de clavier virtuel).
+- **Souris.** Quand l'application distante active le suivi de la souris, xterm.js renvoie chaque mouvement sous forme de séquence ; hors de l'application elle s'affichait en
+  texte parasite (`;M35;12;5M`). Les rapports de **mouvement** (bit 32 du code bouton, formats SGR et X10) sont supprimés avant l'envoi ; **clics et molette** restent transmis
+  (positionnement du curseur au clic). **Vérifié** : séquences d'exemple ; pas encore éprouvé avec un vrai `screen` ni sur un téléphone.

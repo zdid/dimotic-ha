@@ -120,6 +120,14 @@ function setupSocketListeners(): void {
 }
 
 function setupToolbar(): void {
+  // ⭐ 12/10/2026, demande utilisateur : barre de touches pour remonter/descendre dans screen sans clavier physique
+  // (téléphone : pas de Ctrl). « Défiler » = Ctrl-A puis Échap (mode copie/défilement de screen) ; ensuite flèches,
+  // demi-pages (Ctrl-U / Ctrl-D) et pages (Ctrl-B / Ctrl-F) ; « Échap » pour en sortir. Les boutons ne prennent pas
+  // le focus (le clavier virtuel du téléphone ne s'ouvre pas).
+  moduleRoot().querySelectorAll<HTMLButtonElement>('.s2h-keys button[data-seq]').forEach((btn) => {
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
+    btn.addEventListener('click', () => sendKeys(btn.dataset.seq ?? ''));
+  });
   ($('s2h-connect') as HTMLButtonElement | null)?.addEventListener('click', () => connect());
   ($('s2h-disconnect') as HTMLButtonElement | null)?.addEventListener('click', () => disconnect());
   ($('s2h-target') as HTMLSelectElement | null)?.addEventListener('change', (e) => {
@@ -213,7 +221,8 @@ function attachTerminal(): void {
     term.loadAddon(fit);
     term.open(host);
     term.onData((data: string) => {
-      if (sessionId && sessionState === 'connected') socket.emit('screen2http:input', { sessionId, data });
+      const out = dropMouseMoves(data);
+      if (out && sessionId && sessionState === 'connected') socket.emit('screen2http:input', { sessionId, data: out });
     });
     term.onResize(() => sendResize());
   } else if (term.element && term.element.parentElement !== host) {
@@ -227,6 +236,26 @@ function attachTerminal(): void {
   });
   resizeObserver.observe(host);
   try { fit.fit(); } catch { /* idem */ }
+}
+
+/**
+ * ⭐ 12/10/2026, demande utilisateur : les déplacements de souris ne doivent pas être pris en compte.
+ * Quand une application distante active le suivi de la souris, xterm.js renvoie chaque mouvement sous forme de
+ * séquence d'échappement ; elle finissait dans le terminal distant comme du texte parasite. On retire les rapports
+ * de MOUVEMENT (bit 32 du code bouton), au format SGR (ESC [ < b ; x ; y M|m) comme au format X10 (ESC [ M b x y).
+ * Les clics et la molette restent transmis.
+ */
+function dropMouseMoves(data: string): string {
+  return data
+    .replace(/\x1b\[<(\d+);\d+;\d+[Mm]/g, (m: string, b: string) => ((parseInt(b, 10) & 32) !== 0 ? '' : m))
+    .replace(/\x1b\[M([\s\S])[\s\S][\s\S]/g, (m: string, c: string) => (((c.charCodeAt(0) - 32) & 32) !== 0 ? '' : m));
+}
+
+/** Envoie une séquence de touches au terminal distant (séquences décrites dans le HTML : \\x01 = Ctrl-A, \\x1b = Échap). */
+function sendKeys(seq: string): void {
+  if (!seq || !sessionId || sessionState !== 'connected' || !socket) return;
+  const data = seq.replace(/\\x([0-9a-fA-F]{2})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)));
+  socket.emit('screen2http:input', { sessionId, data });
 }
 
 function sendResize(): void {

@@ -39,6 +39,24 @@
     .s2h-header button:disabled { opacity: 0.45; cursor: not-allowed; }
     .s2h-header select:disabled { opacity: 0.6; }
 
+    /* ⭐ 12/10/2026, demande utilisateur : sur téléphone, la console occupe toute la surface disponible
+       (hauteur de l'écran moins le bouton ☰ de l'hôte), sans cadre arrondi ; le bandeau passe à la ligne
+       au lieu de déborder. */
+    @media (max-width: 768px) {
+      .s2h-root.embedded { height: calc(100dvh - 56px); min-height: 300px; border-radius: 0; }
+      .s2h-header { height: auto; min-height: 42px; flex-wrap: wrap; padding: 4px 8px; gap: 4px 10px; }
+      .s2h-actions { margin-left: 0; width: 100%; flex-wrap: wrap; }
+      .s2h-header select { flex: 1; min-width: 0; }
+      .s2h-terminal { padding: 2px; }
+    }
+
+    .s2h-keys { flex: none; display: flex; gap: 6px; padding: 4px 8px; background: #1b1b1b; }
+    .s2h-keys button {
+      flex: 1; height: 34px; min-width: 0; border-radius: 4px; border: 1px solid #555; background: #333; color: white;
+      font-size: 14px; cursor: pointer; padding: 0 6px; touch-action: manipulation;
+    }
+    .s2h-keys button:active { background: #555; }
+
     .s2h-terminal { flex: 1; min-height: 0; padding: 5px; }
     .s2h-terminal .xterm { height: 100%; }
   </style>
@@ -55,11 +73,19 @@
         <button id="s2h-disconnect" disabled>Déconnecter</button>
       </div>
     </header>
+    <div class="s2h-keys" role="toolbar" aria-label="Touches de défilement screen">
+      <button data-seq="\x01\x1b" title="Mode défilement de screen (Ctrl-A puis Échap)">Défiler</button>
+      <button data-seq="\x1b[A" aria-label="Haut">↑</button>
+      <button data-seq="\x1b[B" aria-label="Bas">↓</button>
+      <button data-seq="\x02" title="Page précédente (Ctrl-B)">Page ↑</button>
+      <button data-seq="\x06" title="Page suivante (Ctrl-F)">Page ↓</button>
+      <button data-seq="\x1b" title="Quitter le mode défilement (Échap)">Échap</button>
+    </div>
     <div class="s2h-terminal" id="s2h-terminal"></div>
   </div>
 
   <script type="module" src="/applications/screen2http/presentation/ts/app.js"></script>
 
-  <!-- Derniere modification: 2026-10-07 16:35:00 - Flèche de retour à gauche du bandeau ; présentation de l'outil d'origine : bandeau titre avec choix de session, Connecter/Déconnecter et état ; terminal plein cadre -->
+  <!-- Derniere modification: 2026-10-12 06:30:00 - Barre de touches Défiler/↑/↓/Page/Échap pour le mode défilement de screen ; avant : 2026-10-12 06:00:00 - Téléphone : console sur toute la surface, bandeau qui passe à la ligne ; avant : 2026-10-07 16:35:00 - Flèche de retour à gauche du bandeau ; présentation de l'outil d'origine : bandeau titre avec choix de session, Connecter/Déconnecter et état ; terminal plein cadre -->
 </body>
 </html>
