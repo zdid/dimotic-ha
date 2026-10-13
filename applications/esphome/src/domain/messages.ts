@@ -49,6 +49,8 @@ export const poseSchema = z.object({
   ...commun,
   firmware: z.string().url(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  // Taille du firmware en octets : le poseur contrôle le nombre d'octets reçus (§5.5, §6.1).
+  tailleOctets: z.number().int().positive(),
   esp: z.string().min(1),
   nomAffichage: z.string().min(1),
   // Clé API : présente UNIQUEMENT pour un appareil neuf, visible une seule fois.
@@ -57,12 +59,23 @@ export const poseSchema = z.object({
 });
 export type Pose = z.infer<typeof poseSchema>;
 
+/** Occupation relevée à la fin de la compilation (§5.5). */
+export const mesuresSchema = z.object({
+  flashUtilisee: z.number().int().nonnegative(),
+  flashDisponible: z.number().int().positive(),
+  ramUtilisee: z.number().int().nonnegative(),
+  ramDisponible: z.number().int().positive(),
+  tailleOctets: z.number().int().positive()
+});
+export type Mesures = z.infer<typeof mesuresSchema>;
+
 /** État courant d'un appareil (usine puis poseur). */
 export const statusSchema = z.object({
   ...commun,
   etat: z.enum(ETATS),
   detail: z.string().default(''),
-  versionFirmware: z.string().optional()
+  versionFirmware: z.string().optional(),
+  mesures: mesuresSchema.optional()
 });
 export type Status = z.infer<typeof statusSchema>;
 

@@ -24,6 +24,8 @@ const siteServiSchema = z.object({
 
 const usineSchema = z.object({
   actif: z.boolean().default(false),
+  // Nom de la machine qui héberge ESPHome (sujet de présence `agent/<machine>`) ; vide = nom d'hôte de la machine.
+  machine: z.string().default(''),
   esphome: z
     .object({
       conteneur: z.string().default('esphome'),

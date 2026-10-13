@@ -26,10 +26,10 @@ describe('messages', () => {
   });
 
   it('le message de pose porte la clé seulement pour un appareil neuf', () => {
-    const sans = lire(poseSchema, JSON.stringify({ ...base, firmware: 'http://f/x.bin', sha256: sha, esp: '192.168.1.40', nomAffichage: 'Plan HAPLAN' }));
+    const sans = lire(poseSchema, JSON.stringify({ ...base, firmware: 'http://f/x.bin', sha256: sha, tailleOctets: 1234567, esp: '192.168.1.40', nomAffichage: 'Plan HAPLAN' }));
     expect(sans.ok && sans.valeur.cle).toBeUndefined();
     expect(sans.ok && sans.valeur.options.autoriserAppelsService).toBe(false);
-    const avec = lire(poseSchema, JSON.stringify({ ...base, firmware: 'http://f/x.bin', sha256: sha, esp: '192.168.1.40', nomAffichage: 'Plan HAPLAN', cle: 'k', options: { autoriserAppelsService: true } }));
+    const avec = lire(poseSchema, JSON.stringify({ ...base, firmware: 'http://f/x.bin', sha256: sha, tailleOctets: 1234567, esp: '192.168.1.40', nomAffichage: 'Plan HAPLAN', cle: 'k', options: { autoriserAppelsService: true } }));
     expect(avec.ok && avec.valeur.cle).toBe('k');
   });
 
