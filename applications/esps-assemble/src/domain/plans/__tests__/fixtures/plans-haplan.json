@@ -1,0 +1,359 @@
+{
+ "original": {
+  "image": {
+   "largeur": 660,
+   "hauteur": 858
+  },
+  "positions": [
+   {
+    "entity_id": "light.lumiere_plafonnier_chambre_de_jo_1er_etage",
+    "x": 0.6757729841962408,
+    "y": 0.13067832232871296
+   },
+   {
+    "entity_id": "light.lumiere_plafonnier_toilettes_du_haut_1er_etage",
+    "x": 0.6105666666666667,
+    "y": 0.43593286713286716
+   },
+   {
+    "entity_id": "light.lumiere_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_l1",
+    "x": 0.5044610088416994,
+    "y": 0.42596054119491616
+   },
+   {
+    "entity_id": "switch.gros_ballon_maison_maison_rez_de_chaussee",
+    "x": 0.29625895659073304,
+    "y": 0.3311002555387321
+   },
+   {
+    "entity_id": "light.lumiere_leds_chambre_de_jo_1er_etage",
+    "x": 0.45208161820427756,
+    "y": 0.07484503343878343
+   },
+   {
+    "entity_id": "light.lumiere_chevets_chambre_de_jo_1er_etage_l2",
+    "x": 0.5384200063808378,
+    "y": 0.23842346889221888
+   },
+   {
+    "entity_id": "light.lumiere_chevets_chambre_de_jo_1er_etage_l1",
+    "x": 0.5366027111879906,
+    "y": 0.15277378058139776
+   },
+   {
+    "entity_id": "light.lumiere_plan_de_travail_cuisine_rez_de_chaussee",
+    "x": 0.5585621765360853,
+    "y": 0.6187901047520188
+   },
+   {
+    "entity_id": "switch.petit_ballon_maison_maison_rez_de_chaussee",
+    "x": 0.2984851622313371,
+    "y": 0.2846981306453963
+   },
+   {
+    "entity_id": "sensor.barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_humidity",
+    "x": 0.4636454545454545,
+    "y": 0.35785104895104897
+   },
+   {
+    "entity_id": "sensor.barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_temperature",
+    "x": 0.4681545454545455,
+    "y": 0.3309657342657342
+   },
+   {
+    "entity_id": "sensor.barometre_salle_de_bain_du_bas_salle_de_bain_du_bas_rez_de_chaussee_humidity",
+    "x": 0.06966363636363637,
+    "y": 0.6235580419580421
+   },
+   {
+    "entity_id": "sensor.barometre_salle_de_bain_du_bas_salle_de_bain_du_bas_rez_de_chaussee_temperature",
+    "x": 0.07276363636363636,
+    "y": 0.5932405594405594
+   },
+   {
+    "entity_id": "sensor.barometre_chambre_du_bas_chambre_du_bas_rez_de_chaussee_humidity",
+    "x": 0.21706655399681654,
+    "y": 0.5541330414377289
+   },
+   {
+    "entity_id": "sensor.barometre_chambre_du_bas_chambre_du_bas_rez_de_chaussee_pressure",
+    "x": 0.20874529990329638,
+    "y": 0.6979114635364635
+   },
+   {
+    "entity_id": "sensor.barometre_chambre_du_bas_chambre_du_bas_rez_de_chaussee_temperature",
+    "x": 0.1370312191700499,
+    "y": 0.7737409481794247
+   },
+   {
+    "entity_id": "light.lumiere_terrasse_terrasse_rez_de_chaussee",
+    "x": 0.5757151515151515,
+    "y": 0.04428438228438228
+   },
+   {
+    "entity_id": "light.chambre_plafonnier",
+    "x": 0.8439121212121211,
+    "y": 0.13056526806526808
+   },
+   {
+    "entity_id": "light.entree_lumiere",
+    "x": 0.48114209299585364,
+    "y": 0.8397945641597985
+   },
+   {
+    "entity_id": "light.salle_salon",
+    "x": 0.7832144234141335,
+    "y": 0.632938513309607
+   },
+   {
+    "entity_id": "light.salle_lampadaire",
+    "x": 0.8980045026107193,
+    "y": 0.5396853715945513
+   },
+   {
+    "entity_id": "light.salle_bibliotheque",
+    "x": 0.6999969696969697,
+    "y": 0.8892650349650351
+   },
+   {
+    "entity_id": "light.toilettes_du_bas_lumiere",
+    "x": 0.3097242586693384,
+    "y": 0.8382982577318515
+   },
+   {
+    "entity_id": "light.escalier_couloir",
+    "x": 0.6333,
+    "y": 0.3030317016317016
+   },
+   {
+    "entity_id": "light.salle_de_bain_du_bas_lumiere",
+    "x": 0.0939,
+    "y": 0.6550195804195804
+   },
+   {
+    "entity_id": "light.exterieur_devant",
+    "x": 0.3968704833578405,
+    "y": 0.947678257614781
+   },
+   {
+    "entity_id": "light.chambre_du_bas_lumiere",
+    "x": 0.23941212121212121,
+    "y": 0.6421489510489511
+   },
+   {
+    "entity_id": "light.bureau_plafonnier",
+    "x": 0.8050225932332551,
+    "y": 0.3305848611024392
+   },
+   {
+    "entity_id": "light.salle_salle_a_manger",
+    "x": 0.7847057650568683,
+    "y": 0.777265581098589
+   },
+   {
+    "entity_id": "light.grenier_petit_grenier",
+    "x": 0.23913408757989205,
+    "y": 0.11616414997762654
+   },
+   {
+    "entity_id": "light.cuisine_table",
+    "x": 0.3981456885306136,
+    "y": 0.6581263381800491
+   },
+   {
+    "entity_id": "light.cuisine_plafonnier",
+    "x": 0.45360630672275065,
+    "y": 0.5617143273393274
+   },
+   {
+    "entity_id": "light.chambre_d_ami_ancien_plafonnier",
+    "x": 0.45077491896625416,
+    "y": 0.20447948048045703
+   }
+  ],
+  "texts": []
+ },
+ "Rez de chaussée": {
+  "image": {
+   "largeur": 620,
+   "hauteur": 412
+  },
+  "positions": [
+   {
+    "entity_id": "light.lumiere_plan_de_travail_cuisine_rez_de_chaussee",
+    "x": 0.5629,
+    "y": 0.301
+   },
+   {
+    "entity_id": "light.entree_lumiere",
+    "x": 0.4742,
+    "y": 0.7282
+   },
+   {
+    "entity_id": "light.salle_salon",
+    "x": 0.8145,
+    "y": 0.2306
+   },
+   {
+    "entity_id": "light.salle_lampadaire",
+    "x": 0.9258,
+    "y": 0.0752
+   },
+   {
+    "entity_id": "light.salle_bibliotheque",
+    "x": 0.7129,
+    "y": 0.818
+   },
+   {
+    "entity_id": "light.toilettes_du_bas_lumiere",
+    "x": 0.2984,
+    "y": 0.75
+   },
+   {
+    "entity_id": "light.salle_de_bain_du_bas_lumiere",
+    "x": 0.0677,
+    "y": 0.3301
+   },
+   {
+    "entity_id": "light.exterieur_devant",
+    "x": 0.3823,
+    "y": 0.8859
+   },
+   {
+    "entity_id": "light.chambre_du_bas_lumiere",
+    "x": 0.2226,
+    "y": 0.3034
+   },
+   {
+    "entity_id": "light.salle_salle_a_manger",
+    "x": 0.8129,
+    "y": 0.5752
+   },
+   {
+    "entity_id": "light.cuisine_table",
+    "x": 0.3839,
+    "y": 0.3714
+   },
+   {
+    "entity_id": "light.cuisine_plafonnier",
+    "x": 0.4274,
+    "y": 0.1553
+   },
+   {
+    "entity_id": "sensor.barometre_salle_de_bain_du_bas_salle_de_bain_du_bas_rez_de_chaussee_humidity",
+    "x": 0.0419,
+    "y": 0.2646
+   },
+   {
+    "entity_id": "sensor.barometre_salle_de_bain_du_bas_salle_de_bain_du_bas_rez_de_chaussee_temperature",
+    "x": 0.0452,
+    "y": 0.2015
+   },
+   {
+    "entity_id": "sensor.barometre_chambre_du_bas_chambre_du_bas_rez_de_chaussee_humidity",
+    "x": 0.2065,
+    "y": 0.1383
+   },
+   {
+    "entity_id": "sensor.barometre_chambre_du_bas_chambre_du_bas_rez_de_chaussee_pressure",
+    "x": 0.2032,
+    "y": 0.4078
+   },
+   {
+    "entity_id": "sensor.barometre_chambre_du_bas_chambre_du_bas_rez_de_chaussee_temperature",
+    "x": 0.0968,
+    "y": 0.5655
+   }
+  ],
+  "texts": []
+ },
+ "Premier": {
+  "image": {
+   "largeur": 620,
+   "hauteur": 412
+  },
+  "positions": [
+   {
+    "entity_id": "light.lumiere_plafonnier_chambre_de_jo_1er_etage",
+    "x": 0.6516,
+    "y": 0.233
+   },
+   {
+    "entity_id": "light.lumiere_plafonnier_toilettes_du_haut_1er_etage",
+    "x": 0.6177,
+    "y": 0.8592
+   },
+   {
+    "entity_id": "light.lumiere_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_l1",
+    "x": 0.5048,
+    "y": 0.8374
+   },
+   {
+    "entity_id": "switch.gros_ballon_maison_maison_rez_de_chaussee",
+    "x": 0.2968,
+    "y": 0.6238
+   },
+   {
+    "entity_id": "light.lumiere_leds_chambre_de_jo_1er_etage",
+    "x": 0.429,
+    "y": 0.0971
+   },
+   {
+    "entity_id": "light.lumiere_chevets_chambre_de_jo_1er_etage_l2",
+    "x": 0.5419,
+    "y": 0.483
+   },
+   {
+    "entity_id": "light.lumiere_chevets_chambre_de_jo_1er_etage_l1",
+    "x": 0.55,
+    "y": 0.318
+   },
+   {
+    "entity_id": "switch.petit_ballon_maison_maison_rez_de_chaussee",
+    "x": 0.1935,
+    "y": 0.7039
+   },
+   {
+    "entity_id": "light.lumiere_terrasse_terrasse_rez_de_chaussee",
+    "x": 0.5806,
+    "y": 0.0437
+   },
+   {
+    "entity_id": "light.chambre_plafonnier",
+    "x": 0.8661,
+    "y": 0.2233
+   },
+   {
+    "entity_id": "light.escalier_couloir",
+    "x": 0.6419,
+    "y": 0.5825
+   },
+   {
+    "entity_id": "light.bureau_plafonnier",
+    "x": 0.8468,
+    "y": 0.6262
+   },
+   {
+    "entity_id": "light.grenier_petit_grenier",
+    "x": 0.2355,
+    "y": 0.1796
+   },
+   {
+    "entity_id": "light.chambre_d_ami_ancien_plafonnier",
+    "x": 0.4145,
+    "y": 0.3883
+   },
+   {
+    "entity_id": "sensor.barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_humidity",
+    "x": 0.4613,
+    "y": 0.6966
+   },
+   {
+    "entity_id": "sensor.barometre_salle_de_bain_du_haut_salle_de_bain_du_haut_1er_etage_temperature",
+    "x": 0.4661,
+    "y": 0.6408
+   }
+  ],
+  "texts": []
+ }
+}

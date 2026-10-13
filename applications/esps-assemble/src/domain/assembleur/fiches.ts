@@ -76,7 +76,13 @@ export const ficheAppareilSchema = z.object({
   esp: z.object({ adresse: z.string().default(''), port: z.number().int().positive().default(6053), portOta: z.number().int().positive().optional() }).default({}),
   options: z.object({ autoriserAppelsService: z.boolean().default(false) }).default({}),
   /** Sites dont le wifi figure dans l'appareil (identifiants dans le secrets.yaml de l'usine). */
-  wifi: z.array(identifiant).default([])
+  wifi: z.array(identifiant).default([]),
+  /**
+   * Plans à embarquer, une page chacun (identifiants des plans de l'intégration Plans). Les pages sont GÉNÉRÉES à l'assemblage et
+   * incluses par le fichier de l'appareil sous `generes/page-plan-<identifiant simplifié>.yaml` (voir plans/generer-fichiers.ts).
+   * Exige un écran sur le matériel et l'élément `polices-plans`.
+   */
+  plans: z.array(z.string().min(1)).default([])
 });
 export type FicheAppareil = z.infer<typeof ficheAppareilSchema>;
 

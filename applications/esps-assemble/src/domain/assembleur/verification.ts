@@ -68,6 +68,12 @@ export function verifier(appareil: FicheAppareil, sources: SourcesAppareil, ctx:
     vus.add(cle);
   }
 
+  // Pages de plans générées : exigent un écran et l'élément qui définit les polices d'icônes.
+  if (appareil.plans.length > 0) {
+    if (!m.ecran) erreurs.push(`l'appareil demande des pages de plans : le matériel ${m.id} n'a pas d'écran`);
+    if (!presents.has('polices-plans')) erreurs.push(`l'appareil demande des pages de plans : il doit aussi inclure l'élément polices-plans (polices des icônes)`);
+  }
+
   if (sources.annexesManquantes.length > 0) avertissements.push(`fichiers annexes introuvables (non embarqués) : ${sources.annexesManquantes.join(', ')}`);
   return { erreurs, avertissements };
 }

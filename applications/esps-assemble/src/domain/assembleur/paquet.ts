@@ -29,11 +29,13 @@ export type ResultatAssemblage =
 
 const sha = (b: Buffer): string => crypto.createHash('sha256').update(b).digest('hex');
 
-export function assemblerPaquet(racine: string, nom: string, revision: number, maintenant: () => Date = () => new Date()): ResultatAssemblage {
+export function assemblerPaquet(racine: string, nom: string, revision: number, maintenant: () => Date = () => new Date(), generes: Map<string, Buffer> = new Map()): ResultatAssemblage {
   const biblio = new Bibliotheque(racine);
   try {
     const appareil = biblio.appareil(nom);
-    const sources = resoudreAppareil(racine, nom);
+    const sources = resoudreAppareil(racine, nom, generes);
+    // Les images de fond générées sont des fichiers du paquet au même titre que les sources.
+    for (const [chemin, contenu] of generes) if (!sources.fichiers.has(chemin)) sources.fichiers.set(chemin, contenu);
     const materiel = biblio.materiel(appareil.materiel);
     const elements = new Map<string, FicheElement>();
     const erreursFiches: string[] = [];

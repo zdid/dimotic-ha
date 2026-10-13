@@ -32,6 +32,14 @@ export function chargerYaml(fichier: string): unknown {
   }
 }
 
+export function chargerYamlTexte(texte: string, nom: string): unknown {
+  try {
+    return yaml.load(texte, { schema: SCHEMA });
+  } catch (e) {
+    throw new ResolutionImpossible(`${nom} illisible : ${(e as Error).message}`);
+  }
+}
+
 export interface Inclusion {
   /** Chemin dans le paquet (relatif à la racine de configuration d'ESPHome). */
   chemin: string;
@@ -93,7 +101,7 @@ function annexesDe(noeud: unknown, sortie: Set<string>): void {
  * `racine` : dossier de l'application (contient `appareils/` et `bibliotheque/`). Les annexes sont cherchées dans
  * `bibliotheque/annexes/<chemin>` puis `appareils/<chemin>` ; celles qui sont introuvables sont signalées (pas d'échec).
  */
-export function resoudreAppareil(racine: string, nom: string): SourcesAppareil {
+export function resoudreAppareil(racine: string, nom: string, generes: Map<string, Buffer> = new Map()): SourcesAppareil {
   const fichierAppareil = path.join(racine, 'appareils', `${nom}.yaml`);
   if (!fs.existsSync(fichierAppareil)) throw new ResolutionImpossible(`appareil ${nom} : appareils/${nom}.yaml introuvable`);
   const fichiers = new Map<string, Buffer>();
@@ -103,10 +111,12 @@ export function resoudreAppareil(racine: string, nom: string): SourcesAppareil {
 
   const visite = (cheminPaquet: string, absolu: string, pile: string[]): void => {
     if (pile.includes(cheminPaquet)) throw new ResolutionImpossible(`inclusion circulaire : ${[...pile, cheminPaquet].join(' → ')}`);
-    if (!fs.existsSync(absolu)) throw new ResolutionImpossible(`fichier inclus introuvable : ${cheminPaquet}`);
-    const contenu = fs.readFileSync(absolu);
+    // Fichier GÉNÉRÉ à l'assemblage (pages de plans) : fourni par `generes`, pas lu sur le disque.
+    const genere = generes.get(cheminPaquet);
+    if (genere === undefined && !fs.existsSync(absolu)) throw new ResolutionImpossible(`fichier inclus introuvable : ${cheminPaquet}`);
+    const contenu = genere ?? fs.readFileSync(absolu);
     fichiers.set(cheminPaquet, contenu);
-    const doc = chargerYaml(absolu);
+    const doc = genere !== undefined ? chargerYamlTexte(genere.toString('utf8'), cheminPaquet) : chargerYaml(absolu);
     annexesDe(doc, annexes);
     const incs: Inclusion[] = [];
     inclusionsDe(doc, cheminPaquet, incs);
@@ -124,7 +134,8 @@ export function resoudreAppareil(racine: string, nom: string): SourcesAppareil {
   for (const a of annexes) {
     const candidats = [path.join(racine, 'bibliotheque', 'annexes', a), path.join(racine, 'appareils', a)];
     const trouve = candidats.find((c) => fs.existsSync(c));
-    if (trouve) fichiers.set(a, fs.readFileSync(trouve)); else annexesManquantes.push(a);
+    if (generes.has(a)) fichiers.set(a, generes.get(a) as Buffer); // image de fond générée à l'assemblage
+    else if (trouve) fichiers.set(a, fs.readFileSync(trouve)); else annexesManquantes.push(a);
   }
   return { nom, fichiers, materiel, elements, annexesManquantes: annexesManquantes.sort() };
 }
