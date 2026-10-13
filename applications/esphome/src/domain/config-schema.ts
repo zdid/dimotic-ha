@@ -30,6 +30,8 @@ const usineSchema = z.object({
     .object({
       conteneur: z.string().default('esphome'),
       dossierConfig: z.string().default('/esphome-config'),
+      // Chemin du même dossier VU DEPUIS le conteneur ESPHome (là où `esphome compile` le lit).
+      cheminDansConteneur: z.string().default('/config'),
       // Version figée (compilations reproductibles) ; montée de version volontaire.
       image: z.string().default('esphome/esphome:2025.11.2'),
       socketDocker: z.string().default('/var/run/docker.sock')
