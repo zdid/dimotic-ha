@@ -34,5 +34,7 @@ def cmp(x,y,path):
     elif x!=y: diffs.append((path,"valeur",str(x)[:80],str(y)[:80]))
 cmp(na,nb,"")
 print(len(diffs),"différence(s)"); [print(d) for d in diffs[:25]]
-lv=nb["lvgl"][0] if isinstance(nb["lvgl"],list) else nb["lvgl"]
-print("pages :", [p["id"] for p in lv["pages"]])
+sys.exit(1 if diffs else 0)
+if "lvgl" in nb:  # écrans seulement (un satellite vocal n'a pas de pages)
+    lv=nb["lvgl"][0] if isinstance(nb["lvgl"],list) else nb["lvgl"]
+    print("pages :", [p["id"] for p in lv["pages"]])

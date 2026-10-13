@@ -1,0 +1,267 @@
+# Matériel : Waveshare ESP32-S3-Audio (ESP32-S3, flash 16 Mo, PSRAM octal, codecs ES7210 micro / ES8311 haut-parleur,
+# expandeur TCA9555, anneau de 7 LED WS2812). Élément de bibliothèque espdisplay, extrait fidèlement de hasat4.yaml
+# le 13/10/2026 (tools/decouper-par-plan.py + plans-decoupage/satellite-vocal.json).
+# Paramètres attendus de l'appareil : device_name, friendly_name. Le wifi est un élément à part (wifi-simple ou wifi-multi-ap). Sans clé de chiffrement API (comme l'existant).
+
+substitutions:
+
+  i2s_mclk: GPIO12
+  i2s_bclk: GPIO13 #SCLK
+  i2s_lrclk: GPIO14 #LRCK/WS
+
+  amp_ctrl: 8 #9 #Extended IO pin that controls the PA_EN on the TCA9555
+  i2c_scl: GPIO10
+  i2c_sda: GPIO11
+  rtc_int: 5 #ExtendedIO
+
+  #mic lookup
+  mic_channel_0: 'left'
+  mic_channel_1: 'right' # mic wont allow right
+  mic_channel_2: 'stereo' # voice assistant does not support stereo
+
+  #WORKING
+  which_mic: 0 #0=left, 1=right, 2=stereo
+  i2s_sample_rate: 16000 # Works as in sync with microphone (mic must have 16000 for voice assistant)
+  i2s_bits_per_sample: 32
+  #i2s_bits_per_sample: 16
+  i2s_mode_mic: secondary
+  i2s_mode_speaker: secondary
+  i2s_use_apll: true
+  i2s_bps_spk: 16bit
+  i2s_bps_mic: 16bit
+  i2s_mclk_multiple: 256 # 128, 256, 384, 512
+  led_num: '7' # WS2812 ring leds
+
+# Pre-configured camera code
+# exposes UI controls to Homeassistant
+# ====================================
+#packages: # REMOTE (GIT)
+#  remote_package_shorthand: github://esphome/sw3Dan/waveshare-s2-audio_esphome_voice/waveshare_camera_pkg.yaml@main
+#packages: # LOCAL FILE
+#  dynamic-cam: !include
+#    file: waveshare_camera_pkg.yaml
+
+esphome:
+  name: $device_name
+  friendly_name: ${friendly_name}
+  min_version: 2025.8.0
+
+esp32:
+  board: esp32-s3-devkitc-1
+  cpu_frequency: 240MHz
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
+
+      # Considerably speeds up mWW at the cost of using more PSRAM.
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+
+      CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST: "y"
+      CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
+
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
+      CONFIG_MBEDTLS_SSL_PROTO_TLS1_3: "y"  # TLS1.3 support isn't enabled by default in IDF 5.1.5
+
+#network:
+#  enable_ipv6: true
+
+debug:
+  update_interval: 5s
+
+logger:
+  level: DEBUG
+
+api:
+  id: api_id
+
+#  encryption:
+#    key: !secret api_esp32-audio-s3
+
+# http_request: 
+#   verify_ssl: false
+
+ota:
+  - platform: esphome
+    id: ota_esphome
+    password: !secret ota_password
+
+i2c:
+  - id: internal_i2c
+    sda: GPIO11
+    scl: GPIO10
+    scan: true
+    frequency: 100kHz
+
+# I/O Expander that controls the amplifier enable pin
+tca9555:
+  id: ioexp
+  i2c_id: internal_i2c
+  address: 0x20
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+time:
+  - platform: homeassistant
+  #- platform: pcf85063
+    id: rtc
+  #  address: 0x51
+    #RTC_INT = $rtc_int # extIO 5
+  #  i2c_id: internal_i2c
+
+    on_time:
+      - seconds: 0
+        minutes: /1
+        then:
+          - script.execute: check_alarm
+    on_time_sync:
+      - script.execute: publish_current_time
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: status_ring
+    name: "Status Ring"
+    pin: GPIO38
+    num_leds: ${led_num}
+    chipset: WS2812
+    rgb_order: RGB
+    default_transition_length: 150ms
+    effects:
+      - pulse:
+          name: "Pulse Slow"
+          transition_length: 1000ms
+          update_interval: 16ms
+      - pulse:
+          name: "Pulse Medium"
+          transition_length: 600ms
+          update_interval: 16ms
+      - pulse:
+          name: "Pulse Fast"
+          transition_length: 300ms
+          update_interval: 16ms
+      - addressable_rainbow:
+          name: "Rainbow Slow"
+          speed: 6
+          width: 7
+      - addressable_color_wipe:
+          name: "Wipe"
+
+i2s_audio:
+  - id: i2s_output
+    i2s_lrclk_pin: 
+      number: $i2s_lrclk
+      allow_other_uses: true
+    i2s_bclk_pin:  
+      number: $i2s_bclk
+      allow_other_uses: true
+    i2s_mclk_pin:
+      number: $i2s_mclk
+
+  - id: i2s_input
+    i2s_lrclk_pin:  
+      number: $i2s_lrclk
+      allow_other_uses: true
+    i2s_bclk_pin:  
+      number: $i2s_bclk
+      allow_other_uses: true
+
+audio_adc:
+  - platform: es7210
+    id: adc_mic
+    i2c_id: internal_i2c
+    sample_rate: $i2s_sample_rate
+    bits_per_sample: $i2s_bps_mic
+    #bits_per_sample: "${i2s_bits_per_sample}bit"
+
+# external_components:
+#   - source:
+#       type: local
+#       path: components
+#     components: [ es8311 ]
+external_components:
+  - source:
+      type: git
+      url: "https://github.com/sw3Dan/waveshare-s2-audio_esphome_voice"
+      ref: main
+    components: [ es8311 ]
+    refresh: 0s
+
+audio_dac:
+  - platform: es8311
+    id: es8311_dac
+    i2c_id: internal_i2c
+    use_mclk: true
+    sample_rate: $i2s_sample_rate
+    bits_per_sample: $i2s_bps_spk
+    #bits_per_sample: "${i2s_bits_per_sample}bit"
+    force_master: true
+    mclk_multiple: $i2s_mclk_multiple
+
+microphone:
+  - platform: i2s_audio
+    id: i2s_mics
+    i2s_din_pin: GPIO15
+    adc_type: external
+    pdm: false
+    i2s_audio_id: i2s_input
+    i2s_mode: $i2s_mode_mic
+
+    #sample_rate: $i2s_sample_rate
+    sample_rate: 16000
+
+    bits_per_sample: $i2s_bps_mic
+    #bits_per_sample: "${i2s_bits_per_sample}bit"
+
+    use_apll: $i2s_use_apll
+    mclk_multiple: $i2s_mclk_multiple
+    #channel: stereo
+    channel: ${mic_channel_${which_mic}}
+
+speaker:
+  - platform: i2s_audio
+    id: i2s_audio_speaker
+    i2s_dout_pin: GPIO16
+    
+    i2s_audio_id: i2s_output
+    i2s_mode: secondary #using the patched es8311
+
+    dac_type: external
+    timeout: never
+    buffer_duration: 100ms
+    audio_dac: es8311_dac
+    sample_rate: $i2s_sample_rate
+    #bits_per_sample: "${i2s_bits_per_sample}bit"
+    #bits_per_sample: $i2s_bps_spk
+    bits_per_sample: 16bit #TEMP FIX
+    use_apll: $i2s_use_apll
+    mclk_multiple: $i2s_mclk_multiple
+    #channel: mono #WORKS
+    channel: stereo #WORKS #TEST: STREAM ERROR
+    #channel: ${mic_channel_${which_mic}}
+
+  # Virtual speakers to combine the announcement and media streams together into one output
+  - platform: mixer
+    id: mixing_speaker
+    output_speaker: i2s_audio_speaker
+    num_channels: 2
+    source_speakers:
+      - id: announcement_mixing_input
+        timeout: never
+      - id: media_mixing_input
+        timeout: never
+
+  # Vritual speakers to resample each pipelines' audio, if necessary, as the mixer speaker requires the same sample rate
+  - platform: resampler
+    id: announcement_resampling_speaker
+    output_speaker: announcement_mixing_input
+  - platform: resampler
+    id: media_resampling_speaker
+    output_speaker: media_mixing_input

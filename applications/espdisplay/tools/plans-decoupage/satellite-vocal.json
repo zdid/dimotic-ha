@@ -1,0 +1,109 @@
+{
+  "sorties": {
+    "base": {
+      "fichier": "bibliotheque/materiels/waveshare-esp32-s3-audio/base.yaml",
+      "entete": "# Matériel : Waveshare ESP32-S3-Audio (ESP32-S3, flash 16 Mo, PSRAM octal, codecs ES7210 micro / ES8311 haut-parleur,\n# expandeur TCA9555, anneau de 7 LED WS2812). Élément de bibliothèque espdisplay, extrait fidèlement de hasat4.yaml\n# le 13/10/2026 (tools/decouper-par-plan.py + plans-decoupage/satellite-vocal.json).\n# Paramètres attendus de l'appareil : device_name, friendly_name. Le wifi est un élément à part (wifi-simple ou wifi-multi-ap). Sans clé de chiffrement API (comme l'existant)."
+    },
+    "vocal": {
+      "fichier": "bibliotheque/elements/assistant-vocal/element.yaml",
+      "entete": "# Élément : assistant vocal (lecteur audio, assistant de HA, mot d'éveil, scripts d'état de l'anneau de LED, réglages\n# exposés à HA). Extrait fidèlement de hasat4.yaml le 13/10/2026. Exige le matériel waveshare-esp32-s3-audio\n# (identifiants i2s_mics, status_ring, api_id, wifi_id, ioexp… définis par sa base)."
+    },
+    "wifi": {
+      "fichier": "bibliotheque/elements/wifi-simple/element.yaml",
+      "entete": "# Élément : wifi simple (un seul réseau, connexion rapide) — comportement historique des satellites, extrait fidèlement\n# de hasat4.yaml le 13/10/2026. Fournit : wifi_id. Interchangeable avec elements/wifi-multi-ap (plusieurs réseaux +\n# point d'accès de secours) : une seule ligne à changer dans le fichier de l'appareil."
+    }
+  },
+  "sections": {
+    "esp32": "base",
+    "debug": "base",
+    "logger": "base",
+    "ota": "base",
+    "i2c": "base",
+    "tca9555": "base",
+    "psram": "base",
+    "time": "base",
+    "light": "base",
+    "i2s_audio": "base",
+    "audio_adc": "base",
+    "external_components": "base",
+    "audio_dac": "base",
+    "microphone": "base",
+    "speaker": "base",
+    "media_player": "vocal",
+    "voice_assistant": "vocal",
+    "micro_wake_word": "vocal",
+    "globals": "vocal",
+    "script": "vocal",
+    "select": "vocal",
+    "switch": "vocal",
+    "number": "vocal",
+    "sensor": "vocal",
+    "text_sensor": "vocal",
+    "button": "vocal",
+    "binary_sensor": "vocal"
+  },
+  "partagees": {
+    "substitutions": {
+      "device_name": "-",
+      "voice_assist_idle_phase_id": "vocal",
+      "voice_assist_waiting_for_command_phase_id": "vocal",
+      "voice_assist_listening_for_command_phase_id": "vocal",
+      "voice_assist_thinking_phase_id": "vocal",
+      "voice_assist_replying_phase_id": "vocal",
+      "voice_assist_not_ready_phase_id": "vocal",
+      "voice_assist_error_phase_id": "vocal",
+      "*": "base",
+      "hidden_ssid": "wifi"
+    },
+    "esphome": {
+      "on_boot": "vocal",
+      "*": "base"
+    },
+    "wifi": {
+      "on_connect": "vocal",
+      "on_disconnect": "vocal",
+      "*": "wifi"
+    },
+    "api": {
+      "actions": "vocal",
+      "on_client_connected": "vocal",
+      "on_client_disconnected": "vocal",
+      "*": "base"
+    }
+  },
+  "remplacements": [
+    {
+      "sortie": "base",
+      "avant": "friendly_name: hasat4",
+      "apres": "friendly_name: ${friendly_name}"
+    }
+  ],
+  "appareils": [
+    {
+      "fichier": "appareils/hasat4.yaml",
+      "entete": "# Appareil hasat4 : satellite vocal (assemblé depuis la bibliothèque espdisplay).",
+      "substitutions": {
+        "device_name": "hasat4",
+        "friendly_name": "hasat4"
+      },
+      "packages": {
+        "materiel": "bibliotheque/materiels/waveshare-esp32-s3-audio/base.yaml",
+        "wifi": "bibliotheque/elements/wifi-simple/element.yaml",
+        "assistant_vocal": "bibliotheque/elements/assistant-vocal/element.yaml"
+      }
+    },
+    {
+      "fichier": "appareils/hasat5.yaml",
+      "entete": "# Appareil hasat5 : satellite vocal (assemblé depuis la bibliothèque espdisplay).",
+      "substitutions": {
+        "device_name": "hasat5",
+        "friendly_name": "hasat5"
+      },
+      "packages": {
+        "materiel": "bibliotheque/materiels/waveshare-esp32-s3-audio/base.yaml",
+        "wifi": "bibliotheque/elements/wifi-simple/element.yaml",
+        "assistant_vocal": "bibliotheque/elements/assistant-vocal/element.yaml"
+      }
+    }
+  ]
+}

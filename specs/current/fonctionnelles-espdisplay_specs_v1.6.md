@@ -1,5 +1,7 @@
 # Spécifications Fonctionnelles - Module ESPDISPLAY
 
+*Version 1.6 - 13 Octobre 2026 — **satellites vocaux désassemblés** (§10.3bis) : base matérielle `waveshare-esp32-s3-audio` + élément `assistant-vocal` + **élément wifi interchangeable** (`wifi-simple` / `wifi-multi-ap` : plusieurs réseaux + point d'accès de secours et portail captif) + appareils hasat4/hasat5, `esphome config` identique ; nouvelle organisation `materiels/` + `elements/` + `appareils/` ; outil `decouper-par-plan.py` (découpage piloté par un plan, sections partagées par sous-clés).*
+
 *Version 1.5 - 13 Octobre 2026 — **l'application HAPLAN est retirée de `applications/` et archivée hors dépôt** (`archives-applications/haplan/`, ignoré par git) ; son outil de génération des écrans ESP32 (`generate_esphome_floorplan.py` et le dossier `esphome/` : modèle, police, partitions) est **déplacé sous `applications/espdisplay/tools/`** (même profondeur : `REPO_ROOT` inchangé). Tous les chemins `applications/haplan/tools` de ce document deviennent `applications/espdisplay/tools` ; le script d'agent `~/bin/espdisplay-agent-run.sh` est mis à jour. Les plans sont toujours lus dans `data/haplan/` jusqu'à la phase « plans lus depuis HA » (§10.4). Les passages qui décrivent HAPLAN comme émetteur de la demande de déploiement restent valables à titre historique.*
 
 *Version 1.4 - 12 Octobre 2026 — **bibliothèque d'éléments d'écran** (§10) : un écran ESPHome s'assemble à partir d'une base
@@ -403,6 +405,18 @@ thermostats, 3 climatisations écrites à la main le 06/10/2026 et présentes **
 `screens/haplan-display.yaml` comparé à celui de l'original par `tools/comparer-config.py` : **0 différence** (comparateur
 vérifié sur deux modifications volontaires). Sauvegarde de l'original : `backups/docker/esphome/config/haplan-display_backup_2026-10-12_avant-bibliotheque.yaml`.
 L'écran réel n'a été **ni recompilé ni flashé** ; le fichier en service sur falbala reste le monolithique.
+
+### 10.3bis Satellites vocaux — fait le 13/10/2026
+
+`hasat3.yaml` (archivé), `hasat4.yaml` et `hasat5.yaml` sont identiques au nom près. `hasat4.yaml` (1 274 lignes) a été découpé par
+`tools/decouper-par-plan.py` selon le plan `tools/plans-decoupage/satellite-vocal.json` : **base matérielle**
+`bibliotheque/materiels/waveshare-esp32-s3-audio/base.yaml` (277 lignes), **élément** `bibliotheque/elements/assistant-vocal/element.yaml`
+(1 009 lignes), **élément wifi** `bibliotheque/elements/wifi-simple/element.yaml` (le comportement historique, extrait) **ou** `bibliotheque/elements/wifi-multi-ap/element.yaml` (plusieurs réseaux par site + point d'accès de secours « `<appareil>` secours » avec portail captif, secret `wifi_secours_password` à créer ; conception-esphome-assembleur §3.8), **appareils** `appareils/hasat4.yaml` et `appareils/hasat5.yaml` (nom, nom d'affichage, `packages:` matériel + wifi + assistant : **changer de wifi = changer une ligne**). Les sections
+`esphome`, `wifi`, `api` et `substitutions` sont **partagées par sous-clés** (réglages dans la base, automatismes de démarrage et de
+connexion dans l'élément ; ESPHome refusionne les dictionnaires). Contrôle : `esphome config` assemblé vs original, **0 différence**
+pour hasat4 et hasat5 avec `wifi-simple`, variante `wifi-multi-ap` acceptée par ESPHome (`comparer-config.py`, qui ne suppose plus de pages LVGL et rend un code de sortie ; vérifié sur deux
+modifications volontaires). Constats : pas de clé de chiffrement API sur les satellites ; composant externe `es8311` (dépôt git) sur
+`main`, à figer. Rien n'a été compilé ni envoyé aux appareils.
 
 ### 10.4 Phases suivantes
 

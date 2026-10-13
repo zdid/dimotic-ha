@@ -1,0 +1,10 @@
+# Appareil hasat5 : satellite vocal (assemblé depuis la bibliothèque espdisplay).
+
+substitutions:
+  device_name: hasat5
+  friendly_name: hasat5
+
+packages:
+  materiel: !include bibliotheque/materiels/waveshare-esp32-s3-audio/base.yaml
+  wifi: !include bibliotheque/elements/wifi-simple/element.yaml
+  assistant_vocal: !include bibliotheque/elements/assistant-vocal/element.yaml
