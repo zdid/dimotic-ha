@@ -1,0 +1,124 @@
+# Matériel : « Cheap Yellow Display » ESP32-2432S028 (ESP32 classique, flash 4 Mo, écran SPI ILI9341 2,8" 240x320 en portrait — USB-C en bas —, tactile résistif XPT2046 sur un second bus SPI,
+# rétroéclairage ledc GPIO21). Extrait fidèlement de poele-display.yaml le 14/10/2026 (tools/decouper-par-plan.py + plans-decoupage/poele-display.json).
+# Comprend la veille du rétroéclairage (30 s d'inactivité LVGL ; rallumé au premier tap). Le wifi est un élément à part (wifi-simple ou wifi-multi-ap).
+# Le pinout et le sens de rotation viennent de sources communautaires puis de l'essai réel du 08/09/2026 ; GPIO36 volontairement NON utilisé (broche flottante : faux contacts tactiles).
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+logger:
+
+# -----------------------------------------------------------------------------
+# Écran SPI 2.8" ILI9341 240x320 (portrait natif) + tactile résistif XPT2046, sur deux bus SPI
+# séparés (écran et tactile n'ont pas les mêmes broches CLK/MOSI/MISO sur cette carte).
+# -----------------------------------------------------------------------------
+spi:
+  - id: lcd_bus
+    clk_pin: GPIO14
+    mosi_pin: GPIO13
+    miso_pin: GPIO12
+  - id: touch_bus
+    clk_pin: GPIO25
+    mosi_pin: GPIO32
+    miso_pin: GPIO39
+
+display:
+  - platform: ili9xxx
+    model: ILI9341
+    id: main_lcd
+    spi_id: lcd_bus
+    cs_pin: GPIO15
+    dc_pin: GPIO2
+    invert_colors: false
+    # ⭐ 30/08/2026 : `rotation: 90` (essayé d'abord) tournait bien le rendu visuellement mais sans
+    # redimensionner le canevas que LVGL connaît en interne — LVGL continuait de travailler avec un
+    # canevas 240x320 alors que la surface réellement adressée restait 320x240 (native), d'où le
+    # bandeau vide en haut de l'écran, l'ascenseur (contenu jugé débordant par LVGL) et le premier
+    # caractère de chaque titre masqué par cet ascenseur. La doc ESPHome recommande explicitement
+    # `transform:` (rotation matérielle) + `dimensions:` inversées plutôt que `rotation:` quand
+    # `lvgl:` est utilisé — LVGL reçoit alors directement le bon canevas 240x320 (confirmé : plus de
+    # bandeau, plus d'ascenseur, tout le contenu tient). `swap_xy` + `mirror_x` (la combinaison
+    # documentée pour 90°) donnait un canevas de la bonne taille mais un rendu à l'envers (180°,
+    # confirmé par photo) — `mirror_y` seul corrige l'ordre vertical des sections (POÊLE bien en
+    # haut, Humidité en bas) mais met le texte en miroir horizontal (lettres inversées, confirmé
+    # par une nouvelle photo). Les deux retours se corrigent mutuellement sur l'axe que l'autre
+    # cassait : `mirror_x` ET `mirror_y` ensemble (avec swap_xy) pour corriger les deux à la fois.
+    dimensions:
+      width: 240
+      height: 320
+    transform:
+      swap_xy: true
+      mirror_x: true
+      mirror_y: true
+    # LVGL pilote les rafraîchissements — pas de polling périodique ni d'auto-clear interne au
+    # composant display (même contrainte que haplan-display.yaml, ESPHome refuse
+    # auto_clear_enabled: true en présence de lvgl:).
+    update_interval: never
+    auto_clear_enabled: false
+
+output:
+  - platform: ledc
+    pin: GPIO21
+    id: backlight_pwm
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Rétroéclairage"
+    id: backlight
+    restore_mode: ALWAYS_ON
+
+touchscreen:
+  platform: xpt2046
+  id: touch
+  spi_id: touch_bus
+  cs_pin: GPIO33
+  # ⭐ 08/09/2026, retiré (était GPIO36) — bug réel signalé par l'utilisateur : le rétroéclairage se
+  # rallumait tout seul après son extinction pour inactivité (30s, voir lvgl:on_idle: plus bas), et
+  # ne s'éteignait plus jamais ensuite. Aucune autre action ne pilote `backlight` que
+  # `on_touch:`/`on_idle:` ci-dessous — donc uniquement explicable par un faux contact tactile
+  # ("ghost touch"). Confirmé indépendant du poêle lui-même (à l'arrêt au moment du signalement,
+  # donc pas de bruit de commutation d'un contacteur à proximité) — cohérent avec le défaut
+  # matériel documenté sur ce modèle de carte (ESP32-2432S028 "Cheap Yellow Display") : GPIO36 est
+  # une broche entrée-seule sans résistance de tirage interne disponible, sujette à flotter et
+  # capter du bruit propre à la carte (alimentation à découpage, diaphonie entre les deux bus SPI
+  # écran/tactile) — lu comme une interruption tactile valide sans aucun contact réel. Passage en
+  # pur sondage (`update_interval` ci-dessous, déjà présent) plutôt qu'en interruption : évite de
+  # dépendre de cette broche. **Validé en conditions réelles le 08/09/2026** : tap manuel toujours
+  # réactif (rallume l'écran), extinction après 30s d'inactivité confirmée, plus de rallumage
+  # spontané observé depuis.
+  update_interval: 50ms
+  threshold: 400
+  calibration:
+    x_min: 280
+    x_max: 3860
+    y_min: 340
+    y_max: 3860
+  transform:
+    swap_xy: false
+    mirror_x: true
+    mirror_y: false
+  # ⭐ 31/08/2026 : rallume le rétroéclairage à chaque tap — sert de "réveil" après extinction pour
+  # inactivité (voir lvgl:on_idle: plus bas), même mécanisme que haplan-display.yaml.
+  on_touch:
+    - light.turn_on: backlight
+
+lvgl:
+  displays:
+    - main_lcd
+  touchscreens:
+    - touch
+  # ⭐ 31/08/2026, demande explicite : éteint le rétroéclairage après 30s d'inactivité (rallumé au
+  # premier tap, voir touchscreen:on_touch: ci-dessus) — même délai et mécanisme que
+  # haplan-display.yaml. Le minuteur se réarme automatiquement à chaque tap (LVGL), aucune logique
+  # supplémentaire nécessaire côté réveil.
+  on_idle:
+    - timeout: 30s
+      then:
+        - light.turn_off: backlight

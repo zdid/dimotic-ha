@@ -1,0 +1,25 @@
+# Élément : polices du panneau de chauffage (font_title 18, font_value 30, font_label 17 avec accents français) — jeux de glyphes réduits aux caractères réellement affichés.
+# Extrait fidèlement de poele-display.yaml le 14/10/2026.
+
+# ⭐ 30/08/2026, bug réel constaté à l'écran (accents absents, ex: "Pompe à chaleur") : sans
+# `glyphs:` explicite, ESPHome limite chaque police à son jeu de caractères par défaut (proche
+# ASCII), qui n'inclut PAS les accents français — silencieux à la compilation, juste absent à
+# l'affichage. Un jeu de glyphes par police, couvrant exactement ce qui est utilisé dans les
+# widgets ci-dessous (voir `text:`/`text_font:` de chaque label) — même raisonnement que
+# `font_sensor` dans haplan-display.yaml (glyphes réduits aux caractères réellement produits).
+font:
+  - file: "gfonts://Roboto"
+    id: font_title
+    size: 18
+    glyphs: "0123456789.-+°"
+  - file: "gfonts://Roboto"
+    id: font_value
+    size: 30
+    glyphs: "0123456789.-°%"
+  - file: "gfonts://Roboto"
+    id: font_label
+    # ⭐ 31/08/2026 : "7" absent d'"EVOO7" à l'écran — chiffres oubliés dans le jeu de glyphes de
+    # cette police (utilisée pour les titres, qui peuvent contenir des chiffres, ex: "EVOO7"), pas
+    # seulement dans font_title/font_value. Taille aussi agrandie (14→17) sur retour utilisateur.
+    size: 17
+    glyphs: " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÀÂÄÉÈÊËÎÏÔÖÙÛÜÇàâäéèêëîïôöùûüç—.,:%°"

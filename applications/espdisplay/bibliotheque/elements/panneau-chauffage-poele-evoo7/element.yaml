@@ -1,0 +1,382 @@
+# Élément : panneau de chauffage 240x320 portrait — thermostat du poêle (climate.salle_a_manger_poele), thermostat EVOO7 de la pompe à chaleur
+# (climate.infra_evoo7_control_thermostat) et humidité de la salle (sensor.salle_humidite) : températures, consignes +/- optimistes, boutons CHAUFFER/ARRETER.
+# Extrait fidèlement de poele-display.yaml le 14/10/2026 (entités et libellés encore en dur : à paramétrer plus tard).
+# Exige : un écran 240x320 (identifiants main_lcd, touch, backlight), l'élément polices-poele.
+
+# Consignes tenues côté device (pas seulement dans HA) pour permettre un +/- optimiste immédiat à
+# l'écran sans attendre l'aller-retour HA — resynchronisées par on_value des capteurs ha_*_target
+# ci-dessous (si la consigne est changée depuis l'appli HA, l'écran se met à jour aussi).
+globals:
+  - id: poele_target_c
+    type: float
+    restore_value: no
+    initial_value: '20.0'
+  - id: evoo7_target_c
+    type: float
+    restore_value: no
+    initial_value: '18.0'
+
+sensor:
+  - platform: homeassistant
+    id: ha_poele_current
+    entity_id: climate.salle_a_manger_poele
+    attribute: current_temperature
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_poele_current
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--.-°");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°", x);
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_poele_target
+    entity_id: climate.salle_a_manger_poele
+    attribute: temperature
+    internal: true
+    on_value:
+      - lambda: |-
+          if (!std::isnan(x)) id(poele_target_c) = x;
+      - lvgl.label.update:
+          id: lbl_poele_target
+          text: !lambda |-
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°", id(poele_target_c));
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_evoo7_current
+    entity_id: climate.infra_evoo7_control_thermostat
+    attribute: current_temperature
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_evoo7_current
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--.-°");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°", x);
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_evoo7_target
+    entity_id: climate.infra_evoo7_control_thermostat
+    attribute: temperature
+    internal: true
+    on_value:
+      - lambda: |-
+          if (!std::isnan(x)) id(evoo7_target_c) = x;
+      - lvgl.label.update:
+          id: lbl_evoo7_target
+          text: !lambda |-
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f°", id(evoo7_target_c));
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_humidity
+    entity_id: sensor.salle_humidite
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_humidity
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--%");
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.0f%%", x);
+            return std::string(buf);
+
+text_sensor:
+  - platform: homeassistant
+    id: ha_poele_state
+    entity_id: climate.salle_a_manger_poele
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_poele_toggle
+          text: !lambda |-
+            return (x == "heat") ? std::string("ARRETER") : std::string("CHAUFFER");
+
+  - platform: homeassistant
+    id: ha_evoo7_state
+    entity_id: climate.infra_evoo7_control_thermostat
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_evoo7_toggle
+          text: !lambda |-
+            return (x == "heat") ? std::string("ARRETER") : std::string("CHAUFFER");
+lvgl:
+  bg_color: 0x101418
+  pages:
+    - id: main_page
+      bg_color: 0x101418
+      # ⭐ 30/08/2026 : la barre verticale visible sur la photo de l'écran physique n'était pas un
+      # artefact de rendu mais un ASCENSEUR LVGL (le contenu de la page dépasse légèrement les
+      # 320px de hauteur) — positionné à gauche à cause de la rotation, il se dessinait PAR-DESSUS
+      # le début de chaque titre, d'où le premier caractère qui semblait "coupé" (ex: "alle à
+      # manger"). Cause réelle du souci précédemment attribué à un décalage de colonnes matériel
+      # (dimensions.offset_width, retiré du bloc display: ci-dessus — inutile, ce n'était pas la
+      # bonne piste).
+      scrollbar_mode: "OFF"
+      widgets:
+        # ---- Poêle ------------------------------------------------------------------------
+        - label:
+            x: 8
+            y: 6
+            width: 224
+            height: 24
+            text: "POÊLE — Salle à manger"
+            text_font: font_label
+            text_color: 0xFFFFFF
+
+        - label:
+            id: lbl_poele_current
+            x: 8
+            y: 26
+            width: 112
+            height: 36
+            text: "--.-°"
+            text_font: font_value
+            text_color: 0xFFFFFF
+
+        - label:
+            x: 128
+            y: 26
+            width: 104
+            height: 19
+            text: "Consigne"
+            text_font: font_label
+            text_color: 0xAAAAAA
+
+        - label:
+            id: lbl_poele_target
+            x: 128
+            y: 44
+            width: 104
+            height: 26
+            text: "--.-°"
+            text_font: font_title
+            text_color: 0xFFC107
+
+        - button:
+            id: btn_poele_minus
+            x: 8
+            y: 66
+            width: 52
+            height: 34
+            bg_color: 0x2A3540
+            widgets:
+              - label:
+                  text: "-"
+                  text_font: font_title
+                  text_color: 0xFFFFFF
+            on_click:
+              - lambda: |-
+                  id(poele_target_c) = std::max(15.0f, id(poele_target_c) - 0.5f);
+              - lvgl.label.update:
+                  id: lbl_poele_target
+                  text: !lambda |-
+                    char buf[16];
+                    snprintf(buf, sizeof(buf), "%.1f°", id(poele_target_c));
+                    return std::string(buf);
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.salle_a_manger_poele
+                  data_template:
+                    temperature: !lambda 'return str_sprintf("%.1f", id(poele_target_c));'
+
+        - button:
+            id: btn_poele_plus
+            x: 64
+            y: 66
+            width: 52
+            height: 34
+            bg_color: 0x2A3540
+            widgets:
+              - label:
+                  text: "+"
+                  text_font: font_title
+                  text_color: 0xFFFFFF
+            on_click:
+              - lambda: |-
+                  id(poele_target_c) = std::min(25.0f, id(poele_target_c) + 0.5f);
+              - lvgl.label.update:
+                  id: lbl_poele_target
+                  text: !lambda |-
+                    char buf[16];
+                    snprintf(buf, sizeof(buf), "%.1f°", id(poele_target_c));
+                    return std::string(buf);
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.salle_a_manger_poele
+                  data_template:
+                    temperature: !lambda 'return str_sprintf("%.1f", id(poele_target_c));'
+
+        - button:
+            id: btn_poele_toggle
+            x: 128
+            y: 66
+            width: 104
+            height: 34
+            bg_color: 0x2A3540
+            widgets:
+              - label:
+                  id: lbl_poele_toggle
+                  text: "..."
+                  text_font: font_label
+                  text_color: 0xFFFFFF
+            on_click:
+              - homeassistant.service:
+                  service: climate.set_hvac_mode
+                  data:
+                    entity_id: climate.salle_a_manger_poele
+                  data_template:
+                    hvac_mode: !lambda |-
+                      return (id(ha_poele_state).state == "heat") ? std::string("off") : std::string("heat");
+
+        # ---- EVOO7 (pompe à chaleur) --------------------------------------------------------
+        # ⭐ 31/08/2026 : y décalé de 112→128 (+16px, ~une ligne) sur retour utilisateur — la
+        # section précédente (Poêle) collait trop à celle-ci. Toutes les positions de la section
+        # EVOO7 et Humidité ci-dessous décalées d'autant pour garder les mêmes écarts internes.
+        - label:
+            x: 8
+            y: 128
+            width: 224
+            height: 24
+            text: "EVOO7 — Pompe à chaleur"
+            text_font: font_label
+            text_color: 0xFFFFFF
+
+        - label:
+            id: lbl_evoo7_current
+            x: 8
+            y: 148
+            width: 112
+            height: 36
+            text: "--.-°"
+            text_font: font_value
+            text_color: 0xFFFFFF
+
+        - label:
+            x: 128
+            y: 148
+            width: 104
+            height: 19
+            text: "Consigne"
+            text_font: font_label
+            text_color: 0xAAAAAA
+
+        - label:
+            id: lbl_evoo7_target
+            x: 128
+            y: 166
+            width: 104
+            height: 26
+            text: "--.-°"
+            text_font: font_title
+            text_color: 0xFFC107
+
+        - button:
+            id: btn_evoo7_minus
+            x: 8
+            y: 188
+            width: 52
+            height: 34
+            bg_color: 0x2A3540
+            widgets:
+              - label:
+                  text: "-"
+                  text_font: font_title
+                  text_color: 0xFFFFFF
+            on_click:
+              - lambda: |-
+                  id(evoo7_target_c) = std::max(10.0f, id(evoo7_target_c) - 0.5f);
+              - lvgl.label.update:
+                  id: lbl_evoo7_target
+                  text: !lambda |-
+                    char buf[16];
+                    snprintf(buf, sizeof(buf), "%.1f°", id(evoo7_target_c));
+                    return std::string(buf);
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.infra_evoo7_control_thermostat
+                  data_template:
+                    temperature: !lambda 'return str_sprintf("%.1f", id(evoo7_target_c));'
+
+        - button:
+            id: btn_evoo7_plus
+            x: 64
+            y: 188
+            width: 52
+            height: 34
+            bg_color: 0x2A3540
+            widgets:
+              - label:
+                  text: "+"
+                  text_font: font_title
+                  text_color: 0xFFFFFF
+            on_click:
+              - lambda: |-
+                  id(evoo7_target_c) = std::min(30.0f, id(evoo7_target_c) + 0.5f);
+              - lvgl.label.update:
+                  id: lbl_evoo7_target
+                  text: !lambda |-
+                    char buf[16];
+                    snprintf(buf, sizeof(buf), "%.1f°", id(evoo7_target_c));
+                    return std::string(buf);
+              - homeassistant.service:
+                  service: climate.set_temperature
+                  data:
+                    entity_id: climate.infra_evoo7_control_thermostat
+                  data_template:
+                    temperature: !lambda 'return str_sprintf("%.1f", id(evoo7_target_c));'
+
+        # ⚠️ Premier test réel d'écriture du MODE EVOO7 (voir en-tête de fichier) — l'écriture de
+        # la consigne (boutons +/- ci-dessus) est déjà vérifiée, celle du mode ne l'est pas.
+        - button:
+            id: btn_evoo7_toggle
+            x: 128
+            y: 188
+            width: 104
+            height: 34
+            bg_color: 0x2A3540
+            widgets:
+              - label:
+                  id: lbl_evoo7_toggle
+                  text: "..."
+                  text_font: font_label
+                  text_color: 0xFFFFFF
+            on_click:
+              - homeassistant.service:
+                  service: climate.set_hvac_mode
+                  data:
+                    entity_id: climate.infra_evoo7_control_thermostat
+                  data_template:
+                    hvac_mode: !lambda |-
+                      return (id(ha_evoo7_state).state == "heat") ? std::string("off") : std::string("heat");
+
+        # ---- Humidité (salle) -----------------------------------------------------------------
+        - label:
+            x: 8
+            y: 234
+            width: 224
+            height: 20
+            text: "Humidité — Salle"
+            text_font: font_label
+            text_color: 0xAAAAAA
+
+        - label:
+            id: lbl_humidity
+            x: 8
+            y: 254
+            width: 224
+            height: 40
+            text: "--%"
+            text_font: font_value
+            text_color: 0x00BCD4

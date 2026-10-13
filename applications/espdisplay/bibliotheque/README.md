@@ -19,6 +19,8 @@ des `packages:`. Conception : `specs/current/conception-esphome-assembleur_specs
 - `waveshare-esp32-s3-audio` — ESP32-S3 16 Mo, PSRAM, codecs ES7210/ES8311, TCA9555, anneau de 7 LED, micro, haut-parleur ;
   réglages wifi propres (id `wifi_id`, sans économie d'énergie, redémarrage à 10 min).
 
+- `cyd-esp32-2432s028` — « Cheap Yellow Display » : ESP32 classique (Arduino), écran SPI ILI9341 2,8" 240x320 portrait, tactile résistif XPT2046 (second bus SPI), rétroéclairage ledc, veille du rétroéclairage après 30 s.
+
 ### Éléments
 - **Wifi, interchangeable** (changer de wifi = changer une ligne dans l'appareil) :
   - `wifi-simple` — un seul réseau (`wifi_ssid` / `wifi_password`) ;
@@ -29,19 +31,20 @@ des `packages:`. Conception : `specs/current/conception-esphome-assembleur_specs
   (pages de plans, aujourd'hui générées par `../tools/generate_esphome_floorplan.py`), `page-energie-direct`, `page-ballons-chauffe`,
   `page-thermostats`, et **`page-climatisation` paramétrable** (7 variables : `clim_id`, `clim_entite`, `clim_rang`, `clim_titre`,
   `clim_pas`, `clim_max`, `clim_mode_auto`) qui remplace les trois copies salle / bureau / chambre d'ami.
+- **Chauffage (écran 240x320)** : `polices-poele` ; `panneau-chauffage-poele-evoo7` (thermostat du poêle, thermostat EVOO7 de la pompe à chaleur, humidité de la salle — entités et libellés encore en dur, à paramétrer).
 - **Satellite** : `assistant-vocal` (lecteur audio, assistant de HA, mot d'éveil, scripts de l'anneau, réglages exposés à HA,
   boutons ; automatismes de démarrage et de connexion).
 
 ### Appareils
 - `haplan-display` — Sunton + wifi-simple + polices + 6 pages + 3 instances de `page-climatisation`.
 - `hasat4`, `hasat5` — Waveshare + wifi-simple + assistant-vocal (`hasat3` archivé : même fichier au nom près).
-- `poele-display` — **pas encore désassemblé** (fichier complet, CYD 2,8" portrait).
+- `poele-display` — CYD 2,8" portrait : matériel `cyd-esp32-2432s028` + `wifi-simple` + `polices-poele` + `panneau-chauffage-poele-evoo7` (désassemblé le 14/10/2026, `esphome config` identique à l'original). Le fichier **en service** de la machine ESPHome n'a pas été touché.
 
 ## Contrôles (13/10/2026)
 
 `esphome config` de chaque appareil assemblé comparé à celui du fichier d'origine par `../tools/comparer-config.py` (dictionnaires
 et listes à `id` comparés, substitutions ignorées car déjà appliquées ; détecte bien les modifications volontaires) :
-**0 différence** pour `haplan-display`, `hasat4`, `hasat5` (avec `wifi-simple`) ; variantes `wifi-multi-ap` acceptées par ESPHome.
+**0 différence** pour `haplan-display`, `hasat4`, `hasat5` et `poele-display` (avec `wifi-simple`) ; variantes `wifi-multi-ap` acceptées par ESPHome.
 La page de climatisation paramétrable redonne, ré-instanciée, **chacune des trois pages d'origine à l'identique** (texte).
 Essais faits dans un dossier temporaire avec un `secrets.yaml` factice (valeurs **distinctes**, sinon ESPHome affiche un mauvais nom
 de secret) ; le dossier réel d'ESPHome n'est pas touché, rien n'a été compilé ni envoyé.
@@ -52,7 +55,7 @@ Constats : les satellites n'ont **pas de clé de chiffrement API** ; le composan
 ## Outils (`../tools/`)
 
 - `decouper-par-plan.py` + `plans-decoupage/*.json` — découpage fidèle d'un fichier ESPHome selon un plan (sections entières ou
-  partagées par sous-clés) ; utilisé pour les satellites.
+  partagées par sous-clés) ; utilisé pour les satellites et pour `poele-display`.
 - `reclasser-ecran-phase1.py` — reclassement de l'écran (phase 1 → matériel + éléments), avec contrôle de la page paramétrable.
 - `comparer-config.py` — comparaison de deux `esphome config`.
 - `decouper-ecran.py` — outil de la phase 1 (ancienne organisation `bases/` `communs/` `pages/`), conservé pour l'historique.

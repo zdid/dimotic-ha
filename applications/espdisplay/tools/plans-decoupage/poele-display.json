@@ -1,0 +1,50 @@
+{
+  "sorties": {
+    "base": {
+      "fichier": "bibliotheque/materiels/cyd-esp32-2432s028/base.yaml",
+      "entete": "# Matériel : « Cheap Yellow Display » ESP32-2432S028 (ESP32 classique, flash 4 Mo, écran SPI ILI9341 2,8\" 240x320 en portrait — USB-C en bas —, tactile résistif XPT2046 sur un second bus SPI,\n# rétroéclairage ledc GPIO21). Extrait fidèlement de poele-display.yaml le 14/10/2026 (tools/decouper-par-plan.py + plans-decoupage/poele-display.json).\n# Comprend la veille du rétroéclairage (30 s d'inactivité LVGL ; rallumé au premier tap). Le wifi est un élément à part (wifi-simple ou wifi-multi-ap).\n# Le pinout et le sens de rotation viennent de sources communautaires puis de l'essai réel du 08/09/2026 ; GPIO36 volontairement NON utilisé (broche flottante : faux contacts tactiles)."
+    },
+    "polices": {
+      "fichier": "bibliotheque/elements/polices-poele/element.yaml",
+      "entete": "# Élément : polices du panneau de chauffage (font_title 18, font_value 30, font_label 17 avec accents français) — jeux de glyphes réduits aux caractères réellement affichés.\n# Extrait fidèlement de poele-display.yaml le 14/10/2026."
+    },
+    "panneau": {
+      "fichier": "bibliotheque/elements/panneau-chauffage-poele-evoo7/element.yaml",
+      "entete": "# Élément : panneau de chauffage 240x320 portrait — thermostat du poêle (climate.salle_a_manger_poele), thermostat EVOO7 de la pompe à chaleur\n# (climate.infra_evoo7_control_thermostat) et humidité de la salle (sensor.salle_humidite) : températures, consignes +/- optimistes, boutons CHAUFFER/ARRETER.\n# Extrait fidèlement de poele-display.yaml le 14/10/2026 (entités et libellés encore en dur : à paramétrer plus tard).\n# Exige : un écran 240x320 (identifiants main_lcd, touch, backlight), l'élément polices-poele."
+    },
+    "poubelle": {
+      "fichier": "_inutilise/wifi.yaml",
+      "entete": "# wifi (élément existant wifi-simple, non régénéré)"
+    }
+  },
+  "sections": {
+    "esp32": "base",
+    "ota": "base",
+    "logger": "base",
+    "spi": "base",
+    "display": "base",
+    "output": "base",
+    "light": "base",
+    "touchscreen": "base",
+    "font": "polices",
+    "globals": "panneau",
+    "sensor": "panneau",
+    "text_sensor": "panneau",
+    "wifi": "poubelle"
+  },
+  "partagees": {
+    "esphome": {
+      "name": "-",
+      "friendly_name": "-"
+    },
+    "api": {
+      "*": "-"
+    },
+    "lvgl": {
+      "displays": "base",
+      "touchscreens": "base",
+      "on_idle": "base",
+      "*": "panneau"
+    }
+  }
+}
