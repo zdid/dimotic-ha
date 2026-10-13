@@ -1,5 +1,7 @@
 # Spécifications Fonctionnelles - Module ESPDISPLAY
 
+*Version 1.5 - 13 Octobre 2026 — **l'application HAPLAN est retirée de `applications/` et archivée hors dépôt** (`archives-applications/haplan/`, ignoré par git) ; son outil de génération des écrans ESP32 (`generate_esphome_floorplan.py` et le dossier `esphome/` : modèle, police, partitions) est **déplacé sous `applications/espdisplay/tools/`** (même profondeur : `REPO_ROOT` inchangé). Tous les chemins `applications/haplan/tools` de ce document deviennent `applications/espdisplay/tools` ; le script d'agent `~/bin/espdisplay-agent-run.sh` est mis à jour. Les plans sont toujours lus dans `data/haplan/` jusqu'à la phase « plans lus depuis HA » (§10.4). Les passages qui décrivent HAPLAN comme émetteur de la demande de déploiement restent valables à titre historique.*
+
 *Version 1.4 - 12 Octobre 2026 — **bibliothèque d'éléments d'écran** (§10) : un écran ESPHome s'assemble à partir d'une base
 matérielle, d'éléments communs et de pages (`packages:`) ; phase 1 faite (écran haplan-display découpé fidèlement, 0 différence
 de configuration). Décisions utilisateur : bibliothèque suivie par espdisplay ; une seule bibliothèque avec des pages qui
@@ -95,10 +97,10 @@ HaplanService.handleFloorplanDeploy
 EspDisplayService.handleDeployFloorplan
     |
     v (sous-processus)
-python3 applications/haplan/tools/generate_esphome_floorplan.py <floorplanId> --compile
+python3 applications/espdisplay/tools/generate_esphome_floorplan.py <floorplanId> --compile
     |
     +--> génère widgets/image du plan (lit data/haplan/config-haplan-floorplans-v1.0.yaml)
-    +--> fusionne dans applications/haplan/tools/esphome/haplan-display.yaml (template)
+    +--> fusionne dans applications/espdisplay/tools/esphome/haplan-display.yaml (template)
     +--> copie les assets dans /docker/esphome/config (§6)
     +--> docker exec esphome esphome compile /config/haplan-display.yaml
     |
@@ -157,7 +159,7 @@ porte un lui-même (non fait, périmètre volontairement minimal pour cette v1.0
 
 ### 4.1 Propriété : HAPLAN, pas ESPDISPLAY
 
-`applications/haplan/tools/generate_esphome_floorplan.py` reste sous `applications/haplan/` —
+`applications/espdisplay/tools/generate_esphome_floorplan.py` reste sous `applications/haplan/` —
 HAPLAN est propriétaire des données de plan (`data/haplan/config-haplan-floorplans-v1.0.yaml`) et de
 la logique de génération de widgets (classification d'entités, calcul de position, glyphes
 Font Awesome — voir §9.2 de `fonctionnelles-haplan_specs_v1.2.md` pour la classification côté
@@ -193,7 +195,7 @@ compilé qui ne correspond à aucun appareil apparié.
 | `enabled` | boolean | `true` | |
 | `esphomeContainer` | string | `esphome` | Nom du conteneur Docker déjà en service (§6) |
 | `esphomeConfigDir` | string | `/docker/esphome/config` | Répertoire monté dans ce conteneur |
-| `pipelineScriptPath` | string | `''` | Vide = résolu vers `applications/haplan/tools/generate_esphome_floorplan.py` (relatif à `PROJECT_ROOT`) |
+| `pipelineScriptPath` | string | `''` | Vide = résolu vers `applications/espdisplay/tools/generate_esphome_floorplan.py` (relatif à `PROJECT_ROOT`) |
 | `pythonBin` | string | `python3` | Doit avoir PyYAML + Pillow installés (dépendances du script, hors runtime Node) |
 | `remote.host` | string | `''` | ⭐ v1.3 : **obligatoire** — machine qui héberge le conteneur esphome ; vide = déploiement refusé avec un message clair (plus d'exécution locale implicite), voir §6.3bis |
 | `remote.sshUser` | string | `didier` | |
@@ -312,7 +314,7 @@ vraie compilation ESPHome déclenchée depuis le conteneur ha2.
 | Pas d'OTA automatique | Une compilation réussie ne flashe pas l'écran — flash manuel (`esphome run --device ...`) | Accepté (périmètre v1.0) |
 | Un seul hôte distant configurable (v1.1) | `remote.host` unique, pas de sélection dynamique par appareil — voir la conception (non implémentée) d'un registre multi-machines dans `fonctionnelles-supervisor_specs_v1.0.md` §6.2, qui remplacerait ce SSH point-à-point par un relais MQTT générique | Connu, différé |
 | Hébergement Docker non généralisé | Un seul conteneur/machine supposé (§6.1) — plusieurs appareils ESP futurs partageraient le même conteneur, pas de sélection par appareil | Connu, non généralisé |
-| Chemin du script Python en dur par défaut vers `applications/haplan/tools/` | Un appareil ESP sans rapport avec HAPLAN (ex: futur thermostat de poêle) devra soit un autre script, soit une généralisation de celui-ci | Connu, différé |
+| Chemin du script Python en dur par défaut vers `applications/espdisplay/tools/` | Un appareil ESP sans rapport avec HAPLAN (ex: futur thermostat de poêle) devra soit un autre script, soit une généralisation de celui-ci | Connu, différé |
 | Aucun test automatisé | Vérifié uniquement manuellement (EventBus simulé + vrai sous-processus + vraie compilation Docker, voir session du 13/08/2026) | Accepté |
 
 ---
@@ -331,7 +333,7 @@ applications/espdisplay/
 
 Dépend en exécution (sous-processus, pas en import) de :
 ```
-applications/haplan/tools/
+applications/espdisplay/tools/
 ├── generate_esphome_floorplan.py     # --merge/--compile, voir §4.2
 └── esphome/
     ├── haplan-display.yaml            # template, source de vérité versionnée

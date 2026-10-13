@@ -7,8 +7,8 @@
 # Compatibilité : appelé sans argument par une ancienne commande forcée (clé dédiée), le plan est lu
 # dans $SSH_ORIGINAL_COMMAND.
 set -euo pipefail
-cd "$(dirname "$(readlink -f "$0")")/../ownCloud/dimotic-ha/applications/haplan/tools" 2>/dev/null \
-  || cd /home/didier/ownCloud/dimotic-ha/applications/haplan/tools
+cd "$(dirname "$(readlink -f "$0")")/../ownCloud/dimotic-ha/applications/espdisplay/tools" 2>/dev/null \
+  || cd /home/didier/ownCloud/dimotic-ha/applications/espdisplay/tools
 
 arg="${1:-${SSH_ORIGINAL_COMMAND:-}}"
 container="${2:-esphome}"
