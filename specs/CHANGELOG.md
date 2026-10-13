@@ -1,6 +1,6 @@
 # CHANGELOG - Historique des Spécifications
 
-**Dernière mise à jour :** 12 Octobre 2026
+**Dernière mise à jour :** 13 Octobre 2026
 
 ---
 
@@ -51,6 +51,7 @@
 | 08/10/2026 | **v1.22** | fonctionnelles-ia_specs_v1.22.md | Claude | **Entités de réglage/diagnostic** (§19.10) : écartées de la vision de Mistral ; `categorie` + filtre dans `lister_entites` (MCP), champs ajoutés à `obtenir_details`. v1.21 archivée. |
 | 08/10/2026 | **v1.21** | fonctionnelles-ia_specs_v1.21.md | Claude | **Dépôt d'automatisations dans HA par Claude Code** (§19.9) : outils MCP `lire_automatisations_ha`, `deposer_automatisation`, `supprimer_automatisation` ; aperçu sans effet par défaut + `confirme: true`, sauvegarde avant remplacement, alerte anti-boucle ; via `HaRestBridge`. v1.20 archivée. |
 | 08/10/2026 | **v1.20** | fonctionnelles-ia_specs_v1.20.md | Claude | **Lecture du planificateur par Claude Code** (§19.8) : outil MCP `lire_planificateur` (statut, planifications, macros, actions reçues, commandes réellement envoyées à HA, YAML), lecture seule, sans modifier `planificateur`. v1.19 archivée. |
+| 13/10/2026 | **v1.7** | fonctionnelles-rpigpio_specs_v1.7.md | Claude | **Mémoire des derniers états des pins** (§4.4) : `memoire.py` lance mqtt-io, rejoue au démarrage `data/etats.json`, publie le résumé non retenu `memoire/etats` ; aucun message retenu. v1.6 archivée. |
 | 08/10/2026 | **v1.6** | fonctionnelles-rpigpio_specs_v1.6.md | Claude | **Entités sans suffixe** (§2.3bis) : `ha_discovery.name: null` par broche, l'identifiant de broche n'est plus annoncé comme nom d'entité ; types d'entités produits. v1.5 archivée. |
 | 08/10/2026 | **v4.39** | techniques-socle-ha-mqtt_specs_v4.39.md | Claude | **Préfixe de découverte alternatif** (§8.5.0bis) + **métadonnées du registre HA conservées** (§8.3.2bis) : `entity_category`, `hidden_by`, `disabled_by`, `platform` ; `getEntitiesByQuoiAndLieux` écarte par défaut réglages/diagnostic/désactivées (`includeTechnical`). v4.38 archivée. |
 | 08/10/2026 | **v4.38** | techniques-socle-ha-mqtt_specs_v4.38.md | Claude | **Repli par le nom borné au quoi demandé** (§8.3.2) : une commande ne retombe plus sur une entité d'un autre quoi par son nom (« ferme le volet du salon » → « Plafonnier salon ») ; correspondance en début de mot, 3 lettres minimum. v4.37 archivée. |

@@ -158,8 +158,12 @@ export function generateComposeFile(target: RpigpioTargetConfig): string {
         network_mode: 'host',
         privileged: true,
         user: '0:0',
+        // 13/10/2026 — mémoire des derniers états : memoire.py lance mqtt-io lui-même (voir memoire-script.ts)
+        command: ['venv/bin/python', '/memoire.py'],
         volumes: [
-          './config.yml:/config.yml:ro'
+          './config.yml:/config.yml:ro',
+          './memoire.py:/memoire.py:ro',
+          './data:/data'
         ]
       }
     }

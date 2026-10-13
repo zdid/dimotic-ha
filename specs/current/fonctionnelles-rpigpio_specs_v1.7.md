@@ -1,5 +1,7 @@
 # Spécifications Fonctionnelles - Module RPIGPIO
 
+*Version 1.7 - 13 Octobre 2026*
+*v1.7 : mémoire des derniers états des pins (§4.4) — `memoire.py` lance mqtt-io, rejoue au démarrage les états lus sur disque (`data/etats.json`) et publie un résumé non retenu `<topic_prefix>/memoire/etats` ; plus aucun message retenu requis.*
 *Version 1.6 - 8 Octobre 2026*
 *v1.6 : entités sans suffixe — `ha_discovery.name: null` par broche (§2.3bis) ; l'identifiant de broche n'est plus annoncé comme nom d'entité.*
 *v1.5 : revue de code — un numéro de GPIO ne peut servir qu'à un pin (config mqtt-io invalide sinon) ; suivi de présence de l'agent reconnecté quand la config MQTT change ; `bridgeInstance` plus modifié à chaud (nouveaux topics au déploiement suivant = entités HA en double) ; liste des pins adoptée en mémoire seulement si l'écriture réussit. Décision utilisateur : l'entité HA d'un pin supprimé se supprime **manuellement dans HA** (mqtt-io ne publie jamais de retrait de découverte, et l'application rpigpio reste sans écriture MQTT).*
@@ -303,6 +305,24 @@ quel : ne pas exposer `initial` dans l'IHM évite qu'une source de vérité conc
 impose un état qui pourrait contredire celui attendu par un système tiers gérant encore le même
 pin (cas du pont de compatibilité, §2.5).
 
+### 4.4 Mémoire des derniers états (⭐ nouveau v1.7, 13/10/2026)
+
+**Décision utilisateur** : ni états ni commandes retenus sur le broker (une ancienne commande `/set` retenue pouvait rallumer un
+ballon au redémarrage). À la place, un script `memoire.py` (source : `memoire-script.ts`, déployé par `DeployService` à côté de
+`config.yml`) est lancé par le conteneur **à la place de mqtt-io**, qu'il démarre lui-même :
+
+1. **Au démarrage** : lit `data/etats.json` (`{ "<pin>": "ON"|"OFF" }`, état logique) et écrit une copie de `config.yml` où
+   chaque sortie mémorisée reçoit `initial` (électrique, selon `inverted`) + `publish_initial: true` — l'état est appliqué dès
+   l'initialisation de la broche. L'état mémorisé l'emporte sur l'`initial` du fichier de pins ; une sortie jamais mémorisée garde
+   le comportement habituel.
+2. **En marche** : écoute `<topic_prefix>/output/+` et `<topic_prefix>/input/+`, met à jour `data/etats.json` (écriture
+   atomique) et publie le résumé de toutes les pins sur `<topic_prefix>/memoire/etats` (JSON, **non retenu**, republié à chaque
+   changement et à chaque connexion).
+3. Fichier absent ou illisible : démarrage sans mémoire, jamais d'échec.
+
+`compose.yaml` généré : `command: [venv/bin/python, /memoire.py]`, volumes `./memoire.py:/memoire.py:ro` et `./data:/data`.
+Vérifié sur noisy le 13/10/2026 (états rejoués, niveaux physiques conformes, résumé publié, enregistrement d'un changement).
+
 ---
 
 ## 5. Déploiement Docker
@@ -515,6 +535,7 @@ applications/rpigpio/
 ### 10.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.7 | 2026-10-13 | Claude | Mémoire des derniers états des pins sur disque, rejouée au démarrage (§4.4) ; pas de messages retenus. v1.6 archivée. |
 | 1.6 | 2026-10-08 | Claude | Entités sans suffixe : `ha_discovery.name: null` par broche (§2.3bis), types d'entités produits (switch / binary_sensor). |
 | 1.5 | 2026-09-24 | Claude | Revue de code : GPIO unique par pin, présence de l'agent reconnectée sur changement MQTT, `bridgeInstance` figé à chaud, mémoire alignée sur le disque en cas d'échec d'écriture. v1.4 archivée. |
 | 1.4 | 2026-08-23 | Claude | **Multi-cible standardisé** : `target` singulier → `targets[]` (`.max(1)`, id texte libre, même pattern que `teleinfo`/`arexx` et `nommage/sources`) — §2.1/§5.1/§6/§7. Deux simplifications décidées avec l'utilisateur, propagées au socle partagé : accès cible toujours en root direct (`sshUser` retiré, plus de `sudo` — `sudo NOPASSWD` jugé équivalent à root sur ce projet) et clé SSH par cible sous `data/rpigpio/ssh/<id>/` au lieu de `~/.ssh/...` (non résolu dans le conteneur Docker — vérifié Dockerfile/compose.yaml). Protocole `rpigpio:remote-op`/`rpigpio:remote-op:result` étendu avec `targetId`. Nouvelle carte de cible dans le tableau de bord (`TargetCards.js`, composant mutualisé rpigpio/teleinfo/arexx) avec instructions SSH par cible et 4 boutons Déployer/Démarrer/Arrêter/Redémarrer — remplace l'ancien bloc à cible unique. Testé au navigateur. Ancienne version v1.3 archivée. |

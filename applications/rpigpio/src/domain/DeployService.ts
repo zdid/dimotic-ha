@@ -22,6 +22,7 @@ import {
   type RemoteOpResult,
 } from '../../../core/dist/exports';
 import type { RpigpioTargetConfig } from './config-schema';
+import { MEMOIRE_SCRIPT } from './memoire-script';
 
 export interface DeployResult {
   success: boolean;
@@ -88,6 +89,9 @@ export class DeployService {
 
     const writeConfig = await this.writeRemoteFile(target, configPath, mqttIoConfigYaml);
     if (!writeConfig.success) return { ...writeConfig, step: 'write-config' };
+
+    const writeMemoire = await this.writeRemoteFile(target, `${target.hostDir}/memoire.py`, MEMOIRE_SCRIPT);
+    if (!writeMemoire.success) return { ...writeMemoire, step: 'write-config' };
 
     const writeCompose = await this.writeRemoteFile(target, composePath, composeYaml);
     if (!writeCompose.success) return { ...writeCompose, step: 'write-compose' };
