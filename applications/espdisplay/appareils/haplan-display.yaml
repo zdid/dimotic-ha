@@ -1,4 +1,4 @@
-# ⭐ 12/10/2026 — écran ASSEMBLÉ depuis la bibliothèque espdisplay (voir bibliotheque/README.md) : ce fichier ne contient plus
+# ⭐ 13/10/2026 — reclassé en matériel + éléments (materiels/, elements/) ; 12/10/2026 — écran ASSEMBLÉ depuis la bibliothèque espdisplay (voir bibliotheque/README.md) : ce fichier ne contient plus
 # que l'identité de l'écran (nom, clé API) et la liste des éléments (`packages:`). Le commentaire ci-dessous date de l'écran
 # monolithique ; la procédure « COLLER ICI » n'a plus cours.
 #
@@ -50,15 +50,45 @@ api:
     key: !secret api_haplan-display
 
 # Assemblage : base matérielle, éléments communs, puis les pages dans l'ordre d'affichage.
+
 packages:
-  base: !include bibliotheque/bases/sunton-8048s070c.yaml
-  communs: !include bibliotheque/communs/haplan-display-communs.yaml
-  page_original: !include bibliotheque/pages/original.yaml
-  page_rez_de_chauss_e: !include bibliotheque/pages/rez-de-chauss-e.yaml
-  page_premier: !include bibliotheque/pages/premier.yaml
-  page_energie_direct: !include bibliotheque/pages/energie-direct.yaml
-  page_ballons_chauffe: !include bibliotheque/pages/ballons-chauffe.yaml
-  page_thermostats: !include bibliotheque/pages/thermostats.yaml
-  page_clim_salle: !include bibliotheque/pages/clim-salle.yaml
-  page_clim_bureau: !include bibliotheque/pages/clim-bureau.yaml
-  page_clim_ami: !include bibliotheque/pages/clim-ami.yaml
+  materiel: !include bibliotheque/materiels/sunton-8048s070c/base.yaml
+  wifi: !include bibliotheque/elements/wifi-simple/element.yaml
+  polices_plans: !include bibliotheque/elements/polices-plans/element.yaml
+  polices_climatisation: !include bibliotheque/elements/polices-climatisation/element.yaml
+  page_original: !include bibliotheque/elements/page-plan-original/element.yaml
+  page_rez_de_chaussee: !include bibliotheque/elements/page-plan-rez-de-chaussee/element.yaml
+  page_premier: !include bibliotheque/elements/page-plan-premier/element.yaml
+  page_energie_direct: !include bibliotheque/elements/page-energie-direct/element.yaml
+  page_ballons_chauffe: !include bibliotheque/elements/page-ballons-chauffe/element.yaml
+  page_thermostats: !include bibliotheque/elements/page-thermostats/element.yaml
+  page_clim_salle: !include
+    file: bibliotheque/elements/page-climatisation/element.yaml
+    vars:
+      clim_id: "salle"
+      clim_entite: "climate.153931629788358_climate"
+      clim_rang: "Climatisation 1/3"
+      clim_titre: "Salle"
+      clim_pas: "0.5"
+      clim_max: "30.0"
+      clim_mode_auto: "auto"
+  page_clim_bureau: !include
+    file: bibliotheque/elements/page-climatisation/element.yaml
+    vars:
+      clim_id: "bureau"
+      clim_entite: "climate.bureau_climatiseur"
+      clim_rang: "Climatisation 2/3"
+      clim_titre: "Bureau"
+      clim_pas: "1.0"
+      clim_max: "32.0"
+      clim_mode_auto: "heat_cool"
+  page_clim_ami: !include
+    file: bibliotheque/elements/page-climatisation/element.yaml
+    vars:
+      clim_id: "ami"
+      clim_entite: "climate.chambre_d_ami_climatiseur"
+      clim_rang: "Climatisation 3/3"
+      clim_titre: "Chambre d'ami"
+      clim_pas: "1.0"
+      clim_max: "32.0"
+      clim_mode_auto: "heat_cool"

@@ -20,6 +20,8 @@ def norm(x):
             n=sorted(n, key=lambda v: json.dumps(v.get("id"), default=str))
         return n
     return x
+# Les substitutions sont des ENTRÉES déjà appliquées partout ailleurs : seule la configuration effective est comparée.
+for x in (a,b): x.pop('substitutions',None)
 na,nb=norm(a),norm(b)
 diffs=[]
 def cmp(x,y,path):

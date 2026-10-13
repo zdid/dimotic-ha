@@ -1,5 +1,5 @@
-# Page LVGL « page_thermostats » — élément de bibliothèque espdisplay (extrait de haplan-display.yaml le 12/10/2026).
-# Contient la page et les capteurs HA, images et polices qu'elle seule utilise.
+# Élément : page « thermostats » de l'écran (LVGL 800x480), avec les capteurs HA, images et polices qu'elle seule utilise.
+# Reclassé le 13/10/2026 depuis pages/thermostats.yaml (phase 1).
 
 text_sensor:
   - platform: homeassistant

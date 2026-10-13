@@ -1,5 +1,5 @@
-# Page LVGL « page_rez_de_chauss_e » — élément de bibliothèque espdisplay (extrait de haplan-display.yaml le 12/10/2026).
-# Contient la page et les capteurs HA, images et polices qu'elle seule utilise.
+# Élément : page de plan « Rez de chaussée » de l'écran (LVGL 800x480), avec les capteurs HA, images et polices qu'elle seule utilise.
+# Reclassé le 13/10/2026 depuis pages/rez-de-chauss-e.yaml (phase 1).
 
 image:
   - file: "floorplan_rez_de_chauss_e_800x480.png"

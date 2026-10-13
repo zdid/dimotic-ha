@@ -10,7 +10,7 @@
     },
     "wifi": {
       "fichier": "bibliotheque/elements/wifi-simple/element.yaml",
-      "entete": "# Élément : wifi simple (un seul réseau, connexion rapide) — comportement historique des satellites, extrait fidèlement\n# de hasat4.yaml le 13/10/2026. Fournit : wifi_id. Interchangeable avec elements/wifi-multi-ap (plusieurs réseaux +\n# point d'accès de secours) : une seule ligne à changer dans le fichier de l'appareil."
+      "entete": "# Élément : wifi simple — un seul réseau (secrets wifi_ssid / wifi_password). Interchangeable avec\n# elements/wifi-multi-ap (plusieurs réseaux + point d'accès de secours) : une seule ligne à changer dans le fichier de\n# l'appareil. Les réglages propres à une carte (id, économie d'énergie, délai de redémarrage) restent dans sa base."
     }
   },
   "sections": {
@@ -53,7 +53,7 @@
       "voice_assist_not_ready_phase_id": "vocal",
       "voice_assist_error_phase_id": "vocal",
       "*": "base",
-      "hidden_ssid": "wifi"
+      "hidden_ssid": "-"
     },
     "esphome": {
       "on_boot": "vocal",
@@ -62,7 +62,10 @@
     "wifi": {
       "on_connect": "vocal",
       "on_disconnect": "vocal",
-      "*": "wifi"
+      "ssid": "wifi",
+      "password": "wifi",
+      "fast_connect": "-",
+      "*": "base"
     },
     "api": {
       "actions": "vocal",

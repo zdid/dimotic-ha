@@ -1,0 +1,15 @@
+# Élément : polices des pages de climatisation et de thermostats (font_clim_title, font_clim_text, font_clim_value).
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_clim_title
+    size: 24
+    glyphs: " '+-./0123456789ABCDFMPSTVabcdefghilmnoprstu°àéê"
+  - file: "gfonts://Roboto"
+    id: font_clim_text
+    size: 20
+    glyphs: " '+-./0123456789ABCDFMPSTVabcdefghilmnoprstu°àéê"
+  - file: "gfonts://Roboto"
+    id: font_clim_value
+    size: 44
+    glyphs: " '+-./0123456789ABCDFMPSTVabcdefghilmnoprstu°àéê"

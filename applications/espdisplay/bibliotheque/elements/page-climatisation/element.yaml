@@ -1,40 +1,49 @@
-# Page LVGL « page_clim_bureau » — élément de bibliothèque espdisplay (extrait de haplan-display.yaml le 12/10/2026).
-# Contient la page et les capteurs HA, images et polices qu'elle seule utilise.
+# Élément PARAMÉTRABLE : page de climatisation (LVGL 800x480) pour UNE entité climate. Remplace les trois copies
+# clim-salle / clim-bureau / clim-ami de la phase 1 (vérifié : la ré-instanciation redonne chacune à l'identique).
+# Variables (packages: <nom>: !include { file: …, vars: {…} }) :
+#   clim_id        suffixe des identifiants LVGL/capteurs (unique par instance) : salle, bureau, ami…
+#   clim_entite    entité HA climate (ex. climate.bureau_climatiseur)
+#   clim_rang      libellé du bandeau (ex. « Climatisation 2/3 »)
+#   clim_titre     titre affiché (ex. « Bureau »)
+#   clim_pas       pas des boutons -/+ en °C (ex. 0.5 ou 1.0)
+#   clim_max       consigne maximale en °C (ex. 30.0)
+#   clim_mode_auto nom du mode automatique de l'appareil (auto ou heat_cool)
+# Exige : écran 800x480, élément polices-climatisation.
 
 text_sensor:
   - platform: homeassistant
-    id: clim_bureau_state
-    entity_id: climate.bureau_climatiseur
+    id: clim_${clim_id}_state
+    entity_id: ${clim_entite}
     internal: true
     on_value:
       - lvgl.label.update:
-          id: clim_bureau_mode
+          id: clim_${clim_id}_mode
           text: !lambda 'if (x == "unavailable") return std::string("Indisponible"); if (x == "off") return std::string("Arrêt"); if (x == "heat") return std::string("Chauffage"); if (x == "cool") return std::string("Froid"); if (x == "auto") return std::string("Auto"); if (x == "dry") return std::string("Déshumid."); if (x == "fan_only") return std::string("Ventil."); if (x == "heat_cool") return std::string("Auto"); return x;'
       - lvgl.widget.update:
-          id: clim_bureau_onoff
+          id: clim_${clim_id}_onoff
           border_color: !lambda 'return (x != "off" && x != "unavailable" && x != "unknown") ? lv_color_hex(0x4CAF50) : lv_color_hex(0x666666);'
 sensor:
   - platform: homeassistant
-    id: clim_bureau_cur
-    entity_id: climate.bureau_climatiseur
+    id: clim_${clim_id}_cur
+    entity_id: ${clim_entite}
     attribute: current_temperature
     internal: true
     on_value:
       - lvgl.label.update:
-          id: clim_bureau_temp
+          id: clim_${clim_id}_temp
           text: !lambda |-
             if (std::isnan(x)) return std::string("--");
             char buf[16];
             snprintf(buf, sizeof(buf), "%.1f°C", x);
             return std::string(buf);
   - platform: homeassistant
-    id: clim_bureau_tgt
-    entity_id: climate.bureau_climatiseur
+    id: clim_${clim_id}_tgt
+    entity_id: ${clim_entite}
     attribute: temperature
     internal: true
     on_value:
       - lvgl.label.update:
-          id: clim_bureau_cons
+          id: clim_${clim_id}_cons
           text: !lambda |-
             if (std::isnan(x)) return std::string("--");
             char buf[16];
@@ -42,10 +51,10 @@ sensor:
             return std::string(buf);
 lvgl:
   pages:
-    - id: page_clim_bureau
+    - id: page_clim_${clim_id}
       widgets:
         - obj:
-            id: full_screen_clear_clim_bureau
+            id: full_screen_clear_clim_${clim_id}
             x: 0
             y: 0
             width: 800
@@ -55,18 +64,18 @@ lvgl:
             border_width: 0
             radius: 0
         - label:
-            id: clim_bureau_titre
+            id: clim_${clim_id}_titre
             x: 0
             y: 8
             width: 800
             height: 30
             text_align: CENTER
             text_font: font_clim_title
-            text: "Climatisation 2/3"
+            text: "${clim_rang}"
             text_color: 0xFFFFFF
             bg_opa: TRANSP
         - obj:
-            id: clim_bureau_carte
+            id: clim_${clim_id}_carte
             x: 120
             y: 48
             width: 560
@@ -77,18 +86,18 @@ lvgl:
             border_color: 0x00BCD4
             border_width: 3
         - label:
-            id: clim_bureau_nom
+            id: clim_${clim_id}_nom
             x: 120
             y: 56
             width: 560
             height: 30
             text_align: CENTER
             text_font: font_clim_title
-            text: "Bureau"
+            text: "${clim_titre}"
             text_color: 0x00BCD4
             bg_opa: TRANSP
         - label:
-            id: clim_bureau_leg_temp
+            id: clim_${clim_id}_leg_temp
             x: 120
             y: 96
             width: 560
@@ -99,7 +108,7 @@ lvgl:
             text_color: 0xBBBBBB
             bg_opa: TRANSP
         - label:
-            id: clim_bureau_temp
+            id: clim_${clim_id}_temp
             x: 120
             y: 120
             width: 560
@@ -110,7 +119,7 @@ lvgl:
             text_color: 0xFFFFFF
             bg_opa: TRANSP
         - label:
-            id: clim_bureau_leg_cons
+            id: clim_${clim_id}_leg_cons
             x: 120
             y: 188
             width: 560
@@ -121,7 +130,7 @@ lvgl:
             text_color: 0xBBBBBB
             bg_opa: TRANSP
         - label:
-            id: clim_bureau_cons
+            id: clim_${clim_id}_cons
             x: 220
             y: 214
             width: 360
@@ -132,7 +141,7 @@ lvgl:
             text_color: 0x00BCD4
             bg_opa: TRANSP
         - label:
-            id: clim_bureau_moins
+            id: clim_${clim_id}_moins
             x: 140
             y: 214
             width: 80
@@ -151,16 +160,16 @@ lvgl:
               - homeassistant.service:
                   service: climate.set_temperature
                   data:
-                    entity_id: climate.bureau_climatiseur
+                    entity_id: ${clim_entite}
                     temperature: !lambda |-
-                      float t = id(clim_bureau_tgt).state;
+                      float t = id(clim_${clim_id}_tgt).state;
                       if (std::isnan(t)) t = 16.0f;
-                      t = t - 1.0f;
+                      t = t - ${clim_pas}f;
                       if (t < 16.0f) t = 16.0f;
-                      if (t > 32.0f) t = 32.0f;
+                      if (t > ${clim_max}f) t = ${clim_max}f;
                       char buf[12]; snprintf(buf, sizeof(buf), "%.1f", t); return std::string(buf);
         - label:
-            id: clim_bureau_plus
+            id: clim_${clim_id}_plus
             x: 580
             y: 214
             width: 80
@@ -179,16 +188,16 @@ lvgl:
               - homeassistant.service:
                   service: climate.set_temperature
                   data:
-                    entity_id: climate.bureau_climatiseur
+                    entity_id: ${clim_entite}
                     temperature: !lambda |-
-                      float t = id(clim_bureau_tgt).state;
+                      float t = id(clim_${clim_id}_tgt).state;
                       if (std::isnan(t)) t = 16.0f;
-                      t = t + 1.0f;
+                      t = t + ${clim_pas}f;
                       if (t < 16.0f) t = 16.0f;
-                      if (t > 32.0f) t = 32.0f;
+                      if (t > ${clim_max}f) t = ${clim_max}f;
                       char buf[12]; snprintf(buf, sizeof(buf), "%.1f", t); return std::string(buf);
         - label:
-            id: clim_bureau_mode
+            id: clim_${clim_id}_mode
             x: 120
             y: 284
             width: 560
@@ -199,7 +208,7 @@ lvgl:
             text_color: 0xFFFFFF
             bg_opa: TRANSP
         - label:
-            id: clim_bureau_onoff
+            id: clim_${clim_id}_onoff
             x: 140
             y: 328
             width: 250
@@ -217,19 +226,19 @@ lvgl:
             on_click:
               - if:
                   condition:
-                    lambda: 'return id(clim_bureau_state).state != "off";'
+                    lambda: 'return id(clim_${clim_id}_state).state != "off";'
                   then:
                     - homeassistant.service:
                         service: climate.turn_off
                         data:
-                          entity_id: climate.bureau_climatiseur
+                          entity_id: ${clim_entite}
                   else:
                     - homeassistant.service:
                         service: climate.turn_on
                         data:
-                          entity_id: climate.bureau_climatiseur
+                          entity_id: ${clim_entite}
         - label:
-            id: clim_bureau_modebtn
+            id: clim_${clim_id}_modebtn
             x: 410
             y: 328
             width: 250
@@ -248,10 +257,10 @@ lvgl:
               - homeassistant.service:
                   service: climate.set_hvac_mode
                   data:
-                    entity_id: climate.bureau_climatiseur
+                    entity_id: ${clim_entite}
                     hvac_mode: !lambda |-
-                      static const char* modes[] = {"cool", "heat", "heat_cool", "dry", "fan_only"};
-                      const std::string cur = id(clim_bureau_state).state;
+                      static const char* modes[] = {"cool", "heat", "${clim_mode_auto}", "dry", "fan_only"};
+                      const std::string cur = id(clim_${clim_id}_state).state;
                       int n = 5; int i = -1;
                       for (int k = 0; k < n; k++) if (cur == modes[k]) i = k;
                       return std::string(modes[(i + 1) % n]);

@@ -1,5 +1,7 @@
 # Spécifications Fonctionnelles - Module ESPDISPLAY
 
+*Version 1.7 - 13 Octobre 2026 — **écran mural reclassé** (§10.3ter) en matériel `sunton-8048s070c` + éléments (polices, pages, **page de climatisation paramétrable** à 7 variables qui remplace les 3 copies) + appareil `haplan-display` ; **wifi réduit au réseau** dans `wifi-simple` / `wifi-multi-ap` (réglages propres à une carte dans sa base) ; ancienne organisation `bases/` `communs/` `pages/` `screens/` retirée ; `poele-display` déplacé dans `appareils/` (non désassemblé) ; `comparer-config.py` ignore les substitutions. 0 différence de configuration pour haplan-display, hasat4, hasat5.*
+
 *Version 1.6 - 13 Octobre 2026 — **satellites vocaux désassemblés** (§10.3bis) : base matérielle `waveshare-esp32-s3-audio` + élément `assistant-vocal` + **élément wifi interchangeable** (`wifi-simple` / `wifi-multi-ap` : plusieurs réseaux + point d'accès de secours et portail captif) + appareils hasat4/hasat5, `esphome config` identique ; nouvelle organisation `materiels/` + `elements/` + `appareils/` ; outil `decouper-par-plan.py` (découpage piloté par un plan, sections partagées par sous-clés).*
 
 *Version 1.5 - 13 Octobre 2026 — **l'application HAPLAN est retirée de `applications/` et archivée hors dépôt** (`archives-applications/haplan/`, ignoré par git) ; son outil de génération des écrans ESP32 (`generate_esphome_floorplan.py` et le dossier `esphome/` : modèle, police, partitions) est **déplacé sous `applications/espdisplay/tools/`** (même profondeur : `REPO_ROOT` inchangé). Tous les chemins `applications/haplan/tools` de ce document deviennent `applications/espdisplay/tools` ; le script d'agent `~/bin/espdisplay-agent-run.sh` est mis à jour. Les plans sont toujours lus dans `data/haplan/` jusqu'à la phase « plans lus depuis HA » (§10.4). Les passages qui décrivent HAPLAN comme émetteur de la demande de déploiement restent valables à titre historique.*
@@ -417,6 +419,26 @@ connexion dans l'élément ; ESPHome refusionne les dictionnaires). Contrôle : 
 pour hasat4 et hasat5 avec `wifi-simple`, variante `wifi-multi-ap` acceptée par ESPHome (`comparer-config.py`, qui ne suppose plus de pages LVGL et rend un code de sortie ; vérifié sur deux
 modifications volontaires). Constats : pas de clé de chiffrement API sur les satellites ; composant externe `es8311` (dépôt git) sur
 `main`, à figer. Rien n'a été compilé ni envoyé aux appareils.
+
+### 10.3ter Reclassement de l'écran mural et wifi interchangeable — fait le 13/10/2026
+
+Organisation unique (README de la bibliothèque) : `bibliotheque/materiels/<modèle>/base.yaml`, `bibliotheque/elements/<élément>/element.yaml`,
+`appareils/<appareil>.yaml`. L'écran de la phase 1 est reclassé par `tools/reclasser-ecran-phase1.py` :
+- **matériel** `sunton-8048s070c` (ancienne base **sans le wifi**, plus la police `font_nav` de ses flèches de navigation) ;
+- **éléments** `polices-plans`, `polices-climatisation`, `page-plan-original`, `page-plan-rez-de-chaussee`, `page-plan-premier`,
+  `page-energie-direct`, `page-ballons-chauffe`, `page-thermostats` (contenu inchangé) et **`page-climatisation` paramétrable**
+  (`clim_id`, `clim_entite`, `clim_rang`, `clim_titre`, `clim_pas`, `clim_max`, `clim_mode_auto`), instanciée 3 fois par
+  `!include { file, vars }` — la ré-instanciation redonne chacune des trois pages d'origine **à l'identique** (contrôle textuel dans l'outil) ;
+- **appareil** `appareils/haplan-display.yaml` (identité, clé API, `packages:` dans l'ordre d'affichage).
+
+**Wifi** : l'élément ne contient plus que le **réseau** (`wifi-simple` : `ssid`/`password` ; `wifi-multi-ap` : `networks` + `ap` +
+`captive_portal`) ; les réglages propres à une carte (`id: wifi_id`, `power_save_mode`, `reboot_timeout`) restent dans sa base
+(satellites). Le `fast_connect: false` des satellites (valeur par défaut) est retiré.
+
+Contrôles (`esphome config`, dossier d'essai, secrets factices distincts) : **0 différence** avec l'original pour `haplan-display`,
+`hasat4`, `hasat5` (avec `wifi-simple`) ; variantes `wifi-multi-ap` de l'écran et d'un satellite acceptées. `comparer-config.py`
+ignore désormais les `substitutions` (entrées déjà appliquées). Ancienne organisation (`bases/`, `communs/`, `pages/`, `screens/`)
+retirée ; `poele-display.yaml` déplacé dans `appareils/` sans être désassemblé.
 
 ### 10.4 Phases suivantes
 

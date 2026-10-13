@@ -1,8 +1,6 @@
-# Base matérielle : carte Sunton ESP32-8048S070C (ESP32-S3, 800x480, tactile capacitif GT911).
-# Élément de bibliothèque espdisplay — extrait de haplan-display.yaml le 12/10/2026 (découpage fidèle).
-# Contient aussi la couche LVGL commune à tous les écrans de ce modèle (veille du rétroéclairage, flèches de
-# navigation entre pages) ; les pages viennent d'autres éléments de la bibliothèque.
-
+# Matériel : Sunton ESP32-8048S070C (ESP32-S3, flash 16 Mo, écran RVB 800x480, tactile GT911, rétroéclairage GPIO2).
+# Comprend la couche LVGL commune (veille du rétroéclairage, flèches de navigation + leur police font_nav).
+# Le wifi est un élément à part (wifi-simple ou wifi-multi-ap). Reclassé le 13/10/2026 depuis bases/ (phase 1).
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -18,10 +16,6 @@ esp32:
 psram:
   mode: octal
   speed: 80MHz
-
-wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
 
 # OTA (mise à jour par WiFi) — validé en direct le 13/08/2026 (upload réseau ~10s, sans câble USB).
 # Réutilise ota_password, déjà présent dans secrets.yaml pour les autres appareils de ce parc
@@ -183,3 +177,9 @@ lvgl:
           clickable: true
           on_click:
             - lvgl.page.next:
+
+font:
+  - file: "fa-solid-900.ttf"
+    id: font_nav
+    size: 40
+    glyphs: ["\uf053", "\uf054"]

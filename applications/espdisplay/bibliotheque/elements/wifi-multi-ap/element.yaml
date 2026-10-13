@@ -1,6 +1,7 @@
 # Élément : wifi à PLUSIEURS réseaux + POINT D'ACCÈS DE SECOURS avec portail captif (comme le WiFiManager de Tasmota).
-# conception-esphome-assembleur_specs §3.8. Fournit : wifi_id. Paramètre : device_name (nom du point d'accès de secours).
-# Interchangeable avec elements/wifi-simple : une seule ligne à changer dans le fichier de l'appareil.
+# conception-esphome-assembleur_specs §3.8. Paramètre : device_name (nom du point d'accès de secours).
+# Interchangeable avec elements/wifi-simple : une seule ligne à changer dans le fichier de l'appareil. Les réglages propres
+# à une carte (id, économie d'énergie, délai de redémarrage) restent dans sa base.
 #
 # - L'ESP se connecte au meilleur réseau CONNU qu'il voit (priorité la plus haute d'abord).
 # - Si aucun n'est joignable après `ap_timeout`, il ouvre le wifi « <appareil> secours » : s'y connecter depuis un téléphone,
@@ -9,12 +10,9 @@
 #   (le site d'assemblage, Saint Fort, garde les noms historiques wifi_ssid / wifi_password). L'assembleur écrira cette
 #   liste d'après les sites de l'appareil ; en attendant, décommenter / ajouter les réseaux d'un autre site.
 # - Secret à créer : `wifi_secours_password` (8 caractères au moins), mot de passe du point d'accès de secours.
-# - Pas de `fast_connect` : il ne sait viser qu'un seul réseau.
+# - ESPHome ajoute de lui-même une mise à jour par la page web du portail (protégée par le mot de passe du point d'accès).
 
 wifi:
-  id: wifi_id
-  power_save_mode: none  # Disable power saving for better performance
-  reboot_timeout: 10min  # Prevent unnecessary reboots
   networks:
     - ssid: !secret wifi_ssid          # Saint Fort (site d'assemblage)
       password: !secret wifi_password

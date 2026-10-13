@@ -69,6 +69,11 @@ esp32:
       CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
       CONFIG_MBEDTLS_SSL_PROTO_TLS1_3: "y"  # TLS1.3 support isn't enabled by default in IDF 5.1.5
 
+wifi:
+  id: wifi_id
+  power_save_mode: none  # Disable power saving for better performance
+  reboot_timeout: 10min  # Prevent unnecessary reboots
+
 #network:
 #  enable_ipv6: true
 

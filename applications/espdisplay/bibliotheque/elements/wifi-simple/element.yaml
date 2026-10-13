@@ -1,15 +1,7 @@
-# Élément : wifi simple (un seul réseau, connexion rapide) — comportement historique des satellites, extrait fidèlement
-# de hasat4.yaml le 13/10/2026. Fournit : wifi_id. Interchangeable avec elements/wifi-multi-ap (plusieurs réseaux +
-# point d'accès de secours) : une seule ligne à changer dans le fichier de l'appareil.
-
-substitutions:
-
-  hidden_ssid: "false"
+# Élément : wifi simple — un seul réseau (secrets wifi_ssid / wifi_password). Interchangeable avec
+# elements/wifi-multi-ap (plusieurs réseaux + point d'accès de secours) : une seule ligne à changer dans le fichier de
+# l'appareil. Les réglages propres à une carte (id, économie d'énergie, délai de redémarrage) restent dans sa base.
 
 wifi:
-  id: wifi_id
-  fast_connect: ${hidden_ssid}
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  power_save_mode: none  # Disable power saving for better performance
-  reboot_timeout: 10min  # Prevent unnecessary reboots

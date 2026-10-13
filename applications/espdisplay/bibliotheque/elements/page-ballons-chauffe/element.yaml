@@ -1,5 +1,5 @@
-# Page LVGL « page_ballons_chauffe » — élément de bibliothèque espdisplay (extrait de haplan-display.yaml le 12/10/2026).
-# Contient la page et les capteurs HA, images et polices qu'elle seule utilise.
+# Élément : page « chauffe des ballons » de l'écran (LVGL 800x480), avec les capteurs HA, images et polices qu'elle seule utilise.
+# Reclassé le 13/10/2026 depuis pages/ballons-chauffe.yaml (phase 1).
 
 font:
   - file: "fa-solid-900.ttf"
