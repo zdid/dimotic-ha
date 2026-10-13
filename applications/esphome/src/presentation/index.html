@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<!-- Derniere modification: 2026-10-13 20:15:00 - squelette : page d'état de l'application ESPHome -->
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESPHome - usine et poseur</title>
+  <link rel="stylesheet" href="/styles/main.css">
+  <style>
+    .esphome-container { max-width: 900px; margin: 0 auto; padding: 20px; }
+    .esphome-header { text-align: center; margin-bottom: 30px; }
+    .esphome-header h1 { color: var(--color-accent); font-size: 2em; }
+    .card { background: var(--color-surface); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+    .card h2 { margin-top: 0; border-bottom: 1px solid var(--color-primary); padding-bottom: 10px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-top: 15px; }
+    .label { font-size: .85em; color: var(--color-text-muted); display: block; margin-bottom: 5px; }
+    .value { font-size: 1.2em; color: var(--color-text); }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: .85em; }
+    .badge.on { background: #1e5e2e; color: #a6e6ae; }
+    .badge.off { background: #444; color: #ccc; }
+    .note { color: var(--color-text-muted); font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="esphome-container">
+    <div class="esphome-header"><h1>🏭 ESPHome</h1><p>Usine (compilation) et poseur (envoi à l'ESP)</p></div>
+    <div class="card" id="statut"><h2>État</h2><p class="note">Chargement…</p></div>
+    <div class="card"><h2>Avancement</h2>
+      <p class="note">Squelette : la configuration est lue et l'état affiché. Les boucles de l'usine (récupération des paquets, compilation) et du poseur (envoi à l'ESP, déclaration dans Home Assistant) ne sont pas encore écrites.</p></div>
+  </div>
+  <script type="module" src="/applications/esphome/presentation/ts/app.js"></script>
+</body>
+</html>
