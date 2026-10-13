@@ -19,6 +19,10 @@ export interface MqttTransportConfig {
   clean?: boolean;
   /** Topic du LWT (Last Will and Testament). Défaut : `app/{clientId}/status`. */
   willTopic?: string;
+  /** Charge du LWT. Défaut : `offline` (voir LWT_PAYLOAD_OFFLINE). ⭐ 13/10/2026 (application esphome) : une présence JSON
+   *  (instance, port) doit pouvoir être publiée comme testament. Si définie, le transport ne publie PAS `online` à la
+   *  connexion : l'application publie elle-même sa charge « en ligne ». */
+  willPayload?: string;
   /** Version du protocole MQTT (3 = 3.1, 4 = 3.1.1, 5 = 5.0) — passé tel quel à mqtt.js. Absent =
    *  défaut de la librairie (3.1.1). ⭐ 24/08/2026 : passage général à MQTT 5, SAUF les deux ponts
    *  de compatibilité vers l'ancienne domotique (rpigpio, rfxcom) qui doivent rester en 3.1.1 — ne
@@ -170,7 +174,7 @@ export class MqttTransport {
 
     if (this.client) {
       // Publier le LWT offline avant de se déconnecter
-      this.publishLwt(LWT_PAYLOAD_OFFLINE, true);
+      this.publishLwt(this.config.willPayload ?? LWT_PAYLOAD_OFFLINE, true);
       // ⭐ 30/08/2026, bug réel constaté en conditions réelles (ha2, EVOO7, désactivation puis
       // réactivation rapprochées de l'app depuis l'UI) : SANS ce retrait des listeners, le client
       // mqtt.js qu'on vient de quitter reste en vie en arrière-plan (`.end()` est asynchrone — la
@@ -186,6 +190,10 @@ export class MqttTransport {
       // point d'entrée différent : ici c'est disconnect() qui laissait un client zombie, pas une
       // reconnexion mqtt.js interne concurrente.
       this.client.removeAllListeners();
+      // ⭐ 13/10/2026 (essai réel de l'application esphome) : sans AU MOINS un écouteur 'error', une erreur tardive du client en fin de
+      // vie (ex. ERR_STREAM_WRITE_AFTER_END : un message QoS 1 reçu juste avant la fermeture, accusé après) est émise sans
+      // destinataire et ARRÊTE LE PROCESS. On garde donc un écouteur muet.
+      this.client.on('error', () => undefined);
       this.client.end();
       this.client = null;
     }
@@ -323,7 +331,7 @@ export class MqttTransport {
       // Configuration du LWT (Last Will and Testament)
       will: {
         topic: this.getWillTopic(),
-        payload: LWT_PAYLOAD_OFFLINE,
+        payload: this.config.willPayload ?? LWT_PAYLOAD_OFFLINE,
         retain: true,
         qos: 1,
       },
@@ -359,7 +367,9 @@ export class MqttTransport {
     }, STABLE_CONNECTION_MS);
 
     // Publier le LWT online
-    this.publishLwt(LWT_PAYLOAD_ONLINE, true);
+    // Avec une charge de testament personnalisée, l'application publie elle-même sa charge « en ligne » (sinon le simple
+    // texte `online` écraserait sa présence JSON conservée — constaté en conditions réelles avec l'application esphome).
+    if (this.config.willPayload === undefined) this.publishLwt(LWT_PAYLOAD_ONLINE, true);
 
     // Réappliquer les abonnements actifs et rejouer les publications en attente —
     // voir les commentaires sur `activeSubscriptions`/`pendingPublishes`.
@@ -448,7 +458,7 @@ export class MqttTransport {
    * @param online - true pour publier "online", false pour "offline"
    */
   publishStatus(online: boolean): void {
-    this.publishLwt(online ? LWT_PAYLOAD_ONLINE : LWT_PAYLOAD_OFFLINE, true);
+    this.publishLwt(online ? LWT_PAYLOAD_ONLINE : (this.config.willPayload ?? LWT_PAYLOAD_OFFLINE), true);
   }
 
   // ===========================================================================
