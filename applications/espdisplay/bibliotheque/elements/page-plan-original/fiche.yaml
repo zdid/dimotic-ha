@@ -1,0 +1,7 @@
+id: page-plan-original
+nom: "Page de plan « original »"
+description: "Page LVGL 800x480, avec les capteurs HA, images et polices qu'elle seule utilise."
+exigences:
+  plateformes: [esp32]
+  ecran: { largeur: 800, hauteur: 480 }
+  elements: [polices-plans]

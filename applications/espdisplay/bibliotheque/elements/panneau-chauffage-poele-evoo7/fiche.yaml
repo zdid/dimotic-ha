@@ -1,0 +1,7 @@
+id: panneau-chauffage-poele-evoo7
+nom: "Panneau de chauffage (poêle, EVOO7, humidité)"
+description: "Panneau 240x320 portrait : thermostat du poêle, thermostat EVOO7 de la pompe à chaleur, humidité de la salle ; entités et libellés encore en dur."
+exigences:
+  plateformes: [esp32]
+  ecran: { largeur: 240, hauteur: 320 }
+  elements: [polices-poele]

@@ -1,0 +1,7 @@
+id: assistant-vocal
+nom: "Assistant vocal"
+description: "Lecteur audio, assistant de HA, mot d'éveil, scripts de l'anneau de LED, réglages exposés à HA, boutons."
+exigences:
+  plateformes: [esp32]
+  audio: true
+  materiels: [waveshare-esp32-s3-audio]

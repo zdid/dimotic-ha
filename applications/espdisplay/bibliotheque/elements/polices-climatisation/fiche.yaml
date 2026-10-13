@@ -1,0 +1,5 @@
+id: polices-climatisation
+nom: "Polices climatisation et thermostats"
+description: "Titre, texte et valeur des pages de climatisation et de thermostats."
+exigences:
+  plateformes: [esp32]

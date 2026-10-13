@@ -1,0 +1,10 @@
+# Table de partitions personnalisée — carte 16 Mo, garde le schéma OTA à 2 slots (ESPHome/HA
+# savent l'utiliser pour les mises à jour par WiFi) mais avec des slots à 6 Mo au lieu de ~1,8 Mo
+# par défaut. Nécessaire dès qu'on embarque PLUSIEURS plans à la fois (chaque image de fond
+# 800x480 pèse ~768 Ko brute une fois convertie en RGB565, x3 plans = ~2,3 Mo rien que pour les
+# images, + les widgets/abonnements HA x3 aussi). Reste ~4 Mo non utilisés sur les 16 Mo réels.
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x600000,
+app1,     app,  ota_1,   0x610000, 0x600000,

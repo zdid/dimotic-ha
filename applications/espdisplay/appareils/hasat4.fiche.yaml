@@ -1,0 +1,9 @@
+# Fiche de l'appareil hasat4 (un exemplaire physique). Adresse : à renseigner (adresse fixe ou réservation DHCP) ; vide = hasat4.local.
+nom: hasat4
+nom_affichage: "hasat4"
+materiel: waveshare-esp32-s3-audio
+esp:
+  adresse: ""
+options:
+  autoriser_appels_service: false
+wifi: [stfort]

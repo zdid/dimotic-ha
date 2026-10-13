@@ -1,0 +1,3 @@
+id: wifi-multi-ap
+nom: "Wifi multiple et point d'accès de secours"
+description: "Plusieurs réseaux (un par site : wifi_<site>_ssid/password) et point d'accès de secours avec portail captif (secret wifi_secours_password)."

@@ -1,0 +1,9 @@
+# Fiche de l'appareil hasat5 (un exemplaire physique). Adresse : à renseigner (adresse fixe ou réservation DHCP) ; vide = hasat5.local.
+nom: hasat5
+nom_affichage: "hasat5"
+materiel: waveshare-esp32-s3-audio
+esp:
+  adresse: ""
+options:
+  autoriser_appels_service: false
+wifi: [stfort]

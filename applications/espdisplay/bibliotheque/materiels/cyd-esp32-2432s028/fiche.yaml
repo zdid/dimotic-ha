@@ -1,0 +1,17 @@
+# Fiche du modèle de matériel — « Cheap Yellow Display » ESP32-2432S028 (voir ../base.yaml).
+id: cyd-esp32-2432s028
+nom: "CYD ESP32-2432S028 (écran 2,8\" 240x320, tactile résistif)"
+plateforme: esp32
+puce: esp32
+cadre: arduino
+carte: esp32dev
+flash: 4MB
+memoire:
+  emplacement_ota_octets: 1835008     # relevé à la compilation d'une carte esp32dev (Arduino) : « from 1835008 bytes »
+  ram_interne_octets: 327680
+  psram: false
+ecran: { largeur: 240, hauteur: 320, tactile: xpt2046 }
+audio: false
+# Écran SPI (12, 13, 14, 15, 2), tactile SPI (25, 32, 39, 33), rétroéclairage (21). GPIO36 volontairement non utilisée.
+broches_prises: [2, 12, 13, 14, 15, 21, 25, 32, 33, 39]
+broches_libres: []

@@ -1,0 +1,5 @@
+id: polices-plans
+nom: "Polices des pages de plans"
+description: "Icônes Font Awesome et valeurs des capteurs."
+exigences:
+  plateformes: [esp32]

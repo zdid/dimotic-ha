@@ -1,0 +1,3 @@
+id: wifi-simple
+nom: "Wifi simple"
+description: "Un seul réseau (secrets wifi_ssid / wifi_password). Interchangeable avec wifi-multi-ap."

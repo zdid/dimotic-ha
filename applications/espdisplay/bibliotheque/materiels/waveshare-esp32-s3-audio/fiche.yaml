@@ -1,0 +1,16 @@
+# Fiche du modèle de matériel — Waveshare ESP32-S3-Audio (satellite vocal ; voir ../base.yaml).
+id: waveshare-esp32-s3-audio
+nom: "Waveshare ESP32-S3-Audio (micro, haut-parleur, anneau de LED)"
+plateforme: esp32
+puce: esp32-s3
+cadre: esp-idf
+carte: esp32-s3-devkitc-1
+flash: 16MB
+memoire:
+  emplacement_ota_octets: 1835008     # table de partitions par défaut d'ESPHome (à confirmer sur une compilation réelle)
+  ram_interne_octets: 327680
+  psram: true
+audio: true
+# I2S (12, 13, 14, 15, 16), I2C des codecs et de l'expandeur (10, 11), anneau de LED (38).
+broches_prises: [10, 11, 12, 13, 14, 15, 16, 38]
+broches_libres: []

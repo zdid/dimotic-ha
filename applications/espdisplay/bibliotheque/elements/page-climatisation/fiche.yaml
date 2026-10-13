@@ -1,0 +1,15 @@
+id: page-climatisation
+nom: "Page de climatisation paramétrable"
+description: "Une page pour UNE entité climate (remplace les trois copies salle / bureau / chambre d'ami)."
+parametres:
+  - { nom: clim_id, description: "suffixe des identifiants LVGL/capteurs, unique par instance (salle, bureau, ami…)" }
+  - { nom: clim_entite, description: "entité HA climate (ex. climate.bureau_climatiseur)" }
+  - { nom: clim_rang, description: "libellé du bandeau (ex. Climatisation 2/3)" }
+  - { nom: clim_titre, description: "titre affiché (ex. Bureau)" }
+  - { nom: clim_pas, description: "pas des boutons -/+ en °C (0.5 ou 1.0)" }
+  - { nom: clim_max, description: "consigne maximale en °C (ex. 30.0)" }
+  - { nom: clim_mode_auto, description: "nom du mode automatique de l'appareil (auto ou heat_cool)" }
+exigences:
+  plateformes: [esp32]
+  ecran: { largeur: 800, hauteur: 480 }
+  elements: [polices-climatisation]

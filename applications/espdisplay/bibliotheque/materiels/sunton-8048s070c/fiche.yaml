@@ -1,0 +1,17 @@
+# Fiche du modèle de matériel — Sunton ESP32-8048S070C (voir ../base.yaml). Valeurs vérifiées sur la carte réelle (partitions-haplan.csv : 2 emplacements OTA de 6 Mo).
+id: sunton-8048s070c
+nom: "Sunton ESP32-8048S070C (écran RVB 7\" 800x480, tactile GT911)"
+plateforme: esp32
+puce: esp32-s3
+cadre: esp-idf
+carte: esp32-s3-devkitc-1
+flash: 16MB
+memoire:
+  emplacement_ota_octets: 6291456     # 0x600000 : table de partitions personnalisée
+  ram_interne_octets: 327680          # RAM statique relevée par ESPHome à la compilation (à confirmer sur une compilation réelle)
+  psram: true
+ecran: { largeur: 800, hauteur: 480, tactile: gt911 }
+audio: false
+# Écran RVB (de 41, hsync 39, vsync 40, pclk 42, rouge/vert/bleu), bus I2C du tactile (19, 20) et rétroéclairage (2).
+broches_prises: [1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15, 16, 19, 20, 21, 39, 40, 41, 42, 45, 46, 47, 48]
+broches_libres: []                    # à relever sur les connecteurs quand un élément en aura besoin
