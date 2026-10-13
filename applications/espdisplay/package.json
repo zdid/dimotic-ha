@@ -6,13 +6,15 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc -b",
-    "watch": "tsc -w"
+    "watch": "tsc -w",
+    "test": "vitest run"
   },
   "dependencies": {
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^1.1.0"
   },
   "engines": {
     "node": ">=20.0.0"
