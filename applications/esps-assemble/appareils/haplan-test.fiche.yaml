@@ -1,0 +1,10 @@
+# Fiche de l'appareil haplan-display (un exemplaire physique). Adresse : à renseigner (adresse fixe ou réservation DHCP) ; vide = haplan-display.local.
+nom: haplan-test
+nom_affichage: "Plan test génération (essai, sans envoi à l écran)"
+materiel: sunton-8048s070c
+esp:
+  adresse: ""
+options:
+  autoriser_appels_service: true
+wifi: [stfort]
+plans: [original, "Rez de chaussée", Premier]

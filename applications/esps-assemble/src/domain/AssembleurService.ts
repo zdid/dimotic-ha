@@ -57,6 +57,12 @@ export interface IAssembleurService {
 
 export type ResultatDemande = { ok: true; revision: number; action: string; sha256: string; avertissements: string[] } | { ok: false; erreurs: string[] };
 
+/** Fichiers `generes/…` factices : vérification de la fiche sans générer les pages de plans (qui demandent HA). */
+class GeneresFactices extends Map<string, Buffer> {
+  override get(cle: string): Buffer | undefined { return cle.startsWith('generes/') ? Buffer.from('{}\n') : super.get(cle); }
+  override has(cle: string): boolean { return cle.startsWith('generes/') || super.has(cle); }
+}
+
 export class AssembleurService implements IAssembleurService {
   private config: AssembleurConfig;
   private transport: TransportMqtt | null = null;
@@ -274,7 +280,8 @@ export class AssembleurService implements IAssembleurService {
     return biblio.appareils().map((nom) => {
       let nomAffichage = nom, materiel = '?';
       try { const f = biblio.appareil(nom); nomAffichage = f.nomAffichage; materiel = f.materiel; } catch { /* la vérification ci-dessous le dira */ }
-      const v = assemblerPaquet(this.racineApp, nom, 0, this.maintenant);
+      // Les pages de plans sont générées à l'assemblage : pour la simple vérification, des fichiers factices les remplacent.
+      const v = assemblerPaquet(this.racineApp, nom, 0, this.maintenant, new GeneresFactices());
       return {
         nom, nomAffichage, materiel,
         etat: v.ok ? 'pret' as const : 'refuse' as const,
