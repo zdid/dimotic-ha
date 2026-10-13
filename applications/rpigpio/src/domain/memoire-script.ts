@@ -9,7 +9,9 @@ export const MEMOIRE_SCRIPT = String.raw`#!/usr/bin/env python3
    sortie dans une copie de /config.yml (/tmp/config.yml) — l'état est donc appliqué dès l'initialisation de la broche,
    sans attendre de commande MQTT. Aucune commande retenue n'est nécessaire.
 2. Lance mqtt-io sur cette copie.
-3. Écoute les topics d'état de mqtt-io (<topic_prefix>/output/<nom>, <topic_prefix>/input/<nom>), écrit /data/etats.json
+3. Quand Home Assistant annonce son démarrage (homeassistant/status = online), republie l'état de chaque pin sur son topic d'état
+   (mqtt-io ne publie que lors d'un changement : sans cela les entités restent « inconnu » jusqu'au prochain changement).
+4. Écoute les topics d'état de mqtt-io (<topic_prefix>/output/<nom>, <topic_prefix>/input/<nom>), écrit /data/etats.json
    (écriture atomique) et publie le résumé de toutes les pins sur <topic_prefix>/memoire/etats (JSON, NON retenu).
 """
 import json
@@ -76,10 +78,25 @@ print('memoire: %d état(s) rejoué(s) au démarrage : %s' % (n, json.dumps(etat
 
 m = config['mqtt']
 prefixe = m['topic_prefix']
-sujets = [prefixe + '/output/+', prefixe + '/input/+']
+sujets = [prefixe + '/output/+', prefixe + '/input/+', 'homeassistant/status']
+sorties = {str(o['name']) for o in config.get('digital_outputs') or []}
+entrees = {str(o['name']) for o in config.get('digital_inputs') or []}
+
+
+def republier(client):
+    with verrou:
+        for nom, valeur in etats.items():
+            genre = 'output' if nom in sorties else 'input' if nom in entrees else None
+            if genre:
+                client.publish('%s/%s/%s' % (prefixe, genre, nom), valeur, retain=False)
+    print('memoire: états republiés pour Home Assistant', flush=True)
 
 
 def sur_message(client, _ud, msg):
+    if msg.topic == 'homeassistant/status':
+        if msg.payload.decode('utf-8', 'replace').strip() == 'online':
+            threading.Timer(8.0, republier, args=(client,)).start()  # laisser HA créer ses entités MQTT
+        return
     nom = msg.topic.rsplit('/', 1)[-1]
     valeur = msg.payload.decode('utf-8', 'replace').strip().upper()
     if valeur not in VALIDES:

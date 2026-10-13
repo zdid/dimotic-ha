@@ -1,5 +1,7 @@
 # Spécifications Fonctionnelles - Module RPIGPIO
 
+*Version 1.8 - 13 Octobre 2026*
+*v1.8 : la mémoire republie les états sur leurs topics d'état quand Home Assistant annonce son démarrage (§4.4) — plus d'entités « inconnu » après un redémarrage de HA.*
 *Version 1.7 - 13 Octobre 2026*
 *v1.7 : mémoire des derniers états des pins (§4.4) — `memoire.py` lance mqtt-io, rejoue au démarrage les états lus sur disque (`data/etats.json`) et publie un résumé non retenu `<topic_prefix>/memoire/etats` ; plus aucun message retenu requis.*
 *Version 1.6 - 8 Octobre 2026*
@@ -318,7 +320,8 @@ ballon au redémarrage). À la place, un script `memoire.py` (source : `memoire-
 2. **En marche** : écoute `<topic_prefix>/output/+` et `<topic_prefix>/input/+`, met à jour `data/etats.json` (écriture
    atomique) et publie le résumé de toutes les pins sur `<topic_prefix>/memoire/etats` (JSON, **non retenu**, republié à chaque
    changement et à chaque connexion).
-3. Fichier absent ou illisible : démarrage sans mémoire, jamais d'échec.
+3. **Redémarrage de Home Assistant (v1.8)** : le script écoute aussi `homeassistant/status` ; sur `online`, après 8 s (le temps que HA recrée ses entités), il republie l'état de chaque pin sur son topic d'état (`output/<n>` ou `input/<n>`, non retenu). mqtt-io ne publie qu'à un changement : sans cela les entités restent « inconnu » jusqu'au prochain changement.
+4. Fichier absent ou illisible : démarrage sans mémoire, jamais d'échec.
 
 `compose.yaml` généré : `command: [venv/bin/python, /memoire.py]`, volumes `./memoire.py:/memoire.py:ro` et `./data:/data`.
 Vérifié sur noisy le 13/10/2026 (états rejoués, niveaux physiques conformes, résumé publié, enregistrement d'un changement).
@@ -535,6 +538,7 @@ applications/rpigpio/
 ### 10.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.8 | 2026-10-13 | Claude | La mémoire republie les états quand HA annonce son démarrage (§4.4). v1.7 archivée. |
 | 1.7 | 2026-10-13 | Claude | Mémoire des derniers états des pins sur disque, rejouée au démarrage (§4.4) ; pas de messages retenus. v1.6 archivée. |
 | 1.6 | 2026-10-08 | Claude | Entités sans suffixe : `ha_discovery.name: null` par broche (§2.3bis), types d'entités produits (switch / binary_sensor). |
 | 1.5 | 2026-09-24 | Claude | Revue de code : GPIO unique par pin, présence de l'agent reconnectée sur changement MQTT, `bridgeInstance` figé à chaud, mémoire alignée sur le disque en cas d'échec d'écriture. v1.4 archivée. |
