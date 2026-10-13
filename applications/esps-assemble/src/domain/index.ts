@@ -12,6 +12,7 @@ import type { ApplicationModule, ModuleUiMetadata, IEventBus, Logger, IAppConfig
 import { AppConfigProvider } from '../../../core/dist/exports';
 import { AssembleurService, type IAssembleurService } from './AssembleurService';
 import type { AssembleurConfig } from './config-schema';
+import type { ClientHa } from './plans/source-ha';
 import { ASSEMBLEUR_SOCKET_EVENTS, ASSEMBLEUR_ALL_EVENTS, ASSEMBLEUR_PERSISTENT_EVENTS } from './socket-events';
 
 export interface MenuEntry { id?: string; label: string; icon?: string; path: string; order: number; badge?: string; parentId?: string }
@@ -76,15 +77,15 @@ export const ESPS_ASSEMBLE_APP: ApplicationModule & { menu?: ApplicationMenuConf
   runsAsSeparateProcess: true
 };
 
-export function createAssembleurService(eventBus: IEventBus, logger: Logger, configProvider: IAppConfigProvider<AssembleurConfig>): IAssembleurService {
-  const service = AssembleurService.create(eventBus, logger, configProvider);
+export function createAssembleurService(eventBus: IEventBus, logger: Logger, configProvider: IAppConfigProvider<AssembleurConfig>, clientHa?: ClientHa): IAssembleurService {
+  const service = new AssembleurService(eventBus, logger, configProvider, undefined, undefined, undefined, undefined, undefined, clientHa);
   eventBus.emit('app:socket-events:registered', { appId: 'esps-assemble', socketEvents: ASSEMBLEUR_ALL_EVENTS, persistentEvents: ASSEMBLEUR_PERSISTENT_EVENTS });
   eventBus.emit('app:menu:register', { appId: 'esps-assemble', menuConfig: ESPS_ASSEMBLE_MENU_CONFIG });
   return service;
 }
 
-export function createAssembleurServiceWithConfig(eventBus: IEventBus, logger: Logger, configService: ConfigService): IAssembleurService {
-  return createAssembleurService(eventBus, logger, new AppConfigProvider<AssembleurConfig>('esps-assemble' as any, configService));
+export function createAssembleurServiceWithConfig(eventBus: IEventBus, logger: Logger, configService: ConfigService, clientHa?: ClientHa): IAssembleurService {
+  return createAssembleurService(eventBus, logger, new AppConfigProvider<AssembleurConfig>('esps-assemble' as any, configService), clientHa);
 }
 
 export * from './AssembleurService';
@@ -95,3 +96,7 @@ export * from './assembleur/resolution';
 export * from './assembleur/verification';
 export * from './assembleur/paquet';
 export * from './plans/coordonnees';
+export * from './plans/generation';
+export * from './plans/image';
+export * from './plans/generer-fichiers';
+export * from './plans/source-ha';

@@ -15,6 +15,8 @@ import { assembleurConfigSchema, type AssembleurConfig } from './config-schema';
 import { ASSEMBLEUR_CLIENT_EVENTS, ASSEMBLEUR_SOCKET_EVENTS } from './socket-events';
 import { Bibliotheque } from './assembleur/fiches';
 import { assemblerPaquet } from './assembleur/paquet';
+import { genererFichiersPlans, PlanIntrouvable, type SourcePlans } from './plans/generer-fichiers';
+import { SourcePlansHa, type ClientHa } from './plans/source-ha';
 
 /** Transport MQTT minimal (MqttTransport du cœur en production, faux en test). */
 export interface TransportMqtt {
@@ -71,11 +73,15 @@ export class AssembleurService implements IAssembleurService {
     /** Dossier de données de l'application (`data/esps-assemble`). */
     private readonly dossierDonnees: string = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'esps-assemble'),
     private readonly port: number = Number(process.env.DIMOTIC_WEB_PORT) || 8087,
-    private readonly maintenant: () => Date = () => new Date()
+    private readonly maintenant: () => Date = () => new Date(),
+    /** Liaison HA du cœur (export des plans) ; absente = les appareils à pages de plans sont refusés. */
+    private readonly clientHa?: ClientHa,
+    /** Source de plans de remplacement (tests, anciens plans HAPLAN). */
+    private readonly sourcePlans?: SourcePlans
   ) {
     this.config = this.charger();
     this.eventBus.on(ASSEMBLEUR_CLIENT_EVENTS.GET_APPAREILS, () => this.emettreAppareils());
-    this.eventBus.on(ASSEMBLEUR_CLIENT_EVENTS.ASSEMBLER, (d: unknown) => this.demander(d as { appareil: string; action?: string }));
+    this.eventBus.on(ASSEMBLEUR_CLIENT_EVENTS.ASSEMBLER, (d: unknown) => void this.demander(d as { appareil: string; action?: string }));
     this.eventBus.on(ASSEMBLEUR_CLIENT_EVENTS.ANNULER, (d: unknown) => this.annuler((d as { appareil: string }).appareil));
     this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (e) => {
       if (e?.moduleId !== 'esps-assemble' || !e.success) return;
@@ -112,7 +118,8 @@ export class AssembleurService implements IAssembleurService {
     job: (a: string) => `dimotic/esphome/${this.config.site}/jobs/${a}`,
     jobs: () => `dimotic/esphome/${this.config.site}/jobs/+`,
     status: () => `dimotic/esphome/${this.config.site}/status/+`,
-    appareils: () => `dimotic/esps-assemble/${this.config.site}/appareils`
+    appareils: () => `dimotic/esps-assemble/${this.config.site}/appareils`,
+    generer: () => `dimotic/esps-assemble/${this.config.site}/generer`
   };
 
   private demarrerMqtt(): void {
@@ -122,6 +129,7 @@ export class AssembleurService implements IAssembleurService {
     t.onConnect(() => { this.logger.info('AssembleurService', 'Connecté au broker MQTT du site'); this.publierListe(); this.emettreAppareils(); });
     t.subscribe(this.sujet.status(), 1);
     t.subscribe(this.sujet.jobs(), 1);
+    t.subscribe(this.sujet.generer(), 1);
     t.connect();
   }
 
@@ -133,6 +141,17 @@ export class AssembleurService implements IAssembleurService {
   private recevoir(topic: string, charge: Buffer | string): void {
     const appareil = topic.split('/').pop() ?? '';
     const texte = charge.toString().trim();
+    // Bouton « Générer » de HA (non conservé) : même effet que le bouton de la page.
+    if (topic === this.sujet.generer()) {
+      if (!texte) return;
+      try {
+        const d = JSON.parse(texte);
+        void this.demander({ appareil: String(d.appareil ?? ''), action: d.action });
+      } catch (e) {
+        this.logger.warn('AssembleurService', `Demande « Générer » illisible : ${(e as Error).message}`);
+      }
+      return;
+    }
     try {
       if (topic.includes('/status/')) {
         if (!texte) this.statuts.delete(appareil);
@@ -152,7 +171,7 @@ export class AssembleurService implements IAssembleurService {
   private publierListe(): void {
     if (!this.transport) return;
     const biblio = new Bibliotheque(this.racineApp);
-    const liste = biblio.appareils().map((n) => { try { const f = biblio.appareil(n); return { nom: n, nomAffichage: f.nomAffichage, pagesDePlans: false }; } catch { return null; } }).filter(Boolean);
+    const liste = biblio.appareils().map((n) => { try { const f = biblio.appareil(n); return { nom: n, nomAffichage: f.nomAffichage, pagesDePlans: f.plans.length > 0 }; } catch { return null; } }).filter(Boolean);
     this.transport.publish(this.sujet.appareils(), JSON.stringify({ v: 1, site: this.config.site, at: this.maintenant().toISOString(), appareils: liste }), 1, true);
   }
 
@@ -188,15 +207,37 @@ export class AssembleurService implements IAssembleurService {
   }
 
   /** Assemble l'appareil et publie la demande. `action` : `firmware` (défaut) ou `amorce` (première carte, flash USB). */
-  demander(demande: { appareil: string; action?: string }): ResultatDemande {
+  async demander(demande: { appareil: string; action?: string }): Promise<ResultatDemande> {
     const appareil = String(demande?.appareil ?? '');
     const action = demande?.action === 'amorce' ? 'amorce' : 'firmware';
     const fin = (r: ResultatDemande): ResultatDemande => { this.eventBus.emit(ASSEMBLEUR_SOCKET_EVENTS.RESULTAT, { appareil, action, ...r }); this.emettreAppareils(); return r; };
     if (!/^[a-z0-9][a-z0-9_-]*$/.test(appareil)) return fin({ ok: false, erreurs: ['nom d\'appareil invalide'] });
     if (!this.transport || !this.transport.getConnected()) return fin({ ok: false, erreurs: ['pas de connexion au broker MQTT du site : la demande ne peut pas être publiée'] });
 
+    // Pages de plans : générées à l'assemblage depuis les plans de HA (ou de la source de remplacement).
+    let generes = new Map<string, Buffer>();
+    const resumePlans: { plan: string; page: string; placees: number; hors: number }[] = [];
+    try {
+      const biblio = new Bibliotheque(this.racineApp);
+      const fiche = biblio.appareil(appareil);
+      if (fiche.plans.length > 0) {
+        const ecran = biblio.materiel(fiche.materiel).ecran;
+        if (!ecran) return fin({ ok: false, erreurs: [`l'appareil demande des pages de plans : le matériel ${fiche.materiel} n'a pas d'écran`] });
+        const source = this.sourcePlans ?? (this.clientHa ? new SourcePlansHa(this.clientHa) : null);
+        if (!source) return fin({ ok: false, erreurs: ['les plans viennent de Home Assistant et la liaison HA du cœur est indisponible'] });
+        if (source instanceof SourcePlansHa) await source.preparer(fiche.plans);
+        const g = await genererFichiersPlans(fiche.plans, source, { largeur: ecran.largeur, hauteur: ecran.hauteur });
+        generes = g.fichiers;
+        resumePlans.push(...g.resume);
+      }
+    } catch (e) {
+      const message = e instanceof PlanIntrouvable ? e.message : `génération des pages de plans impossible : ${(e as Error).message}`;
+      this.logger.warn('AssembleurService', `${appareil} : ${message}`);
+      return fin({ ok: false, erreurs: [message] });
+    }
+
     const revision = (this.revisions()[appareil] ?? 0) + 1;
-    const r = assemblerPaquet(this.racineApp, appareil, revision, this.maintenant);
+    const r = assemblerPaquet(this.racineApp, appareil, revision, this.maintenant, generes);
     if (!r.ok) { this.logger.warn('AssembleurService', `Assemblage de ${appareil} refusé : ${r.erreurs.join(' ; ')}`); return fin({ ok: false, erreurs: r.erreurs }); }
 
     const dossier = path.join(this.dossierDonnees, 'machine_partage', 'paquets', appareil);
@@ -212,7 +253,8 @@ export class AssembleurService implements IAssembleurService {
       v: 1, site: this.config.site, appareil, revision, at: this.maintenant().toISOString(), action,
       origine: adresse, paquet: `http://${adresse}/api/apps/esps-assemble/partage/paquets/${appareil}/r${revision}.zip`, sha256: r.sha256
     }), 1, true);
-    this.logger.info('AssembleurService', `Paquet de ${appareil} (révision ${revision}, ${action}) publié : ${r.zip.length} octets`);
+    const detail = resumePlans.length ? ` ; plans : ${resumePlans.map((p) => `${p.plan} (${p.placees} objets${p.hors ? `, ${p.hors} hors cadre` : ''})`).join(', ')}` : '';
+    this.logger.info('AssembleurService', `Paquet de ${appareil} (révision ${revision}, ${action}) publié : ${r.zip.length} octets${detail}`);
     return fin({ ok: true, revision, action, sha256: r.sha256, avertissements: r.avertissements });
   }
 

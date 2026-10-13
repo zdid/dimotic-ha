@@ -17,7 +17,8 @@ import {
   ConfigWriter,
   ConfigService,
   createLogger,
-  IpcEventBus
+  IpcEventBus,
+  HaBridgeClient
 } from '../../core/dist/exports';
 import { createAssembleurServiceWithConfig } from './domain';
 
@@ -41,7 +42,9 @@ async function main(): Promise<void> {
   const machineId = configService.getConfig().core.machineId;
   const eventBus = new IpcEventBus();
 
-  const service = createAssembleurServiceWithConfig(eventBus, logger, configService);
+  // Liaison HA du cœur : export des plans de l'intégration Plans pour les pages de plans générées.
+  const haBridgeClient = new HaBridgeClient(eventBus, logger);
+  const service = createAssembleurServiceWithConfig(eventBus, logger, configService, haBridgeClient);
 
   await service.start();
   logger.info('esps-assemble:standalone', `esps-assemble démarré en process séparé (pid ${process.pid}, machine ${machineId})`);

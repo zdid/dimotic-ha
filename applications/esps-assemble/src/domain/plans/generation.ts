@@ -10,7 +10,7 @@
  * Deux conventions de position : `centre` (anciens plans HAPLAN) et `bas-gauche` (intégration Plans) — voir coordonnees.ts.
  */
 
-import { ajuster, versPixels, boiteCentree, arrondi, type Dimensions } from './coordonnees';
+import { ajuster, versPixels, boiteCentree, arrondi, type Ancrage, type Dimensions } from './coordonnees';
 
 export const COLOR_ON = '0xFFC107';
 export const COLOR_OFF = '0x9E9E9E';
@@ -180,8 +180,6 @@ export interface PagePlan {
   placees: number;
   hors: number;
 }
-
-export type Ancrage = 'centre' | 'bas-gauche';
 
 export function genererPage(plan: EntreePlan, ecran: Dimensions, ancrage: Ancrage = 'bas-gauche'): PagePlan {
   const page = slug(plan.id) || 'plan';

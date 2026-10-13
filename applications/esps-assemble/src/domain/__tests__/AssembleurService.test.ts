@@ -42,7 +42,7 @@ beforeEach(() => {
 describe('AssembleurService — assemblage et demande', () => {
   it('publie la demande conservée avec l\'adresse du paquet, dépose le paquet, que l\'usine accepte', async () => {
     const s = service({ site: 'stfort', adresseJoignable: '192.168.1.51:8087' }); await s.start();
-    const r = s.demander({ appareil: 'ecran' });
+    const r = await s.demander({ appareil: 'ecran' });
     expect(r).toMatchObject({ ok: true, revision: 1, action: 'firmware' });
     const job = JSON.parse(transport.derniere('dimotic/esphome/stfort/jobs/ecran')!.payload);
     expect(transport.derniere('dimotic/esphome/stfort/jobs/ecran')!.retain).toBe(true);
@@ -55,8 +55,8 @@ describe('AssembleurService — assemblage et demande', () => {
 
   it('révision croissante, 2 dernières conservées, action amorce', async () => {
     const s = service(); await s.start();
-    for (let i = 0; i < 3; i++) s.demander({ appareil: 'ecran' });
-    expect(s.demander({ appareil: 'ecran', action: 'amorce' })).toMatchObject({ ok: true, revision: 4, action: 'amorce' });
+    for (let i = 0; i < 3; i++) await s.demander({ appareil: 'ecran' });
+    expect(await s.demander({ appareil: 'ecran', action: 'amorce' })).toMatchObject({ ok: true, revision: 4, action: 'amorce' });
     expect(fs.readdirSync(path.join(donnees, 'machine_partage/paquets/ecran')).sort()).toEqual(['r3.zip', 'r4.zip']);
     expect(JSON.parse(fs.readFileSync(path.join(donnees, 'revisions.json'), 'utf8'))).toEqual({ ecran: 4 });
   });
@@ -64,7 +64,7 @@ describe('AssembleurService — assemblage et demande', () => {
   it('refus : appareil refusé par les vérifications → rien publié, rien déposé, raisons données', async () => {
     ecrire('appareils/ecran.fiche.yaml', 'nom: ecran\nnom_affichage: "Écran"\nmateriel: autre\n');
     const s = service(); await s.start();
-    const r = s.demander({ appareil: 'ecran' });
+    const r = await s.demander({ appareil: 'ecran' });
     expect(r.ok).toBe(false);
     expect(transport.publications.filter((p) => p.topic.includes('/jobs/'))).toEqual([]);
     expect(fs.existsSync(path.join(donnees, 'machine_partage'))).toBe(false);
@@ -72,9 +72,9 @@ describe('AssembleurService — assemblage et demande', () => {
 
   it('refus : pas de connexion au broker, nom d\'appareil dangereux', async () => {
     const s = service(); // pas de start() : transport absent
-    expect(s.demander({ appareil: 'ecran' })).toMatchObject({ ok: false, erreurs: [expect.stringContaining('broker MQTT')] });
+    expect(await s.demander({ appareil: 'ecran' })).toMatchObject({ ok: false, erreurs: [expect.stringContaining('broker MQTT')] });
     await s.start();
-    expect(s.demander({ appareil: '../x' })).toMatchObject({ ok: false, erreurs: ['nom d\'appareil invalide'] });
+    expect(await s.demander({ appareil: '../x' })).toMatchObject({ ok: false, erreurs: ['nom d\'appareil invalide'] });
   });
 
   it('annulation : message vide conservé sur la demande', async () => {
@@ -109,5 +109,67 @@ describe('AssembleurService — état', () => {
   it('message MQTT illisible : ignoré sans exception', async () => {
     const s = service(); await s.start();
     expect(() => transport.recevoir('dimotic/esphome/stfort/status/ecran', '{pas du json')).not.toThrow();
+  });
+});
+
+describe('AssembleurService — pages de plans générées depuis HA', () => {
+  const PNG_1X1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const exportHa = { floorplans: { 'Rez de chaussée': { filename: 'rdc.png', positions: [{ entity_id: 'light.salon', x: 0.5, y: 0.5, quoi: null }, { entity_id: 'switch.entree_salle', x: 0.2, y: 0.8, quoi: 'Radiateur' }], texts: [] } }, images: { 'rdc.png': PNG_1X1.toString('base64') } };
+
+  beforeEach(() => {
+    ecrire('bibliotheque/materiels/carte/fiche.yaml', 'id: carte\nnom: Carte\nplateforme: esp32\npuce: esp32\ncadre: arduino\ncarte: esp32dev\nflash: 4MB\nmemoire: { emplacement_ota_octets: 1835008, ram_interne_octets: 327680 }\necran: { largeur: 800, hauteur: 480 }\n');
+    ecrire('bibliotheque/elements/polices-plans/element.yaml', 'font:\n  - file: "gfonts://Roboto"\n    id: font_sensor\n    size: 20\n    glyphs: "0123"\n');
+    ecrire('bibliotheque/elements/polices-plans/fiche.yaml', 'id: polices-plans\nnom: Polices\n');
+    ecrire('appareils/ecran.yaml', 'esphome:\n  name: ecran\npackages:\n  materiel: !include bibliotheque/materiels/carte/base.yaml\n  polices: !include bibliotheque/elements/polices-plans/element.yaml\n  plan: !include generes/page-plan-rez_de_chauss_e.yaml\n');
+    ecrire('appareils/ecran.fiche.yaml', 'nom: ecran\nnom_affichage: "Écran"\nmateriel: carte\nplans: ["Rez de chaussée"]\n');
+  });
+
+  it('récupère l\'export de HA une fois, génère page et image, les met dans le paquet que l\'usine accepte', async () => {
+    const appels: any[] = [];
+    const ha = { callWs: async (m: any) => { appels.push(m); return exportHa; } };
+    const s = new AssembleurService(bus, logger, provider({ site: 'stfort' }), () => (transport = new FauxTransport()), app, donnees, 8087, maintenant, ha);
+    await s.start();
+    const r = await s.demander({ appareil: 'ecran' });
+    expect(r.ok).toBe(true);
+    expect(appels).toEqual([{ type: 'dimotic_plans/floorplans/export', plan_ids: ['Rez de chaussée'] }]);
+    const verif = verifierPaquet(lireZip(fs.readFileSync(path.join(donnees, 'machine_partage/paquets/ecran/r1.zip'))));
+    expect(verif.ok).toBe(true);
+    if (verif.ok) {
+      expect(Object.keys(verif.manifeste.fichiers)).toEqual(expect.arrayContaining(['generes/page-plan-rez_de_chauss_e.yaml', 'floorplan_rez_de_chauss_e_800x480.png']));
+      const page = verif.fichiers.find((f) => f.chemin === 'generes/page-plan-rez_de_chauss_e.yaml')!.contenu.toString();
+      expect(page).toContain('icon_rez_de_chauss_e_light_salon');
+      expect(page).toContain('? std::string("'); // le radiateur a une icône qui change avec l'état (la taxonomie « Radiateur » est prise en compte)
+      expect(page).toContain('icon_rez_de_chauss_e_switch_entree_salle');
+    }
+  });
+
+  it('liaison HA absente, intégration Plans trop ancienne ou plan inconnu : refus clair, rien publié', async () => {
+    const sans = new AssembleurService(bus, logger, provider({ site: 'stfort' }), () => (transport = new FauxTransport()), app, donnees, 8087, maintenant);
+    await sans.start();
+    expect(await sans.demander({ appareil: 'ecran' })).toMatchObject({ ok: false, erreurs: [expect.stringContaining('liaison HA')] });
+    const ancienne = { callWs: async () => { throw new Error('Unknown command.'); } };
+    const s = new AssembleurService(bus, logger, provider({ site: 'stfort' }), () => (transport = new FauxTransport()), app, donnees, 8087, maintenant, ancienne);
+    await s.start();
+    const r = await s.demander({ appareil: 'ecran' });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.erreurs[0]).toContain('export des plans impossible');
+    expect(transport.publications.filter((p) => p.topic.includes('/jobs/'))).toEqual([]);
+  });
+
+  it('bouton « Générer » de HA : message MQTT sur le sujet générer → même effet que la page', async () => {
+    const ha = { callWs: async () => exportHa };
+    const s = new AssembleurService(bus, logger, provider({ site: 'stfort' }), () => (transport = new FauxTransport()), app, donnees, 8087, maintenant, ha);
+    await s.start();
+    expect(transport.abonnements).toContain('dimotic/esps-assemble/stfort/generer');
+    transport.recevoir('dimotic/esps-assemble/stfort/generer', JSON.stringify({ appareil: 'ecran', action: 'firmware' }));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(JSON.parse(transport.derniere('dimotic/esphome/stfort/jobs/ecran')!.payload)).toMatchObject({ appareil: 'ecran', revision: 1, action: 'firmware' });
+    expect(() => transport.recevoir('dimotic/esps-assemble/stfort/generer', '{illisible')).not.toThrow();
+  });
+
+  it('la liste publiée signale les appareils à pages de plans (bouton « Générer » de HA)', async () => {
+    const s = service(); await s.start();
+    const l = JSON.parse(transport.derniere('dimotic/esps-assemble/stfort/appareils')!.payload);
+    expect(l.appareils.find((a: any) => a.nom === 'ecran').pagesDePlans).toBe(true);
   });
 });

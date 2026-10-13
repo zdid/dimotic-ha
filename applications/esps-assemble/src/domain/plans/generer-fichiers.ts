@@ -7,9 +7,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import { elementPlan, genererPage, slug, type Ancrage, type PositionPlan, type TexteLibre } from './generation';
+import { elementPlan, genererPage, slug, type PositionPlan, type TexteLibre } from './generation';
 import { ajusterImage, dimensionsPng } from './image';
-import type { Dimensions } from './coordonnees';
+import type { Ancrage, Dimensions } from './coordonnees';
 
 export interface PlanSource {
   id: string;
