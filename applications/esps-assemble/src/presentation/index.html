@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<!-- Derniere modification: 2026-10-14 01:10:00 - page de l'assembleur ESP (liste des appareils, assembler, annuler, états) -->
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Assembleur ESP</title>
+  <link rel="stylesheet" href="/styles/main.css">
+  <style>
+    .asm { max-width: 1000px; margin: 0 auto; padding: 20px; }
+    .asm h1 { text-align: center; color: var(--color-accent); }
+    .carte { background: var(--color-surface); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+    .carte h2 { margin: 0 0 6px; font-size: 1.15em; }
+    .ligne { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; color: var(--color-text-muted); font-size: .9em; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: .8em; }
+    .ok { background: #1e5e2e; color: #a6e6ae; } .ko { background: #5e1e1e; color: #e6a6a6; } .neutre { background: #444; color: #ccc; } .att { background: #5e4a1e; color: #e6d3a6; }
+    .btn { padding: 6px 14px; margin-right: 6px; cursor: pointer; border-radius: var(--radius); border: 1px solid var(--color-primary); background: var(--color-surface); color: var(--color-text); }
+    .btn:disabled { opacity: .4; cursor: default; }
+    .erreurs { color: #e6a6a6; margin: 6px 0 0 18px; } .avert { color: #e6d3a6; margin: 6px 0 0 18px; } .msg { margin-top: 8px; font-size: .9em; }
+    .note { color: var(--color-text-muted); font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="asm">
+    <h1>🧩 Assembleur ESP</h1>
+    <p class="note" id="entete">Chargement…</p>
+    <div id="liste"></div>
+  </div>
+  <script type="module" src="/applications/esps-assemble/presentation/ts/app.js"></script>
+</body>
+</html>

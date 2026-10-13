@@ -54,7 +54,7 @@ Le **socle** (`applications/core`) porte la connexion WebSocket Home Assistant e
 | `nommage` / `arbreouquoi` | Taxonomie QUOI/OÙ — noms et hiérarchie de lieux déduits, pas saisis à la main |
 | `scriptsha` | Dépôt et diffusion de scripts/automatisations HA, synchronisés entre instances |
 | `rfxcom` / `arexx` / `evoo7` / `teleinfo` / `rpigpio` | Intégrations matérielles |
-| `haplan` / `espdisplay` | Écrans tactiles muraux et orchestration des périphériques ESP |
+| `haplan` / `esps-assemble` | Écrans tactiles muraux et orchestration des périphériques ESP |
 
 Plusieurs instances de dimotic-ha tournent en parallèle sur des machines différentes de la maison (un Raspberry Pi par zone, plus une machine plus ancienne) — un service partagé (macros, scripts) se propage automatiquement entre elles.
 

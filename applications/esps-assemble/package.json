@@ -1,13 +1,14 @@
 {
-  "name": "espdisplay",
+  "name": "esps-assemble",
   "version": "1.0.0",
-  "description": "Orchestration des écrans ESP (ESPHome/LVGL) : reçoit une demande de déploiement (ex: depuis HAPLAN via l'EventBus) et exécute le pipeline génération+compilation Python correspondant.",
+  "description": "Assembleur de sources ESPHome : matériel + éléments de bibliothèque -> paquets, demande a l usine par MQTT",
   "main": "dist/domain/index.js",
   "license": "MIT",
   "scripts": {
     "build": "tsc -b",
     "watch": "tsc -w",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:ui": "tsc -p src/presentation/tsconfig.ui.json"
   },
   "dependencies": {
     "js-yaml": "^4.3.2",
