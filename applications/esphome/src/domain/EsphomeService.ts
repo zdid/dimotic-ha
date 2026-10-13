@@ -22,6 +22,8 @@ import type { Etat } from './messages';
 import { InstallerService, type PublicationPoseur } from './installer/InstallerService';
 import { HaDeclarer, type ClientHa } from './installer/HaDeclarer';
 import { televerserOta } from './installer/OtaClient';
+import { reconnaitre, juger, type Releve, type Verdict } from './factory/Reconnaissance';
+import type { DockerClient } from './factory/DockerApi';
 
 /** Traitement d'une demande par l'usine — injectable pour les tests. */
 export interface TraiteurUsine {
@@ -146,6 +148,7 @@ export class EsphomeService implements IEsphomeService {
 
   private setupEventListeners(): void {
     this.eventBus.on(ESPHOME_CLIENT_EVENTS.GET_STATUS, () => this.emitStatus());
+    this.eventBus.on(ESPHOME_CLIENT_EVENTS.CARTE_RECONNAITRE, () => void this.reconnaitreCarte());
     // Process séparé : sa propre instance de ConfigService est distincte de celle du cœur qui a écrit le fichier,
     // d'où `reload()` AVANT de relire (même correctif que rpigpio/teleinfo).
     this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (event) => {
@@ -417,6 +420,33 @@ export class EsphomeService implements IEsphomeService {
       },
       implementation: 'squelette'
     };
+  }
+
+  /** Docker de l'usine, remplaçable par les tests. */
+  dockerUsine: DockerClient | null = null;
+
+  /**
+   * Reconnaissance de la carte branchée sur la machine de l'usine (§5.4) : lecture seule. Les catalogues de modèles et
+   * d'appareils viendront de l'assembleur (étape 3) ; en attendant le verdict compare à des listes vides.
+   */
+  async reconnaitreCarte(): Promise<{ releve: Releve; verdict: Verdict } | null> {
+    const u = this.config.usine;
+    if (!u.actif) {
+      this.eventBus.emit(ESPHOME_SOCKET_EVENTS.ERROR, { message: "La reconnaissance d'une carte demande l'option « usine » active sur cette machine." });
+      return null;
+    }
+    try {
+      const docker = this.dockerUsine ?? new DockerApi(u.esphome.socketDocker);
+      const releve = await reconnaitre(docker, u.esphome.conteneur, u.premierFlash.peripherique);
+      const verdict = juger(releve, [], []);
+      this.eventBus.emit(ESPHOME_SOCKET_EVENTS.CARTE_RELEVE, { releve, verdict, at: new Date().toISOString() });
+      this.logger.info('EsphomeService', `Carte reconnue : ${releve.puceBrute}, flash ${releve.flash ?? '?'}, MAC ${releve.mac} — ${verdict.type}`);
+      return { releve, verdict };
+    } catch (e) {
+      this.logger.warn('EsphomeService', `Reconnaissance de la carte : ${(e as Error).message}`);
+      this.eventBus.emit(ESPHOME_SOCKET_EVENTS.ERROR, { message: (e as Error).message });
+      return null;
+    }
   }
 
   private emitStatus(): void {

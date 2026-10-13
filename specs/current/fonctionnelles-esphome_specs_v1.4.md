@@ -1,6 +1,6 @@
 # Spécifications Fonctionnelles - Module ESPHOME
 
-*Version 1.3 - 13 Octobre 2026 — **manifeste du paquet (§4bis)** et **tailles connues après compilation (§5.5)** : flash et RAM mesurées, comparées à la fiche du modèle, refus avant envoi si le firmware ne tient pas (important quand un appareil change pour un modèle moins doté en RAM). Version 1.2 : **deux enregistrements distincts : le modèle de matériel (une fois par type de carte) et l'appareil (un exemplaire, avec sa MAC)** ; la reconnaissance de la carte (§5.4) propose de créer l'un et/ou l'autre. Version 1.1 : **décisions de l'utilisateur sur les points ouverts** : brokers par site (connexions propres), réservations DHCP pour les ESP de noisy, assembleur **renommé `esps-assemble`**, **reconnaissance de la carte avant le premier flash** (§5.4) ; protocole d'envoi à l'ESP tranché à l'essai. Version 1.0 : première version, avant tout code : écrite d'après `conception-esphome-assembleur_specs_v1.4.md` (décisions et plan de tests de l'utilisateur du 13/10/2026) et `guide-nouvelle-application_specs_v2.1.md`. L'assembleur (application `espdisplay` aujourd'hui, **qui deviendra `esps-assemble`**, voir §1.4) a sa propre spec (`fonctionnelles-espdisplay_specs`) ; cette spec couvre l'application **`esphome`** : l'**usine** et le **poseur**. Les points marqués ❓ (§12) attendent encore une décision ou un essai.*
+*Version 1.4 - 13 Octobre 2026 — **réalisation de l'usine, du poseur et de la reconnaissance de la carte** : mot de passe OTA du poseur, ports API et OTA dans le manifeste et la pose, protocole OTA précisé (port de `espota2.py`), format lu d'`esptool flash-id`, limite de la clé API d'un appareil existant absent de HA, état de l'application. Version 1.3 : **manifeste du paquet (§4bis)** et **tailles connues après compilation (§5.5)** : flash et RAM mesurées, comparées à la fiche du modèle, refus avant envoi si le firmware ne tient pas (important quand un appareil change pour un modèle moins doté en RAM). Version 1.2 : **deux enregistrements distincts : le modèle de matériel (une fois par type de carte) et l'appareil (un exemplaire, avec sa MAC)** ; la reconnaissance de la carte (§5.4) propose de créer l'un et/ou l'autre. Version 1.1 : **décisions de l'utilisateur sur les points ouverts** : brokers par site (connexions propres), réservations DHCP pour les ESP de noisy, assembleur **renommé `esps-assemble`**, **reconnaissance de la carte avant le premier flash** (§5.4) ; protocole d'envoi à l'ESP tranché à l'essai. Version 1.0 : première version, avant tout code : écrite d'après `conception-esphome-assembleur_specs_v1.4.md` (décisions et plan de tests de l'utilisateur du 13/10/2026) et `guide-nouvelle-application_specs_v2.1.md`. L'assembleur (application `espdisplay` aujourd'hui, **qui deviendra `esps-assemble`**, voir §1.4) a sa propre spec (`fonctionnelles-espdisplay_specs`) ; cette spec couvre l'application **`esphome`** : l'**usine** et le **poseur**. Les points marqués ❓ (§12) attendent encore une décision ou un essai.*
 
 ---
 
@@ -126,6 +126,7 @@ poseur:
   actif: true
   mqtt: { hote: 127.0.0.1, port: 1883 }    # broker du site (celui de l'application nommage/core)
   tentatives: { intervalleMinutes: 5, dureeMinutes: 60 }
+  motDePasseOta: ""          # mot de passe OTA des ESP du site (ota_password) — champ masqué, jamais dans un message
 ```
 
 Le poseur utilise la **liaison HA du cœur de son instance** (aucun jeton d'un autre HA).
@@ -143,7 +144,7 @@ Tous en JSON avec les champs communs : `v` (version du format, `1`), `site`, `ap
 | Sujet | Émetteur | Contenu propre | Supprimé par |
 |---|---|---|---|
 | `dimotic/esphome/<site>/jobs/<appareil>` | assembleur | `action` (`amorce` \| `firmware`), `origine` (adresse de l'assembleur), `paquet` (adresse du zip), `sha256` | l'usine, **après** récupération réussie et dépôt chez ESPHome ; ou l'assembleur (annulation) |
-| `dimotic/esphome/<site>/pose/<appareil>` | usine | `firmware` (adresse), `sha256`, `tailleOctets`, `esp` (adresse de l'ESP, tirée du manifeste), `nomAffichage`, `cle` (clé API, **visible une fois**, seulement pour un appareil neuf), `options` (ex. `autoriserAppelsService: true`) | le poseur, après prise en charge ; ou l'assembleur (annulation) |
+| `dimotic/esphome/<site>/pose/<appareil>` | usine | `firmware` (adresse), `sha256`, `tailleOctets`, `esp` (adresse de l'ESP, tirée du manifeste), `portApi` (6053) et `portOta` (3232, du manifeste), `nomAffichage`, `cle` (clé API, **visible une fois**, seulement pour un appareil neuf), `options` (ex. `autoriserAppelsService: true`) | le poseur, après prise en charge ; ou l'assembleur (annulation) |
 | `dimotic/esphome/<site>/status/<appareil>` | usine puis poseur | `etat`, `detail` (fin du journal), `versionFirmware`, `mesures` (flash et RAM utilisées, §5.5) | jamais (état courant) |
 | `dimotic/esphome/agent/<machine ESPHome>` | usine | `instance`, `port`, `heure` ; **testament** = hors ligne | testament |
 | `dimotic/esphome/<site>/poseur` | poseur | idem | testament |
@@ -168,7 +169,7 @@ Le paquet produit par l'assembleur contient un fichier `manifest.json` que l'usi
   "revision": 7,
   "assemble": "2026-10-13T18:00:00+02:00",
   "modele": { "id": "sunton-8048s070c", "puce": "esp32-s3", "flash": "16MB", "cadre": "esp-idf" },
-  "esp": { "adresse": "192.168.1.40", "port": 6053 },
+  "esp": { "adresse": "192.168.1.40", "port": 6053, "portOta": 3232 },
   "options": { "autoriserAppelsService": true },
   "wifi": ["stfort"],
   "fichiers": { "haplan-display.yaml": "<sha256>", "bibliotheque/…": "<sha256>" }
@@ -221,6 +222,8 @@ Pour ne **jamais flasher une carte qui n'est pas celle qu'on croit** (l'utilisat
 
 **Deux enregistrements distincts** (conception §3.1) : le **modèle de matériel** (la fiche : puce, flash, périphériques, broches — **une seule fois** par type de carte) et l'**appareil** (un exemplaire physique, avec son nom unique, son nom d'affichage et sa **MAC** ; deux cartes identiques = un modèle, deux appareils). Une carte nouvelle peut demander les deux.
 
+**Commande** : `esptool --port <port USB> flash-id` (esptool 5.1.0 de l'image ESPHome) lancée dans le conteneur ESPHome ; la sortie est lue de façon tolérante (lignes `Chip type`, `MAC`, `Detected flash size` ou `Flash Size`, `Features`). Le **format exact est à valider sur la carte d'essai**. Le bouton « Reconnaître la carte » de la page ESPHome (usine) lance la commande et affiche relevé et verdict (événement `esphome:carte:reconnaitre` → `esphome:carte:releve`). Les catalogues de modèles et d'appareils viendront de l'assembleur (étape 3) ; en attendant, tout verdict est « carte inconnue » ou « non conforme ».
+
 **Verdict** (affiché dans l'interface, état `reconnaissance`), d'après le relevé :
 
 | Relevé | Verdict | Proposition |
@@ -256,8 +259,8 @@ La reconnaissance sert aussi **avant un achat** (carte d'essai ou de rechange br
 
 1. **Réception** du message `pose` du site (état `recuperation`).
 2. **Récupération du firmware** chez l'usine (adresse du message, par le VPN pour un autre site) et vérification de `sha256` **et de `tailleOctets`** (nombre d'octets reçus).
-3. **Envoi à l'ESP** (`envoi`) sur le réseau local, par le **protocole de mise à jour d'ESPHome** implémenté dans l'application (TypeScript, sans ESPHome ni Python sur la machine) ; l'adresse de l'ESP est celle du message `pose`.
-4. **Déclaration dans HA** (appareil neuf) : flux REST `esphome` (adresse, port 6053, **clé**, option « Autoriser les appels de service » si demandé). Un appareil déjà connu de HA n'est pas redéclaré.
+3. **Envoi à l'ESP** (`envoi`) sur le réseau local, par le **protocole de mise à jour d'ESPHome** implémenté dans l'application (TypeScript, sans ESPHome ni Python sur la machine) ; l'adresse et le port OTA sont ceux du message `pose`. Le protocole (versions 1 et 2) est un **port d'`espota2.py` d'ESPHome 2025.11.2** : octets magiques, version, fonctionnalités (compression gzip, authentification SHA256), défi-réponse avec le **mot de passe OTA du poseur** (§3.3), taille, MD5 de la charge, blocs de 8 Ko (un accusé par bloc en version 2), accusés de réception et de fin. Testé contre un faux ESP ; **à valider sur la carte d'essai**.
+4. **Déclaration dans HA** (appareil neuf) : flux REST `esphome` (adresse, port API, **clé**, option « Autoriser les appels de service » si demandé). Un appareil déjà connu de HA (entrée ESPHome retrouvée par nom réseau, adresse ou titre) n'est pas redéclaré. **Limite** : la clé n'est dans le message de pose que pour un appareil créé par l'usine ; un appareil **déjà existant mais absent de HA** (hasat4) ne peut pas être déclaré automatiquement — l'échec le dit et indique `api_<appareil>` dans le `secrets.yaml` de l'usine.
 5. **Vérification** (`verification`) : la **date de compilation** dans la version du firmware de l'appareil (registre d'appareils de HA) doit avoir changé ; sinon `echec`.
 6. **Fin** : suppression du message `pose`, état `termine` (`versionFirmware`).
 
@@ -266,7 +269,8 @@ La reconnaissance sert aussi **avant un achat** (carte d'essai ou de rechange br
 | Cas | Comportement |
 |---|---|
 | ESP injoignable | le message `pose` reste ; nouvelle tentative **toutes les 5 minutes pendant 1 heure**, puis `echec` |
-| ESP refuse (clé, partitions) | `echec` avec la raison, le message est supprimé |
+| ESP refuse (mot de passe OTA, partition trop petite, MD5…) | `echec` avec la raison de l'ESP, le message est supprimé |
+| Firmware envoyé mais appareil impossible à déclarer dans HA | `echec` : « firmware envoyé, mais déclaration dans HA impossible : … » |
 | HA indisponible | tentative différée comme ci-dessus |
 | Appareil déjà dans HA mais firmware inchangé | `echec` « le firmware n'a pas changé » |
 
@@ -339,6 +343,19 @@ data/esphome/machine_partage/   firmwares/<appareil>/<révision>/   (route de le
 
 ---
 
+## 11bis. État de la réalisation (13/10/2026)
+
+| Élément | État |
+|---|---|
+| Configuration, messages, garde-fou, liaisons MQTT par site | fait, **vérifié sur les vrais brokers** (ha2 et noisy2 par le VPN) |
+| Usine : paquet, manifeste, dépôt, clé API, compilation, tailles, firmware, pose | fait, **vérifié par une compilation réelle** dans le conteneur ESPHome (ESP32 de test) |
+| Poseur : client OTA, déclaration et vérification dans HA, file et tentatives | fait, **testé en simulation seulement** (faux ESP, HA simulé) — à valider sur la carte d'essai |
+| Reconnaissance de la carte (esptool) | fait, **format de sortie à valider** sur une carte réelle |
+| Premier flash USB et amorce | **à faire** (l'amorce se compile déjà comme un firmware ; le flash USB est à écrire) |
+| Entretien (purge du cache à 30 jours) et assembleur (paquets, fiches, catalogues) | **à faire** (étape 3) |
+
+---
+
 ## 12. Points ouverts
 
 **Tranchés le 13/10/2026** : accès MQTT par **connexions propres de l'application** (une par site servi, identifiants dans les secrets du cœur) ; ESP de noisy : **réservations DHCP** ; assembleur renommé **`esps-assemble`** (§1.4) ; premier flash : **reconnaissance de la carte avant tout flash** (§5.4).
@@ -356,6 +373,7 @@ data/esphome/machine_partage/   firmwares/<appareil>/<révision>/   (route de le
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.4 | 2026-10-13 | Claude | Réalisation : mot de passe OTA du poseur (§3.3), ports API/OTA (§4, §4bis), protocole OTA précisé (§6.1), limite de la clé d'un appareil existant absent de HA, commande et format de la reconnaissance (§5.4), état de la réalisation (§11bis). v1.3 archivée. |
 | 1.3 | 2026-10-13 | Claude | Manifeste du paquet (§4bis) ; tailles relevées après compilation et comparées à la fiche du modèle, refus avant envoi si le firmware ne tient pas, historique des tailles, cas du changement de modèle (§5.5) ; `tailleOctets` dans la pose. v1.2 archivée. |
 | 1.2 | 2026-10-13 | Claude | Modèle de matériel et appareil enregistrés séparément ; la reconnaissance de la carte propose de créer l'un et/ou l'autre, reconnaît une MAC déjà connue (§5.4). v1.1 archivée. |
 | 1.1 | 2026-10-13 | Claude | Décisions sur les points ouverts : connexions MQTT propres par site, réservations DHCP, assembleur renommé `esps-assemble` (§1.4), reconnaissance de la carte avant le premier flash (§5.4), test associé. v1.0 archivée. |

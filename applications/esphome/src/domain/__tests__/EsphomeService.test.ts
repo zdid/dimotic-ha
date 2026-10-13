@@ -276,3 +276,28 @@ describe('EsphomeService — file du poseur', () => {
   });
 });
 
+describe('EsphomeService — reconnaissance de la carte', () => {
+  const SORTIE = 'Chip type:          ESP32-C3 (QFN32) (revision v0.4)\nMAC:                aa:bb:cc:dd:ee:ff\nDetected flash size: 4MB\nFeatures: Wi-Fi\n';
+  it('lit la carte, émet le relevé et un verdict (catalogue vide : carte inconnue)', async () => {
+    const evts: { e: string; d: any }[] = [];
+    const eb: any = { on() {}, onGeneric() {}, emit(e: string, d: any) { evts.push({ e, d }); } };
+    const s = EsphomeService.create(eb, logger, provider({ site: 'stfort', usine: { actif: true, sites: [] } }), undefined, undefined, undefined);
+    s.dockerUsine = { etat: async () => ({ existe: true, enMarche: true }), demarrer: async () => undefined, exec: async () => ({ codeSortie: 0, sortie: SORTIE }) };
+    const r = await s.reconnaitreCarte();
+    expect(r?.releve).toMatchObject({ puce: 'esp32-c3', flash: '4MB', mac: 'aa:bb:cc:dd:ee:ff' });
+    expect(r?.verdict).toEqual({ type: 'carte_inconnue', propositionModele: { puce: 'esp32-c3', flash: '4MB' } });
+    expect(evts.find((x) => x.e === 'esphome:carte:releve')?.d.verdict.type).toBe('carte_inconnue');
+  });
+  it('usine inactive ou carte absente : message d\'erreur, pas d\'exception', async () => {
+    const evts: { e: string; d: any }[] = [];
+    const eb: any = { on() {}, onGeneric() {}, emit(e: string, d: any) { evts.push({ e, d }); } };
+    const inactive = EsphomeService.create(eb, logger, provider({ site: 'stfort' }));
+    expect(await inactive.reconnaitreCarte()).toBeNull();
+    expect(evts.at(-1)?.d.message).toContain('option « usine »');
+    const s = EsphomeService.create(eb, logger, provider({ site: 'stfort', usine: { actif: true } }));
+    s.dockerUsine = { etat: async () => ({ existe: true, enMarche: true }), demarrer: async () => undefined, exec: async () => ({ codeSortie: 2, sortie: 'A fatal error occurred: Could not open /dev/ttyUSB0' }) };
+    expect(await s.reconnaitreCarte()).toBeNull();
+    expect(evts.at(-1)?.d.message).toContain('Could not open');
+  });
+});
+
