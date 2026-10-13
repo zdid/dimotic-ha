@@ -1,6 +1,6 @@
 # Conception — Assembleur de sources ESPHome et agent `esphome`
 
-*Version 1.3 — 13 Octobre 2026 — **plusieurs sites, mêmes modules partout** : trois rôles (assembleur, poseur, usine), flux à deux messages (§4), amorce, wifi multiples et point d'accès de secours (§3.8–3.9), vérification et déclaration dans HA (§3.10), liaison entre sites (§8) ; **conception seule, rien n'est encore codé** (sauf la phase 1 de la bibliothèque d'éléments, voir `fonctionnelles-espdisplay_specs_v1.5.md` §10, et le port 8088 forcé du dev, §6). Décisions de l'utilisateur du 13/10/2026, prises en discussion.*
+*Version 1.4 — 13 Octobre 2026 — **décisions techniques pour la réalisation (§11) et plan de tests par étape et par endroit (§12)**, validés par l'utilisateur ; instance réelle de falbala installée et paramétrée (§6). v1.3 : plusieurs sites, mêmes modules partout, trois rôles, flux à deux messages ; **conception, rien n'est encore codé** (sauf la phase 1 de la bibliothèque d'éléments, voir `fonctionnelles-espdisplay_specs_v1.5.md` §10, et le port 8088 forcé du dev, §6).*
 
 ## 1. Objet
 
@@ -132,6 +132,7 @@ Chaque **usine** publie sa **présence** sur un message conservé (avec testamen
 ## 6. Instance réelle et instance de dev sur falbala
 
 - Falbala héberge **deux instances de dimotic-ha** : l'instance **réelle** (Docker, `/docker/dimotic-ha`, port **8087**, identité propre créée à l'installation) qui porte l'agent `esphome`, et l'instance de **dev** (depuis le dépôt) avec l'identité `falbala_817412`, en « Recevoir sans Diffuser ».
+- **Instance réelle installée le 13/10/2026** (`installer-dimotic-ha-falbala.sh`, image 3.7.0, identité `falbala_410210`, site `stfort`, HA WebSocket et MQTT de ha2, configuration `sauvegarde` du site ; applications désactivées sauf supervision). Paramètres écrits à la main dans `data/` : l'écran n'acceptait pas d'enregistrer le site seul (TODO.md).
 - **Le dev écoute sur 8088, forcé au lancement** : les scripts `dev` et `dev:local` du cœur positionnent `DIMOTIC_WEB_PORT=8088`, et cette variable est **prioritaire sur `web.port`** de la configuration (aucun fichier ni écran ne peut le changer). L'instance réelle n'a pas la variable (8087).
 - **Les essais vont jusqu'à l'écran.** Pour tester, on **désactive** l'agent `esphome` réel (8087) et on **active** celui du dev (8088) ; puis on inverse. Un seul agent actif à la fois (le garde-fou §5 l'impose).
 
@@ -169,6 +170,36 @@ Testée à part (quelques cas à la main, par exemple « un objet au coin infér
 - Vérifier que l'instance réelle de falbala peut se connecter au broker MQTT de ha2, et que le broker de noisy est joignable par le VPN (écoute sur l'interface VPN).
 - Nom définitif de l'application d'assemblage (aujourd'hui `espdisplay`).
 - Réveil de falbala par le réseau (facultatif : la demande conservée attend).
-- Format exact des fiches (matériel, élément) et du manifeste du paquet zip.
+- Format exact des fiches (matériel, élément) et du manifeste du paquet zip (à écrire aux étapes 2-3).
 - Faisabilité du protocole de mise à jour d'ESPHome en TypeScript (poseur) ; adresses fixes ou réservations pour les ESP de noisy.
 - Premier flash : depuis falbala (carte branchée) ou flasheur web ; choix des sites dont les wifi figurent dans un appareil donné.
+
+## 11. Décisions techniques pour la réalisation (validées le 13/10/2026)
+
+1. **L'usine commande ESPHome depuis son conteneur** par l'**API du moteur Docker** (socket `/var/run/docker.sock` monté dans le conteneur de l'instance réelle de falbala ; requêtes HTTP sur le socket depuis Node, **sans client Docker dans l'image**) : `exec` dans le conteneur `esphome` pour compiler, envoyer, flasher. Le dossier de configuration d'ESPHome (`/docker/esphome/config`) est monté dans le conteneur de l'instance (dépôt des sources, `secrets.yaml`). Le `compose.yaml` de l'instance réelle de falbala reçoit ces deux montages à l'étape 2 (fichier propre à cette machine). Le script d'agent par SSH (`~/bin/espdisplay-agent-run.sh`) est abandonné à la fin de l'étape 2.
+2. **Premier flash par USB** : la carte est branchée sur **falbala** ; l'usine lance `esphome upload <appareil>.yaml --device /dev/ttyUSB0` (ou `ttyACM0`) dans le conteneur `esphome` (`privileged: true`). Un périphérique branché **après** le démarrage du conteneur n'y est pas visible : monter `/dev:/dev` dans le `compose.yaml` d'ESPHome, ou redémarrer le conteneur. Repli : flasheur web avec le fichier d'amorce téléchargé.
+3. **Format des messages** : JSON avec un champ `v` (version du format), `site`, `appareil`, `revision`, `at` (date ISO). Sujets : `dimotic/esphome/<site>/jobs/<appareil>`, `…/<site>/pose/<appareil>`, `…/<site>/status/<appareil>`, `…/agent/<machine ESPHome>` (usine), `…/<site>/poseur` (poseur), et `dimotic/espdisplay/<site>/appareils` (liste publiée par l'assembleur). États de `status` : `en_attente`, `recuperation`, `compilation`, `pret_a_poser`, `envoi`, `verification`, `termine`, `echec` (+ `detail`, fin du journal). Schémas écrits dans la spec fonctionnelle de `esphome` (étape 2).
+4. **Cas d'erreur** : une demande d'une **révision plus ancienne** que celle déjà traitée est ignorée (journalisée) ; une demande plus récente **remplace** l'ancienne non encore prise (même sujet conservé) ; **compilation ratée** → état `echec` avec la fin du journal, la demande est supprimée (refaire « Assembler ») ; **ESP injoignable** → le message de pose reste, nouvelle tentative toutes les 5 minutes pendant 1 heure, puis `echec` ; **annulation** = l'assembleur publie un message vide conservé sur `jobs` (ou `pose`). Une compilation à la fois par usine, une pose à la fois par poseur.
+5. **Reprise des appareils existants** (haplan-display, poele-display, hasat4, hasat5) : **mêmes noms réseau et mêmes clés** (`api_haplan-display`, … déjà dans `secrets.yaml`) ⇒ aucun réappairage dans HA. L'usine ne crée une clé que pour un nom **absent** de `secrets.yaml`.
+6. **Bouton « Générer » dans HA** : l'assembleur publie la **liste de ses appareils** (message conservé `dimotic/espdisplay/<site>/appareils`, avec pour chacun : nom, a-t-il des pages de plans) ; l'intégration Plans ajoute une commande WebSocket (administrateurs) qui **publie la demande** par le MQTT de HA (`mqtt.publish`) ; le panneau affiche le bouton pour les appareils qui ont des pages de plans, et l'état reçu.
+7. **Adresse joignable** : chaque instance déclare son **adresse vue des autres sites** (ex. `10.10.10.3:8087` pour noisy2, `192.168.1.26:8087` pour l'instance réelle de falbala) ; c'est elle qui figure dans les messages (`origine`, adresse du paquet ou du firmware). Défaut : adresse du réseau local et port web.
+8. **Nettoyage côté usine** : garder les sources et le firmware des **5 dernières révisions** par appareil ; le cache de compilation d'ESPHome (`config/.esphome`, **1,8 Go** au 13/10/2026) est purgé (`esphome clean`) des appareils qui n'ont pas été compilés depuis 30 jours. **Version d'ESPHome figée** (image `esphome/esphome:<version>` au lieu de `latest`) pour des compilations reproductibles ; montée de version volontaire.
+9. **Spec fonctionnelle avant le code** : `fonctionnelles-esphome_specs_v1.0.md` au début de l'étape 2 (rôles, configuration, messages, états, interface), et mise à jour de `fonctionnelles-espdisplay_specs` à l'étape 3 (assembleur), selon `guide-nouvelle-application_specs` (déclaration `*_APP`, application désactivée par défaut, `configUi`, page).
+
+**Appareil d'essai** : l'utilisateur dispose d'une **carte ESP32 de rechange** ; elle sert aux **premiers envois réels** (amorce, premier flash par USB, envoi par le réseau, déclaration dans HA) avant tout appareil en service (écran mural, thermostat, satellites).
+
+## 12. Plan de tests (par étape et par endroit)
+
+| Étape | Où | Tests | Critère de réussite |
+|---|---|---|---|
+| 1. Cœur : route REST de lecture, « interroger HA » | falbala, dev 8088 | tests unitaires (vitest) : lecture d'un fichier du dossier réservé, **refus hors dossier** (`..`, lien symbolique), fichier absent ; appel HA générique simulé | tests verts ; la suite complète du cœur reste verte |
+| 2. Usine | falbala, dev 8088 (usine réelle désactivée) | unitaires : traitement d'une demande, **suppression seulement après récupération réussie**, révision périmée, garde-fou (deux usines), création de clé seulement pour un nom absent ; intégration : broker de test, demande conservée qui **attend** l'usine éteinte | une compilation de l'appareil d'essai aboutit ; `secrets.yaml` contient sa clé ; message de pose publié |
+| 2. Poseur | falbala dev puis ha2 | unitaires : récupération et vérification du firmware, envoi (protocole de mise à jour d'ESPHome), nouvelles tentatives ; déclaration dans HA (flux REST) sur l'**appareil d'essai** | l'appareil d'essai apparaît dans HA (entrée `loaded`), sa **date de compilation** change après un second envoi |
+| 2. Amorce | falbala, carte d'essai branchée en USB | compilation de l'amorce d'après la fiche, flash USB, connexion wifi (liste + point d'accès de secours testé en coupant le wifi) | la carte d'essai rejoint le wifi, est déclarée dans HA, reçoit ensuite le firmware complet par le réseau |
+| 3. Assembleur | falbala dev | unitaires : fiches valides et invalides, compatibilité, **conflits de broches**, zip + manifeste + sommes de contrôle, 5 révisions gardées ; **désassemblage de hasat4/hasat5 et de haplan-display comparé par `esphome config`** | 0 différence de configuration (outil `comparer-config.py`, vérifié sur une modification volontaire) |
+| 3. Thermostat (premier cas sans écran) | appareil d'essai | assemblage, envoi, commande réelle d'un relais depuis HA | le relais répond, l'état revient dans HA |
+| 4. Conversion des coordonnées | falbala dev | unitaires : coins, centre, plan large et plan haut, icône qui déborde ; **comparaison avec l'ancien générateur** sur les 3 plans | écart ≤ 1 pixel |
+| 4. Intégration Plans (HA) | conteneur HA de ha2 | pytest : commande d'export (plans, positions avec `entity_id` actuel, textes), commande « Générer » (publication MQTT), droits administrateur | tests verts ; redémarrage de HA par l'utilisateur |
+| 4. Bout en bout, site stfort | réel, en présence de l'utilisateur | « Générer » dans HA → plans → assemblage → usine → poseur → écran ; puis un plan modifié, régénéré | l'écran montre les plans à jour ; état `termine` dans HA |
+| 5. Bout en bout, site noisy | réel, via VPN | usine connectée au broker de noisy, poseur sur noisy2, appareil de noisy (ou carte d'essai sur place) | état `termine` côté noisy ; aucun message de noisy sur le broker de stfort |
+| Chaque étape | dimotic-ha | `npm run build` + tests de l'application modifiée, suite du cœur ; commits atomiques ; spec à jour | build sans erreur |
