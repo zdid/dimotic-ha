@@ -1,6 +1,6 @@
 # Spécifications Fonctionnelles - Module ESPHOME
 
-*Version 1.2 - 13 Octobre 2026 — **deux enregistrements distincts : le modèle de matériel (une fois par type de carte) et l'appareil (un exemplaire, avec sa MAC)** ; la reconnaissance de la carte (§5.4) propose de créer l'un et/ou l'autre. Version 1.1 : **décisions de l'utilisateur sur les points ouverts** : brokers par site (connexions propres), réservations DHCP pour les ESP de noisy, assembleur **renommé `esps-assemble`**, **reconnaissance de la carte avant le premier flash** (§5.4) ; protocole d'envoi à l'ESP tranché à l'essai. Version 1.0 : première version, avant tout code : écrite d'après `conception-esphome-assembleur_specs_v1.4.md` (décisions et plan de tests de l'utilisateur du 13/10/2026) et `guide-nouvelle-application_specs_v2.1.md`. L'assembleur (application `espdisplay` aujourd'hui, **qui deviendra `esps-assemble`**, voir §1.4) a sa propre spec (`fonctionnelles-espdisplay_specs`) ; cette spec couvre l'application **`esphome`** : l'**usine** et le **poseur**. Les points marqués ❓ (§12) attendent encore une décision ou un essai.*
+*Version 1.3 - 13 Octobre 2026 — **manifeste du paquet (§4bis)** et **tailles connues après compilation (§5.5)** : flash et RAM mesurées, comparées à la fiche du modèle, refus avant envoi si le firmware ne tient pas (important quand un appareil change pour un modèle moins doté en RAM). Version 1.2 : **deux enregistrements distincts : le modèle de matériel (une fois par type de carte) et l'appareil (un exemplaire, avec sa MAC)** ; la reconnaissance de la carte (§5.4) propose de créer l'un et/ou l'autre. Version 1.1 : **décisions de l'utilisateur sur les points ouverts** : brokers par site (connexions propres), réservations DHCP pour les ESP de noisy, assembleur **renommé `esps-assemble`**, **reconnaissance de la carte avant le premier flash** (§5.4) ; protocole d'envoi à l'ESP tranché à l'essai. Version 1.0 : première version, avant tout code : écrite d'après `conception-esphome-assembleur_specs_v1.4.md` (décisions et plan de tests de l'utilisateur du 13/10/2026) et `guide-nouvelle-application_specs_v2.1.md`. L'assembleur (application `espdisplay` aujourd'hui, **qui deviendra `esps-assemble`**, voir §1.4) a sa propre spec (`fonctionnelles-espdisplay_specs`) ; cette spec couvre l'application **`esphome`** : l'**usine** et le **poseur**. Les points marqués ❓ (§12) attendent encore une décision ou un essai.*
 
 ---
 
@@ -143,8 +143,8 @@ Tous en JSON avec les champs communs : `v` (version du format, `1`), `site`, `ap
 | Sujet | Émetteur | Contenu propre | Supprimé par |
 |---|---|---|---|
 | `dimotic/esphome/<site>/jobs/<appareil>` | assembleur | `action` (`amorce` \| `firmware`), `origine` (adresse de l'assembleur), `paquet` (adresse du zip), `sha256` | l'usine, **après** récupération réussie et dépôt chez ESPHome ; ou l'assembleur (annulation) |
-| `dimotic/esphome/<site>/pose/<appareil>` | usine | `firmware` (adresse), `sha256`, `esp` (adresse de l'ESP), `nomAffichage`, `cle` (clé API, **visible une fois**, seulement pour un appareil neuf), `options` (ex. `autoriserAppelsService: true`) | le poseur, après prise en charge ; ou l'assembleur (annulation) |
-| `dimotic/esphome/<site>/status/<appareil>` | usine puis poseur | `etat`, `detail` (fin du journal), `versionFirmware` | jamais (état courant) |
+| `dimotic/esphome/<site>/pose/<appareil>` | usine | `firmware` (adresse), `sha256`, `tailleOctets`, `esp` (adresse de l'ESP, tirée du manifeste), `nomAffichage`, `cle` (clé API, **visible une fois**, seulement pour un appareil neuf), `options` (ex. `autoriserAppelsService: true`) | le poseur, après prise en charge ; ou l'assembleur (annulation) |
+| `dimotic/esphome/<site>/status/<appareil>` | usine puis poseur | `etat`, `detail` (fin du journal), `versionFirmware`, `mesures` (flash et RAM utilisées, §5.5) | jamais (état courant) |
 | `dimotic/esphome/agent/<machine ESPHome>` | usine | `instance`, `port`, `heure` ; **testament** = hors ligne | testament |
 | `dimotic/esphome/<site>/poseur` | poseur | idem | testament |
 | `dimotic/esps-assemble/<site>/appareils` | assembleur | liste des appareils (nom, pages de plans oui/non) | — |
@@ -153,6 +153,29 @@ Tous en JSON avec les champs communs : `v` (version du format, `1`), `site`, `ap
 **États de `status`** : `en_attente`, `recuperation`, `compilation`, `pret_a_poser`, `envoi`, `verification`, `termine`, `echec`.
 
 **Règles** : une demande de révision **plus ancienne** que celle déjà traitée est ignorée et journalisée ; une plus récente **remplace** la précédente non encore prise (même sujet conservé) ; l'annulation est un message vide conservé sur `jobs` ou `pose`.
+
+---
+
+## 4bis. Manifeste du paquet (zip)
+
+Le paquet produit par l'assembleur contient un fichier `manifest.json` que l'usine lit : c'est de lui, et non du message de demande, que viennent les informations de l'appareil dont la pose a besoin.
+
+```json
+{
+  "v": 1,
+  "appareil": "haplan-display",
+  "nomAffichage": "Plan HAPLAN",
+  "revision": 7,
+  "assemble": "2026-10-13T18:00:00+02:00",
+  "modele": { "id": "sunton-8048s070c", "puce": "esp32-s3", "flash": "16MB", "cadre": "esp-idf" },
+  "esp": { "adresse": "192.168.1.40", "port": 6053 },
+  "options": { "autoriserAppelsService": true },
+  "wifi": ["stfort"],
+  "fichiers": { "haplan-display.yaml": "<sha256>", "bibliotheque/…": "<sha256>" }
+}
+```
+
+L'usine **refuse** un paquet dont le manifeste est absent, invalide, ou dont une somme de contrôle de fichier ne correspond pas. `modele` sert à la reconnaissance de la carte (§5.4) et au contrôle des tailles (§5.5). `esp.adresse` est une adresse fixe ou une **réservation DHCP** (les ESP de noisy). Le format complet, avec les fiches de modèle et d'élément, est fixé par la spec de l'assembleur (étape 3).
 
 ---
 
@@ -165,7 +188,7 @@ Tous en JSON avec les champs communs : `v` (version du format, `1`), `site`, `ap
 3. **Récupération du paquet** : `GET` à l'adresse `paquet` (via VPN pour un autre site), **vérification de `sha256`**. Échec ⇒ la demande **reste** (nouvelle tentative), état `echec` si répété.
 4. **Dépôt** des sources dans `dossierConfig/<appareil>/` (remplacement atomique ; 5 dernières révisions gardées) ; **suppression de la demande** (message vide conservé) — seulement maintenant.
 5. **Clé API** : si `api_<appareil>` est **absent** de `secrets.yaml`, génération d'une clé aléatoire et écriture sous `api_<appareil>` ; **un appareil existant ne reçoit jamais de nouvelle clé** (reprise de haplan-display, poele-display, hasat4/5 sans réappairage).
-6. **Compilation** (`compilation`) par `exec` dans le conteneur ESPHome (API Docker) : `esphome compile <appareil>.yaml`. Journal conservé ; fin du journal dans `detail`.
+6. **Compilation** (`compilation`) par `exec` dans le conteneur ESPHome (API Docker) : `esphome compile <appareil>.yaml`. Journal conservé ; fin du journal dans `detail`. **Les tailles sont relevées et contrôlées** (§5.5) avant toute publication.
 7. **Publication** : dépôt du firmware dans `machine_partage/firmwares/<appareil>/<revision>/`, puis message `pose` (`pret_a_poser`).
 8. **Amorce** (`action: amorce`) : compile l'amorce **du modèle de matériel** (même découpage de la flash que le firmware final) ; si une carte est branchée sur la machine de l'usine, elle est d'abord **reconnue** (§5.4) puis flashée par `esphome upload … --device <peripherique>` (premier flash par USB) ; sinon l'amorce reste téléchargeable pour un flasheur web.
 
@@ -174,6 +197,7 @@ Tous en JSON avec les champs communs : `v` (version du format, `1`), `site`, `ap
 | Cas | Comportement |
 |---|---|
 | Compilation ratée | `echec` + fin du journal ; la demande est **supprimée** (refaire « Assembler ») |
+| Firmware trop gros pour le modèle (§5.5) | `echec` explicite, rien n'est publié ; la demande est supprimée |
 | Somme de contrôle fausse | paquet rejeté, demande conservée, `echec` après 3 essais |
 | Révision périmée | ignorée, journalisée |
 | Une autre usine pour la même machine ESPHome | aucune demande traitée (§7) |
@@ -210,6 +234,20 @@ Un modèle jamais utilisé ne reçoit son amorce (même découpage de flash que 
 
 La reconnaissance sert aussi **avant un achat** (carte d'essai ou de rechange branchée pour savoir ce qu'elle est). Elle n'écrit rien sur la carte.
 
+### 5.5 Tailles connues après compilation (décision du 13/10/2026)
+
+À la fin de la compilation, ESPHome affiche l'occupation **de la RAM** et **de la flash** (« used N bytes from M bytes ») et `firmware.bin` existe : la taille est **connue avec précision**. L'usine la relève (`mesures` : `flashUtilisee`, `flashDisponible`, `ramUtilisee`, `ramDisponible`, `tailleOctets` du fichier) et la compare à la **fiche du modèle** (taille de l'emplacement de mise à jour, RAM interne, présence de PSRAM) :
+
+| Contrôle | Seuil | Effet |
+|---|---|---|
+| firmware plus gros que l'**emplacement de mise à jour** du modèle | > 100 % | **refus** : état `echec` « le firmware (N octets) ne tient pas dans l'emplacement (M octets) du modèle X » ; rien n'est publié |
+| flash utilisée proche de la limite | > 90 % | **avertissement** affiché (le moindre élément ajouté ne tiendra plus) |
+| RAM statique utilisée | > 80 % | **avertissement** ; > 100 % : l'édition de liens échoue déjà, message explicite |
+
+**Changement de modèle** (un appareil réaffecté à un modèle moins doté en RAM ou en flash) : l'assembleur contrôle la compatibilité d'après la fiche **avant** de générer ; l'usine contrôle les tailles **réelles** après la compilation. L'interface affiche l'**historique des tailles par appareil** (révision par révision) : on voit le firmware grossir et l'effet d'un changement de modèle.
+
+**Limite** : la RAM relevée est la RAM **statique** ; la mémoire dynamique à l'exécution (tas, tampons de l'écran LVGL, PSRAM) n'est pas mesurée à la compilation. Laisser de la marge ; la fiche du modèle porte les valeurs (`memoire` : RAM interne, PSRAM, `emplacementOta`).
+
 ---
 
 ## 6. Poseur
@@ -217,7 +255,7 @@ La reconnaissance sert aussi **avant un achat** (carte d'essai ou de rechange br
 ### 6.1 Déroulement d'une pose
 
 1. **Réception** du message `pose` du site (état `recuperation`).
-2. **Récupération du firmware** chez l'usine (adresse du message, par le VPN pour un autre site) et vérification de `sha256`.
+2. **Récupération du firmware** chez l'usine (adresse du message, par le VPN pour un autre site) et vérification de `sha256` **et de `tailleOctets`** (nombre d'octets reçus).
 3. **Envoi à l'ESP** (`envoi`) sur le réseau local, par le **protocole de mise à jour d'ESPHome** implémenté dans l'application (TypeScript, sans ESPHome ni Python sur la machine) ; l'adresse de l'ESP est celle du message `pose`.
 4. **Déclaration dans HA** (appareil neuf) : flux REST `esphome` (adresse, port 6053, **clé**, option « Autoriser les appels de service » si demandé). Un appareil déjà connu de HA n'est pas redéclaré.
 5. **Vérification** (`verification`) : la **date de compilation** dans la version du firmware de l'appareil (registre d'appareils de HA) doit avoir changé ; sinon `echec`.
@@ -273,6 +311,8 @@ Repris de la conception §12 ; lieu, critère et ordre :
 | Messages, schémas, révisions | unitaires (vitest) | demandes périmées ignorées, remplacement d'une demande par la suivante |
 | Usine | falbala, dev 8088 (usine réelle désactivée) | suppression **seulement après** récupération réussie, création de clé **seulement** pour un nom absent, deux usines refusées ; compilation réelle de l'appareil d'essai |
 | Poseur | falbala dev puis ha2 | récupération/vérification du firmware, envoi, tentatives ; l'appareil d'essai apparaît dans HA (`loaded`), la date de compilation change au second envoi |
+| Tailles (§5.5) | unitaires : lecture de la sortie de compilation (flash, RAM), refus > 100 % de l'emplacement, avertissements 90 % / 80 %, historique par révision | un firmware volontairement trop gros pour un modèle fictif est refusé avant publication |
+| Manifeste (§4bis) | unitaires : manifeste absent, invalide, somme de contrôle fausse | paquet refusé avec la raison |
 | Reconnaissance de la carte | carte d'essai en USB | puce, flash et MAC relevés ; refus d'une carte d'un autre modèle que la fiche (essai avec une fiche volontairement fausse) ; aucune écriture sur la carte | verdict correct dans les 3 cas |
 | Amorce | carte d'essai en USB | rejoint le wifi (liste + point d'accès de secours), déclarée dans HA, reçoit ensuite le firmware par le réseau |
 | Bout en bout stfort | réel, avec l'utilisateur | « Générer » dans HA → assemblage → usine → poseur → écran à jour ; état `termine` |
@@ -316,6 +356,7 @@ data/esphome/machine_partage/   firmwares/<appareil>/<révision>/   (route de le
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.3 | 2026-10-13 | Claude | Manifeste du paquet (§4bis) ; tailles relevées après compilation et comparées à la fiche du modèle, refus avant envoi si le firmware ne tient pas, historique des tailles, cas du changement de modèle (§5.5) ; `tailleOctets` dans la pose. v1.2 archivée. |
 | 1.2 | 2026-10-13 | Claude | Modèle de matériel et appareil enregistrés séparément ; la reconnaissance de la carte propose de créer l'un et/ou l'autre, reconnaît une MAC déjà connue (§5.4). v1.1 archivée. |
 | 1.1 | 2026-10-13 | Claude | Décisions sur les points ouverts : connexions MQTT propres par site, réservations DHCP, assembleur renommé `esps-assemble` (§1.4), reconnaissance de la carte avant le premier flash (§5.4), test associé. v1.0 archivée. |
 | 1.0 | 2026-10-13 | Claude | Première spécification fonctionnelle de l'application `esphome` (usine et poseur), avant tout code, d'après la conception v1.4. |
