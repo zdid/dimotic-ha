@@ -36,7 +36,9 @@ export type HaBridgeMethod =
   | 'getLieuCatalog'
   | 'sendCommand'
   | 'processConversation'
-  | 'getHaConfig';
+  | 'getHaConfig'
+  | 'callWs'
+  | 'callRest';
 
 interface HaBridgeRequest {
   correlation_id: string;
@@ -139,6 +141,16 @@ export class HaQueryBridge {
       case 'getHaConfig': {
         const client = this.requireWsClient();
         return client.getHaConfig();
+      }
+      case 'callWs': {
+        // ⭐ 13/10/2026 — commande WebSocket générique (validée par HaWsClient.callWs).
+        const [message] = args as [Record<string, unknown>];
+        return this.requireWsClient().callWs(message);
+      }
+      case 'callRest': {
+        // ⭐ 13/10/2026 — appel REST générique sous /api/ (validé par HaWsClient.callRest).
+        const [httpMethod, apiPath, body] = args as ['GET' | 'POST' | 'DELETE', string, unknown];
+        return this.requireWsClient().callRest(httpMethod, apiPath, body);
       }
       default: {
         const exhaustive: never = method;

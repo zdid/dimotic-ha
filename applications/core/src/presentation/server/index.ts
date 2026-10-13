@@ -14,6 +14,7 @@ import type { ApplicationModule } from '../../types/config';
 import { AuthService } from '../../infrastructure/auth/AuthService';
 import type { HaAutomationBackupService } from '../../ha/automations/HaAutomationBackupService';
 import { servedAppDir } from '../../application/appRoots';
+import { resolveSharedFile } from './sharedFiles';
 
 /**
  * Crée et configure le serveur Express + Socket.io
@@ -52,6 +53,9 @@ import { servedAppDir } from '../../application/appRoots';
  *   navigateur récupère alors les octets ici en synchrone. Fichier + méta supprimés après un
  *   téléchargement réussi. Toute nouvelle app avec ce besoin réutilise cette route plutôt que d'en
  *   ajouter une dédiée.
+ * - **Fichiers partagés en lecture seule** (⭐ 13/10/2026, conception-esphome-assembleur §4/§11) :
+ *   `GET /api/apps/:appId/partage/<chemin>` → `data/<appId>/machine_partage/<chemin>` — livraison « je demande,
+ *   j'obtiens » entre instances (paquets de l'assembleur, firmwares de l'usine). Voir `sharedFiles.ts`.
  */
 export class PresentationServer {
   private app: Express;
@@ -392,6 +396,19 @@ export class PresentationServer {
         fs.unlink(filePath, () => {});
         fs.unlink(metaPath, () => {});
       });
+    });
+
+    // Fichiers partagés en lecture seule — voir le commentaire de tête de cette classe et sharedFiles.ts (dossier
+    // réservé data/<appId>/machine_partage, refus de tout ce qui en sort, liens symboliques compris).
+    this.app.get('/api/apps/:appId/partage/*', (req: Request, res: Response) => {
+      const dataRoot = path.join(process.env.PROJECT_ROOT || this.projectRoot, 'data');
+      const relPath = (req.params as Record<string, string>)[0] || '';
+      const r = resolveSharedFile(dataRoot, req.params.appId || '', relPath);
+      if (!r.ok) {
+        res.status(r.status).json({ error: r.status === 400 ? 'Bad Request' : 'Not Found', message: r.message });
+        return;
+      }
+      res.sendFile(r.filePath);
     });
 
     // Sauvegarde/rechargement des automatisations HA — troisième exception volontaire à "tout par

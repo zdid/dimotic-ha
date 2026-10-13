@@ -197,6 +197,20 @@ export class HaBridgeClient {
     return { latitude: config.latitude, longitude: config.longitude };
   }
 
+  /**
+   * ⭐ 13/10/2026 — « interroger HA » de façon générique (conception-esphome-assembleur) : n'importe quelle commande
+   * WebSocket `{ type, … }` (sans `id`), ex. `{ type: 'dimotic_plans/floorplans/list' }`. Délai : celui du client, ou
+   * `timeoutMs` pour une commande longue.
+   */
+  async callWs(message: Record<string, unknown>, timeoutMs?: number): Promise<unknown> {
+    return this.request('callWs', [message], timeoutMs);
+  }
+
+  /** ⭐ 13/10/2026 — appel REST générique sous `/api/` de HA (ex. flux de déclaration d'un appareil ESPHome). */
+  async callRest(method: 'GET' | 'POST' | 'DELETE', apiPath: string, body?: unknown, timeoutMs?: number): Promise<{ status: number; body: unknown }> {
+    return (await this.request('callRest', [method, apiPath, body], timeoutMs)) as { status: number; body: unknown };
+  }
+
   // ==========================================================================
   // Abonnement live — état brut, poussé par core à chaque state_changed HA
   // ==========================================================================
@@ -205,8 +219,8 @@ export class HaBridgeClient {
     this.eventBus.onGeneric<HaRawEntity>('ha:entity:state_changed', callback);
   }
 
-  private async request(method: HaBridgeMethod, args: unknown[]): Promise<unknown> {
-    const reply = await this.requester.request({ method, args }, this.timeoutMs);
+  private async request(method: HaBridgeMethod, args: unknown[], timeoutMs?: number): Promise<unknown> {
+    const reply = await this.requester.request({ method, args }, timeoutMs ?? this.timeoutMs);
     if (!reply.ok) {
       throw new Error(reply.error || `Échec de la requête HaBridgeClient (${method})`);
     }

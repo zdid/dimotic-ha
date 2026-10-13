@@ -10,6 +10,7 @@ import {
 import type { HaRawEntity, HaStateChangedMessage, HaAreaRegistryUpdatedMessage, HaDeviceRegistryUpdatedMessage, HaEntityRegistryUpdatedMessage, HaWsMessage } from '../types/ha-entity';
 import { HaWsConfig } from '../../infrastructure/config/schema';
 import { Logger } from '../../infrastructure/logger/index';
+import { validateWsMessage, validateRestCall, type HaRestMethod } from './haGenerique';
 
 // =============================================================================
 // Polyfill WebSocket pour Node.js — home-assistant-js-websocket cible le navigateur
@@ -296,6 +297,43 @@ export class HaWsClient {
     }
 
     return this.connection.sendMessagePromise({ type: 'config/area_registry/create', name, ...(icon ? { icon } : {}) });
+  }
+
+  /**
+   * ⭐ 13/10/2026 — appel WebSocket GÉNÉRIQUE pour les applications (conception-esphome-assembleur : « interroger HA ») :
+   * n'importe quelle commande `{ type, … }`, validée par haGenerique.validateWsMessage. Même échappatoire bas niveau que
+   * processConversation()/createArea().
+   */
+  callWs(message: Record<string, unknown>): Promise<unknown> {
+    const invalid = validateWsMessage(message);
+    if (invalid) throw new Error(invalid);
+    if (!this.isAuthenticated || !this.connection) {
+      throw new Error('Cannot call HA: not authenticated');
+    }
+    return this.connection.sendMessagePromise(message as { type: string });
+  }
+
+  /**
+   * ⭐ 13/10/2026 — appel REST GÉNÉRIQUE pour les applications, sous `/api/` de HA seulement (haGenerique.validateRestCall),
+   * avec le jeton du cœur. Renvoie le statut et le corps (JSON si possible, sinon texte) ; lève une erreur avec le corps
+   * de la réponse si HA répond en erreur (même raison que setDomainConfig : messages de HA exploitables).
+   */
+  async callRest(method: HaRestMethod, apiPath: string, body?: unknown): Promise<{ status: number; body: unknown }> {
+    const invalid = validateRestCall(method, apiPath);
+    if (invalid) throw new Error(invalid);
+    const url = `http://${this.currentConfig.host}:${this.currentConfig.port}${apiPath}`;
+    const response = await fetch(url, {
+      method,
+      headers: { Authorization: `Bearer ${this.currentConfig.token}`, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    const text = await response.text().catch(() => '');
+    let parsed: unknown = text;
+    try { parsed = text ? JSON.parse(text) : null; } catch { /* corps non JSON : rendu tel quel */ }
+    if (!response.ok) {
+      throw new Error(`${method} ${apiPath} → HTTP ${response.status}${text ? `: ${text}` : ''}`);
+    }
+    return { status: response.status, body: parsed };
   }
 
   /**
