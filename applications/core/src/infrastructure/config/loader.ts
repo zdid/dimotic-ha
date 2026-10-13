@@ -13,6 +13,7 @@ import {
   APP_DECLARATIONS,
   DATA_RENAMES
 } from './layers';
+import { forcedWebPort } from './webPort';
 
 /**
  * Valeurs par défaut complètes pour la configuration
@@ -160,6 +161,9 @@ export class ConfigLoader {
     }
 
     const configWithDefaults = deepMerge(DEFAULT_CONFIG, parsedConfig as Partial<AppConfig>);
+    // ⭐ 13/10/2026 — port web forcé par l'environnement (instance de dev : DIMOTIC_WEB_PORT=8088), prioritaire sur le fichier.
+    const forcedPort = forcedWebPort();
+    if (forcedPort !== null) configWithDefaults.web = { ...configWithDefaults.web, port: forcedPort };
     this.ensureMachineIdPersisted(parsedConfig as Partial<AppConfig> | null | undefined, configWithDefaults);
     this.omitDisabledHaSections(configWithDefaults);
 

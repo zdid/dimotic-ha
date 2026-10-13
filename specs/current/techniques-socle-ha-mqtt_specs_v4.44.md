@@ -1,9 +1,10 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.43  
-**Date :** 12 Octobre 2026  
+**Version :** 4.44  
+**Date :** 13 Octobre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
 
+> **v4.44** : **port web forcé par l'environnement** (`DIMOTIC_WEB_PORT`, `infrastructure/config/webPort.ts`, appliqué par `ConfigLoader.load()`) — valeur **prioritaire** sur `web.port` du fichier, ignorée si absente ou invalide. Les scripts `dev` et `dev:local` du cœur la positionnent à **8088** : l'instance de dev de falbala cohabite avec l'instance réelle (Docker, 8087) et aucun fichier, diffusion ou écran de paramètres ne peut la déplacer ; les instances réelles n'ont pas la variable (comportement inchangé). Voir `conception-esphome-assembleur_specs_v1.0.md` §6. Tests : `webPort.test.ts` (5).
 > **v4.43** : **Fichiers de secrets créés en 0600** (`secrets_config.yaml`, `layers.ts::writeYamlAtomic`) — propriétaire seul. Avant : 0664, donc un secret créé après la pose d'ACL par défaut sur `data/` (ex. `rwX` pour le compte de Claude Code) devenait lisible par ce compte (constaté sur ha2 : clé Mistral de `ia`). Avec 0600 le masque d'ACL tombe à `---` et les droits hérités ne donnent rien.
 
 > **v4.42** : **Services post-installation de HA — groupe de notification des administrateurs** (§13bis) — nouveau service `notifygroup` (`HaPostInstallService`) :
@@ -2732,5 +2733,6 @@ membres sont les appareils où l'application HA est installée (pas de SMS). Vé
 | **4.6** | 19/07/2026 | Mistral Vibe | **Restructuration complète de l'arborescence** : Déplacement de `src/applications/` et `src/applications_desactivees/` vers `applications/` et `applications_desactivees/` à la racine du projet. Chaque application (y compris le core) est maintenant autonome avec ses propres `package.json`, `tsconfig.json`, et `dist/`. **Le core ne peut pas être désactivé**. Activation/désactivation via sous-menu Paramètres Techniques. Mise à jour des mécanismes de détection et d'activation/désactivation via `AppService`. |
 | **4.5** | 17/07/2026 | Mistral Vibe | Ajout du **démarrage automatique des services d'application** : AppService instancie et démarre automatiquement les services des applications activées via convention de factory (`create*Service`). Reconnection automatique sur changement de configuration via écoute de `app:module:config:saved`. **Traces obligatoires** au démarrage et gestion des erreurs de connexion (matériel absent, mauvais paramètres) avec logging WARN/ERROR et motif précis. Processus reproductible pour toute nouvelle application. |
 | **4.4** | 14/07/2026 | Mistral Vibe | Ajout §4.3 "Gestion Dynamique des Applications" avec répertoires `applications/` et `applications_desactivees/`. Mécanisme d'activation/désactivation par déplacement de répertoires. |
+| **4.44** | 13/10/2026 | Claude | **Port web forcé par `DIMOTIC_WEB_PORT`** (prioritaire sur `web.port`) ; `dev` / `dev:local` à 8088 (instance de dev de falbala ≠ instance réelle 8087). Test ajouté. |
 | 4.3 | 10/07/2026 | - | Restructuration de la configuration HA avec flags d'activation (`ws_enable`, `mqtt_enable`) et regroupement MQTT sous HA. |
 | 4.2 | - | - | Ajout du support Alpine.js pour la couche Présentation.
