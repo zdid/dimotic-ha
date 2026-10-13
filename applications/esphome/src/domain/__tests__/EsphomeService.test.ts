@@ -4,6 +4,9 @@ import { EsphomeService } from '../EsphomeService';
 import { esphomeConfigSchema } from '../config-schema';
 import { topics } from '../messages';
 import { AgentPresence } from '../AgentPresence';
+import type { TraiteurUsine, FabriqueTraiteur } from '../EsphomeService';
+import type { Job } from '../messages';
+import type { ResultatTraitement, PublicationUsine } from '../factory/FactoryService';
 
 const logger: any = { info() {}, warn() {}, error() {}, debug() {} };
 const bus: any = { handlers: {} as Record<string, Function>, emitted: [] as { e: string; d: any }[], on(e: string, cb: Function) { this.handlers[e] = cb; }, onGeneric(e: string, cb: Function) { this.handlers[e] = cb; }, emit(e: string, d: any) { this.emitted.push({ e, d }); } };
@@ -12,9 +15,18 @@ const job = (rev: number, appareil = 'hasat4') => ({ v: 1, site: 'stfort', appar
 
 afterEach(() => { vi.useRealTimers(); bus.emitted.length = 0; });
 
-function service(brokers: Record<string, FauxBroker>, conf: unknown, identite = { instance: 'falbala_410210', port: 8087 }) {
+/** Traiteur d'essai : chaque demande attend qu'on la libère (`liberer(resultat)`), ce qui permet d'observer la file. */
+function traiteurManuel() {
+  const vus: Job[] = [];
+  const attente: ((r: ResultatTraitement) => void)[] = [];
+  let publication!: PublicationUsine;
+  const fabrique: FabriqueTraiteur = (_c, _i, p) => { publication = p; return { traiter: (job) => new Promise((res) => { vus.push(job); attente.push(res); }) } as TraiteurUsine; };
+  return { vus, fabrique, liberer: (r: ResultatTraitement = 'termine') => attente.shift()!(r), publication: () => publication };
+}
+
+function service(brokers: Record<string, FauxBroker>, conf: unknown, identite = { instance: 'falbala_410210', port: 8087 }, traiteur: FabriqueTraiteur = traiteurManuel().fabrique) {
   const fabrique = ({ broker, willTopic, willPayload }: any) => brokers[broker.hote].transport({ topic: willTopic, payload: willPayload });
-  return EsphomeService.create(bus, logger, provider(conf), fabrique, identite);
+  return EsphomeService.create(bus, logger, provider(conf), fabrique, identite, traiteur);
 }
 const confUsine = { site: 'stfort', usine: { actif: true, machine: 'falbala', sites: [{ id: 'stfort', mqtt: { hote: 'ha2' } }, { id: 'noisy', mqtt: { hote: 'noisy2' } }] } };
 
@@ -107,6 +119,89 @@ describe('EsphomeService — poseur (réception des poses)', () => {
     expect(s.getStatus().poseur.poses.map((p) => p.esp)).toEqual(['192.168.1.44']);
     ha2.publier(topics.pose('stfort', 'hasat4'), '', true);
     expect(s.getStatus().poseur.poses).toEqual([]);
+    await s.stop();
+  });
+});
+
+describe('EsphomeService — file de l\'usine', () => {
+  const flush = () => new Promise((r) => setImmediate(r));
+
+  it('une compilation à la fois, dans l\'ordre ; une demande plus récente remplace celle qui attend', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const ha2 = new FauxBroker();
+    const tm = traiteurManuel();
+    const s = service({ ha2, noisy2: new FauxBroker() }, confUsine, undefined, tm.fabrique);
+    await s.start();
+    ha2.publier(topics.job('stfort', 'a'), JSON.stringify(job(1, 'a')), true);
+    ha2.publier(topics.job('stfort', 'b'), JSON.stringify(job(1, 'b')), true);
+    ha2.publier(topics.job('stfort', 'b'), JSON.stringify(job(2, 'b')), true); // remplace b@1 en attente
+    await flush();
+    expect(tm.vus.map((j) => `${j.appareil}@${j.revision}`)).toEqual(['a@1']); // b attend
+    expect(s.getStatus().usine.demandes.map((d) => `${d.appareil}:${d.etat}`)).toEqual(['a:en_cours', 'b:en_attente']);
+    tm.liberer(); await flush();
+    expect(tm.vus.map((j) => `${j.appareil}@${j.revision}`)).toEqual(['a@1', 'b@2']);
+    tm.liberer(); await flush();
+    expect(s.getStatus().usine.demandes).toEqual([]);
+    await s.stop();
+  });
+
+  it('une révision terminée n\'est pas retraitée ; une plus récente l\'est', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const ha2 = new FauxBroker();
+    const tm = traiteurManuel();
+    const s = service({ ha2, noisy2: new FauxBroker() }, confUsine, undefined, tm.fabrique);
+    await s.start();
+    ha2.publier(topics.job('stfort', 'a'), JSON.stringify(job(5, 'a')), true);
+    await flush(); tm.liberer(); await flush();
+    ha2.publier(topics.job('stfort', 'a'), JSON.stringify(job(5, 'a')), true); // même révision
+    ha2.publier(topics.job('stfort', 'a'), JSON.stringify(job(4, 'a')), true); // plus ancienne
+    await flush();
+    expect(tm.vus).toHaveLength(1);
+    ha2.publier(topics.job('stfort', 'a'), JSON.stringify(job(6, 'a')), true);
+    await flush();
+    expect(tm.vus.map((j) => j.revision)).toEqual([5, 6]);
+    await s.stop();
+  });
+
+  it('« à réessayer » : nouvelle tentative après un délai, abandon après 3 essais', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const ha2 = new FauxBroker();
+    const tm = traiteurManuel();
+    const s = service({ ha2, noisy2: new FauxBroker() }, confUsine, undefined, tm.fabrique);
+    await s.start();
+    ha2.publier(topics.job('stfort', 'a'), JSON.stringify(job(1, 'a')), true);
+    await flush();
+    for (let essai = 1; essai <= 3; essai++) {
+      expect(tm.vus).toHaveLength(essai);
+      tm.liberer('a_reessayer'); await flush();
+      if (essai < 3) {
+        expect(s.getStatus().usine.demandes[0]).toMatchObject({ etat: 'a_reessayer', essais: essai });
+        await vi.advanceTimersByTimeAsync(31_000); await flush();
+      }
+    }
+    expect(s.getStatus().usine.demandes).toEqual([]); // abandonnée après 3 essais
+    await vi.advanceTimersByTimeAsync(120_000); await flush();
+    expect(tm.vus).toHaveLength(3);
+    await s.stop();
+  });
+
+  it('publie état, pose et suppression de demande sur le broker DU SITE de la demande', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const ha2 = new FauxBroker();
+    const noisy2 = new FauxBroker();
+    const tm = traiteurManuel();
+    const s = service({ ha2, noisy2 }, confUsine, undefined, tm.fabrique);
+    await s.start();
+    noisy2.publier(topics.job('noisy', 'ecran'), JSON.stringify({ ...job(7, 'ecran'), site: 'noisy' }), true);
+    await flush();
+    const pub = tm.publication();
+    pub.statut('noisy', 'ecran', 'compilation', { detail: 'en cours' });
+    pub.pose('noisy', 'ecran', { site: 'noisy', appareil: 'ecran', revision: 7, firmware: 'http://f/x.bin', sha256: 'a'.repeat(64), tailleOctets: 10, esp: '192.168.1.40', nomAffichage: 'Écran', options: { autoriserAppelsService: false } });
+    pub.supprimerDemande('noisy', 'ecran');
+    expect(JSON.parse(noisy2.conserves.get(topics.status('noisy', 'ecran'))!)).toMatchObject({ v: 1, site: 'noisy', appareil: 'ecran', revision: 7, etat: 'compilation', detail: 'en cours' });
+    expect(JSON.parse(noisy2.conserves.get(topics.pose('noisy', 'ecran'))!)).toMatchObject({ v: 1, tailleOctets: 10, esp: '192.168.1.40' });
+    expect(noisy2.conserves.has(topics.job('noisy', 'ecran'))).toBe(false);
+    expect([...ha2.conserves.keys()].filter((k) => k.includes('/noisy/'))).toEqual([]); // rien de noisy sur le broker de stfort
     await s.stop();
   });
 });

@@ -13,6 +13,21 @@ import { ESPHOME_CLIENT_EVENTS, ESPHOME_SOCKET_EVENTS } from './socket-events';
 import { creerLiaisons, fabriqueMqtt, type FabriqueTransport, type Liaisons } from './MqttSites';
 import { jobSchema, poseSchema, topics, revisionAcceptee, type Job, type Pose } from './messages';
 import type { Identite } from './presence';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { FactoryService, type PublicationUsine, type ResultatTraitement } from './factory/FactoryService';
+import { DockerApi } from './factory/DockerApi';
+import { SecretsStore } from './factory/SecretsStore';
+import type { Etat } from './messages';
+
+/** Traitement d'une demande par l'usine — injectable pour les tests. */
+export interface TraiteurUsine {
+  traiter(job: Job): Promise<ResultatTraitement>;
+}
+export type FabriqueTraiteur = (config: EsphomeConfig, identite: Identite, publication: PublicationUsine) => TraiteurUsine;
+
+const ESSAIS_MAX = 3;
+const DELAI_ESSAI_MS = 30_000;
 
 export interface EsphomeStatus {
   site: string;
@@ -24,7 +39,7 @@ export interface EsphomeStatus {
 }
 
 /** Demande reçue (vue de l'interface) — la compilation n'est pas encore écrite : elle reste « en_attente ». */
-export interface DemandeVue { site: string; appareil: string; revision: number; action: string; recueLe: string }
+export interface DemandeVue { site: string; appareil: string; revision: number; action: string; recueLe: string; etat: 'en_attente' | 'en_cours' | 'a_reessayer'; essais: number }
 export interface PoseVue { appareil: string; revision: number; esp: string; recueLe: string }
 
 export interface IEsphomeService {
@@ -40,6 +55,10 @@ export class EsphomeService implements IEsphomeService {
   /** Dernière révision traitée par appareil (une demande plus ancienne ou déjà traitée est ignorée). */
   private readonly revisions = new Map<string, number>();
   private timers: NodeJS.Timeout[] = [];
+  private traiteur: TraiteurUsine | null = null;
+  private file: Job[] = [];
+  private enCours = false;
+  private liaisonsActives = 0;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -49,14 +68,43 @@ export class EsphomeService implements IEsphomeService {
     private readonly identite: Identite = {
       instance: process.env.DIMOTIC_MACHINE_ID || 'esphome',
       port: Number(process.env.DIMOTIC_WEB_PORT) || 8087
-    }
+    },
+    private readonly fabriqueTraiteur: FabriqueTraiteur = (c, i, p) => EsphomeService.traiteurReel(c, i, p, logger)
   ) {
     this.config = this.loadConfig();
     this.setupEventListeners();
   }
 
-  static create(eventBus: IEventBus, logger: Logger, configProvider: IAppConfigProvider<EsphomeConfig>, fabrique?: FabriqueTransport, identite?: Identite): EsphomeService {
-    return new EsphomeService(eventBus, logger, configProvider, fabrique, identite);
+  static create(eventBus: IEventBus, logger: Logger, configProvider: IAppConfigProvider<EsphomeConfig>, fabrique?: FabriqueTransport, identite?: Identite, fabriqueTraiteur?: FabriqueTraiteur): EsphomeService {
+    return new EsphomeService(eventBus, logger, configProvider, fabrique, identite, fabriqueTraiteur);
+  }
+
+  /** Adresse publique de l'instance vue des autres sites : celle de la configuration, sinon la première adresse IPv4 locale. */
+  static adresseJoignable(config: EsphomeConfig, identite: Identite): string {
+    if (config.adresseJoignable) return config.adresseJoignable;
+    const ip = Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal)?.address ?? '127.0.0.1';
+    return `${ip}:${identite.port}`;
+  }
+
+  private static traiteurReel(config: EsphomeConfig, identite: Identite, publication: PublicationUsine, logger: Logger): TraiteurUsine {
+    const u = config.usine;
+    const racine = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'esphome', 'machine_partage');
+    return new FactoryService({
+      telecharger: async (url) => {
+        const r = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return Buffer.from(await r.arrayBuffer());
+      },
+      docker: new DockerApi(u.esphome.socketDocker),
+      secrets: new SecretsStore(path.join(u.esphome.dossierConfig, 'secrets.yaml')),
+      publication,
+      dossierConfig: u.esphome.dossierConfig,
+      cheminDansConteneur: u.esphome.cheminDansConteneur,
+      conteneur: u.esphome.conteneur,
+      partage: { dossier: racine, url: `http://${EsphomeService.adresseJoignable(config, identite)}/api/apps/esphome/partage` },
+      revisionsGardees: u.conservation.revisions,
+      surJournal: (m) => logger.debug('EsphomeService', m.trimEnd())
+    });
   }
 
   private loadConfig(): EsphomeConfig {
@@ -102,6 +150,8 @@ export class EsphomeService implements IEsphomeService {
   private demarrerLiaisons(): void {
     this.liaisons = creerLiaisons(this.config, this.identite, this.fabrique);
     const { usine, poseur } = this.liaisons;
+    this.liaisonsActives++;
+    this.traiteur = usine ? this.fabriqueTraiteur(this.config, this.identite, this.publicationUsine()) : null;
 
     if (usine) {
       for (const bus of usine.bus) {
@@ -159,6 +209,8 @@ export class EsphomeService implements IEsphomeService {
     this.liaisons = {};
     this.demandes.clear();
     this.poses.clear();
+    this.file = [];
+    this.traiteur = null;
   }
 
   private surDemande(job: Job): void {
@@ -171,13 +223,65 @@ export class EsphomeService implements IEsphomeService {
       this.logger.info('EsphomeService', `Demande ${job.appareil}@${job.revision} ignorée : révision déjà traitée ou plus ancienne`);
       return;
     }
-    this.demandes.set(cle, { site: job.site, appareil: job.appareil, revision: job.revision, action: job.action, recueLe: new Date().toISOString() });
-    this.logger.info('EsphomeService', `Demande reçue : ${job.appareil}@${job.revision} (${job.action}, site ${job.site}) — traitement à venir`);
+    // Une demande plus récente remplace celle qui attend encore dans la file (pas celle en cours de traitement).
+    this.file = this.file.filter((j) => !(j.site === job.site && j.appareil === job.appareil));
+    this.file.push(job);
+    this.demandes.set(cle, { site: job.site, appareil: job.appareil, revision: job.revision, action: job.action, recueLe: new Date().toISOString(), etat: 'en_attente', essais: 0 });
+    this.logger.info('EsphomeService', `Demande reçue : ${job.appareil}@${job.revision} (${job.action}, site ${job.site})`);
     this.emitStatus();
+    void this.traiterFile();
+  }
+
+  /** Une compilation à la fois, dans l'ordre d'arrivée. */
+  private async traiterFile(): Promise<void> {
+    if (this.enCours || !this.traiteur) return;
+    this.enCours = true;
+    try {
+      let job: Job | undefined;
+      while ((job = this.file.shift()) && this.traiteur) {
+        const cle = `${job.site}/${job.appareil}`;
+        const vue = this.demandes.get(cle);
+        if (vue) { vue.etat = 'en_cours'; vue.essais++; this.emitStatus(); }
+        this.revisionCourante.set(cle, job.revision);
+        let resultat: ResultatTraitement;
+        try {
+          resultat = await this.traiteur.traiter(job);
+        } catch (e) {
+          this.logger.error('EsphomeService', `Traitement de ${job.appareil}@${job.revision} : erreur inattendue : ${(e as Error).message}`);
+          resultat = 'echec';
+        }
+        if (resultat === 'a_reessayer' && vue && vue.essais < ESSAIS_MAX) {
+          vue.etat = 'a_reessayer';
+          const a = job;
+          this.timers.push(setTimeout(() => { if (this.demandes.get(cle)?.revision === a.revision) { this.file.push(a); void this.traiterFile(); } }, DELAI_ESSAI_MS));
+        } else {
+          if (resultat === 'termine') this.revisions.set(cle, job.revision);
+          this.demandes.delete(cle);
+        }
+        this.emitStatus();
+      }
+    } finally {
+      this.enCours = false;
+    }
+  }
+
+  private readonly revisionCourante = new Map<string, number>();
+
+  /** Publication de l'usine sur le broker du site de la demande (sites étanches). */
+  private publicationUsine(): PublicationUsine {
+    const bus = (site: string) => this.liaisons.usine?.bus.find((b) => b.site === site);
+    const maintenant = () => new Date().toISOString();
+    return {
+      statut: (site, appareil, etat: Etat, extra = {}) =>
+        bus(site)?.publier(topics.status(site, appareil), { v: 1, site, appareil, revision: this.revisionCourante.get(`${site}/${appareil}`) ?? 0, at: maintenant(), etat, detail: '', ...extra }, true),
+      pose: (site, appareil, pose) => bus(site)?.publier(topics.pose(site, appareil), { v: 1, at: maintenant(), ...pose }, true),
+      supprimerDemande: (site, appareil) => bus(site)?.supprimer(topics.job(site, appareil))
+    };
   }
 
   private surDemandeSupprimee(site: string, topic: string): void {
     const appareil = topic.split('/').pop() ?? '';
+    this.file = this.file.filter((j) => !(j.site === site && j.appareil === appareil));
     if (this.demandes.delete(`${site}/${appareil}`)) {
       this.logger.info('EsphomeService', `Demande ${appareil} (${site}) annulée ou supprimée`);
       this.emitStatus();
