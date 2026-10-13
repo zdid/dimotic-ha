@@ -19,12 +19,20 @@ import { FactoryService, type PublicationUsine, type ResultatTraitement } from '
 import { DockerApi } from './factory/DockerApi';
 import { SecretsStore } from './factory/SecretsStore';
 import type { Etat } from './messages';
+import { InstallerService, type PublicationPoseur } from './installer/InstallerService';
+import { HaDeclarer, type ClientHa } from './installer/HaDeclarer';
+import { televerserOta } from './installer/OtaClient';
 
 /** Traitement d'une demande par l'usine — injectable pour les tests. */
 export interface TraiteurUsine {
   traiter(job: Job): Promise<ResultatTraitement>;
 }
 export type FabriqueTraiteur = (config: EsphomeConfig, identite: Identite, publication: PublicationUsine) => TraiteurUsine;
+/** Traitement d'une pose par le poseur — injectable pour les tests. */
+export interface TraiteurPoseur {
+  traiter(pose: Pose): Promise<ResultatTraitement>;
+}
+export type FabriquePoseur = (config: EsphomeConfig, publication: PublicationPoseur) => TraiteurPoseur;
 
 const ESSAIS_MAX = 3;
 const DELAI_ESSAI_MS = 30_000;
@@ -40,7 +48,7 @@ export interface EsphomeStatus {
 
 /** Demande reçue (vue de l'interface) — la compilation n'est pas encore écrite : elle reste « en_attente ». */
 export interface DemandeVue { site: string; appareil: string; revision: number; action: string; recueLe: string; etat: 'en_attente' | 'en_cours' | 'a_reessayer'; essais: number }
-export interface PoseVue { appareil: string; revision: number; esp: string; recueLe: string }
+export interface PoseVue { appareil: string; revision: number; esp: string; recueLe: string; etat: 'en_attente' | 'en_cours' | 'a_reessayer'; essais: number }
 
 export interface IEsphomeService {
   start(): Promise<void>;
@@ -56,6 +64,11 @@ export class EsphomeService implements IEsphomeService {
   private readonly revisions = new Map<string, number>();
   private timers: NodeJS.Timeout[] = [];
   private traiteur: TraiteurUsine | null = null;
+  private poseur: TraiteurPoseur | null = null;
+  private filePoses: Pose[] = [];
+  private enCoursPoseur = false;
+  private readonly revisionsPoses = new Map<string, number>();
+  private readonly revisionPoseCourante = new Map<string, number>();
   private file: Job[] = [];
   private enCours = false;
   private liaisonsActives = 0;
@@ -69,14 +82,34 @@ export class EsphomeService implements IEsphomeService {
       instance: process.env.DIMOTIC_MACHINE_ID || 'esphome',
       port: Number(process.env.DIMOTIC_WEB_PORT) || 8087
     },
-    private readonly fabriqueTraiteur: FabriqueTraiteur = (c, i, p) => EsphomeService.traiteurReel(c, i, p, logger)
+    private readonly fabriqueTraiteur: FabriqueTraiteur = (c, i, p) => EsphomeService.traiteurReel(c, i, p, logger),
+    private readonly clientHa?: ClientHa,
+    private readonly fabriquePoseur: FabriquePoseur = (c, p) => EsphomeService.poseurReel(c, p, clientHa, logger)
   ) {
     this.config = this.loadConfig();
     this.setupEventListeners();
   }
 
-  static create(eventBus: IEventBus, logger: Logger, configProvider: IAppConfigProvider<EsphomeConfig>, fabrique?: FabriqueTransport, identite?: Identite, fabriqueTraiteur?: FabriqueTraiteur): EsphomeService {
-    return new EsphomeService(eventBus, logger, configProvider, fabrique, identite, fabriqueTraiteur);
+  static create(eventBus: IEventBus, logger: Logger, configProvider: IAppConfigProvider<EsphomeConfig>, fabrique?: FabriqueTransport, identite?: Identite, fabriqueTraiteur?: FabriqueTraiteur, clientHa?: ClientHa, fabriquePoseur?: FabriquePoseur): EsphomeService {
+    return new EsphomeService(eventBus, logger, configProvider, fabrique, identite, fabriqueTraiteur, clientHa, fabriquePoseur);
+  }
+
+  private static poseurReel(config: EsphomeConfig, publication: PublicationPoseur, clientHa: ClientHa | undefined, logger: Logger): TraiteurPoseur {
+    if (!clientHa) throw new Error('liaison Home Assistant indisponible pour le poseur');
+    return new InstallerService({
+      telecharger: async (url) => {
+        const r = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return Buffer.from(await r.arrayBuffer());
+      },
+      ota: (o) => televerserOta({ ...o, surProgres: undefined }),
+      ha: new HaDeclarer(clientHa),
+      publication,
+      motDePasseOta: config.poseur.motDePasseOta,
+      attendre: (ms) => new Promise((r) => setTimeout(r, ms)),
+      intervalleVerifMs: 10_000,
+      delaiVerifMs: 180_000
+    });
   }
 
   /** Adresse publique de l'instance vue des autres sites : celle de la configuration, sinon la première adresse IPv4 locale. */
@@ -152,6 +185,14 @@ export class EsphomeService implements IEsphomeService {
     const { usine, poseur } = this.liaisons;
     this.liaisonsActives++;
     this.traiteur = usine ? this.fabriqueTraiteur(this.config, this.identite, this.publicationUsine()) : null;
+    this.poseur = null;
+    if (poseur) {
+      try {
+        this.poseur = this.fabriquePoseur(this.config, this.publicationPoseur());
+      } catch (e) {
+        this.logger.error('EsphomeService', `Poseur indisponible : ${(e as Error).message}`);
+      }
+    }
 
     if (usine) {
       for (const bus of usine.bus) {
@@ -210,7 +251,9 @@ export class EsphomeService implements IEsphomeService {
     this.demandes.clear();
     this.poses.clear();
     this.file = [];
+    this.filePoses = [];
     this.traiteur = null;
+    this.poseur = null;
   }
 
   private surDemande(job: Job): void {
@@ -290,13 +333,67 @@ export class EsphomeService implements IEsphomeService {
 
   private surPose(pose: Pose): void {
     if (this.liaisons.poseur && !this.liaisons.poseur.presence.etat.actif) return;
-    this.poses.set(pose.appareil, { appareil: pose.appareil, revision: pose.revision, esp: pose.esp, recueLe: new Date().toISOString() });
-    this.logger.info('EsphomeService', `Pose reçue : ${pose.appareil}@${pose.revision} vers ${pose.esp} — traitement à venir`);
+    const cle = pose.appareil;
+    if (!revisionAcceptee(pose.revision, this.revisionsPoses.get(cle))) {
+      this.logger.info('EsphomeService', `Pose ${pose.appareil}@${pose.revision} ignorée : révision déjà traitée ou plus ancienne`);
+      return;
+    }
+    this.filePoses = this.filePoses.filter((p) => p.appareil !== pose.appareil);
+    this.filePoses.push(pose);
+    this.poses.set(cle, { appareil: pose.appareil, revision: pose.revision, esp: pose.esp, recueLe: new Date().toISOString(), etat: 'en_attente', essais: 0 });
+    this.logger.info('EsphomeService', `Pose reçue : ${pose.appareil}@${pose.revision} vers ${pose.esp}`);
     this.emitStatus();
+    void this.traiterPoses();
+  }
+
+  /** Une pose à la fois ; ESP injoignable : nouvelle tentative toutes les `intervalleMinutes` pendant `dureeMinutes`. */
+  private async traiterPoses(): Promise<void> {
+    if (this.enCoursPoseur || !this.poseur) return;
+    this.enCoursPoseur = true;
+    try {
+      let pose: Pose | undefined;
+      while ((pose = this.filePoses.shift()) && this.poseur) {
+        const vue = this.poses.get(pose.appareil);
+        if (vue) { vue.etat = 'en_cours'; vue.essais++; this.emitStatus(); }
+        this.revisionPoseCourante.set(pose.appareil, pose.revision);
+        let resultat: ResultatTraitement;
+        try {
+          resultat = await this.poseur.traiter(pose);
+        } catch (e) {
+          this.logger.error('EsphomeService', `Pose de ${pose.appareil}@${pose.revision} : erreur inattendue : ${(e as Error).message}`);
+          resultat = 'echec';
+        }
+        const t = this.config.poseur.tentatives;
+        const essaisMax = Math.floor(t.dureeMinutes / t.intervalleMinutes) + 1;
+        if (resultat === 'a_reessayer' && vue && vue.essais < essaisMax) {
+          vue.etat = 'a_reessayer';
+          const a = pose;
+          this.timers.push(setTimeout(() => { if (this.poses.get(a.appareil)?.revision === a.revision) { this.filePoses.push(a); void this.traiterPoses(); } }, t.intervalleMinutes * 60_000));
+        } else {
+          if (resultat === 'termine') this.revisionsPoses.set(pose.appareil, pose.revision);
+          else if (resultat === 'a_reessayer') this.logger.warn('EsphomeService', `Pose de ${pose.appareil}@${pose.revision} abandonnée après ${essaisMax} essais`);
+          this.poses.delete(pose.appareil);
+        }
+        this.emitStatus();
+      }
+    } finally {
+      this.enCoursPoseur = false;
+    }
+  }
+
+  /** Publication du poseur sur le broker de SON site. */
+  private publicationPoseur(): PublicationPoseur {
+    const bus = () => this.liaisons.poseur?.bus[0];
+    return {
+      statut: (site, appareil, etat: Etat, extra = {}) =>
+        bus()?.publier(topics.status(site, appareil), { v: 1, site, appareil, revision: this.revisionPoseCourante.get(appareil) ?? 0, at: new Date().toISOString(), etat, detail: '', ...extra }, true),
+      supprimerPose: (site, appareil) => bus()?.supprimer(topics.pose(site, appareil))
+    };
   }
 
   private surPoseSupprimee(topic: string): void {
     const appareil = topic.split('/').pop() ?? '';
+    this.filePoses = this.filePoses.filter((p) => p.appareil !== appareil);
     if (this.poses.delete(appareil)) this.emitStatus();
   }
 

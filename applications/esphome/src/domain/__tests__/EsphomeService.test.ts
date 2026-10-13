@@ -4,7 +4,9 @@ import { EsphomeService } from '../EsphomeService';
 import { esphomeConfigSchema } from '../config-schema';
 import { topics } from '../messages';
 import { AgentPresence } from '../AgentPresence';
-import type { TraiteurUsine, FabriqueTraiteur } from '../EsphomeService';
+import type { TraiteurUsine, FabriqueTraiteur, FabriquePoseur, TraiteurPoseur } from '../EsphomeService';
+import type { Pose } from '../messages';
+import type { PublicationPoseur } from '../installer/InstallerService';
 import type { Job } from '../messages';
 import type { ResultatTraitement, PublicationUsine } from '../factory/FactoryService';
 
@@ -196,7 +198,7 @@ describe('EsphomeService — file de l\'usine', () => {
     await flush();
     const pub = tm.publication();
     pub.statut('noisy', 'ecran', 'compilation', { detail: 'en cours' });
-    pub.pose('noisy', 'ecran', { site: 'noisy', appareil: 'ecran', revision: 7, firmware: 'http://f/x.bin', sha256: 'a'.repeat(64), tailleOctets: 10, esp: '192.168.1.40', nomAffichage: 'Écran', options: { autoriserAppelsService: false } });
+    pub.pose('noisy', 'ecran', { site: 'noisy', appareil: 'ecran', revision: 7, firmware: 'http://f/x.bin', sha256: 'a'.repeat(64), tailleOctets: 10, esp: '192.168.1.40', portApi: 6053, portOta: 3232, nomAffichage: 'Écran', options: { autoriserAppelsService: false } });
     pub.supprimerDemande('noisy', 'ecran');
     expect(JSON.parse(noisy2.conserves.get(topics.status('noisy', 'ecran'))!)).toMatchObject({ v: 1, site: 'noisy', appareil: 'ecran', revision: 7, etat: 'compilation', detail: 'en cours' });
     expect(JSON.parse(noisy2.conserves.get(topics.pose('noisy', 'ecran'))!)).toMatchObject({ v: 1, tailleOctets: 10, esp: '192.168.1.40' });
@@ -205,3 +207,72 @@ describe('EsphomeService — file de l\'usine', () => {
     await s.stop();
   });
 });
+
+describe('EsphomeService — file du poseur', () => {
+  const flush = () => new Promise((r) => setImmediate(r));
+  const poseMsg = (rev: number, app = 'hasat4') => ({ v: 1, site: 'stfort', appareil: app, revision: rev, at: '2026-10-13T18:00:00+02:00', firmware: 'http://f/x.bin', sha256: 'd'.repeat(64), tailleOctets: 1000, esp: '192.168.1.44', nomAffichage: 'Satellite' });
+  function poseurManuel() {
+    const vus: Pose[] = [];
+    const attente: ((r: ResultatTraitement) => void)[] = [];
+    let publication!: PublicationPoseur;
+    const fabrique: FabriquePoseur = (_c, p) => { publication = p; return { traiter: (pose) => new Promise((res) => { vus.push(pose); attente.push(res); }) } as TraiteurPoseur; };
+    return { vus, fabrique, liberer: (r: ResultatTraitement = 'termine') => attente.shift()!(r), publication: () => publication };
+  }
+  const confPoseur = { site: 'stfort', poseur: { actif: true, mqtt: { hote: 'ha2' }, tentatives: { intervalleMinutes: 5, dureeMinutes: 10 } } };
+  const svc = (ha2: FauxBroker, pm: ReturnType<typeof poseurManuel>) =>
+    EsphomeService.create(bus, logger, provider(confPoseur), ({ broker, willTopic, willPayload }: any) => ({ ha2 }[broker.hote as 'ha2']).transport({ topic: willTopic, payload: willPayload }), { instance: 'p', port: 8087 }, undefined, undefined, pm.fabrique);
+
+  it('traite une pose à la fois, remplace celle qui attend, ignore une révision terminée', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const ha2 = new FauxBroker(); const pm = poseurManuel(); const s = svc(ha2, pm);
+    await s.start();
+    ha2.publier(topics.pose('stfort', 'a'), JSON.stringify(poseMsg(1, 'a')), true);
+    ha2.publier(topics.pose('stfort', 'b'), JSON.stringify(poseMsg(1, 'b')), true);
+    ha2.publier(topics.pose('stfort', 'b'), JSON.stringify(poseMsg(2, 'b')), true);
+    await flush();
+    expect(pm.vus.map((p) => `${p.appareil}@${p.revision}`)).toEqual(['a@1']);
+    expect(s.getStatus().poseur.poses.map((p) => `${p.appareil}:${p.etat}`)).toEqual(['a:en_cours', 'b:en_attente']);
+    pm.liberer(); await flush();
+    expect(pm.vus.map((p) => `${p.appareil}@${p.revision}`)).toEqual(['a@1', 'b@2']);
+    pm.liberer(); await flush();
+    ha2.publier(topics.pose('stfort', 'a'), JSON.stringify(poseMsg(1, 'a')), true); // déjà terminée
+    await flush();
+    expect(pm.vus).toHaveLength(2);
+    await s.stop();
+  });
+
+  it('ESP injoignable : nouvelle tentative toutes les 5 minutes pendant 10 minutes (3 essais), puis abandon', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const ha2 = new FauxBroker(); const pm = poseurManuel(); const s = svc(ha2, pm);
+    await s.start();
+    ha2.publier(topics.pose('stfort', 'a'), JSON.stringify(poseMsg(1, 'a')), true);
+    await flush();
+    for (let essai = 1; essai <= 3; essai++) {
+      expect(pm.vus).toHaveLength(essai);
+      pm.liberer('a_reessayer'); await flush();
+      if (essai < 3) {
+        expect(s.getStatus().poseur.poses[0]).toMatchObject({ etat: 'a_reessayer', essais: essai });
+        await vi.advanceTimersByTimeAsync(5 * 60_000 + 1000); await flush();
+      }
+    }
+    expect(s.getStatus().poseur.poses).toEqual([]);
+    await vi.advanceTimersByTimeAsync(30 * 60_000); await flush();
+    expect(pm.vus).toHaveLength(3);
+    await s.stop();
+  });
+
+  it('publie l\'état et la suppression de la pose sur le broker du site', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const ha2 = new FauxBroker(); const pm = poseurManuel(); const s = svc(ha2, pm);
+    await s.start();
+    ha2.publier(topics.pose('stfort', 'a'), JSON.stringify(poseMsg(4, 'a')), true);
+    await flush();
+    const pub = pm.publication();
+    pub.statut('stfort', 'a', 'envoi', { detail: '192.168.1.44:3232' });
+    expect(JSON.parse(ha2.conserves.get(topics.status('stfort', 'a'))!)).toMatchObject({ etat: 'envoi', revision: 4, detail: '192.168.1.44:3232' });
+    pub.supprimerPose('stfort', 'a');
+    expect(ha2.conserves.has(topics.pose('stfort', 'a'))).toBe(false);
+    await s.stop();
+  });
+});
+

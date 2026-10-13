@@ -55,6 +55,8 @@ const usineSchema = z.object({
 
 const poseurSchema = z.object({
   actif: z.boolean().default(false),
+  // Mot de passe OTA des ESP de ce site (`ota_password` du secrets.yaml d'ESPHome) : propre au site, jamais dans un message.
+  motDePasseOta: z.string().default(''),
   mqtt: brokerSchema.default({ hote: '127.0.0.1' }),
   tentatives: z
     .object({

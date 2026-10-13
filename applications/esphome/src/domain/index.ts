@@ -21,6 +21,7 @@ import {
 import { ESPHOME_SOCKET_EVENTS, ESPHOME_ALL_EVENTS, ESPHOME_PERSISTENT_EVENTS } from './socket-events';
 import { EsphomeService, IEsphomeService } from './EsphomeService';
 import type { EsphomeConfig } from './config-schema';
+import type { ClientHa } from './installer/HaDeclarer';
 
 export interface MenuEntry {
   id?: string;
@@ -98,6 +99,7 @@ export const ESPHOME_UI_METADATA: ModuleUiMetadata = {
       icon: '📡',
       fields: [
         { name: 'poseur.actif', label: 'Poseur actif', type: 'boolean', default: false },
+        { name: 'poseur.motDePasseOta', label: 'Mot de passe OTA des ESP de ce site', type: 'password' },
         ...brokerFields('poseur.mqtt'),
         { name: 'poseur.tentatives.intervalleMinutes', label: 'Intervalle entre deux tentatives (minutes)', type: 'number', default: 5 },
         { name: 'poseur.tentatives.dureeMinutes', label: 'Durée maximale des tentatives (minutes)', type: 'number', default: 60 }
@@ -135,9 +137,10 @@ export const ESPHOME_APP: ApplicationModule & { menu?: ApplicationMenuConfig } =
 export function createEsphomeService(
   eventBus: IEventBus,
   logger: Logger,
-  configProvider: IAppConfigProvider<EsphomeConfig>
+  configProvider: IAppConfigProvider<EsphomeConfig>,
+  clientHa?: ClientHa
 ): IEsphomeService {
-  const service = EsphomeService.create(eventBus, logger, configProvider);
+  const service = EsphomeService.create(eventBus, logger, configProvider, undefined, undefined, undefined, clientHa);
 
   eventBus.emit('app:socket-events:registered', {
     appId: 'esphome',
@@ -149,9 +152,9 @@ export function createEsphomeService(
   return service;
 }
 
-export function createEsphomeServiceWithConfig(eventBus: IEventBus, logger: Logger, configService: ConfigService): IEsphomeService {
+export function createEsphomeServiceWithConfig(eventBus: IEventBus, logger: Logger, configService: ConfigService, clientHa?: ClientHa): IEsphomeService {
   const configProvider = new AppConfigProvider<EsphomeConfig>('esphome' as any, configService);
-  return createEsphomeService(eventBus, logger, configProvider);
+  return createEsphomeService(eventBus, logger, configProvider, clientHa);
 }
 
 export * from './EsphomeService';
@@ -162,3 +165,6 @@ export * from './presence';
 export * from './bus';
 export * from './AgentPresence';
 export * from './MqttSites';
+export * from './installer/OtaClient';
+export * from './installer/HaDeclarer';
+export * from './installer/InstallerService';

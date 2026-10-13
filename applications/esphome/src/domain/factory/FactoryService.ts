@@ -144,6 +144,8 @@ export class FactoryService {
       sha256: sha256(firmware),
       tailleOctets: firmware.length,
       esp: manifeste.esp.adresse,
+      portApi: manifeste.esp.port,
+      portOta: manifeste.esp.portOta,
       nomAffichage: manifeste.nomAffichage,
       ...(cleNeuve ? { cle: cleNeuve } : {}),
       options: manifeste.options

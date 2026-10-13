@@ -52,6 +52,9 @@ export const poseSchema = z.object({
   // Taille du firmware en octets : le poseur contrôle le nombre d'octets reçus (§5.5, §6.1).
   tailleOctets: z.number().int().positive(),
   esp: z.string().min(1),
+  // Ports de l'ESP : API native (déclaration dans HA) et mise à jour OTA.
+  portApi: z.number().int().positive().default(6053),
+  portOta: z.number().int().positive().default(3232),
   nomAffichage: z.string().min(1),
   // Clé API : présente UNIQUEMENT pour un appareil neuf, visible une seule fois.
   cle: z.string().optional(),

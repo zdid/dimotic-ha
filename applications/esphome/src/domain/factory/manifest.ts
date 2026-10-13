@@ -23,7 +23,7 @@ export const manifesteSchema = z.object({
     // Valeurs de la fiche du modèle pour le contrôle des tailles (§5.5) ; absentes = contrôle de taille non fait.
     memoire: z.object({ emplacementOtaOctets: z.number().int().positive(), ramInterneOctets: z.number().int().positive() }).optional()
   }),
-  esp: z.object({ adresse: z.string().min(1), port: z.number().int().positive().default(6053) }),
+  esp: z.object({ adresse: z.string().min(1), port: z.number().int().positive().default(6053), portOta: z.number().int().positive().default(3232) }),
   options: z.object({ autoriserAppelsService: z.boolean().default(false) }).default({}),
   wifi: z.array(nom).default([]),
   fichiers: z.record(z.string().regex(/^[a-f0-9]{64}$/))

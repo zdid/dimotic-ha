@@ -4,7 +4,7 @@
  */
 
 import * as path from 'node:path';
-import { ConfigLoader, ConfigWriter, ConfigService, createLogger, IpcEventBus } from '../../core/dist/exports';
+import { ConfigLoader, ConfigWriter, ConfigService, createLogger, IpcEventBus, HaBridgeClient } from '../../core/dist/exports';
 import { createEsphomeServiceWithConfig } from './domain';
 
 async function main(): Promise<void> {
@@ -23,7 +23,10 @@ async function main(): Promise<void> {
     logger
   );
 
-  const service = createEsphomeServiceWithConfig(new IpcEventBus(), logger, configService);
+  const eventBus = new IpcEventBus();
+  // Liaison HA du cœur (poseur : vérification et déclaration des appareils) — même patron que scriptsha/planificateur.
+  const haBridgeClient = new HaBridgeClient(eventBus, logger);
+  const service = createEsphomeServiceWithConfig(eventBus, logger, configService, haBridgeClient);
   await service.start();
   logger.info('esphome:standalone', `esphome démarré en process séparé (pid ${process.pid})`);
 
