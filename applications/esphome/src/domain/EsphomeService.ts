@@ -21,9 +21,11 @@ import { SecretsStore } from './factory/SecretsStore';
 import type { Etat } from './messages';
 import { InstallerService, type PublicationPoseur } from './installer/InstallerService';
 import { HaDeclarer, type ClientHa } from './installer/HaDeclarer';
-import { televerserOta } from './installer/OtaClient';
+import { televerserOta, attendrePort } from './installer/OtaClient';
 import { reconnaitre, juger, type Releve, type Verdict } from './factory/Reconnaissance';
 import type { DockerClient } from './factory/DockerApi';
+import { Catalogue } from './factory/Catalogue';
+import { flasherParUsb, type ResultatFlash } from './factory/PremierFlash';
 
 /** Traitement d'une demande par l'usine — injectable pour les tests. */
 export interface TraiteurUsine {
@@ -42,7 +44,7 @@ const DELAI_ESSAI_MS = 30_000;
 export interface EsphomeStatus {
   site: string;
   adresseJoignable: string;
-  usine: { actif: boolean; sitesServis: string[]; enRetrait: string | null; connexions: { site: string; connecte: boolean }[]; demandes: DemandeVue[] };
+  usine: { actif: boolean; sitesServis: string[]; enRetrait: string | null; connexions: { site: string; connecte: boolean }[]; demandes: DemandeVue[]; appareils: { appareil: string; modele: string; mac?: string }[] };
   poseur: { actif: boolean; enRetrait: string | null; connecte: boolean; poses: PoseVue[] };
   /** Avancement de la réalisation : 'squelette' tant que les boucles usine/poseur (traitement des demandes) ne sont pas écrites. */
   implementation: 'squelette';
@@ -108,6 +110,7 @@ export class EsphomeService implements IEsphomeService {
       ha: new HaDeclarer(clientHa),
       publication,
       motDePasseOta: config.poseur.motDePasseOta,
+      attendreApi: (hote, port) => attendrePort(hote, port),
       attendre: (ms) => new Promise((r) => setTimeout(r, ms)),
       intervalleVerifMs: 10_000,
       delaiVerifMs: 180_000
@@ -133,6 +136,7 @@ export class EsphomeService implements IEsphomeService {
       docker: new DockerApi(u.esphome.socketDocker),
       secrets: new SecretsStore(path.join(u.esphome.dossierConfig, 'secrets.yaml')),
       publication,
+      catalogue: new Catalogue(path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'esphome', 'catalogue.json')),
       dossierConfig: u.esphome.dossierConfig,
       cheminDansConteneur: u.esphome.cheminDansConteneur,
       conteneur: u.esphome.conteneur,
@@ -149,6 +153,7 @@ export class EsphomeService implements IEsphomeService {
   private setupEventListeners(): void {
     this.eventBus.on(ESPHOME_CLIENT_EVENTS.GET_STATUS, () => this.emitStatus());
     this.eventBus.on(ESPHOME_CLIENT_EVENTS.CARTE_RECONNAITRE, () => void this.reconnaitreCarte());
+    this.eventBus.on(ESPHOME_CLIENT_EVENTS.CARTE_FLASHER, (d: unknown) => void this.flasherCarte(d as { appareil: string; forcer?: boolean }));
     // Process séparé : sa propre instance de ConfigService est distincte de celle du cœur qui a écrit le fichier,
     // d'où `reload()` AVANT de relire (même correctif que rpigpio/teleinfo).
     this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (event) => {
@@ -410,7 +415,8 @@ export class EsphomeService implements IEsphomeService {
         sitesServis: this.config.usine.sites.map((s) => s.id),
         enRetrait: usine && !usine.presence.etat.actif ? usine.presence.etat.raison : null,
         connexions: (usine?.bus ?? []).map((b) => ({ site: b.site, connecte: b.connecte })),
-        demandes: [...this.demandes.values()]
+        demandes: [...this.demandes.values()],
+        appareils: this.catalogue.lire().appareils
       },
       poseur: {
         actif: this.config.poseur.actif,
@@ -424,6 +430,31 @@ export class EsphomeService implements IEsphomeService {
 
   /** Docker de l'usine, remplaçable par les tests. */
   dockerUsine: DockerClient | null = null;
+  catalogue: Catalogue = new Catalogue(path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'esphome', 'catalogue.json'));
+
+  /** Premier flash USB d'un appareil (carte branchée sur la machine de l'usine) : reconnaissance, refus si non conforme, flash, MAC notée. */
+  async flasherCarte(demande: { appareil: string; forcer?: boolean }): Promise<ResultatFlash | null> {
+    const u = this.config.usine;
+    if (!u.actif) {
+      this.eventBus.emit(ESPHOME_SOCKET_EVENTS.ERROR, { message: "Le flash d'une carte demande l'option « usine » active sur cette machine." });
+      return null;
+    }
+    const appareil = String(demande?.appareil ?? '');
+    if (!/^[a-zA-Z0-9_-]+$/.test(appareil)) {
+      this.eventBus.emit(ESPHOME_SOCKET_EVENTS.ERROR, { message: 'Nom d\'appareil invalide.' });
+      return null;
+    }
+    this.logger.info('EsphomeService', `Premier flash USB de ${appareil} demandé (port ${u.premierFlash.peripherique})`);
+    const r = await flasherParUsb(
+      { docker: this.dockerUsine ?? new DockerApi(u.esphome.socketDocker), catalogue: this.catalogue, conteneur: u.esphome.conteneur, cheminDansConteneur: u.esphome.cheminDansConteneur, peripherique: u.premierFlash.peripherique },
+      appareil,
+      { forcer: demande.forcer === true }
+    );
+    this.logger.info('EsphomeService', r.ok ? `Flash de ${appareil} réussi (MAC ${r.releve.mac})` : `Flash de ${appareil} refusé ou raté : ${r.raison}`);
+    this.eventBus.emit(ESPHOME_SOCKET_EVENTS.CARTE_FLASH, { appareil, ...r, at: new Date().toISOString() });
+    this.emitStatus();
+    return r;
+  }
 
   /**
    * Reconnaissance de la carte branchée sur la machine de l'usine (§5.4) : lecture seule. Les catalogues de modèles et
@@ -438,7 +469,7 @@ export class EsphomeService implements IEsphomeService {
     try {
       const docker = this.dockerUsine ?? new DockerApi(u.esphome.socketDocker);
       const releve = await reconnaitre(docker, u.esphome.conteneur, u.premierFlash.peripherique);
-      const verdict = juger(releve, [], []);
+      const verdict = juger(releve, this.catalogue.lire().modeles, this.catalogue.appareilsAvecMac());
       this.eventBus.emit(ESPHOME_SOCKET_EVENTS.CARTE_RELEVE, { releve, verdict, at: new Date().toISOString() });
       this.logger.info('EsphomeService', `Carte reconnue : ${releve.puceBrute}, flash ${releve.flash ?? '?'}, MAC ${releve.mac} — ${verdict.type}`);
       return { releve, verdict };

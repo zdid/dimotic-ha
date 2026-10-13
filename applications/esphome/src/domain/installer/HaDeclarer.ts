@@ -27,12 +27,19 @@ export interface EtatHa {
   appareil: AppareilHa | null;
 }
 
-/** Entrée ESPHome de l'appareil : par nom réseau (`device_name`), sinon par adresse, sinon par titre (nom d'affichage). */
+/**
+ * Entrée ESPHome de l'appareil. La commande `config_entries/get` ne renvoie PAS les données de l'entrée (adresse, nom réseau) :
+ * constaté en réel le 13/10/2026, seul le titre est fiable. HA titre l'entrée du nom réseau (« essai-esp8266 ») ou du nom
+ * d'affichage donné à l'appareil (« Plan HAPLAN ») : on cherche donc par titre (sans tenir compte de la casse), puis, si les
+ * données sont présentes, par nom réseau ou adresse.
+ */
 export function trouverEntree(entrees: EntreeEsphome[], c: CibleAppareil): EntreeEsphome | null {
+  const meme = (a?: string, b?: string) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
   return (
+    entrees.find((e) => meme(e.title, c.appareil)) ??
+    entrees.find((e) => meme(e.title, c.nomAffichage)) ??
     entrees.find((e) => e.data?.device_name === c.appareil) ??
     entrees.find((e) => e.data?.host === c.adresse) ??
-    entrees.find((e) => e.title === c.nomAffichage) ??
     null
   );
 }

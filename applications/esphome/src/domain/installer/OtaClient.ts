@@ -88,6 +88,23 @@ function attendu(octet: number, attendus: number[], contexte: string): void {
   throw new OtaError(msg ? `${contexte} : ${msg}` : `${contexte} : réponse inattendue de l'ESP (0x${octet.toString(16).padStart(2, '0')})`);
 }
 
+/** Attend qu'un port TCP réponde (l'API de l'ESP après son redémarrage) : tentative toutes les 3 s, au plus `delaiMs`. */
+export async function attendrePort(hote: string, port: number, delaiMs = 120_000): Promise<boolean> {
+  const fin = Date.now() + delaiMs;
+  while (Date.now() < fin) {
+    const ouvert = await new Promise<boolean>((ok) => {
+      const s = net.connect({ host: hote, port });
+      s.setTimeout(2500);
+      s.once('connect', () => { s.destroy(); ok(true); });
+      s.once('error', () => { s.destroy(); ok(false); });
+      s.once('timeout', () => { s.destroy(); ok(false); });
+    });
+    if (ouvert) return true;
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  return false;
+}
+
 export interface OptionsOta {
   hote: string;
   port?: number;

@@ -23,6 +23,8 @@ export interface DepsPoseur {
   ha: HaDeclarer;
   publication: PublicationPoseur;
   motDePasseOta: string;
+  /** Attend que l'API native de l'ESP réponde de nouveau après son redémarrage (rend false au bout du délai). */
+  attendreApi: (adresse: string, port: number) => Promise<boolean>;
   /** Attente (injectable) ; la vérification interroge HA toutes les `intervalleVerifMs` pendant `delaiVerifMs` au plus. */
   attendre(ms: number): Promise<void>;
   intervalleVerifMs: number;
@@ -71,9 +73,21 @@ export class InstallerService {
 
     // 4. Déclaration dans HA (appareil neuf seulement)
     pub.statut(pose.site, pose.appareil, 'verification');
+    // L'ESP redémarre sur le nouveau firmware : on attend son API avant de le déclarer (sinon HA répond « connection_error »).
+    const revenu = await this.d.attendreApi(pose.esp, pose.portApi);
+    if (!revenu) pub.statut(pose.site, pose.appareil, 'verification', { detail: "l'ESP ne répond pas encore sur son API après le redémarrage" });
     if (!avant.entree) {
       try {
-        await this.d.ha.declarer({ adresse: pose.esp, portApi: pose.portApi, cle: pose.cle, autoriserAppelsService: pose.options.autoriserAppelsService });
+        // Tant que l'ESP achève son redémarrage, HA peut répondre « connection_error » : trois tentatives espacées.
+        for (let essai = 1; ; essai++) {
+          try {
+            await this.d.ha.declarer({ adresse: pose.esp, portApi: pose.portApi, cle: pose.cle, autoriserAppelsService: pose.options.autoriserAppelsService });
+            break;
+          } catch (e) {
+            if (essai >= 3 || !(e instanceof ErreurHa) || !/connection_error/.test(e.message)) throw e;
+            await this.d.attendre(5000);
+          }
+        }
       } catch (e) {
         return echec(`firmware envoyé, mais déclaration dans HA impossible : ${(e as Error).message}`, !(e instanceof ErreurHa) ? false : true);
       }

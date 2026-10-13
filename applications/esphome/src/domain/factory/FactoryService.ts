@@ -16,6 +16,7 @@ import { sha256, verifierPaquet, type Manifeste } from './manifest';
 import { releverMesures, controlerTailles } from './compile-output';
 import type { DockerClient } from './DockerApi';
 import type { SecretsStore } from './SecretsStore';
+import type { Catalogue } from './Catalogue';
 
 export interface PublicationUsine {
   statut(site: string, appareil: string, etat: Etat, extra?: Partial<Pick<Status, 'detail' | 'mesures' | 'versionFirmware'>>): void;
@@ -28,6 +29,8 @@ export interface DepsUsine {
   docker: DockerClient;
   secrets: SecretsStore;
   publication: PublicationUsine;
+  /** Catalogue des modèles et appareils connus (optionnel). */
+  catalogue?: Catalogue;
   /** Dossier de configuration d'ESPHome vu par l'application, et le même vu du conteneur. */
   dossierConfig: string;
   cheminDansConteneur: string;
@@ -87,6 +90,7 @@ export class FactoryService {
       return echec(`dépôt des sources impossible : ${(e as Error).message}`, false);
     }
     pub.supprimerDemande(job.site, job.appareil);
+    this.d.catalogue?.noterPaquet({ id: manifeste.modele.id, puce: manifeste.modele.puce, flash: manifeste.modele.flash }, job.appareil);
 
     // 3. Clé API (appareil neuf seulement)
     let cleNeuve: string | null;

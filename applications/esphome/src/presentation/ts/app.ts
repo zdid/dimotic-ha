@@ -7,7 +7,7 @@ interface PoseVue { appareil: string; revision: number; esp: string; etat: strin
 interface EsphomeStatus {
   site: string;
   adresseJoignable: string;
-  usine: { actif: boolean; sitesServis: string[]; enRetrait: string | null; connexions: { site: string; connecte: boolean }[]; demandes: DemandeVue[] };
+  usine: { actif: boolean; sitesServis: string[]; enRetrait: string | null; connexions: { site: string; connecte: boolean }[]; demandes: DemandeVue[]; appareils: { appareil: string; modele: string; mac?: string }[] };
   poseur: { actif: boolean; enRetrait: string | null; connecte: boolean; poses: PoseVue[] };
   implementation: string;
 }
@@ -24,7 +24,11 @@ function esc(texte: string): string {
   return texte.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
 }
 
+let appareilsConnus: { appareil: string; modele: string; mac?: string }[] = [];
+
 function render(status: EsphomeStatus): void {
+  appareilsConnus = status.usine.appareils;
+  majFlash();
   const zone = moduleRoot().querySelector('#statut');
   if (!zone) return;
   zone.innerHTML = `<h2>État</h2>
@@ -61,10 +65,32 @@ function afficherCarte(r: { releve: any; verdict: any }): void {
     <p><strong>${esc(VERDICTS[verdict.type] ?? verdict.type)}</strong>${verdict.detail ? ' — ' + esc(verdict.detail) : ''}</p>`;
 }
 
+function majFlash(): void {
+  const zone = moduleRoot().querySelector('#carte-flash') as HTMLElement | null;
+  if (!zone) return;
+  if (appareilsConnus.length === 0) { zone.innerHTML = '<p class="note">Aucun appareil connu : le premier paquet reçu de l\'assembleur crée l\'appareil et son modèle.</p>'; return; }
+  const choix = (zone.querySelector('select') as HTMLSelectElement | null)?.value;
+  zone.innerHTML = `<label class="label">Flasher la carte branchée comme appareil</label>
+    <select id="flash-appareil" style="padding:6px;margin-right:8px">${appareilsConnus.map((a) => `<option value="${esc(a.appareil)}"${a.appareil === choix ? ' selected' : ''}>${esc(a.appareil)} (${esc(a.modele)}${a.mac ? ', déjà flashé' : ''})</option>`).join('')}</select>
+    <button class="btn" id="btn-flasher" style="padding:8px 16px;cursor:pointer">Flasher par USB</button>
+    <p class="note">La carte est reconnue d'abord ; si elle n'est pas du modèle de l'appareil, rien n'est écrit.</p>
+    <div id="flash-resultat"></div>`;
+  zone.querySelector('#btn-flasher')?.addEventListener('click', () => {
+    const nom = (zone.querySelector('#flash-appareil') as HTMLSelectElement).value;
+    if (!window.confirm(`Flasher la carte branchée sur la machine de l'usine comme « ${nom} » ? Son contenu actuel sera remplacé.`)) return;
+    (zone.querySelector('#flash-resultat') as HTMLElement).innerHTML = '<p class="note">Reconnaissance puis flash en cours (jusqu\'à plusieurs minutes)…</p>';
+    window.app.socketService.getSocket().emit('esphome:carte:flasher', { appareil: nom });
+  });
+}
+
 function init(): void {
   const socket = window.app.socketService.getSocket();
   socket.on('esphome:status', (status: EsphomeStatus) => render(status));
   socket.on('esphome:carte:releve', (r: { releve: any; verdict: any }) => afficherCarte(r));
+  socket.on('esphome:carte:flash', (r: { appareil: string; ok: boolean; raison?: string; releve?: { mac: string } }) => {
+    const zone = moduleRoot().querySelector('#flash-resultat');
+    if (zone) zone.innerHTML = r.ok ? `<p><strong>${esc(r.appareil)} flashé</strong> (MAC ${esc(r.releve?.mac ?? '')}). La carte redémarre sur le nouveau firmware.</p>` : `<p class="note">Refusé ou raté : ${esc(r.raison ?? '')}</p>`;
+  });
   socket.on('esphome:error', (e: { message: string }) => {
     const zone = moduleRoot().querySelector('#carte-resultat');
     if (zone) zone.innerHTML = `<p class="note">${esc(e.message)}</p>`;

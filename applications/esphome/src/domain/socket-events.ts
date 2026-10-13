@@ -6,12 +6,14 @@
 export const ESPHOME_SOCKET_EVENTS = {
   STATUS: 'esphome:status',
   CARTE_RELEVE: 'esphome:carte:releve',
+  CARTE_FLASH: 'esphome:carte:flash',
   ERROR: 'esphome:error'
 } as const;
 
 export const ESPHOME_CLIENT_EVENTS = {
   GET_STATUS: 'esphome:status:get',
-  CARTE_RECONNAITRE: 'esphome:carte:reconnaitre'
+  CARTE_RECONNAITRE: 'esphome:carte:reconnaitre',
+  CARTE_FLASHER: 'esphome:carte:flasher'
 } as const;
 
 export const ESPHOME_ALL_EVENTS = {

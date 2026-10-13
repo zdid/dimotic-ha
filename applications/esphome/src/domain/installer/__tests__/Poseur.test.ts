@@ -27,9 +27,11 @@ const entree = (o: Partial<EntreeEsphome> = {}): EntreeEsphome => ({ entry_id: '
 describe('HaDeclarer', () => {
   it('retrouve l\'entrée par nom réseau, puis adresse, puis titre', () => {
     const cible = { appareil: 'hasat4', nomAffichage: 'Satellite 4', adresse: '192.168.1.44' };
-    expect(trouverEntree([entree({ entry_id: 'A', data: { device_name: 'autre' } }), entree()], cible)?.entry_id).toBe('E1');
-    expect(trouverEntree([entree({ data: { host: '192.168.1.44' } })], { ...cible, appareil: 'nouveau' })?.entry_id).toBe('E1');
-    expect(trouverEntree([entree({ data: {} })], { ...cible, appareil: 'x', adresse: 'y' })?.entry_id).toBe('E1'); // par titre
+    expect(trouverEntree([entree({ entry_id: 'A', title: 'Autre', data: { device_name: 'autre' } }), entree()], cible)?.entry_id).toBe('E1');
+    expect(trouverEntree([entree({ title: 'hasat4', data: undefined })], { ...cible, nomAffichage: 'Autre nom' })?.entry_id).toBe('E1'); // titre = nom réseau (cas réel : « essai-esp8266 »)
+    expect(trouverEntree([entree({ title: 'HASAT4', data: undefined })], cible)?.entry_id).toBe('E1'); // casse ignorée
+    expect(trouverEntree([entree({ title: 'x', data: { host: '192.168.1.44' } })], { ...cible, appareil: 'nouveau', nomAffichage: 'y' })?.entry_id).toBe('E1'); // par adresse si les données sont fournies
+    expect(trouverEntree([entree({ title: 'x', data: {} })], { ...cible, appareil: 'z', nomAffichage: 'y', adresse: 'w' })).toBeNull();
     expect(trouverEntree([], cible)).toBeNull();
   });
 
@@ -90,7 +92,7 @@ beforeEach(() => {
   deps = {
     telecharger: () => dl(), ota: (o) => ota(o), ha: new HaDeclarer(fauxHa(sim)),
     publication: { statut: (_s, _a, etat, extra) => { evts.push('statut:' + etat); statuts.push({ etat, ...extra }); }, supprimerPose: () => evts.push('supprime') },
-    motDePasseOta: 'mdp-site', attendre: async () => undefined, intervalleVerifMs: 10_000, delaiVerifMs: 60_000
+    motDePasseOta: 'mdp-site', attendreApi: async () => true, attendre: async () => undefined, intervalleVerifMs: 10_000, delaiVerifMs: 60_000
   };
 });
 
@@ -160,5 +162,21 @@ describe('InstallerService', () => {
     deps.ha = { etat: async () => { throw new Error('socket HA fermé'); } } as unknown as HaDeclarer;
     expect(await new InstallerService(deps).traiter(pose())).toBe('a_reessayer');
     expect(otaAppels).toEqual([]);
+  });
+
+  it('ESP encore en redémarrage : HA répond connection_error, la déclaration est retentée puis réussit', async () => {
+    sim.entrees = []; sim.appareils = [];
+    sim.flux.etapes = [
+      { type: 'form', flow_id: 'F', step_id: 'user', data_schema: [{ name: 'host' }, { name: 'port' }] },
+      { type: 'form', flow_id: 'F', step_id: 'user', data_schema: [{ name: 'host' }, { name: 'port' }], errors: { base: 'connection_error' } },
+      { type: 'form', flow_id: 'G', step_id: 'user', data_schema: [{ name: 'host' }, { name: 'port' }] },
+      { type: 'form', flow_id: 'G', step_id: 'encryption_key', data_schema: [{ name: 'noise_psk' }] },
+      { type: 'create_entry', result: { entry_id: 'E1' } }
+    ];
+    ota = async (o) => { otaAppels.push(o); sim.entrees = [entree()]; sim.appareils = [appareil('2025.11.2 (Oct 13 2026, 21:00:00)')]; return { versionProtocole: 2, compresse: false, octetsEnvoyes: 1 }; };
+    const attentes: string[] = [];
+    deps.attendreApi = async (h, p) => { attentes.push(`${h}:${p}`); return true; };
+    expect(await new InstallerService(deps).traiter(pose({ cle: 'K' }))).toBe('termine');
+    expect(attentes).toEqual(['192.168.1.44:6053']); // l'API de l'ESP est attendue avant la déclaration
   });
 });
