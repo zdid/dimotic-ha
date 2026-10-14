@@ -7,4 +7,4 @@ esp:
 options:
   autoriser_appels_service: true
 wifi: [stfort]
-plans: [original, "Rez de chaussée", Premier]
+plans: [Maison, "Rez de chaussée", Premier]

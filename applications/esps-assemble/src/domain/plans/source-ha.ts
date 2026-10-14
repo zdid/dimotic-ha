@@ -16,6 +16,13 @@ interface Export {
   images: Record<string, string>;
 }
 
+/** Message lisible d'une erreur de la liaison HA (`{code, message}` ou Error). */
+function texteErreur(e: unknown): string {
+  if (e instanceof Error) return typeof e.message === 'string' ? e.message : JSON.stringify(e.message);
+  if (e && typeof e === 'object') { const o = e as { code?: unknown; message?: unknown }; return [o.code, o.message].filter(Boolean).join(' : ') || JSON.stringify(e); }
+  return String(e);
+}
+
 export class SourcePlansHa implements SourcePlans {
   private cache: Export | null = null;
 
@@ -27,7 +34,7 @@ export class SourcePlansHa implements SourcePlans {
     try {
       r = await this.ha.callWs({ type: 'dimotic_plans/floorplans/export', plan_ids: ids }, 60_000);
     } catch (e) {
-      throw new PlanIntrouvable(`export des plans impossible (intégration Plans ≥ 0.1.8 installée et configurée ? plans « ${ids.join(', ')} » existants ?) : ${(e as Error).message}`);
+      throw new PlanIntrouvable(`export des plans impossible (intégration Plans ≥ 0.1.8 installée et configurée ? plans « ${ids.join(', ')} » existants ?) : ${texteErreur(e)}`);
     }
     this.cache = r as Export;
   }
