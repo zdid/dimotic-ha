@@ -1,6 +1,6 @@
 # Spécifications Fonctionnelles - Module ESPHOME
 
-*Version 1.4 - 13 Octobre 2026 — **réalisation de l'usine, du poseur et de la reconnaissance de la carte** : mot de passe OTA du poseur, ports API et OTA dans le manifeste et la pose, protocole OTA précisé (port de `espota2.py`), format lu d'`esptool flash-id`, limite de la clé API d'un appareil existant absent de HA, état de l'application. Version 1.3 : **manifeste du paquet (§4bis)** et **tailles connues après compilation (§5.5)** : flash et RAM mesurées, comparées à la fiche du modèle, refus avant envoi si le firmware ne tient pas (important quand un appareil change pour un modèle moins doté en RAM). Version 1.2 : **deux enregistrements distincts : le modèle de matériel (une fois par type de carte) et l'appareil (un exemplaire, avec sa MAC)** ; la reconnaissance de la carte (§5.4) propose de créer l'un et/ou l'autre. Version 1.1 : **décisions de l'utilisateur sur les points ouverts** : brokers par site (connexions propres), réservations DHCP pour les ESP de noisy, assembleur **renommé `esps-assemble`**, **reconnaissance de la carte avant le premier flash** (§5.4) ; protocole d'envoi à l'ESP tranché à l'essai. Version 1.0 : première version, avant tout code : écrite d'après `conception-esphome-assembleur_specs_v1.4.md` (décisions et plan de tests de l'utilisateur du 13/10/2026) et `guide-nouvelle-application_specs_v2.1.md`. L'assembleur (application `espdisplay` aujourd'hui, **qui deviendra `esps-assemble`**, voir §1.4) a sa propre spec (`fonctionnelles-espdisplay_specs`) ; cette spec couvre l'application **`esphome`** : l'**usine** et le **poseur**. Les points marqués ❓ (§12) attendent encore une décision ou un essai.*
+*Version 1.5 - 14 Octobre 2026 — **usine vérifiée en réel sur falbala** à partir d'une demande venue de HA (bouton « Générer ») : accès du conteneur de l'instance (dossier ESPHome, socket Docker), sujet de la demande « Générer » tranché, site servi distinct du poseur, compilation interrompue par une recréation du conteneur. Version 1.4 - 13 Octobre 2026 — **réalisation de l'usine, du poseur et de la reconnaissance de la carte** : mot de passe OTA du poseur, ports API et OTA dans le manifeste et la pose, protocole OTA précisé (port de `espota2.py`), format lu d'`esptool flash-id`, limite de la clé API d'un appareil existant absent de HA, état de l'application. Version 1.3 : **manifeste du paquet (§4bis)** et **tailles connues après compilation (§5.5)** : flash et RAM mesurées, comparées à la fiche du modèle, refus avant envoi si le firmware ne tient pas (important quand un appareil change pour un modèle moins doté en RAM). Version 1.2 : **deux enregistrements distincts : le modèle de matériel (une fois par type de carte) et l'appareil (un exemplaire, avec sa MAC)** ; la reconnaissance de la carte (§5.4) propose de créer l'un et/ou l'autre. Version 1.1 : **décisions de l'utilisateur sur les points ouverts** : brokers par site (connexions propres), réservations DHCP pour les ESP de noisy, assembleur **renommé `esps-assemble`**, **reconnaissance de la carte avant le premier flash** (§5.4) ; protocole d'envoi à l'ESP tranché à l'essai. Version 1.0 : première version, avant tout code : écrite d'après `conception-esphome-assembleur_specs_v1.4.md` (décisions et plan de tests de l'utilisateur du 13/10/2026) et `guide-nouvelle-application_specs_v2.1.md`. L'assembleur (application `espdisplay` aujourd'hui, **qui deviendra `esps-assemble`**, voir §1.4) a sa propre spec (`fonctionnelles-espdisplay_specs`) ; cette spec couvre l'application **`esphome`** : l'**usine** et le **poseur**. Les points marqués ❓ (§12) attendent encore une décision ou un essai.*
 
 ---
 
@@ -149,7 +149,7 @@ Tous en JSON avec les champs communs : `v` (version du format, `1`), `site`, `ap
 | `dimotic/esphome/agent/<machine ESPHome>` | usine | `instance`, `port`, `heure` ; **testament** = hors ligne | testament |
 | `dimotic/esphome/<site>/poseur` | poseur | idem | testament |
 | `dimotic/esps-assemble/<site>/appareils` | assembleur | liste des appareils (nom, pages de plans oui/non) | — |
-| `dimotic/esphome/<site>/demande-generer` (non conservé) | HA (panneau Plans) | `appareil` | — |
+| `dimotic/esps-assemble/<site>/generer` (non conservé) | HA (panneau Plans) | `{appareil, action}` — écouté par l'**assembleur**, qui répond par la demande `jobs/<appareil>` (l'usine ne l'écoute pas) | — |
 
 **États de `status`** : `en_attente`, `recuperation`, `compilation`, `pret_a_poser`, `envoi`, `verification`, `termine`, `echec`.
 
@@ -352,7 +352,11 @@ data/esphome/machine_partage/   firmwares/<appareil>/<révision>/   (route de le
 | Poseur : client OTA, déclaration et vérification dans HA, file et tentatives | fait, **testé en simulation seulement** (faux ESP, HA simulé) — à valider sur la carte d'essai |
 | Reconnaissance de la carte (esptool) | fait, **format de sortie à valider** sur une carte réelle |
 | Premier flash USB et amorce | **à faire** (l'amorce se compile déjà comme un firmware ; le flash USB est à écrire) |
-| Entretien (purge du cache à 30 jours) et assembleur (paquets, fiches, catalogues) | **à faire** (étape 3) |
+| Entretien (purge du cache à 30 jours) | **à faire** |
+| Assembleur (paquets, fiches, catalogues, pages de plans, bouton « Générer ») | fait (spec `esps-assemble` v1.1) |
+| **Chaîne réelle (14/10/2026)** : HA → assembleur (ha2) → broker de ha2 → usine (falbala) → compilation réelle | **vérifiée** : firmware prêt (3,4 Mo / 6 Mo de flash, 42 Ko / 320 Ko de RAM) ; poseur non essayé en réel |
+
+**Accès de l'instance qui héberge l'usine** (vérifié le 14/10/2026) : son conteneur doit monter le dossier d'ESPHome (`/docker/esphome/config:/esphome-config`) et le socket Docker (`/var/run/docker.sock`, `group_add` du groupe `docker`, 994 sur falbala) ; sans cela « dépôt des sources impossible : EACCES ». Le **site servi** se déclare dans `usine.sites[]` avec **le broker du site** (celui de HA), et non dans `poseur.mqtt` (broker de la machine du poseur). Recréer le conteneur **interrompt une compilation en cours** : la demande ayant été supprimée du broker à la prise en charge, il faut la redemander.
 
 ---
 
@@ -362,7 +366,7 @@ data/esphome/machine_partage/   firmwares/<appareil>/<révision>/   (route de le
 
 1. ❓ **Protocole de mise à jour d'ESPHome en TypeScript** (poseur) : à vérifier **à l'essai** avec l'appareil d'essai. **Repli** si trop coûteux : `esphome upload` dans un petit conteneur dédié sur ha2/noisy2.
 2. ❓ **Flasheur web** : utile en plus du flash depuis falbala ? (à voir après les premiers essais).
-3. **Sujet de la demande « Générer »** (`dimotic/esphome/<site>/demande-generer`) : nom à confirmer à l'étape 4.
+3. ✅ **Sujet de la demande « Générer »** tranché : `dimotic/esps-assemble/<site>/generer` (appartient à l'assembleur ; l'ancien nom `demande-generer` est abandonné).
 4. **Réveil de falbala** par le réseau (facultatif : la demande attend).
 5. **Format des fiches** de matériels/éléments et du manifeste du zip : défini par la spec de l'assembleur (étape 3) — la fiche de matériel devra porter ce que la reconnaissance compare (famille de puce, flash).
 6. **Version d'ESPHome** à figer : valeur à choisir au moment d'écrire le `compose.yaml` de l'instance de falbala.
@@ -373,6 +377,7 @@ data/esphome/machine_partage/   firmwares/<appareil>/<révision>/   (route de le
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.5 | 2026-10-14 | Claude | Usine vérifiée en réel sur falbala depuis une demande de HA : accès du conteneur (dossier ESPHome, socket Docker), sujet « Générer » tranché (`dimotic/esps-assemble/<site>/generer`), `usine.sites[]` distinct de `poseur.mqtt`, compilation interrompue par une recréation. v1.4 archivée. |
 | 1.4 | 2026-10-13 | Claude | Réalisation : mot de passe OTA du poseur (§3.3), ports API/OTA (§4, §4bis), protocole OTA précisé (§6.1), limite de la clé d'un appareil existant absent de HA, commande et format de la reconnaissance (§5.4), état de la réalisation (§11bis). v1.3 archivée. |
 | 1.3 | 2026-10-13 | Claude | Manifeste du paquet (§4bis) ; tailles relevées après compilation et comparées à la fiche du modèle, refus avant envoi si le firmware ne tient pas, historique des tailles, cas du changement de modèle (§5.5) ; `tailleOctets` dans la pose. v1.2 archivée. |
 | 1.2 | 2026-10-13 | Claude | Modèle de matériel et appareil enregistrés séparément ; la reconnaissance de la carte propose de créer l'un et/ou l'autre, reconnaît une MAC déjà connue (§5.4). v1.1 archivée. |
