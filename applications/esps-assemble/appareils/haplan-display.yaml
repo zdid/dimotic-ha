@@ -56,9 +56,9 @@ packages:
   wifi: !include bibliotheque/elements/wifi-simple/element.yaml
   polices_plans: !include bibliotheque/elements/polices-plans/element.yaml
   polices_climatisation: !include bibliotheque/elements/polices-climatisation/element.yaml
-  page_original: !include bibliotheque/elements/page-plan-original/element.yaml
-  page_rez_de_chaussee: !include bibliotheque/elements/page-plan-rez-de-chaussee/element.yaml
-  page_premier: !include bibliotheque/elements/page-plan-premier/element.yaml
+  page_original: !include generes/page-plan-maison.yaml
+  page_rez_de_chaussee: !include generes/page-plan-rez_de_chauss_e.yaml
+  page_premier: !include generes/page-plan-premier.yaml
   page_energie_direct: !include bibliotheque/elements/page-energie-direct/element.yaml
   page_ballons_chauffe: !include bibliotheque/elements/page-ballons-chauffe/element.yaml
   page_thermostats: !include bibliotheque/elements/page-thermostats/element.yaml
