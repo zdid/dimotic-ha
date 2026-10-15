@@ -1,6 +1,6 @@
 # Conception — Gestion des pilotes par l'agent IA (ponts, découverts, adoption, remplacement)
 
-*Version 1.2 — 15 octobre 2026 — **étape 1 (cœur + pont de test) réalisée et essayée** (`fonctionnelles-supervisor` v2.11 §14ter) ; deux écarts corrigés ici (§4 testament, §11/§14 signature). Décisions issues de la discussion du 15/10/2026. **Changement par rapport à la v1.0 : l'adaptateur zigbee2mqtt n'est plus dans `nommage` mais dans une application `zigbee2mqtt` à part (§9, §12, §14).***
+*Version 1.3 — 15 octobre 2026 — **étapes 1 (cœur + pont de test) et 2 (AREXX) réalisées et essayées** (`fonctionnelles-supervisor` v2.11 §14ter, `fonctionnelles-arexx` v1.7 §6.5) ; écarts corrigés ici : §4 testament, §11/§14 signature, §14 retrait complet et états non retenus. Décisions issues de la discussion du 15/10/2026. **Changement par rapport à la v1.0 : l'adaptateur zigbee2mqtt n'est plus dans `nommage` mais dans une application `zigbee2mqtt` à part (§9, §12, §14).***
 
 ## 1. Objet
 
@@ -188,7 +188,9 @@ Chaque étape est testée **sans Docker d'abord** (instance de développement), 
 ## 14. Points ouverts
 
 - **AREXX, plusieurs bases** : **tranché (15/10)** — pas de doublon dans HA ; à l'avenir, relais de la réception vers le pont porteur quand le capteur n'est pas dans la liste de la base qui l'entend (comme le RFXCOM). À spécifier dans `fonctionnelles-arexx`.
-- **Remplacement AREXX** : **tranché (15/10)** — suppression puis ajout au même nommage (le numéro n'est pas dans le nom HA). Reste à **vérifier en réel** : même `entity_id` retrouvé et historique repris (supprimer **avant** d'ajouter).
+- **Remplacement AREXX** : **tranché (15/10)** — suppression puis ajout au même nommage (le numéro n'est pas dans le nom HA). **Réalisé (étape 2)** et essayé sur un broker de test : retrait des sujets de l'ancien (découverte, attributs, état : messages vides retenus), publication du neuf. Reste à **vérifier dans un vrai HA** : même `entity_id` retrouvé et historique repris (supprimer **avant** d'ajouter).
+- **Messages retenus (décision du 15/10)** : **seules les découvertes (et attributs) sont retenues, jamais les états**. Appliqué à l'AREXX (`retain: false`) ; **les autres pilotes retiennent encore leurs états** (défaut du cœur) — à décider pilote par pilote ou globalement. Le retrait d'une entité vide désormais aussi ses attributs et son état retenus (`socle` v4.46).
+- **Vocabulaire de `nommage`** : l'`adopter` AREXX vérifie la forme du nom (quoi et lieu obligatoires, pas de `--`) mais **pas encore** le vocabulaire (quoi/lieux connus) — à brancher.
 - **Présence des ponts** : **tranché (15/10)** — les présences MQTT suffisent : la demande « liste des ponts » reçoit la réponse de ceux qui sont là. Le registre d'applications par gossip reste un **autre sujet** (connaître les machines disparues) et n'est pas utilisé ici.
 - **Où implémenter le pilote z2m** : **tranché (15/10, v1.1)** — application `zigbee2mqtt` à part (en v1.0 : dans `nommage`, écarté car `nommage` sert tous les pilotes).
 - **Scènes RFXCOM**, **teleinfo/tasmota/evoo7** : étape ultérieure.

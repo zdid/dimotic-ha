@@ -11,7 +11,7 @@ import { Logger } from '../../infrastructure/logger/index';
 import { createMqttError } from '../../types/errors';
 import { getBridgeStatusTopic, HA_STATUS_TOPIC } from './types/ha-mqtt';
 import type { HaMqttDiscoveryEntity, HaMqttStateMessage } from './types/ha-mqtt';
-import { buildDiscoveryPayload, publishDiscovery, publishAttributes, unpublishDiscovery, type EssentialEntityData } from './discovery';
+import { buildDiscoveryPayload, publishDiscovery, publishAttributes, unpublishDiscovery, unpublishEntityData, type EssentialEntityData } from './discovery';
 import { publishState, subscribeCommands, parseIncomingCommand, type ParsedIncomingCommand } from './stateCommand';
 import { publishDiscoveryPassthrough, publishPassthrough } from './passthrough';
 
@@ -182,11 +182,14 @@ export class HaMqttIntegrationService {
    * Retire une découverte déjà publiée (voir discovery.ts::unpublishDiscovery) — à utiliser quand
    * un module désélectionne une donnée/un device qui avait déjà été annoncé à HA.
    */
-  removeDiscoveryFor(moduleName: string, bridgeInstance: string, component: string, objectId: string, discoveryPrefix?: string): void {
+  removeDiscoveryFor(moduleName: string, bridgeInstance: string, component: string, objectId: string, discoveryPrefix?: string, deviceId?: string): void {
     const transport = this.getBridgeOrWarn(moduleName, bridgeInstance);
     if (!transport) return;
     unpublishDiscovery(transport, component, objectId, 1, bridgeInstance, discoveryPrefix);
     if (discoveryPrefix) return; // préfixe alternatif : pas d'ancien format à nettoyer
+    // ⭐ 15/10/2026 — messages retenus d'attributs (et d'état si deviceId) vidés aussi : plus de résidus sur le broker
+    // (préfixe standard seulement : avec un préfixe alternatif, ces sujets ne sont pas ceux de l'entité).
+    unpublishEntityData(transport, moduleName, bridgeInstance, component, objectId, deviceId);
     // Nettoie aussi l'ancien format (sans node_id), au cas où l'entité aurait été publiée avant la
     // migration vers le nouveau format de topic (§9.3) — idempotent si jamais publié ainsi.
     unpublishDiscovery(transport, component, objectId, 1);

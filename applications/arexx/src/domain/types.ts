@@ -31,6 +31,9 @@ export interface ArexxDiscoveredSensor {
   uniqueId: string;
   kind: ArexxSensorKind;
   detectedAt: string;
+  /** ⭐ 15/10/2026 — dernière valeur et qualité de réception, pour reconnaître un capteur découvert (gestion des pilotes). */
+  lastValue?: number;
+  signalDbm?: number;
 }
 
 /** Capteur paramétré (persisté), qu'il transmette ou non vers HA. */

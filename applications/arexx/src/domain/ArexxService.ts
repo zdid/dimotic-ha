@@ -12,7 +12,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData, RemoteAction } from '../../../core/dist/exports';
-import { computeBridgeInstance, isRunningInDocker, ensureGlobalSshKey } from '../../../core/dist/exports';
+import { computeBridgeInstance, isRunningInDocker, ensureGlobalSshKey, PilotePont } from '../../../core/dist/exports';
 import { arexxConfigSchema, type ArexxConfig } from './config-schema';
 import type { ArexxSensorsConfigFile } from './devices-config-schema';
 import type { ArexxRawReading, ArexxSensorInfo, ArexxStatus } from './types';
@@ -24,6 +24,7 @@ import { PollClient } from './acquisition/PollClient';
 import { UsbBridge } from './acquisition/UsbBridge';
 import { ensureDriversBundle, readDriverTarget, writeDriverTarget } from './DriversBundle';
 import { ArexxDeployService } from './ArexxDeployService';
+import { ArexxPilote } from './ArexxPilote';
 
 const MODULE_NAME = 'arexx';
 /** ⭐ 24/08/2026, demande explicite : une entité AREXX température/humidité doit passer
@@ -52,6 +53,8 @@ export class ArexxService implements IArexxService {
   private configFileManager: ConfigFileManager;
   private sensorRegistry: SensorRegistry;
   private readonly deployService: ArexxDeployService;
+  /** ⭐ 15/10/2026 — pont du canal « gestion des pilotes » (conception-gestion-pilotes_specs v1.2). */
+  private pilotePont: PilotePont | null = null;
 
   private pushReceiver?: PushReceiver;
   private pollClient?: PollClient;
@@ -68,7 +71,7 @@ export class ArexxService implements IArexxService {
     this.config = this.loadConfig();
     this.effectiveBridgeInstance = computeBridgeInstance(this.config.bridgeInstance, process.env.DIMOTIC_MACHINE_ID);
     this.configFileManager = new ConfigFileManager(this.resolveSensorsConfigPath(), this.logger);
-    this.sensorsConfig = { arexx_sensors: {} };
+    this.sensorsConfig = { arexx_sensors: {}, arexx_ignored: [] };
     this.sensorRegistry = new SensorRegistry(this.logger);
     this.deployService = new ArexxDeployService(this.logger);
   }
@@ -88,6 +91,7 @@ export class ArexxService implements IArexxService {
 
     this.sensorsConfig = this.configFileManager.load();
     this.sensorRegistry.loadConfigured(this.sensorsConfig.arexx_sensors as Record<string, ArexxSensorInfo>);
+    this.sensorRegistry.loadIgnored(this.sensorsConfig.arexx_ignored ?? []);
 
     ensureDriversBundle(this.config, this.logger);
     ensureGlobalSshKey();
@@ -115,11 +119,29 @@ export class ArexxService implements IArexxService {
     this.emitStatus();
     this.emitSensorsList();
 
+    this.pilotePont = new PilotePont(this.eventBus, this.logger, {
+      appId: MODULE_NAME,
+      pont: this.effectiveBridgeInstance,
+      type: 'arexx',
+      capacites: ['lister', 'decouverts', 'adopter', 'modifier', 'remplacer', 'effacer', 'ignorer', 'supprimer', 'redemarrer'],
+      gestionnaire: new ArexxPilote({
+        registry: this.sensorRegistry,
+        sauvegarder: () => this.configFileManager.backupTimestamped(),
+        persister: () => this.persistSensors(),
+        publierDecouverte: (capteur) => this.publishSensorDiscovery(capteur),
+        retirerDecouverte: (uniqueId) => this.removeSensorDiscovery(uniqueId),
+        rafraichir: () => this.emitSensorsList(),
+        relire: () => this.relireCapteurs()
+      })
+    });
+    this.pilotePont.start();
+
     this.logger.info('ArexxService', 'Service AREXX démarré');
   }
 
   async stop(): Promise<void> {
     this.logger.info('ArexxService', 'Arrêt du service AREXX...');
+    this.pilotePont?.stop();
     this.stopAcquisition();
     this.eventBus.emitGeneric('integration:bridge:unregister', {
       moduleName: MODULE_NAME,
@@ -215,7 +237,8 @@ export class ArexxService implements IArexxService {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:state`, {
       bridgeInstance: this.effectiveBridgeInstance,
       deviceId: sensor.uniqueId,
-      state: { state: sensor.lastValue as number }
+      state: { state: sensor.lastValue as number },
+      retain: false
     });
   }
 
@@ -265,7 +288,9 @@ export class ArexxService implements IArexxService {
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, {
       bridgeInstance: this.effectiveBridgeInstance,
       component: 'sensor',
-      objectId: uniqueId
+      objectId: uniqueId,
+      // ⭐ 15/10/2026 — vide aussi l'état et les attributs retenus : aucun résidu sur le broker après une suppression.
+      deviceId: uniqueId
     });
   }
 
@@ -276,7 +301,9 @@ export class ArexxService implements IArexxService {
       state: {
         state: reading.value,
         attributes: { signal_dbm: reading.signalDbm }
-      }
+      },
+      // ⭐ 15/10/2026 — décision utilisateur : seuls les messages de découverte sont retenus sur le broker, jamais les états.
+      retain: false
     });
   }
 
@@ -454,9 +481,27 @@ export class ArexxService implements IArexxService {
     }
   }
 
+  /**
+   * ⭐ 15/10/2026 — ordre `redemarrer` du canal pilotes : relit le fichier des capteurs (modifié à la main ou par un
+   * autre outil), retire de HA ceux qui ont disparu ou ne sont plus transmis, republie la découverte des autres.
+   * L'acquisition n'est pas interrompue.
+   */
+  private relireCapteurs(): number {
+    const avant = this.sensorRegistry.getConfiguredSensors().filter((c) => c.transmitToHa).map((c) => c.uniqueId);
+    this.sensorsConfig = this.configFileManager.load();
+    this.sensorRegistry.loadConfigured(this.sensorsConfig.arexx_sensors as Record<string, ArexxSensorInfo>);
+    this.sensorRegistry.loadIgnored(this.sensorsConfig.arexx_ignored ?? []);
+    const apres = new Set(this.sensorRegistry.getConfiguredSensors().filter((c) => c.transmitToHa).map((c) => c.uniqueId));
+    for (const id of avant) if (!apres.has(id)) this.removeSensorDiscovery(id);
+    this.publishInitialDiscoveries();
+    this.emitSensorsList();
+    return this.sensorRegistry.getConfiguredSensors().length;
+  }
+
   private persistSensors(): void {
     const config: ArexxSensorsConfigFile = {
-      arexx_sensors: this.sensorRegistry.getConfiguredSensorsRecord()
+      arexx_sensors: this.sensorRegistry.getConfiguredSensorsRecord(),
+      arexx_ignored: this.sensorRegistry.getIgnored()
     };
     const result = this.configFileManager.save(config);
     if (!result.success) {

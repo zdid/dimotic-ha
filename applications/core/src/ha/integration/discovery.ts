@@ -185,3 +185,22 @@ export function unpublishDiscovery(
 ): void {
   transport.publish(getDiscoveryTopic(component, objectId, bridgeInstance, prefix), '', qos, true);
 }
+
+/**
+ * ⭐ 15/10/2026 — complète unpublishDiscovery() : une entité retirée laissait derrière elle ses messages RETENUS
+ * (topic d'attributs de taxonomie, et topic d'état si `deviceId` est fourni) sur le broker, pour toujours. Publie un
+ * message VIDE retenu sur chacun (même mécanisme que le retrait de la découverte). `deviceId` facultatif : sans lui,
+ * seul le topic d'attributs (déterministe : component/objectId) est nettoyé.
+ */
+export function unpublishEntityData(
+  transport: MqttTransport,
+  moduleName: string,
+  bridgeInstance: string,
+  component: string,
+  objectId: string,
+  deviceId?: string,
+  qos: 0 | 1 = 1
+): void {
+  transport.publish(getAttributesTopic(component, objectId), '', qos, true);
+  if (deviceId) transport.publish(getStateTopic(moduleName, bridgeInstance, deviceId), '', qos, true);
+}

@@ -14,6 +14,8 @@ import type { ArexxDiscoveredSensor, ArexxRawReading, ArexxSensorInfo } from './
 export class SensorRegistry {
   private configuredSensors: Map<string, ArexxSensorInfo> = new Map();
   private discoveredSensors: Map<string, ArexxDiscoveredSensor> = new Map();
+  /** Capteurs écartés (liste d'exclusion persistée) : jamais ajoutés aux découverts. */
+  private ignoredSensors: Set<string> = new Set();
 
   constructor(private readonly logger: Logger) {}
 
@@ -27,6 +29,35 @@ export class SensorRegistry {
       this.configuredSensors.set(uniqueId, sensor);
     }
     this.logger.info('SensorRegistry', `${this.configuredSensors.size} capteur(s) paramétré(s) chargé(s)`);
+  }
+
+  loadIgnored(ids: string[]): void {
+    this.ignoredSensors = new Set(ids);
+  }
+
+  getIgnored(): string[] {
+    return Array.from(this.ignoredSensors);
+  }
+
+  /** Écarte un capteur pour toujours : retiré des découverts, plus jamais reproposé. */
+  ignore(uniqueId: string): void {
+    this.ignoredSensors.add(uniqueId);
+    this.discoveredSensors.delete(uniqueId);
+  }
+
+  /** Retire un découvert de la liste (en mémoire seulement) ; il réapparaît s'il émet à nouveau. */
+  forgetDiscovered(uniqueId: string): boolean {
+    return this.discoveredSensors.delete(uniqueId);
+  }
+
+  forgetAllDiscovered(): string[] {
+    const ids = Array.from(this.discoveredSensors.keys());
+    this.discoveredSensors.clear();
+    return ids;
+  }
+
+  getDiscovered(uniqueId: string): ArexxDiscoveredSensor | undefined {
+    return this.discoveredSensors.get(uniqueId);
   }
 
   getConfiguredSensors(): ArexxSensorInfo[] {
@@ -63,11 +94,16 @@ export class SensorRegistry {
       return { uniqueId, isNew: false };
     }
 
+    // Écarté par l'utilisateur : ni découvert, ni proposé.
+    if (this.ignoredSensors.has(uniqueId)) return { uniqueId, isNew: false };
+
     const alreadyDiscovered = this.discoveredSensors.has(uniqueId);
     this.discoveredSensors.set(uniqueId, {
       uniqueId,
       kind: reading.kind,
-      detectedAt: reading.timestamp.toISOString()
+      detectedAt: reading.timestamp.toISOString(),
+      lastValue: reading.value,
+      signalDbm: reading.signalDbm
     });
 
     if (!alreadyDiscovered) {

@@ -1,8 +1,10 @@
 # Spécifications Techniques — Socle Commun Applications HA/MQTT
 
-**Version :** 4.45  
+**Version :** 4.46  
 **Date :** 13 Octobre 2026  
 **Statut :** Document de référence projet — sert de prompt de base pour la génération de chaque application
+
+> **v4.46** : **retrait complet d'une entité** (§8.5.4) — `integration:{module}:discovery:remove` accepte un `deviceId` facultatif ; `discovery.ts::unpublishEntityData()` publie en plus un **message vide retenu** sur le topic d'attributs de taxonomie et, si `deviceId` est fourni, sur le topic d'état (sans cela, ces messages retenus restaient sur le broker pour toujours). Préfixe de découverte alternatif : comportement inchangé. Un module peut publier ses états avec `retain: false` (événement `integration:{module}:state`, champ `retain`) : AREXX le fait depuis la v1.7. Canal « gestion des pilotes » du cœur : voir `fonctionnelles-supervisor_specs` §14ter.
 
 > **v4.45** : **fichiers partagés en lecture seule et « interroger HA » générique** (conception-esphome-assembleur, étape 1). (1) Route `GET /api/apps/:appId/partage/<chemin>` → `data/<appId>/machine_partage/<chemin>` (`presentation/server/sharedFiles.ts`) : livraison « je demande, j'obtiens » entre instances ; dossier préfixé `machine_` donc **exclu de la diffusion** ; refus de tout ce qui sort du dossier (`..`, segments cachés ou vides, caractères hors liste, **liens symboliques** — chemin réel contrôlé) ; pas d'authentification (réseau local + VPN). (2) `HaWsClient.callWs(message)` (toute commande `{type,…}`, `id` refusé) et `HaWsClient.callRest(GET|POST|DELETE, '/api/…', corps)` (chemin sous `/api/` seulement, jeton du cœur, corps d'erreur de HA remonté), validations pures dans `ha/sync/haGenerique.ts` ; exposés aux applications par `HaQueryBridge` (méthodes `callWs`, `callRest`) et `HaBridgeClient.callWs()` / `callRest()` (délai réglable par appel). Tests : `sharedFiles.test.ts` (5), `haGenerique.test.ts` (4), `HaQueryBridge.generique.test.ts` (3) ; essai réel du cœur seul (dossier temporaire, HA et MQTT désactivés, port forcé 8099) : fichier servi, remontée encodée et lien symbolique refusés (400), absent et dossier (404).
 > **v4.44** : **port web forcé par l'environnement** (`DIMOTIC_WEB_PORT`, `infrastructure/config/webPort.ts`, appliqué par `ConfigLoader.load()`) — valeur **prioritaire** sur `web.port` du fichier, ignorée si absente ou invalide. Les scripts `dev` et `dev:local` du cœur la positionnent à **8088** : l'instance de dev de falbala cohabite avec l'instance réelle (Docker, 8087) et aucun fichier, diffusion ou écran de paramètres ne peut la déplacer ; les instances réelles n'ont pas la variable (comportement inchangé). Voir `conception-esphome-assembleur_specs_v1.0.md` §6. Tests : `webPort.test.ts` (5).
@@ -2054,6 +2056,7 @@ démarrage/reconnexion du bridge MQTT propre au module).
   symétriquement à `integration:{module}:discovery`. Le module métier doit capturer le `component`/
   `objectId` de l'entité **avant** toute mutation/suppression de son état interne — cette
   information peut ne plus être disponible une fois l'entité retirée de son registre interne.
+  ⭐ **v4.46** — le retrait ne laisse plus de résidu : `HaMqttIntegrationService.removeDiscoveryFor(…, deviceId?)` appelle aussi `unpublishEntityData()` (message vide retenu, QoS 1, sur `homeassistant/{component}/{object_id}/attributs` et, si `deviceId` est donné, sur `{module}/{bridge_instance}/{deviceId}/state`) — hors préfixe alternatif. Le module passe `deviceId` dans l'événement `discovery:remove`.
 - **⭐ v4.25 — `name` nullable + `has_entity_name` systématique.** `EssentialEntityData.name` et
   `HaMqttDiscoveryEntity.name` acceptent désormais `string | null` ; `buildDiscoveryPayload()`
   positionne inconditionnellement `has_entity_name: true` sur toute entité construite via le socle

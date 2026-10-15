@@ -1,6 +1,11 @@
 # Spécifications Fonctionnelles - Module AREXX
 
-*Version 1.6 - 24 Septembre 2026*
+*Version 1.7 - 15 Octobre 2026*
+*v1.7 : **gestion des capteurs par l'agent IA** (§6.5, conception-gestion-pilotes) — le pont `arexx_bridge_<machine>` répond
+aux ordres lister, découverts, adopter, modifier, remplacer, effacer, ignorer, supprimer, redémarrer ; liste d'exclusion
+`arexx_ignored` ; **les états ne sont plus retenus sur le broker** (seule la découverte l'est) ; **suppression complète**
+(§7.4 réécrit) : messages vides retenus sur la découverte, les attributs ET l'état.*
+*Historique — Version 1.6 - 24 Septembre 2026*
 *v1.6 : revue de code — **config relue sur disque** à l'enregistrement (process séparé : le
 correctif du 25/08 rechargeait la config sans relire le fichier, les cibles restaient périmées) ;
 **acquisition relancée à chaud** si mode/port/adresse BS1000/intervalle/périphérique USB changent ;
@@ -407,7 +412,8 @@ indépendantes pour un seul boîtier physique.
 
 Schéma (`devices-config-schema.ts`) — clé racine `arexx_sensors: Record<uniqueId, ...>`, chaque
 entrée : `uniqueId`, `kind` (`temperature`|`humidity`), `name`, `transmitToHa` (défaut `false`),
-`lastValue?`, `lastSeen?`.
+`lastValue?`, `lastSeen?`. ⭐ v1.7 : clé racine `arexx_ignored: string[]` (défaut `[]`) — découverts écartés pour toujours
+(ordre `ignorer`), jamais reproposés ; l'ancien fichier sans cette clé se charge sans changement.
 
 `ConfigFileManager` : mêmes garanties que RFXCOM/EVOO7 (copie `.bak` avant écriture, écriture
 atomique tmp→rename) ; fichier manquant → créé avec un contenu vide ; erreur de validation Zod au
@@ -427,6 +433,30 @@ Un capteur détecté (`isNew: true` lors d'un relevé) apparaît dans `discovere
 de détection. `setSensorName()` le promeut vers `configuredSensors` (`transmitToHa: false` par
 défaut, même convention que RFXCOM) et le retire de la liste des découverts.
 
+⭐ v1.7 : un découvert garde sa **dernière valeur** et son **signal (dBm)** — de quoi reconnaître une sonde neuve
+(`ArexxDiscoveredSensor.lastValue`, `signalDbm`). Un capteur de la liste d'exclusion n'est jamais ajouté aux découverts.
+
+### 6.5 Gestion par l'agent IA — pont `arexx_bridge_<machine>` (⭐ nouveau v1.7, 15/10/2026)
+
+Au démarrage, `ArexxService` crée un `PilotePont` (type `arexx`, `core/src/pilotes/`) dont le gestionnaire est `ArexxPilote.ts` ;
+le cœur publie sa présence et relaie les requêtes MQTT (`fonctionnelles-supervisor_specs` §14ter). Un capteur physique a une
+**température** (`arexx_<n>`) **et parfois une humidité** (`arexx_<n>_rh`) : les ordres de remplacement traitent les deux.
+
+| Ordre | Effet | Particularités |
+|---|---|---|
+| `lister` | capteurs configurés (id, numéro, type, nom, transmitToHa, dernière valeur) + exclus | — |
+| `decouverts` | capteurs détectés non adoptés (id, type, dernière valeur, signal dBm, date) | en mémoire ; **aucune entité HA** |
+| `adopter` `{id, quoi, lieu, lieuPrecis?, transmitToHa?}` | promeut un découvert | nom `quoi---lieuPrécis--lieu` (ou `quoi---lieu`) ; **quoi et lieu obligatoires** ; `--` refusé dans un champ ; `transmitToHa` faux par défaut ; la validation contre le vocabulaire de `nommage` reste **à faire** |
+| `modifier` `{id, quoi?, lieu?, lieuPrecis?, transmitToHa?}` | renomme / (dés)active la transmission | une modification = suppression HA puis ajout |
+| `remplacer` `{ancien, nouveau}` | numéros bruts (« 8962 » ou `arexx_8962`) | **retrait HA de l'ancien d'abord**, puis ajout du neuf **au même nommage** ; refusé si le neuf (et son humidité si l'ancien en avait) n'est pas dans les découverts |
+| `effacer` `{id}` ou `{tout:true}` | retire des découverts | mémoire seulement ; réapparaît s'il émet ; HA non touché |
+| `ignorer` `{id}` | liste d'exclusion persistée | jamais reproposé ; HA non touché |
+| `supprimer` `{id}` | supprime un capteur configuré | retrait HA complet (§7.4) |
+| `redemarrer` | relit `arexx-sensors-v1.0.yaml`, retire de HA ce qui a disparu, republie | **l'acquisition n'est pas interrompue** ; pas de sauvegarde |
+
+Tout ordre modifiant : aperçu (rien n'est modifié) → jeton → application ; **copie horodatée** `arexx-sensors-v1.0.yaml.bak-AAAAMMJJ-HHMMSS`
+avant écriture (en plus du `.bak` ordinaire). Le numéro n'apparaît pas dans le nom HA : le remplacement redonne le même `entity_id`
+**à vérifier dans un vrai HA** (essayé ici sur broker de test : sujets retenus de l'ancien vidés, ceux du neuf publiés).
 ---
 
 ## 7. Taxonomie et Découverte HA
@@ -464,13 +494,18 @@ n'émet un état que si `lastValue` est défini **et** `lastSeen` a moins de 30 
 qu'une fausse valeur "unknown". Voir §6.3 pour la limite pratique de ce mécanisme (persistance
 opportuniste de `lastSeen`).
 
-### 7.4 ⚠️ Aucun retrait de découverte
+### 7.4 Retrait d'un capteur (réécrit v1.7)
 
-**Contrairement à RFXCOM/EVOO7**, AREXX n'émet jamais `integration:arexx:discovery:remove` —
-supprimer un capteur, ou désactiver `transmitToHa` après l'avoir activé, ne retire **jamais**
-l'entité déjà publiée côté HA (elle reste visible, figée sur sa dernière valeur connue). Le
-mécanisme générique existe pourtant côté socle (`unpublishDiscovery`) — simplement jamais appelé
-par AREXX. Non corrigé à ce jour.
+Supprimer un capteur, ou désactiver `transmitToHa` après l'avoir activé, retire son entité de HA (v1.6) : `removeSensorDiscovery()`
+émet `integration:arexx:discovery:remove` **avec le `deviceId`**. Le cœur publie alors des **messages vides retenus** (chaîne vide, QoS 1)
+sur : la découverte (nouveau et ancien format de topic), les **attributs de taxonomie**, et l'**état** du capteur
+(`socle` v4.46 §8.5.4) — aucun résidu retenu ne reste sur le broker. Vérifié en direct (messages de taille 0).
+
+### 7.5 États non retenus (⭐ v1.7, décision utilisateur du 15/10/2026)
+
+Les états sont publiés avec `retain: false` ; **seuls les messages de découverte (et d'attributs) sont retenus**. Au redémarrage, le
+dernier état connu (moins de 30 minutes, §7.3) est republié avec la découverte ; entre-temps HA affiche « indisponible » (`expire_after`).
+Les anciens états retenus déjà présents sur un broker ne sont nettoyés que lorsque le capteur est supprimé.
 
 ---
 
@@ -692,6 +727,7 @@ data/arexx/
 ### 12.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 1.7 | 2026-10-15 | Claude | **Gestion par l'agent IA** (§6.5) : pont `arexx_bridge_<machine>` (lister, decouverts, adopter, modifier, remplacer, effacer, ignorer, supprimer, redemarrer), liste d'exclusion `arexx_ignored`, découverts avec valeur et signal ; **suppression complète** (§7.4 réécrit : messages vides retenus sur découverte, attributs, état) ; **états non retenus** (§7.5) ; 20 tests (`npm test`). |
 | 1.6 | 2026-09-24 | Claude | Revue de code : config relue sur disque à l'enregistrement (cibles périmées depuis le « correctif » du 25/08), acquisition relancée à chaud si ses paramètres changent, `bridgeInstance` non modifié à chaud (journalisé), entité HA retirée à la désélection/suppression d'un capteur. v1.5 archivée. |
 | 1.5 | 2026-08-23 | Claude | **Vrai pilotage SSH automatisé des émetteurs** (§5.4bis, nouveau) : `ArexxDeployService.ts` (même patron que `teleinfo/DeployService.ts`, socle `core/infrastructure/remote/`) remplace la copie manuelle `scp`/`ssh` décrite jusqu'ici — `deploy()` copie `data/arexx/drivers/` sur la cible et y lance `scripts/deploy-sender.sh` (script inchangé) ; `start`/`stop`/`restart` pilotent `arexx-sender.service` via `SystemdUnitController`. Nouveau champ `targets[]` (id/host/sshKeyPath/remoteDir, pas de `.max()` — AREXX est la 1ère des 3 apps à avoir plusieurs cibles dès le départ), même pattern multi-cible que `rpigpio`/`teleinfo` introduit simultanément. Toujours en root direct, clé SSH par cible sous `data/arexx/ssh/<id>/` (mêmes simplifications que les 2 autres apps). Protocole `arexx:remote-op`/`arexx:remote-op:result` (nouveau, `{ targetId, action }`). Page Déploiement restructurée (§9.2bis) : carte 1 (adresse récepteur) inchangée, carte 2 = liste de cibles pilotables (`TargetCards.js`, composant mutualisé rpigpio/teleinfo/arexx) remplaçant les 4 anciennes étapes statiques. Testé au navigateur (rendu, pas de test réel contre un émetteur physique — en attente d'accord explicite). Ancienne version v1.4 archivée. |
 | 1.4 | 2026-08-22 | Claude | **Étape "Préparer l'accès SSH"** sur la page Déploiement (§9.2bis), entre le formulaire `target.txt` et la copie du dossier `drivers/` : affiche `ssh-keygen`/`ssh-copy-id` à lancer par l'utilisateur (`ssh-copy-id` non scriptable, exige un terminal interactif pour le mot de passe — décision explicite de ne pas automatiser côté serveur). Nouveau champ `ArexxStatus.isRunningInDocker` (§8.1/§9.3), alimenté par un nouveau mécanisme partagé du socle (`core/infrastructure/runtime/docker.ts` — détection `/.dockerenv` au bootstrap de `core`, transmise aux process enfants séparés via héritage `process.env`, même mécanisme déjà utilisé pour `PROJECT_ROOT`) : si vrai, un bloc conditionnel ajoute l'instruction d'ouvrir un terminal **dans** le conteneur (`docker exec -it`) avant de générer la clé, sans quoi elle ne serait pas visible du conteneur qui exécute réellement la copie/le script. Testé au navigateur (bascule du bloc conditionnel vérifiée dans les deux sens). Sans changement du mécanisme de déploiement lui-même (§5.4). Ancienne version v1.3 archivée. |

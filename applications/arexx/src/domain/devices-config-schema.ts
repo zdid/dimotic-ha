@@ -24,11 +24,14 @@ export type ArexxSensorEntry = z.infer<typeof arexxSensorSchema>;
 // ============================================================================
 
 export const arexxSensorsConfigSchema = z.object({
-  arexx_sensors: z.record(arexxSensorSchema).default({})
+  arexx_sensors: z.record(arexxSensorSchema).default({}),
+  // ⭐ 15/10/2026 — découverts écartés pour toujours (ordre `ignorer`, conception-gestion-pilotes) : jamais reproposés.
+  arexx_ignored: z.array(z.string()).default([])
 });
 
 export type ArexxSensorsConfigFile = z.infer<typeof arexxSensorsConfigSchema>;
 
 export const DEFAULT_SENSORS_CONFIG: ArexxSensorsConfigFile = {
-  arexx_sensors: {}
+  arexx_sensors: {},
+  arexx_ignored: []
 };

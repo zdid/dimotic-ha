@@ -45,6 +45,8 @@ export interface DiscoveryRemoveRequestEvent {
   component: string;
   objectId: string;
   discoveryPrefix?: string;
+  /** ⭐ 15/10/2026 — si fourni, le message d'état retenu du device est aussi vidé (sinon seuls découverte + attributs). */
+  deviceId?: string;
 }
 
 export interface StateRequestEvent {
@@ -265,7 +267,7 @@ export class IntegrationBridge {
 
     this.eventBus.onGeneric<DiscoveryRemoveRequestEvent>(`integration:${moduleName}:discovery:remove`, (data) => {
       if (!this.mqttEnabled) return;
-      this.haMqttService.removeDiscoveryFor(moduleName, data.bridgeInstance, data.component, data.objectId, data.discoveryPrefix);
+      this.haMqttService.removeDiscoveryFor(moduleName, data.bridgeInstance, data.component, data.objectId, data.discoveryPrefix, data.deviceId);
     });
 
     this.eventBus.onGeneric<StateRequestEvent>(`integration:${moduleName}:state`, (data) => {
