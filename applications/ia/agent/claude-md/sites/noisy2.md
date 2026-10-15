@@ -26,10 +26,27 @@ Un pont Mosquitto relie les deux (`homeassistant/#`, `homeassist/#`, `mqttio/#`)
 - **Radiateurs** : 9 interrupteurs `switch.*radiateur*` pilotés par 8 **thermostats génériques** (`climate.yaml`, `unique_id` posés) ; ils reprennent leur dernier mode au redémarrage. Les 8 sont **éteints** (hiver passé) : ne pas les rallumer sans demande.
 - **Ballons** : gros ballon `switch.ballon…` (broche 7, 2 kW) et ballon du grenier ; automatisations `[classement]` de chauffe sur excédent solaire / heures creuses (règle du ballon du grenier : seuil injection 500 W / soutirage 600 W pendant 5 min, batterie ≥ 20 %, nuit 1 h 40 – 6 h 40).
 - **Énergie** : compteur réseau DDSU666-H (remplacement par le DDZY422-D2 **en cours d'essai** — ne pas toucher à leurs entités), batterie Marstek Venus E pilotée par l'intégration **Omnibattery** (ne pas perturber sa logique), micro-onduleurs Deye (Solarman), tableau « Énergie en direct ».
-- **Automatisations créées pour l'utilisateur** : libellé commençant par `[classement]` (ex. `[volets]`, `[chauffage]`) ; garder ce rangement.
+- **Automatisations créées pour l'utilisateur** : rangées par **étiquette** (label) HA, **sans préfixe dans le nom** (étiquettes existantes : `ballon`, `volets`, `lumieres`, `aquarium`, `association`). Le tableau de bord « Automatisations » (`/liste-automatisations`) a une carte par étiquette ; une automatisation sans étiquette tombe dans « Autres ». **À chaque nouvelle automatisation, demande à l'utilisateur dans quelle catégorie (étiquette) la ranger**, en proposant les étiquettes existantes, puis pose-la (une nouvelle étiquette = une carte à ajouter au tableau de bord, à proposer à l'utilisateur) ; ne remets pas de `[classement]` dans le nom.
 - **Mémoire des états GPIO** (`memoire.py` sur noisy) : ne jamais rendre les états ou commandes MQTT « retenus » (décision de l'utilisateur).
 
 ### Accès
 - Config de HA en **lecture** (`automations.yaml`, `scripts.yaml`, `scenes.yaml`, `configuration.yaml`) ; `secrets.yaml` et `.storage` interdits.
 - Écriture dans HA **uniquement par les outils MCP** (aperçu d'abord, `confirme: true` après accord).
 - Pas de root : si une action l'exige, donne la commande exacte et pourquoi, puis attends l'utilisateur.
+
+### Pilotes de noisy (AREXX, RFXCOM, GPIO) : retrouver et modifier leurs paramètres sans passer par HA
+Les pilotes tournent dans dimotic-ha **sur noisy** (192.168.1.62) ; leurs réglages sont des fichiers dans `/docker/dimotic-ha/data/<app>/` de noisy.
+Tu n'y accèdes PAS par un shell, mais par une commande SSH restreinte (clé `~/.ssh/noisy-pilotes`, une seule commande permise) :
+`ssh -i ~/.ssh/noisy-pilotes -o IdentitiesOnly=yes root@192.168.1.62 <commande>` avec :
+- `lister` (applications : arexx, rfxcom, rpigpio, teleinfo) ; `lister <app>` (fichiers et dates) ;
+- `lire <app> <fichier>` ; `ecrire <app> <fichier>` (nouveau contenu sur l'entrée standard : `… ecrire arexx x.yaml < local.yaml`) — sauvegarde `.bak-AAAAMMJJ-HHMMSS`
+  automatique, YAML/JSON contrôlé ; secrets/mots de passe refusés ;
+- `arreter <app>`, `demarrer <app>`, `redemarrer <app>` : désactivation/activation **à chaud** de l'application, jamais du cœur. Le redémarrage relit la config.
+Fichiers utiles : `arexx/config.yaml` (adresse du BS-1000, intervalle) et `arexx/arexx-sensors-v1.0.yaml` (un capteur par bloc `arexx_<numéro>` : `uniqueId`, `kind`, `name`, `transmitToHa`) ;
+`rfxcom/config.yaml` et `rfxcom/machine_config-rfxcom-devices-v1.0.yaml` (appareils RFXCOM) ; `rpigpio/`.
+**Règles** : lire d'abord ; montrer à l'utilisateur la modification (avant/après) et obtenir son accord AVANT `ecrire` et avant tout arrêt/redémarrage (l'arrêt coupe la mesure/les commandes
+du pilote) ; une seule modification à la fois ; vérifier ensuite (état du pilote, entité dans HA par le MCP) ; en cas d'échec, restaurer la sauvegarde indiquée.
+**Exemple — capteur AREXX en panne remplacé par un neuf** : (1) `lister arexx` puis `lire arexx arexx-sensors-v1.0.yaml`, présenter la liste (numéro, nom) ; (2) l'utilisateur donne
+l'ancien numéro et le **numéro du neuf** (étiquette au dos de la sonde) ; (3) préparer une copie locale où `arexx_<ancien>` (clé ET `uniqueId`) devient `arexx_<nouveau>`, `name` inchangé,
+et montrer la différence ; (4) après accord : `ecrire` puis `redemarrer arexx` ; (5) vérifier dans HA que la nouvelle entité reçoit des mesures. À vérifier en réel : le changement
+de `uniqueId` peut créer une NOUVELLE entité HA (historique de l'ancienne non repris) — préviens l'utilisateur et propose de renommer/rattacher.
