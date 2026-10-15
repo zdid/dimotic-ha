@@ -34,19 +34,7 @@ Un pont Mosquitto relie les deux (`homeassistant/#`, `homeassist/#`, `mqttio/#`)
 - Écriture dans HA **uniquement par les outils MCP** (aperçu d'abord, `confirme: true` après accord).
 - Pas de root : si une action l'exige, donne la commande exacte et pourquoi, puis attends l'utilisateur.
 
-### Pilotes de noisy (AREXX, RFXCOM, GPIO) : retrouver et modifier leurs paramètres sans passer par HA
-Les pilotes tournent dans dimotic-ha **sur noisy** (192.168.1.62) ; leurs réglages sont des fichiers dans `/docker/dimotic-ha/data/<app>/` de noisy.
-Tu n'y accèdes PAS par un shell, mais par une commande SSH restreinte (clé `~/.ssh/noisy-pilotes`, une seule commande permise), **si l'utilisateur l'a installée** (sinon : « accès non installé », ne tente rien d'autre) :
-`ssh -i ~/.ssh/noisy-pilotes -o IdentitiesOnly=yes root@192.168.1.62 <commande>` avec :
-- `lister` (applications : arexx, rfxcom, rpigpio, teleinfo) ; `lister <app>` (fichiers et dates) ;
-- `lire <app> <fichier>` ; `ecrire <app> <fichier>` (nouveau contenu sur l'entrée standard : `… ecrire arexx x.yaml < local.yaml`) — sauvegarde `.bak-AAAAMMJJ-HHMMSS`
-  automatique, YAML/JSON contrôlé ; secrets/mots de passe refusés ;
-- `arreter <app>`, `demarrer <app>`, `redemarrer <app>` : désactivation/activation **à chaud** de l'application, jamais du cœur. Le redémarrage relit la config.
-Fichiers utiles : `arexx/config.yaml` (adresse du BS-1000, intervalle) et `arexx/arexx-sensors-v1.0.yaml` (un capteur par bloc `arexx_<numéro>` : `uniqueId`, `kind`, `name`, `transmitToHa`) ;
-`rfxcom/config.yaml` et `rfxcom/machine_config-rfxcom-devices-v1.0.yaml` (appareils RFXCOM) ; `rpigpio/`.
-**Règles** : lire d'abord ; montrer à l'utilisateur la modification (avant/après) et obtenir son accord AVANT `ecrire` et avant tout arrêt/redémarrage (l'arrêt coupe la mesure/les commandes
-du pilote) ; une seule modification à la fois ; vérifier ensuite (état du pilote, entité dans HA par le MCP) ; en cas d'échec, restaurer la sauvegarde indiquée.
-**Exemple — capteur AREXX en panne remplacé par un neuf** : (1) `lister arexx` puis `lire arexx arexx-sensors-v1.0.yaml`, présenter la liste (numéro, nom) ; (2) l'utilisateur donne
-l'ancien numéro et le **numéro du neuf** (étiquette au dos de la sonde) ; (3) préparer une copie locale où `arexx_<ancien>` (clé ET `uniqueId`) devient `arexx_<nouveau>`, `name` inchangé,
-et montrer la différence ; (4) après accord : `ecrire` puis `redemarrer arexx` ; (5) vérifier dans HA que la nouvelle entité reçoit des mesures. À vérifier en réel : le changement
-de `uniqueId` peut créer une NOUVELLE entité HA (historique de l'ancienne non repris) — préviens l'utilisateur et propose de renommer/rattacher.
+### Pilotes de noisy (AREXX, RFXCOM, GPIO)
+Les pilotes tournent dans dimotic-ha **sur noisy** (192.168.1.62). Tu n'as **aucun accès** à leurs réglages (ni SSH, ni fichiers) : si l'utilisateur te demande de les modifier
+(remplacer un capteur AREXX, adopter un appareil, etc.), réponds que ce n'est pas encore possible. La gestion des pilotes par un canal MQTT est conçue
+(`specs/current/conception-gestion-pilotes_specs_v1.1.md`) mais **pas encore réalisée** ; n'essaie pas de la contourner.

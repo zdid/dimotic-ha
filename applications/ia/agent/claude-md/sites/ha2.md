@@ -127,23 +127,15 @@ Site **Saint Fort** (même LAN 192.168.1.0/24) :
 |---|---|---|---|
 | ha2 | .51 | RPi4 2 Go : HA, z2m, mosquitto, dimotic-ha (là où tu es) | local |
 | orangepi | .130 | 2e instance dimotic-ha | SSH (compte `claude`, clé dédiée, à créer pour ce Claude) |
-| stfort | .53 | RFXCOM, GPIO relais (3) | commande SSH restreinte `dimotic-pilotes` (voir « Pilotes de stfort ») une fois installée ; sinon accès à demander à l'utilisateur |
+| stfort | .53 | RFXCOM, GPIO relais (3) | SSH (accès à demander à l'utilisateur) |
 
 Autres : RPi1 (teleinfo), machine Nextcloud, sniffer Modbus (.21). Le **site noisy** (noisy, noisy2) est un **autre site distant** (WireGuard) : **hors périmètre**, sauf demande explicite.
 
 Règles SSH : une clé dédiée pour ce Claude (à fournir par l'utilisateur, pas à générer/copier sans demander) ; commandes **lecture seule par défaut** (`docker ps`, `docker logs --tail`, `cat`) ; pas de `docker compose down/restart`, pas d'édition de `cron.json`/`equipements.json` de l'ancien système sans arrêter son service (cf. `supervisor`), toujours vérifier un `scp` par MD5 vers stfort (SSH instable sous charge).
 
-### Pilotes de stfort (RFXCOM, GPIO, AREXX…) : retrouver et modifier leurs paramètres sans passer par HA
-Les pilotes tournent dans dimotic-ha **sur stfort** (192.168.1.53) ; leurs réglages sont des fichiers de `/docker/dimotic-ha/data/<app>/` de stfort. Tu n'y accèdes PAS par un shell,
-mais par une commande SSH restreinte (clé `~/.ssh/stfort-pilotes`, une seule commande permise), **si l'utilisateur l'a installée** (sinon : « accès non installé », ne tente rien d'autre) :
-`ssh -i ~/.ssh/stfort-pilotes -o IdentitiesOnly=yes root@192.168.1.53 <commande>` avec :
-- `lister` (applications autorisées) ; `lister <app>` (fichiers et dates) ; `lire <app> <fichier>` ;
-- `ecrire <app> <fichier>` (nouveau contenu sur l'entrée standard) — sauvegarde `.bak-AAAAMMJJ-HHMMSS` automatique, YAML/JSON contrôlé, secrets/mots de passe refusés ;
-- `arreter <app>`, `demarrer <app>`, `redemarrer <app>` : désactivation/activation **à chaud** de l'application, jamais du cœur ; le redémarrage relit la config.
-**Règles** : lire d'abord ; montrer la modification (avant/après) et obtenir l'accord de l'utilisateur AVANT `ecrire` et avant tout arrêt/redémarrage (l'arrêt coupe la mesure ou les commandes du
-pilote : **RFXCOM et GPIO relais = production**, prévenir) ; une seule modification à la fois ; vérifier ensuite (état du pilote, entité dans HA par le MCP) ; en cas d'échec, restaurer la sauvegarde indiquée.
-Exemples de demandes : remplacer un capteur AREXX par un neuf (clé ET `uniqueId` `arexx_<numéro>` dans `arexx/arexx-sensors-v1.0.yaml`), retrouver le réglage d'un appareil RFXCOM, changer un paramètre d'un pilote puis le redémarrer.
-Le changement de `uniqueId` peut créer une NOUVELLE entité HA (historique non repris) : préviens l'utilisateur.
+### Pilotes de stfort (RFXCOM, GPIO, AREXX…)
+Les pilotes tournent dans dimotic-ha **sur stfort** (192.168.1.53). Tu n'as **aucun accès** à leurs réglages tant que la gestion des pilotes par MQTT n'est pas réalisée
+(`specs/current/conception-gestion-pilotes_specs_v1.1.md`) : si l'utilisateur te le demande, réponds que ce n'est pas encore possible.
 
 ### 8. Méthode pour créer un automatisme
 
