@@ -1,7 +1,7 @@
 # Spécifications — Module RFXCOM
 
-**Version :** 7.1
-**Date :** 8 Octobre 2026
+**Version :** 7.2
+**Date :** 15 Octobre 2026
 **Statut :** En production
 **Type :** Application d'intégration
 **Dépend de :** `fonctionnelles-nommage_specs` (protocole de taxonomie QUOI/OÙ), `techniques-socle-ha-mqtt_specs`
@@ -27,6 +27,7 @@ Ce document est la description complète et unique du module : fonctionnel, tech
 11. État au démarrage
 12. Plusieurs instances RFXCOM
 13. Interface web
+13bis. Gestion par l'agent IA (canal « pilotes »)
 14. Démarrage, arrêt, reconnexion
 15. Journalisation et erreurs
 16. Limites connues
@@ -857,6 +858,31 @@ Chaque ordre reçu de HA (récepteur cible, commande, valeur) est journalisé av
 `:device:set_name|set_transmit|delete|create_manual`, `:receiver:create|update|delete`,
 `:scene:create|update|delete|execute|cancel`, `:hardware-protocol:toggle` (`{protocol, enabled}`),
 `:hardware-protocols:push`, `:hardware-status:refresh`.
+
+---
+
+## 13bis. Gestion par l'agent IA (canal « pilotes », nouveau v7.2)
+
+Le module implémente le contrat de `conception-gestion-pilotes_specs` (v1.4) : l'agent IA d'un site lit et modifie les devices, récepteurs et scènes par des messages MQTT reçus par le cœur, **sans passer par l'écran web ni par SSH**. Le pont s'appelle comme l'instance (`rfx_bridge_<machine>`) ; sa présence (type `rfxcom`) est annoncée au démarrage et retirée à l'arrêt. Capacités : `lister`, `decouverts`, `adopter`, `creer`, `modifier`, `remplacer`, `effacer`, `ignorer`, `supprimer`, `redemarrer`.
+
+| Ordre | Ce qu'il fait ici |
+|---|---|
+| `lister` | devices, récepteurs, scènes et liste d'exclusion ; filtrable par `ressource` (`devices`, `recepteurs`, `scenes`) |
+| `decouverts` | devices détectés non adoptés (identifiant, type, QUOI proposé, date), hors liste d'exclusion |
+| `adopter` | `id`, `lieu` (obligatoire), `lieuPrecis`, `quoi` (prérempli depuis le type : « Bouton », « Température »…), `transmitToHa` explicite |
+| `creer` | `ressource` = `recepteur` (`switch`, `light`, `cover` ; `emetteurPrincipal` pris parmi les devices **adoptés**, `emetteurs[]` : `emitterId`, `action`, `value`, `followReceivedSignal` ; `light` : `variable`, `niveauParDefaut` ; `cover` : `coverType`, `ouvertureSec`, `fermetureSec`), `scene` (`sceneType`, `delaiEntreCommandesMs`, `actions[]` sur des récepteurs existants) ou `device` (volet Somfy RFY créé à la main : `sensorId`, `unitCode`) ; l'identifiant `recepteur_<horodatage>` / `scene_<horodatage>` est attribué à l'application et renvoyé |
+| `modifier` | nom (quoi, lieu, lieu précis), `transmitToHa`, et selon la ressource : émetteurs, type, réglages du récepteur, actions de la scène. **Une modification qui change le nom, le type ou la présence dans HA = retrait de l'entité PUIS recréation** (même `entity_id`) ; sinon remplacement sans toucher à HA. Changer le **type** d'un récepteur repart sans derniers états |
+| `remplacer` | **un device** (émetteur, capteur) : l'ancien est supprimé (retrait HA), le neuf (un découvert **de même nature**) reprend **le même nommage**, et remplace l'ancien **partout** (émetteur principal et émetteurs associés de tous les récepteurs, sans doublon). L'appairage **physique** du module avec le nouvel émetteur se fait hors dimotic-ha : l'aperçu le rappelle |
+| `effacer` | oublie un découvert (ou tous : `tout: true`) en mémoire ; il revient s'il émet de nouveau ; HA non touché |
+| `ignorer` | met un découvert en liste d'exclusion (`rfxcom_ignored`, fichier de configuration) : plus jamais proposé, ni dans l'écran web |
+| `supprimer` | supprime un device, un récepteur ou une scène (et son entité HA si elle était transmise : messages vides retenus sur découverte, attributs et état). **Refusé** si la ressource est encore utilisée : device cité par un récepteur, récepteur cité par une scène — le message nomme les utilisateurs |
+| `redemarrer` | relit le fichier de configuration, retire de HA ce qui a disparu, republie le reste ; **le transceiver n'est pas touché** |
+
+Règles communes : aperçu + jeton avant tout ordre modifiant ; sauvegarde horodatée du fichier (`<fichier>.bak-AAAAMMJJ-HHMMSS`) avant chaque écriture ; validation par le schéma du fichier (un récepteur invalide est refusé avec le champ fautif) ; qualification **complète** exigée (lieu) ; `--` interdit dans les parties du nom. Le pilote réutilise les registres et les publications de l'écran web (`DeviceManager`, `ReceiverManager`, `SceneManager`) : aucun chemin parallèle.
+
+Le fichier de configuration gagne une clé **`rfxcom_ignored`** (liste d'identifiants de découverts exclus). Le retrait d'une entité vide aussi son état retenu (`socle` v4.46).
+
+Essayé en réel sur une instance de développement isolée (broker privé) : création d'un volet Somfy et d'un récepteur `cover` transmis (découverte publiée), suppression (messages vides sur la découverte et les attributs), sauvegarde horodatée à chaque écriture. Les ordres `adopter`/`remplacer` d'un émetteur détecté par radio sont couverts par 17 tests automatisés (sans transceiver).
 
 ---
 

@@ -12,7 +12,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
-import { createRfxComError, getCommandTopic, computeBridgeInstance, isEmitterQuoi } from '../../../core/dist/exports';
+import { createRfxComError, getCommandTopic, computeBridgeInstance, isEmitterQuoi, PilotePont } from '../../../core/dist/exports';
 import { rfxcomConfigSchema, type RfxComConfig } from './config-schema';
 import type { RfxComDevicesConfigFile, ReceiverConfigEntry } from './devices-config-schema';
 import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult, RfxComOrderTrace, AssociatedEmitter } from './types';
@@ -28,6 +28,7 @@ import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { LastStatesStore, type LastStatesFile } from './state/LastStatesStore';
 import { getDefaultComponent, getDefaultUnit, buildStateDeviceId } from './classification';
 import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName, buildBoutonDisplayName } from './taxonomy';
+import { RfxcomPilote } from './RfxcomPilote';
 
 const MODULE_NAME = 'rfxcom';
 
@@ -66,6 +67,8 @@ export class RfxComService implements IRfxComService {
   private sceneManager: SceneManager;
   private sceneExecutor: SceneExecutor;
   private transceiver: RfxComTransceiver;
+  /** ⭐ 15/10/2026 — pont du canal « gestion des pilotes » (conception-gestion-pilotes_specs v1.3). */
+  private pilotePont: PilotePont | null = null;
 
   private lastDiscovery: string | null = null;
 
@@ -192,7 +195,7 @@ export class RfxComService implements IRfxComService {
       path.join(path.dirname(this.resolveDevicesConfigPath()), 'machine_rfxcom-derniers-etats.json'),
       this.logger
     );
-    this.devicesConfig = { rfxcom_devices: {}, rfxcom_receivers: {} };
+    this.devicesConfig = { rfxcom_devices: {}, rfxcom_receivers: {}, rfxcom_ignored: [] };
     this.deviceManager = new DeviceManager(this.logger);
     this.receiverManager = new ReceiverManager(this.deviceManager, this.logger);
     this.sceneManager = new SceneManager(this.logger);
@@ -235,6 +238,7 @@ export class RfxComService implements IRfxComService {
     this.applyLastStates(this.lastStatesStore.load());
     const togglesRemoved = this.migrateTogglesToReceivedSignal();
     this.deviceManager.loadConfigured(this.devicesConfig.rfxcom_devices);
+    this.deviceManager.loadIgnored(this.devicesConfig.rfxcom_ignored ?? []);
     this.receiverManager.loadReceivers(this.devicesConfig.rfxcom_receivers);
     if (togglesRemoved > 0) this.persistConfig();
     this.sceneManager.loadScenes(this.devicesConfig.rfxcom_receivers);
@@ -321,11 +325,21 @@ export class RfxComService implements IRfxComService {
     this.emitScenesList();
     this.emitProtocolsList();
 
+    this.pilotePont = new PilotePont(this.eventBus, this.logger, {
+      appId: MODULE_NAME,
+      pont: this.effectiveBridgeInstance,
+      type: 'rfxcom',
+      capacites: ['lister', 'decouverts', 'adopter', 'creer', 'modifier', 'remplacer', 'effacer', 'ignorer', 'supprimer', 'redemarrer'],
+      gestionnaire: new RfxcomPilote(this.piloteHote())
+    });
+    this.pilotePont.start();
+
     this.logger.info('RfxComService', 'Service RFXCOM démarré');
   }
 
   async stop(): Promise<void> {
     this.logger.info('RfxComService', 'Arrêt du service RFXCOM...');
+    this.pilotePont?.stop();
     // ⭐ 24/09/2026 — déconnexion AVANT l'arrêt de la boucle : disconnect() notifie « déconnecté »,
     // ce qui relançait la boucle de reconnexion qu'on venait d'arrêter.
     this.transceiver.disconnect();
@@ -854,9 +868,10 @@ export class RfxComService implements IRfxComService {
   }
 
   /** Retrait d'une découverte : toujours sur `homeassistant/` ; en plus sur `homeassist/` si on passe par NOMMAGE (qui propage le retrait). */
-  private emitDiscoveryRemove(component: string, objectId: string): void {
+  private emitDiscoveryRemove(component: string, objectId: string, deviceId?: string): void {
     const base = { bridgeInstance: this.effectiveBridgeInstance, component, objectId };
-    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, base);
+    // ⭐ 15/10/2026 — `deviceId` : vide aussi l'état et les attributs retenus (aucun résidu sur le broker).
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, deviceId ? { ...base, deviceId } : base);
     if (this.config.discoveryViaNommage) {
       this.eventBus.emitGeneric(`integration:${MODULE_NAME}:discovery:remove`, { ...base, discoveryPrefix: RfxComService.NOMMAGE_DISCOVERY_PREFIX });
     }
@@ -1010,7 +1025,7 @@ export class RfxComService implements IRfxComService {
    */
   private removeDeviceDiscovery(device: RfxComDeviceInfo): void {
     const { component } = getDefaultComponent(device.type, device.subType);
-    this.emitDiscoveryRemove(component, device.uniqueId);
+    this.emitDiscoveryRemove(component, device.uniqueId, buildStateDeviceId(device.protocole, device.subType, device.sensorId, device.unitCode));
   }
 
   // ==========================================================================
@@ -1100,7 +1115,7 @@ export class RfxComService implements IRfxComService {
    * récepteur (le composant dépend de son type, indisponible une fois retiré de ReceiverManager).
    */
   private removeReceiverDiscovery(receiverId: string, component: string): void {
-    this.emitDiscoveryRemove(component, receiverId);
+    this.emitDiscoveryRemove(component, receiverId, receiverId);
   }
 
   // ==========================================================================
@@ -1893,6 +1908,107 @@ export class RfxComService implements IRfxComService {
     return /^lighting[126]_/i.test(emitterId);
   }
 
+  /**
+   * ⭐ 15/10/2026 — ce que le pilote du canal « gestion des pilotes » (RfxcomPilote) utilise : les mêmes registres et les
+   * mêmes publications que l'écran web et les événements Socket.io, sans les contourner.
+   */
+  private piloteHote(): import('./RfxcomPilote').RfxcomPiloteHote {
+    const sansEtats = (c: ReceiverConfig): ReceiverConfig => {
+      const { lastOn: _on, lastLevel: _level, lastPosition: _position, ...reste } = c as ReceiverConfig & { lastOn?: boolean; lastLevel?: number; lastPosition?: number };
+      return reste as ReceiverConfig;
+    };
+    return {
+      devices: () => this.deviceManager.getConfiguredDevices(),
+      decouverts: () => this.deviceManager.getDiscoveredDevices(),
+      ignores: () => this.deviceManager.getIgnored(),
+      recepteurs: () => this.receiverManager.getAllReceivers().map((r) => sansEtats(r.config)),
+      scenes: () => this.sceneManager.getAllScenes(),
+      sauvegarder: () => this.configFileManager.backupTimestamped(),
+      persister: () => this.persistConfig(),
+      rafraichir: () => {
+        this.publishRegisteredDevicesList();
+        this.emitDevicesList();
+        this.emitReceiversList();
+        this.emitScenesList();
+      },
+      retirerDevice: (id) => {
+        const device = this.deviceManager.getDevice(id);
+        if (!device) return;
+        if (device.transmitToHa) this.removeDeviceDiscovery(device);
+        this.deviceManager.deleteDevice(id);
+      },
+      retirerRecepteur: (id) => {
+        const existing = this.receiverManager.getReceiver(id);
+        if (!existing) return;
+        if (existing.config.transmitToHa) this.removeReceiverDiscovery(id, existing.getDiscoveryEssential().component);
+        this.receiverManager.removeReceiver(id);
+      },
+      retirerScene: (id) => {
+        const existing = this.sceneManager.getScene(id);
+        if (!existing) return;
+        if (existing.transmitToHa) this.removeSceneDiscovery(id);
+        this.sceneManager.removeScene(id);
+      },
+      definirDevice: (device) => this.deviceManager.setConfigured(device),
+      // Remplace le module en gardant les derniers états connus du récepteur d'origine (sauf changement de type : il n'en a plus).
+      definirRecepteur: (config) => {
+        const ancien = this.receiverManager.getReceiver(config.receiverId)?.config as (ReceiverConfig & { lastOn?: boolean; lastLevel?: number; lastPosition?: number }) | undefined;
+        const memeType = ancien && ancien.type === config.type;
+        const etats = memeType ? { lastOn: ancien.lastOn, lastLevel: ancien.lastLevel, lastPosition: ancien.lastPosition } : {};
+        this.receiverManager.removeReceiver(config.receiverId);
+        this.receiverManager.addReceiver({ ...config, ...Object.fromEntries(Object.entries(etats).filter(([, v]) => v !== undefined)) } as ReceiverConfig);
+      },
+      definirScene: (config) => this.sceneManager.addScene(config),
+      publierDevice: (id) => {
+        const device = this.deviceManager.getDevice(id);
+        if (device) this.publishDeviceDiscovery(device);
+      },
+      publierRecepteur: (id) => this.publishReceiverDiscovery(id),
+      publierScene: (id) => {
+        const scene = this.sceneManager.getScene(id);
+        if (scene) this.publishSceneDiscovery(scene);
+      },
+      ignorer: (id) => this.deviceManager.ignore(id),
+      oublier: (ids) => this.deviceManager.forgetDiscovered(ids),
+      relire: () => this.relireConfiguration(),
+      horodatage: () => Date.now()
+    };
+  }
+
+  /**
+   * ⭐ 15/10/2026 — ordre `redemarrer` du canal pilotes : relit le fichier (modifié à la main), retire de HA ce qui a disparu,
+   * republie le reste. Le transceiver n'est pas touché.
+   */
+  private relireConfiguration(): [number, number, number] {
+    const avantDevices = this.deviceManager.getConfiguredDevices().filter((d) => d.transmitToHa);
+    const avantRecepteurs = this.receiverManager.getAllReceivers().filter((r) => r.config.transmitToHa).map((r) => ({ id: r.config.receiverId, component: r.getDiscoveryEssential().component }));
+    const avantScenes = this.sceneManager.getAllScenes().filter((s) => s.transmitToHa).map((s) => s.receiverId);
+
+    // Les derniers états viennent de leur fichier dédié ; ceux de la mémoire courante sont plus récents.
+    this.lastStatesStore.flush();
+    this.devicesConfig = this.configFileManager.load();
+    this.applyLastStates(this.lastStatesStore.load());
+    this.deviceManager.loadConfigured(this.devicesConfig.rfxcom_devices);
+    this.deviceManager.loadIgnored(this.devicesConfig.rfxcom_ignored ?? []);
+    this.receiverManager.loadReceivers(this.devicesConfig.rfxcom_receivers);
+    this.sceneManager.loadScenes(this.devicesConfig.rfxcom_receivers);
+
+    for (const d of avantDevices) {
+      if (!this.deviceManager.getDevice(d.uniqueId)?.transmitToHa) this.removeDeviceDiscovery(d);
+    }
+    for (const r of avantRecepteurs) {
+      if (!this.receiverManager.getReceiver(r.id)?.config.transmitToHa) this.removeReceiverDiscovery(r.id, r.component);
+    }
+    for (const id of avantScenes) {
+      if (!this.sceneManager.getScene(id)?.transmitToHa) this.removeSceneDiscovery(id);
+    }
+    this.publishInitialDiscoveries();
+    this.emitDevicesList();
+    this.emitReceiversList();
+    this.emitScenesList();
+    return [this.deviceManager.getConfiguredDevices().length, this.receiverManager.getAllReceivers().length, this.sceneManager.getAllScenes().length];
+  }
+
   private persistConfig(): void {
     const devices: Record<string, RfxComDeviceInfo> = {};
     for (const [id, device] of Object.entries(this.deviceManager.getConfiguredDevicesRecord())) {
@@ -1907,7 +2023,7 @@ export class RfxComService implements IRfxComService {
     for (const scene of this.sceneManager.getAllScenes()) {
       receivers[scene.receiverId] = scene as ReceiverConfigEntry;
     }
-    const result = this.configFileManager.save({ rfxcom_devices: devices, rfxcom_receivers: receivers });
+    const result = this.configFileManager.save({ rfxcom_devices: devices, rfxcom_receivers: receivers, rfxcom_ignored: this.deviceManager.getIgnored() });
     if (!result.success) {
       this.logger.error('RfxComService', `Échec de sauvegarde de la configuration RFXCOM: ${result.error}`);
     }

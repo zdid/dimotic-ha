@@ -60,6 +60,18 @@ export class ConfigFileManager {
   }
 
   /**
+   * ⭐ 15/10/2026 — copie horodatée du fichier (`.bak-AAAAMMJJ-HHMMSS`) AVANT une modification demandée par l'agent IA
+   * (gestion des pilotes) ; renvoie le chemin de la copie, ou `undefined` si le fichier n'existe pas encore.
+   */
+  backupTimestamped(now: Date = new Date()): string | undefined {
+    if (!fs.existsSync(this.filePath)) return undefined;
+    const stamp = now.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+    const target = `${this.filePath}.bak-${stamp}`;
+    fs.copyFileSync(this.filePath, target);
+    return target;
+  }
+
+  /**
    * Sauvegarde le fichier de manière atomique (tmp → rename), avec copie de sauvegarde (.bak)
    * du fichier précédent si présent.
    */

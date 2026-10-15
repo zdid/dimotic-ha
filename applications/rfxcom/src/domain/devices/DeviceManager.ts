@@ -12,9 +12,20 @@ import type { Logger } from '../../../../core/dist/exports';
 import { determineQuoi, getProtocole } from '../classification';
 import type { RfxComDeviceInfo, RfxComDiscoveredDevice, RfxComRawMessage } from '../types';
 
+export interface ManualDeviceParams {
+  sensorId: string;
+  type: RfxComDeviceInfo['type'];
+  subType: string;
+  protocole: string;
+  unitCode: number;
+  name: string;
+}
+
 export class DeviceManager {
   private configuredDevices: Map<string, RfxComDeviceInfo> = new Map();
   private discoveredDevices: Map<string, RfxComDiscoveredDevice> = new Map();
+  /** ⭐ 15/10/2026 — liste d'exclusion (gestion des pilotes) : jamais proposés dans les découverts. */
+  private ignored: Set<string> = new Set();
 
   constructor(private readonly logger: Logger) {}
 
@@ -39,7 +50,36 @@ export class DeviceManager {
   }
 
   getDiscoveredDevices(): RfxComDiscoveredDevice[] {
-    return Array.from(this.discoveredDevices.values());
+    return Array.from(this.discoveredDevices.values()).filter((d) => !this.ignored.has(d.uniqueId));
+  }
+
+  getDiscovered(uniqueId: string): RfxComDiscoveredDevice | undefined {
+    return this.ignored.has(uniqueId) ? undefined : this.discoveredDevices.get(uniqueId);
+  }
+
+  getIgnored(): string[] {
+    return Array.from(this.ignored).sort();
+  }
+
+  loadIgnored(ids: string[]): void {
+    this.ignored = new Set(ids);
+  }
+
+  /** Met un découvert en liste d'exclusion (il disparaît des découverts et n'y revient plus). */
+  ignore(uniqueId: string): void {
+    this.ignored.add(uniqueId);
+    this.discoveredDevices.delete(uniqueId);
+  }
+
+  /** Oublie des découverts (mémoire seulement : ils reviennent s'ils émettent à nouveau). */
+  forgetDiscovered(ids: string[]): void {
+    for (const id of ids) this.discoveredDevices.delete(id);
+  }
+
+  /** Enregistre (ou remplace) un device paramétré tel quel — retire le découvert correspondant. */
+  setConfigured(device: RfxComDeviceInfo): void {
+    this.configuredDevices.set(device.uniqueId, device);
+    this.discoveredDevices.delete(device.uniqueId);
   }
 
   getDevice(uniqueId: string): RfxComDeviceInfo | undefined {
@@ -105,8 +145,10 @@ export class DeviceManager {
 
   /** Supprime tous les devices auto-découverts non paramétrés (fonctionnelles-rfxcom_specs §11.2 toolbar). */
   clearUnconfigured(): number {
-    const count = this.discoveredDevices.size;
-    this.discoveredDevices.clear();
+    const count = this.getDiscoveredDevices().length;
+    for (const id of Array.from(this.discoveredDevices.keys())) {
+      if (!this.ignored.has(id)) this.discoveredDevices.delete(id);
+    }
     return count;
   }
 
@@ -147,14 +189,15 @@ export class DeviceManager {
    * est calculé ici (format "sensorId/unitCode", identique à Lighting2) plutôt que reconstruit
    * plus tard — un device Rfy n'ayant jamais de trame RF reçue pour le déduire autrement.
    */
-  createManualDevice(params: {
-    sensorId: string;
-    type: RfxComDeviceInfo['type'];
-    subType: string;
-    protocole: string;
-    unitCode: number;
-    name: string;
-  }): RfxComDeviceInfo {
+  createManualDevice(params: ManualDeviceParams): RfxComDeviceInfo {
+    const device = DeviceManager.buildManualDevice(params);
+    this.configuredDevices.set(device.uniqueId, device);
+    this.logger.info('DeviceManager', `Device créé manuellement: ${device.uniqueId}`);
+    return device;
+  }
+
+  /** Construit (sans l'enregistrer) un device créé à la main — partagé avec le pilote (gestion des pilotes). */
+  static buildManualDevice(params: ManualDeviceParams): RfxComDeviceInfo {
     const uniqueId = `${params.protocole}_${params.subType.toLowerCase()}_${params.sensorId.toLowerCase()}_${params.unitCode}`;
     const device: RfxComDeviceInfo = {
       uniqueId,
@@ -168,8 +211,6 @@ export class DeviceManager {
       unitCode: params.unitCode,
       commandDeviceId: `${params.sensorId}/${params.unitCode}`
     };
-    this.configuredDevices.set(uniqueId, device);
-    this.logger.info('DeviceManager', `Device créé manuellement: ${uniqueId}`);
     return device;
   }
 

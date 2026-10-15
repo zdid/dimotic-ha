@@ -131,6 +131,8 @@ export const rfxComDevicesConfigSchema = z
   .object({
     rfxcom_devices: z.record(rfxComDeviceSchema).default({}),
     rfxcom_receivers: z.record(receiverConfigSchema).default({}),
+    // ⭐ 15/10/2026 — découverts mis en liste d'exclusion par l'agent IA (gestion des pilotes) : plus jamais proposés.
+    rfxcom_ignored: z.array(z.string()).default([]),
     // ⭐ Nouveau (15/08/2026, demande utilisateur) : horodatage global — dernier changement de
     // valeur, tous devices confondus, sans rattachement à un device précis (distinct de
     // `lastSeen`/`lastValue`, qui restent par device). Persisté, pas de logique de fraîcheur
@@ -151,5 +153,6 @@ export type RfxComDevicesConfigFile = z.infer<typeof rfxComDevicesConfigSchema>;
 
 export const DEFAULT_DEVICES_CONFIG: RfxComDevicesConfigFile = {
   rfxcom_devices: {},
-  rfxcom_receivers: {}
+  rfxcom_receivers: {},
+  rfxcom_ignored: []
 };
