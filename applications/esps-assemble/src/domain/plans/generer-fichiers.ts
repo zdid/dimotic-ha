@@ -56,13 +56,13 @@ export interface FichiersPlans {
   resume: { plan: string; page: string; placees: number; hors: number }[];
 }
 
-export async function genererFichiersPlans(ids: string[], source: SourcePlans, ecran: Dimensions): Promise<FichiersPlans> {
+export async function genererFichiersPlans(ids: string[], source: SourcePlans, ecran: Dimensions, tailleTexte?: number): Promise<FichiersPlans> {
   const fichiers = new Map<string, Buffer>();
   const resume: FichiersPlans['resume'] = [];
   const pages = new Set<string>();
   for (const id of ids) {
     const p = await source.lire(id);
-    const page = genererPage({ id, image: dimensionsPng(p.image), positions: p.positions, textes: p.textes }, ecran, p.ancrage);
+    const page = genererPage({ id, image: dimensionsPng(p.image), positions: p.positions, textes: p.textes }, ecran, p.ancrage, tailleTexte);
     if (pages.has(page.page)) throw new Error(`deux plans donnent la même page « ${page.page} » (identifiants trop proches)`);
     pages.add(page.page);
     const entete = `# Élément GÉNÉRÉ à l'assemblage — page du plan « ${id} » (${ecran.largeur}x${ecran.hauteur}). Ne pas modifier : regénéré à chaque assemblage.`;

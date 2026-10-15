@@ -28,12 +28,23 @@ describe('image de fond (fit and pad)', () => {
   });
   it('transparence composée sur fond noir ; pixel à demi transparent assombri de moitié', () => {
     const src = creer(8, 8, (x) => (x < 4 ? [255, 255, 255, 0] : [255, 255, 255, 255]));
-    const r = ajusterImage(src, { largeur: 8, hauteur: 8 });
+    const r = ajusterImage(src, { largeur: 8, hauteur: 8 }, { inverser: false });
     expect(pixel(r.png, 1, 4)).toEqual([0, 0, 0]);
     expect(pixel(r.png, 6, 4)).toEqual([255, 255, 255]);
-    const demi = ajusterImage(creer(4, 4, () => [200, 200, 200, 128]), { largeur: 4, hauteur: 4 });
+    const demi = ajusterImage(creer(4, 4, () => [200, 200, 200, 128]), { largeur: 4, hauteur: 4 }, { inverser: false });
     const [v] = pixel(demi.png, 2, 2);
     expect(v).toBeGreaterThan(95); expect(v).toBeLessThan(105);
+  });
+  it('dessin au trait à fond transparent (traits noirs) : inversé, traits blancs sur fond noir', () => {
+    const trait = creer(10, 10, (x) => (x === 5 ? [0, 0, 0, 255] : [0, 0, 0, 0]));
+    const r = ajusterImage(trait, { largeur: 10, hauteur: 10 });
+    expect(pixel(r.png, 5, 4)).toEqual([255, 255, 255]);   // le trait noir devient blanc
+    expect(pixel(r.png, 1, 4)).toEqual([0, 0, 0]);         // le fond transparent reste noir
+  });
+  it('plan opaque : jamais inversé en automatique ; inversion forcée possible', () => {
+    const opaque = creer(10, 10, () => [10, 20, 30, 255]);
+    expect(pixel(ajusterImage(opaque, { largeur: 10, hauteur: 10 }).png, 3, 3)).toEqual([10, 20, 30]);
+    expect(pixel(ajusterImage(creer(10, 10, () => [0, 0, 0, 255]), { largeur: 10, hauteur: 10 }, { inverser: true }).png, 3, 3)).toEqual([255, 255, 255]);
   });
   it('réduction : un motif en damier fin donne un gris moyen (filtre de Lanczos, pas de crénelage)', () => {
     const src = creer(64, 64, (x, y) => ((x + y) % 2 ? [255, 255, 255, 255] : [0, 0, 0, 255]));

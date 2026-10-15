@@ -1,10 +1,11 @@
-# Fiche de l'appareil haplan-display (un exemplaire physique). Adresse : à renseigner (adresse fixe ou réservation DHCP) ; vide = haplan-display.local.
+# Fiche de l'appareil haplan-display (un exemplaire physique). Adresse fixe 192.168.1.115 : le poseur (dans un conteneur Docker) ne résout pas les noms en .local ; à fixer par réservation DHCP.
 nom: haplan-display
 nom_affichage: "Plan HAPLAN"
 materiel: sunton-8048s070c
 esp:
-  adresse: ""
+  adresse: "192.168.1.115"
 options:
   autoriser_appels_service: true
 wifi: [stfort]
 plans: [Maison, "Rez de chaussée", Premier]
+tailles_plans: { texte: 14, valeur: 14, icone: 14 }

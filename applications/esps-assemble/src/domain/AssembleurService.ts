@@ -57,6 +57,9 @@ export interface IAssembleurService {
 
 export type ResultatDemande = { ok: true; revision: number; action: string; sha256: string; avertissements: string[] } | { ok: false; erreurs: string[] };
 
+/** Chemin, dans le paquet, du fichier généré des tailles d'icônes et de valeurs (à inclure après l'élément `polices-plans`). */
+const CHEMIN_TAILLES_PLANS = 'generes/tailles-plans.yaml';
+
 /** Fichiers `generes/…` factices : vérification de la fiche sans générer les pages de plans (qui demandent HA). */
 class GeneresFactices extends Map<string, Buffer> {
   override get(cle: string): Buffer | undefined { return cle.startsWith('generes/') ? Buffer.from('{}\n') : super.get(cle); }
@@ -232,8 +235,9 @@ export class AssembleurService implements IAssembleurService {
         const source = this.sourcePlans ?? (this.clientHa ? new SourcePlansHa(this.clientHa) : null);
         if (!source) return fin({ ok: false, erreurs: ['les plans viennent de Home Assistant et la liaison HA du cœur est indisponible'] });
         if (source instanceof SourcePlansHa) await source.preparer(fiche.plans);
-        const g = await genererFichiersPlans(fiche.plans, source, { largeur: ecran.largeur, hauteur: ecran.hauteur });
+        const g = await genererFichiersPlans(fiche.plans, source, { largeur: ecran.largeur, hauteur: ecran.hauteur }, fiche.taillesPlans.texte);
         generes = g.fichiers;
+        generes.set(CHEMIN_TAILLES_PLANS, Buffer.from(`# GÉNÉRÉ à l'assemblage d'après la fiche de l'appareil (tailles_plans). Ne pas modifier.\nsubstitutions:\n  taille_icone: "${fiche.taillesPlans.icone}"\n  taille_valeur: "${fiche.taillesPlans.valeur}"\n`));
         resumePlans.push(...g.resume);
       }
     } catch (e) {

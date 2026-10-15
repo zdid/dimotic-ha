@@ -8,3 +8,4 @@ options:
   autoriser_appels_service: true
 wifi: [stfort]
 plans: [Maison, "Rez de chaussée", Premier]
+tailles_plans: { texte: 14, valeur: 14, icone: 14 }

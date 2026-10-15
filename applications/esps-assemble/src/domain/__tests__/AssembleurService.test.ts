@@ -124,6 +124,24 @@ describe('AssembleurService — pages de plans générées depuis HA', () => {
     ecrire('appareils/ecran.fiche.yaml', 'nom: ecran\nnom_affichage: "Écran"\nmateriel: carte\nplans: ["Rez de chaussée"]\n');
   });
 
+  it('tailles réglées dans la fiche : fichier généré des substitutions, textes libres à la taille demandée, défaut 20', async () => {
+    ecrire('appareils/ecran.yaml', fs.readFileSync(path.join(app, 'appareils/ecran.yaml'), 'utf8').replace('  plan: !include', '  tailles: !include generes/tailles-plans.yaml\n  plan: !include'));
+    ecrire('appareils/ecran.fiche.yaml', 'nom: ecran\nnom_affichage: "Écran"\nmateriel: carte\nplans: ["Rez de chaussée"]\ntailles_plans: { texte: 14, valeur: 12 }\n');
+    const ha = { callWs: async () => exportHa };
+    const s = new AssembleurService(bus, logger, provider({ site: 'stfort' }), () => (transport = new FauxTransport()), app, donnees, 8087, maintenant, ha);
+    await s.start();
+    const r = await s.demander({ appareil: 'ecran' });
+    expect(r.ok).toBe(true);
+    const verif = verifierPaquet(lireZip(fs.readFileSync(path.join(donnees, 'machine_partage/paquets/ecran/r1.zip'))));
+    expect(verif.ok).toBe(true);
+    if (verif.ok) {
+      const tailles = verif.fichiers.find((f) => f.chemin === 'generes/tailles-plans.yaml')!.contenu.toString();
+      expect(tailles).toContain('taille_valeur: "12"');
+      expect(tailles).toContain('taille_icone: "20"');   // défaut
+      expect(verif.fichiers.find((f) => f.chemin === 'generes/page-plan-rez_de_chauss_e.yaml')!.contenu.toString()).not.toContain('size: 28');
+    }
+  });
+
   it('récupère l\'export de HA une fois, génère page et image, les met dans le paquet que l\'usine accepte', async () => {
     const appels: any[] = [];
     const ha = { callWs: async (m: any) => { appels.push(m); return exportHa; } };

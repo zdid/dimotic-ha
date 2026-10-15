@@ -137,16 +137,16 @@ export function widgetCapteur(page: string, entityId: string, px: number, py: nu
 export interface TexteLibre { id: string; text: string; x: number; y: number; size?: string; color?: string }
 
 /** Boîte d'un texte libre, dimensionnée d'après le nombre de caractères (aucune mesure réelle possible hors du firmware). */
-export function boiteTexte(texte: TexteLibre, ecran: Dimensions): { largeur: number; hauteur: number } {
-  const taille = TEXT_FONT_SIZE_BY_SIZE[texte.size || 'medium'] ?? TEXT_FONT_SIZE_BY_SIZE.medium;
+export function boiteTexte(texte: TexteLibre, ecran: Dimensions, tailleForcee?: number): { largeur: number; hauteur: number } {
+  const taille = tailleForcee ?? TEXT_FONT_SIZE_BY_SIZE[texte.size || 'medium'] ?? TEXT_FONT_SIZE_BY_SIZE.medium;
   return { largeur: Math.min(ecran.largeur - 8, Math.max(taille * 2, arrondi([...texte.text].length * taille * TEXT_CHAR_WIDTH_FACTOR))), hauteur: arrondi(taille * 1.4) };
 }
 
 /** `idPolice` : identifiant de la police du palier (par plan, pour que deux plans ne définissent pas la même police). */
-export function widgetTexte(page: string, texte: TexteLibre, px: number, py: number, ecran: Dimensions, idPolice: (taille: string) => string): string[] {
+export function widgetTexte(page: string, texte: TexteLibre, px: number, py: number, ecran: Dimensions, idPolice: (taille: string) => string, tailleForcee?: number): string[] {
   const taille = texte.size || 'medium';
   const couleur = (texte.color || '#FFFFFF').replace(/^#+/, '').toUpperCase();
-  const boite = boiteTexte(texte, ecran);
+  const boite = boiteTexte(texte, ecran, tailleForcee);
   const b = boiteCentree(px, py, boite, ecran);
   return [
     '  - label:', `      id: text_${page}_${slug(texte.id)}`, `      x: ${b.x}`, `      y: ${b.y}`, `      width: ${boite.largeur}`, `      height: ${boite.hauteur}`,
@@ -177,11 +177,13 @@ export interface PagePlan {
   capteurs: string[];
   widgets: string[];
   textesUtilises: TexteLibre[];
+  /** Taille forcée (px) de tous les textes libres de la page (fiche de l'appareil) ; absente = tailles du plan. */
+  tailleTexte?: number;
   placees: number;
   hors: number;
 }
 
-export function genererPage(plan: EntreePlan, ecran: Dimensions, ancrage: Ancrage = 'bas-gauche'): PagePlan {
+export function genererPage(plan: EntreePlan, ecran: Dimensions, ancrage: Ancrage = 'bas-gauche', tailleTexte?: number): PagePlan {
   const page = slug(plan.id) || 'plan';
   const a = ajuster(plan.image, ecran);
   const decalage = ancrage === 'bas-gauche' ? 1 : 0;
@@ -201,13 +203,13 @@ export function genererPage(plan: EntreePlan, ecran: Dimensions, ancrage: Ancrag
   const textesUtilises: TexteLibre[] = [];
   for (const t of textes) {
     const p = versPixels(t.x, t.y, plan.image, a);
-    const boite = boiteTexte(t, ecran);
+    const boite = boiteTexte(t, ecran, tailleTexte);
     const px = p.x + decalage * Math.floor(boite.largeur / 2), py = p.y - decalage * Math.floor(boite.hauteur / 2);
     if (!(px >= 0 && px <= ecran.largeur && py >= 0 && py <= ecran.hauteur)) { hors++; continue; }
-    widgets.push(...widgetTexte(page, t, px, py, ecran, (s) => `font_text_${page}_${s}`));
+    widgets.push(...widgetTexte(page, t, px, py, ecran, (s) => `font_text_${page}_${s}`, tailleTexte));
     textesUtilises.push(t);
   }
-  return { page, imageFilename: `floorplan_${page}_${ecran.largeur}x${ecran.hauteur}.png`, capteursTexte, capteurs, widgets, textesUtilises, placees: positions.length + textes.length - hors, hors };
+  return { page, imageFilename: `floorplan_${page}_${ecran.largeur}x${ecran.hauteur}.png`, capteursTexte, capteurs, widgets, textesUtilises, placees: positions.length + textes.length - hors, hors, tailleTexte };
 }
 
 /** Polices des textes libres d'UNE page : un palier par taille utilisée, glyphes = caractères des textes de ce palier (+ espace). */
@@ -224,7 +226,7 @@ export function policesTextes(r: PagePlan): string[] {
   for (const s of ['small', 'medium', 'large']) {
     const c = parTaille.get(s);
     if (!c) continue;
-    lignes.push('  - file: "gfonts://Roboto"', `    id: font_text_${r.page}_${s}`, `    size: ${TEXT_FONT_SIZE_BY_SIZE[s]}`, `    glyphs: ${glyphesLitteral(c)}`);
+    lignes.push('  - file: "gfonts://Roboto"', `    id: font_text_${r.page}_${s}`, `    size: ${r.tailleTexte ?? TEXT_FONT_SIZE_BY_SIZE[s]}`, `    glyphs: ${glyphesLitteral(c)}`);
   }
   return lignes;
 }

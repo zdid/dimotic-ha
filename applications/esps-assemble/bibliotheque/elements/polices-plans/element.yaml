@@ -1,11 +1,16 @@
 # Élément : polices des pages de plans (icônes Font Awesome font_icons, valeurs des capteurs font_sensor).
 
+# Tailles réglables par appareil : substitutions `taille_icone` et `taille_valeur` (px) dans le fichier de l'appareil ; 20 par défaut.
+substitutions:
+  taille_icone: "20"
+  taille_valeur: "20"
+
 font:
   - file: "fa-solid-900.ttf"
     id: font_icons
-    size: 20
+    size: ${taille_icone}
     glyphs: ["\uf043", "\uf05a", "\uf06d", "\uf0e7", "\uf0eb", "\uf204", "\uf205", "\uf2c9", "\uf2d0", "\uf2d1", "\uf2dc", "\uf3fd", "\uf72e", "\uf773"]
   - file: "gfonts://Roboto"
     id: font_sensor
-    size: 20
+    size: ${taille_valeur}
     glyphs: "0123456789.-"

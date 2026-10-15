@@ -38,6 +38,7 @@
 # mais pas suffisant) et le pinout tactile (bon du premier coup, voir plus bas) comme causes.
 # =============================================================================
 
+
 esphome:
   name: haplan-test
   friendly_name: "Plan test génération"
@@ -55,6 +56,7 @@ packages:
   materiel: !include bibliotheque/materiels/sunton-8048s070c/base.yaml
   wifi: !include bibliotheque/elements/wifi-simple/element.yaml
   polices_plans: !include bibliotheque/elements/polices-plans/element.yaml
+  tailles_plans: !include generes/tailles-plans.yaml   # généré d'après `tailles_plans` de la fiche (icônes, valeurs de capteurs)
   polices_climatisation: !include bibliotheque/elements/polices-climatisation/element.yaml
   page_original: !include generes/page-plan-maison.yaml
   page_rez_de_chaussee: !include generes/page-plan-rez_de_chauss_e.yaml

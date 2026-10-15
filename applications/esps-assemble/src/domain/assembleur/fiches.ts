@@ -82,7 +82,16 @@ export const ficheAppareilSchema = z.object({
    * incluses par le fichier de l'appareil sous `generes/page-plan-<identifiant simplifié>.yaml` (voir plans/generer-fichiers.ts).
    * Exige un écran sur le matériel et l'élément `polices-plans`.
    */
-  plans: z.array(z.string().min(1)).default([])
+  plans: z.array(z.string().min(1)).default([]),
+  /**
+   * Tailles (px) des pages de plans générées : `texte` = tous les textes libres (absente : petit/moyen/grand du plan, 14/20/28),
+   * `valeur` = valeurs des capteurs, `icone` = icônes (20 par défaut). Écrites à l'assemblage dans `generes/tailles-plans.yaml`.
+   */
+  taillesPlans: z.object({
+    texte: z.number().int().min(8).max(48).optional(),
+    valeur: z.number().int().min(8).max(48).default(20),
+    icone: z.number().int().min(8).max(48).default(20)
+  }).default({})
 });
 export type FicheAppareil = z.infer<typeof ficheAppareilSchema>;
 

@@ -68,18 +68,40 @@ export function dimensionsPng(png: Buffer): Dimensions {
   return { largeur: png.readUInt32BE(16), hauteur: png.readUInt32BE(20) };
 }
 
+export interface OptionsImage {
+  /** `auto` (défaut) : un plan à fond transparent (dessin au trait sombre) est inversé pour se lire sur le fond noir de l'écran ; `true` / `false` : forcé. */
+  inverser?: 'auto' | boolean;
+}
+
+/** Vrai si au moins un cinquième des pixels est (même en partie) transparent : dessin au trait fait pour un fond clair. */
+function aFondTransparent(d: PNG): boolean {
+  let n = 0;
+  const total = d.width * d.height;
+  for (let i = 0; i < total; i++) if (d.data[i * 4 + 3] < 250) n++;
+  return n >= total / 5;
+}
+
+/** Équivalent du filtre CSS `invert(1) hue-rotate(180deg)` (celui du mode sombre du panneau Plans) : le noir devient blanc, les teintes sont conservées. */
+function inverserCouleur(r: number, g: number, b: number): [number, number, number] {
+  const R = 255 - r, G = 255 - g, B = 255 - b;
+  const lim = (v: number): number => Math.max(0, Math.min(255, v));
+  return [lim(-0.574 * R + 1.430 * G + 0.144 * B), lim(0.426 * R + 0.430 * G + 0.144 * B), lim(0.426 * R + 1.430 * G - 0.856 * B)];
+}
+
 export interface ImageAjustee { png: Buffer; ajustement: Ajustement; source: Dimensions }
 
-export function ajusterImage(png: Buffer, ecran: Dimensions): ImageAjustee {
+export function ajusterImage(png: Buffer, ecran: Dimensions, options: OptionsImage = {}): ImageAjustee {
   let decode: PNG;
   try { decode = PNG.sync.read(png); } catch (e) { throw new ImageInvalide(`PNG illisible : ${(e as Error).message}`); }
   const source = { largeur: decode.width, hauteur: decode.height };
   const a = ajuster(source, ecran);
+  const inverser = options.inverser === undefined || options.inverser === 'auto' ? aFondTransparent(decode) : options.inverser;
   // Pré-multiplication par l'alpha (comme Pillow pour RGBA), en flottants.
   const pre = new Float64Array(source.largeur * source.hauteur * 4);
   for (let i = 0; i < source.largeur * source.hauteur; i++) {
     const al = decode.data[i * 4 + 3] / 255;
-    pre[i * 4] = decode.data[i * 4] * al; pre[i * 4 + 1] = decode.data[i * 4 + 1] * al; pre[i * 4 + 2] = decode.data[i * 4 + 2] * al; pre[i * 4 + 3] = decode.data[i * 4 + 3];
+    const [r, g, b] = inverser ? inverserCouleur(decode.data[i * 4], decode.data[i * 4 + 1], decode.data[i * 4 + 2]) : [decode.data[i * 4], decode.data[i * 4 + 1], decode.data[i * 4 + 2]];
+    pre[i * 4] = r * al; pre[i * 4 + 1] = g * al; pre[i * 4 + 2] = b * al; pre[i * 4 + 3] = decode.data[i * 4 + 3];
   }
   const redim = redimensionner(pre, source.largeur, source.hauteur, a.largeurImage, a.hauteurImage);
   const sortie = new PNG({ width: ecran.largeur, height: ecran.hauteur });
