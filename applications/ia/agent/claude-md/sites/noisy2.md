@@ -36,7 +36,7 @@ Un pont Mosquitto relie les deux (`homeassistant/#`, `homeassist/#`, `mqttio/#`)
 
 ### Pilotes de noisy (AREXX, RFXCOM, GPIO) : retrouver et modifier leurs paramètres sans passer par HA
 Les pilotes tournent dans dimotic-ha **sur noisy** (192.168.1.62) ; leurs réglages sont des fichiers dans `/docker/dimotic-ha/data/<app>/` de noisy.
-Tu n'y accèdes PAS par un shell, mais par une commande SSH restreinte (clé `~/.ssh/noisy-pilotes`, une seule commande permise) :
+Tu n'y accèdes PAS par un shell, mais par une commande SSH restreinte (clé `~/.ssh/noisy-pilotes`, une seule commande permise), **si l'utilisateur l'a installée** (sinon : « accès non installé », ne tente rien d'autre) :
 `ssh -i ~/.ssh/noisy-pilotes -o IdentitiesOnly=yes root@192.168.1.62 <commande>` avec :
 - `lister` (applications : arexx, rfxcom, rpigpio, teleinfo) ; `lister <app>` (fichiers et dates) ;
 - `lire <app> <fichier>` ; `ecrire <app> <fichier>` (nouveau contenu sur l'entrée standard : `… ecrire arexx x.yaml < local.yaml`) — sauvegarde `.bak-AAAAMMJJ-HHMMSS`

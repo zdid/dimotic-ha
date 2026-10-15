@@ -1,6 +1,6 @@
 #!/bin/bash
-# dimotic-pilotes — commande RESTREINTE de noisy pour l'agent Claude de noisy2 (15/10/2026).
-# Installée sur noisy en /usr/local/bin/dimotic-pilotes et appelée par SSH comme « commande forcée » de la clé
+# dimotic-pilotes — commande RESTREINTE d'une machine à pilotes pour l'agent Claude du site (15/10/2026).
+# Installée sur la machine des pilotes (noisy, stfort…) en /usr/local/bin/dimotic-pilotes et appelée par SSH comme « commande forcée » de la clé
 # de l'agent (authorized_keys : command="/usr/local/bin/dimotic-pilotes",restrict ...). Aucune autre commande n'est possible.
 #
 # Usage (SSH_ORIGINAL_COMMAND) :
@@ -9,10 +9,13 @@
 #   ecrire <app> <fichier>      remplace le fichier par l'entrée standard (sauvegarde .bak-… automatique, YAML/JSON contrôlé)
 #   arreter <app> | demarrer <app> | redemarrer <app>     désactive / active à chaud l'application (jamais le cœur)
 set -u
+# Réglages par défaut, remplacés par /etc/dimotic-pilotes.conf (écrit par installer-acces-agent.sh) : DATA, CONTENEUR, PORT, APPS.
 DATA=/docker/dimotic-ha/data
 CONTENEUR=dimotic-ha
+PORT=8087
 APPS="arexx rfxcom rpigpio teleinfo"
 LOG=/var/log/dimotic-pilotes.log
+[ -f /etc/dimotic-pilotes.conf ] && . /etc/dimotic-pilotes.conf
 
 set -- ${SSH_ORIGINAL_COMMAND:-}
 CMD="${1:-}"; APP="${2:-}"; FIC="${3:-}"
@@ -28,7 +31,7 @@ fic_ok() {
 evenement() {   # $1 = enable|disable
   docker exec -i "$CONTENEUR" node -e '
     const WebSocket=require("/app/applications/core/node_modules/ws");const ev="app:applications:"+process.argv[1],appId=process.argv[2];
-    const ws=new WebSocket("ws://127.0.0.1:8087/socket.io/?EIO=4&transport=websocket");
+    const ws=new WebSocket("ws://127.0.0.1:"+process.argv[3]+"/socket.io/?EIO=4&transport=websocket");
     setTimeout(()=>{console.log("délai dépassé");process.exit(4)},90000);
     ws.on("message",m=>{const s=m.toString();if(s[0]==="0")ws.send("40");else if(s==="2")ws.send("3");
       else if(s.startsWith("40"))ws.send("42"+JSON.stringify([ev,{appId}]));
