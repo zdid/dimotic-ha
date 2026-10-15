@@ -1,6 +1,6 @@
 # Conception — Gestion des pilotes par l'agent IA (ponts, découverts, adoption, remplacement)
 
-*Version 1.0 — 15 octobre 2026 — **validée par l'utilisateur le 15/10/2026** ; aucun code écrit. Décisions issues de la discussion du 15/10/2026.*
+*Version 1.1 — 15 octobre 2026 — **validée par l'utilisateur le 15/10/2026** ; aucun code écrit. Décisions issues de la discussion du 15/10/2026. **Changement par rapport à la v1.0 : l'adaptateur zigbee2mqtt n'est plus dans `nommage` mais dans une application `zigbee2mqtt` à part (§9, §12, §14).***
 
 ## 1. Objet
 
@@ -109,9 +109,9 @@ L'aperçu renvoie un `jeton` (empreinte de l'état courant + ordre). L'ordre ré
 | **RFXCOM** | **devices** (capteurs, compteurs, émetteurs), **récepteurs** (`switch`, `light`, `cover`), **scènes** | devices seulement | récepteur : `primaryEmitter` obligatoire pris parmi les devices adoptés, `emitters[]` (action, valeur, `followReceivedSignal`), `cover` : type et durées d'ouverture/fermeture ; `light` : variable, niveau par défaut |
 | **GPIO** (`rpigpio` → mqtt-io) | broches (quoi / où / broche) | non | `creer`/`modifier`/`supprimer` puis redémarrage de mqtt-io (production) |
 | **teleinfo, tasmota, evoo7** | à détailler à la réalisation | selon le pilote | — |
-| **zigbee2mqtt** (adaptateur) | appareils Zigbee | oui (interview en cours, ou encore nommés par l'adresse IEEE) | voir §9 |
+| **zigbee2mqtt** (application à part) | appareils Zigbee | oui (interview en cours, ou encore nommés par l'adresse IEEE) | voir §9 |
 
-## 9. Adaptateur zigbee2mqtt
+## 9. Pilote zigbee2mqtt (application à part)
 
 zigbee2mqtt a **son propre protocole d'interrogation** (`<base>/bridge/request/…`, `<base>/bridge/response/…`, `<base>/bridge/devices`). L'adaptateur traduit le contrat :
 
@@ -125,7 +125,7 @@ zigbee2mqtt a **son propre protocole d'interrogation** (`<base>/bridge/request/�
 | `appairer` | `bridge/request/permit_join` : **durée courte**, accord explicite, refermeture contrôlée ; mettre l'appareil en mode appairage reste une action **physique** de l'utilisateur |
 | `remplacer` | suite d'étapes (§7.2) |
 
-L'adaptateur vit dans **`nommage`** (décision du 15/10 : il relaie déjà z2m et connaît déjà la règle `quoi---lieu--lieu précis`, que les `friendly_name` de z2m suivent déjà ; module séparé à l'intérieur de l'application) et publie sa présence comme un pont. `ia` reste indépendant des pilotes. Attention : renommer un appareil dans z2m change ses sujets MQTT et son `entity_id` HA — l'aperçu doit lister les entités touchées.
+Le pilote est une **application `zigbee2mqtt` autonome**, comme `arexx` ou `rfxcom` (décision du 15/10, v1.1) : `nommage` est le service de nommage de **tous** les pilotes (z2m, RFXCOM, AREXX, GPIO), pas un pilote ; z2m ne doit donc pas y être un cas à part. L'application implémente le contrat, publie sa présence comme un pont et **demande à `nommage` de valider** les noms `quoi---lieu--lieu précis` et les pièces, comme les autres pilotes. Le **relais des messages z2m** que `nommage` fait déjà pour tous les pilotes (réécriture des découvertes) **n'est pas déplacé**. Comme toute application nouvelle, elle arrive désactivée (activation à chaud). `ia` reste indépendant des pilotes. Attention : renommer un appareil dans z2m change ses sujets MQTT et son `entity_id` HA — l'aperçu doit lister les entités touchées.
 
 ## 10. Parcours de l'agent et questions à poser
 
@@ -166,6 +166,7 @@ Quel appareil (liste des découverts) ? Nom QUOI---OÙ et pièce ? Pour appairer
 | Élément | Changement |
 |---|---|
 | **Cœur** | reçoit les requêtes MQTT `dimotic/<site>/pilotes/<pont>/requete/*`, les transmet à l'application, renvoie la réponse ; publie la présence des ponts de la machine (avec testament) |
+| **Nouvelle application `zigbee2mqtt`** | pilote z2m (contrat + traduction vers l'API `bridge/request/…` de z2m) ; arrive désactivée ; spécification `fonctionnelles-zigbee2mqtt` à écrire |
 | **Pilotes** | implémentent le contrat (présence, capacités, `lister`, `decouverts`, `adopter`…) — d'abord **AREXX** |
 | **Application `ia`** | nouveaux outils MCP `pilotes_ponts`, `pilotes_lister`, `pilotes_decouverts`, `pilotes_adopter`, `pilotes_remplacer`, `pilotes_effacer`, `pilotes_supprimer`, `pilotes_redemarrer` (aperçu puis `confirme: true`) |
 | **CLAUDE.md des agents** | sections « pilotes » réécrites d'après §10 ; les sections « SSH restreint » actuelles (`sites/noisy2.md`, `sites/ha2.md`) sont remplacées |
@@ -188,6 +189,6 @@ Chaque étape est testée **sans Docker d'abord** (instance de développement), 
 - **AREXX, plusieurs bases** : **tranché (15/10)** — pas de doublon dans HA ; à l'avenir, relais de la réception vers le pont porteur quand le capteur n'est pas dans la liste de la base qui l'entend (comme le RFXCOM). À spécifier dans `fonctionnelles-arexx`.
 - **Remplacement AREXX** : **tranché (15/10)** — suppression puis ajout au même nommage (le numéro n'est pas dans le nom HA). Reste à **vérifier en réel** : même `entity_id` retrouvé et historique repris (supprimer **avant** d'ajouter).
 - **Présence des ponts** : **tranché (15/10)** — les présences MQTT suffisent : la demande « liste des ponts » reçoit la réponse de ceux qui sont là. Le registre d'applications par gossip reste un **autre sujet** (connaître les machines disparues) et n'est pas utilisé ici.
-- **Où implémenter l'adaptateur z2m** : **tranché (15/10)** — dans `nommage` (à revoir si cela gêne à l'usage).
+- **Où implémenter le pilote z2m** : **tranché (15/10, v1.1)** — application `zigbee2mqtt` à part (en v1.0 : dans `nommage`, écarté car `nommage` sert tous les pilotes).
 - **Scènes RFXCOM**, **teleinfo/tasmota/evoo7** : étape ultérieure.
 - **Authentification des requêtes** au-delà des droits du broker (signature du jeton) : nécessaire ou non entre deux machines d'un même site ?
