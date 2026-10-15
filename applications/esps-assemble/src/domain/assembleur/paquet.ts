@@ -8,6 +8,7 @@ import * as crypto from 'node:crypto';
 import { Bibliotheque, FicheInvalide, type FicheElement, type FicheAppareil } from './fiches';
 import { resoudreAppareil, ResolutionImpossible } from './resolution';
 import { verifier } from './verification';
+import { CHEMIN_WIFI, genererWifi } from './wifi';
 import { ecrireZip } from './zip-ecriture';
 
 export interface ManifestePaquet {
@@ -20,6 +21,8 @@ export interface ManifestePaquet {
   esp: { adresse: string; port: number; portOta: number };
   options: { autoriserAppelsService: boolean };
   wifi: string[];
+  /** Secrets (`!secret …`) que les sources référencent, hors clé API de l'appareil : l'usine les contrôle avant de compiler. */
+  secrets: string[];
   fichiers: Record<string, string>;
 }
 
@@ -29,13 +32,25 @@ export type ResultatAssemblage =
 
 const sha = (b: Buffer): string => crypto.createHash('sha256').update(b).digest('hex');
 
+/** Noms des secrets référencés par `!secret` dans les sources (la clé API de l'appareil est créée par l'usine : exclue). */
+export function secretsReferences(fichiers: Map<string, Buffer>, nom: string): string[] {
+  const noms = new Set<string>();
+  for (const [chemin, contenu] of fichiers) {
+    if (!/\.ya?ml$/i.test(chemin)) continue;
+    for (const m of contenu.toString('utf8').matchAll(/!secret\s+([A-Za-z0-9_.-]+)/g)) noms.add(m[1]);
+  }
+  noms.delete(`api_${nom}`);
+  return [...noms].sort();
+}
+
 export function assemblerPaquet(racine: string, nom: string, revision: number, maintenant: () => Date = () => new Date(), generes: Map<string, Buffer> = new Map()): ResultatAssemblage {
   const biblio = new Bibliotheque(racine);
   try {
     const appareil = biblio.appareil(nom);
+    if (appareil.wifi.length > 0) { generes = new Map(generes); generes.set(CHEMIN_WIFI, Buffer.from(genererWifi(nom, appareil.wifi, biblio).yaml)); }
     const sources = resoudreAppareil(racine, nom, generes);
     // Les images de fond générées sont des fichiers du paquet au même titre que les sources.
-    for (const [chemin, contenu] of generes) if (!sources.fichiers.has(chemin)) sources.fichiers.set(chemin, contenu);
+    for (const [chemin, contenu] of generes) if (!sources.fichiers.has(chemin) && chemin !== CHEMIN_WIFI) sources.fichiers.set(chemin, contenu);
     const materiel = biblio.materiel(appareil.materiel);
     const elements = new Map<string, FicheElement>();
     const erreursFiches: string[] = [];
@@ -61,6 +76,7 @@ export function assemblerPaquet(racine: string, nom: string, revision: number, m
       esp: { adresse: appareil.esp.adresse || `${nom}.local`, port: appareil.esp.port, portOta: appareil.esp.portOta ?? materiel.portOta },
       options: { autoriserAppelsService: appareil.options.autoriserAppelsService },
       wifi: appareil.wifi,
+      secrets: secretsReferences(sources.fichiers, nom),
       fichiers
     };
     const zip = ecrireZip([

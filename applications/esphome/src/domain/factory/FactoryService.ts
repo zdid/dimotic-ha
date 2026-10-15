@@ -82,6 +82,11 @@ export class FactoryService {
       return echec(`le manifeste (${manifeste.appareil} révision ${manifeste.revision}) ne correspond pas à la demande (${job.appareil} révision ${job.revision})`);
     }
 
+    // 1bis. Secrets référencés par les sources (wifi, mot de passe OTA…) : une compilation sans eux échouerait de façon obscure
+    let absents: string[];
+    try { absents = this.d.secrets.manquants(manifeste.secrets); } catch (e) { return echec(`secrets.yaml inaccessible : ${(e as Error).message}`); }
+    if (absents.length > 0) return echec(`secrets absents du secrets.yaml de l'usine : ${absents.join(', ')} (à ajouter dans secrets.yaml, puis redemander)`);
+
     // 2. Dépôt des sources, puis seulement alors suppression de la demande
     try {
       for (const f of fichiers) this.ecrireAtomique(path.join(this.d.dossierConfig, f.chemin), f.contenu);

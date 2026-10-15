@@ -95,6 +95,22 @@ export const ficheAppareilSchema = z.object({
 });
 export type FicheAppareil = z.infer<typeof ficheAppareilSchema>;
 
+/**
+ * Wifi d'un site — `bibliotheque/wifi/<site>.yaml` : les réseaux du site (nom court + noms des secrets, JAMAIS de mot de passe). Noms de secrets
+ * par défaut : `wifi_<site>_<réseau>_ssid` et `…_password` ; `secours_password_secret` : mot de passe du point d'accès de secours du site
+ * (défaut `wifi_<site>_secours_password`). Un site peut avoir plusieurs réseaux (ordre = préférence).
+ */
+export const ficheWifiSiteSchema = z.object({
+  site: identifiant,
+  reseaux: z.array(z.object({
+    id: identifiant,
+    ssidSecret: z.string().regex(/^[A-Za-z0-9_.-]+$/).optional(),
+    passwordSecret: z.string().regex(/^[A-Za-z0-9_.-]+$/).optional()
+  })).min(1),
+  secoursPasswordSecret: z.string().regex(/^[A-Za-z0-9_.-]+$/).optional()
+});
+export type FicheWifiSite = z.infer<typeof ficheWifiSiteSchema>;
+
 /** Convertit les clés `snake_case` de la fiche YAML en `camelCase` du schéma (broches_prises → brochesPrises, nom_affichage → nomAffichage, …). */
 function camel(x: unknown): unknown {
   if (Array.isArray(x)) return x.map(camel);
@@ -134,6 +150,12 @@ export class Bibliotheque {
   appareil(nom: string): FicheAppareil {
     const f = lire(path.join(this.racine, 'appareils', `${nom}.fiche.yaml`), ficheAppareilSchema, `fiche de l'appareil ${nom}`);
     if (f.nom !== nom) throw new FicheInvalide(`fiche de l'appareil ${nom} : le nom « ${f.nom} » ne correspond pas au fichier`);
+    return f;
+  }
+
+  wifiSite(site: string): FicheWifiSite {
+    const f = lire(path.join(this.racine, 'bibliotheque', 'wifi', `${site}.yaml`), ficheWifiSiteSchema, `wifi du site ${site}`);
+    if (f.site !== site) throw new FicheInvalide(`wifi du site ${site} : le site « ${f.site} » ne correspond pas au fichier`);
     return f;
   }
 

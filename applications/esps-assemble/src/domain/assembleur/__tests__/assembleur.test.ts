@@ -52,6 +52,8 @@ beforeEach(() => {
   ecrire('bibliotheque/materiels/carte-test/fiche.yaml', FICHE_MATERIEL);
   ecrire('bibliotheque/elements/wifi-simple/element.yaml', 'wifi:\n  ssid: !secret wifi_ssid\n  password: !secret wifi_password\n');
   ecrire('bibliotheque/elements/wifi-simple/fiche.yaml', FICHE_ELEMENT('wifi-simple'));
+  ecrire('bibliotheque/wifi/stfort.yaml', 'site: stfort\nreseaux:\n  - id: principal\n    ssid_secret: wifi_ssid\n    password_secret: wifi_password\n  - id: garage\nsecours_password_secret: wifi_stfort_secours_password\n');
+  ecrire('bibliotheque/wifi/noisy.yaml', 'site: noisy\nreseaux:\n  - id: maison\n'); 
   ecrire('bibliotheque/elements/page-clim/element.yaml', 'lvgl:\n  pages:\n    - id: page_${clim_id}\n      widgets:\n        - label:\n            text: !lambda |-\n              return std::string("x");\n    - id: img\n      bg_image_src: img_fond\nimage:\n  - file: fond.png\n    id: img_fond\n    type: RGB565\n');
   ecrire('bibliotheque/elements/page-clim/fiche.yaml', FICHE_ELEMENT('page-clim', `parametres:\n  - nom: clim_id\n  - nom: clim_entite\n  - nom: clim_titre\n    requis: false\n    defaut: "Clim"\nexigences:\n  plateformes: [esp32]\n  ecran: { largeur: 800, hauteur: 480 }\n  elements: [wifi-simple]\n`));
   ecrire('bibliotheque/annexes/fond.png', 'PNGDATA');
@@ -108,12 +110,37 @@ describe('assemblage du paquet', () => {
     expect(r.manifeste).toMatchObject({
       v: 1, appareil: 'ecran-salon', nomAffichage: 'Écran salon', revision: 4, assemble: '2026-10-14T10:00:00.000Z',
       modele: { id: 'carte-test', puce: 'esp32-s3', flash: '16MB', cadre: 'esp-idf', memoire: { emplacementOtaOctets: 6000000 } },
-      esp: { adresse: '192.168.1.40', port: 6053, portOta: 3232 }, options: { autoriserAppelsService: true }, wifi: ['stfort']
+      esp: { adresse: '192.168.1.40', port: 6053, portOta: 3232 }, options: { autoriserAppelsService: true }, wifi: ['stfort'], secrets: expect.arrayContaining(['wifi_password', 'wifi_ssid'])
     });
     // Contrôle croisé avec l'usine : mêmes sommes, mêmes fichiers.
     const verif = verifierPaquet(lireZip(r.zip));
     expect(verif.ok).toBe(true);
     if (verif.ok) expect(Object.keys(verif.manifeste.fichiers).sort()).toEqual(Object.keys(r.manifeste.fichiers).sort());
+  });
+  it('wifi généré : tous les réseaux des sites de la fiche, premier site préféré, secours par site, secrets listés', () => {
+    ecrire('appareils/ecran-noisy.yaml', 'esphome:\n  name: ecran-noisy\n  friendly_name: "Écran noisy"\npackages:\n  materiel: !include bibliotheque/materiels/carte-test/base.yaml\n  wifi: !include generes/wifi.yaml\n');
+    ecrire('appareils/ecran-noisy.fiche.yaml', 'nom: ecran-noisy\nnom_affichage: "Écran noisy"\nmateriel: carte-test\nwifi: [noisy, stfort]\n');
+    const r = assemblerPaquet(racine, 'ecran-noisy', 1, () => new Date('2026-10-15T10:00:00Z'));
+    if (!r.ok) throw new Error(r.erreurs.join(' ; '));
+    const verif = verifierPaquet(lireZip(r.zip));
+    expect(verif.ok).toBe(true);
+    if (!verif.ok) return;
+    const w = verif.fichiers.find((f) => f.chemin === 'generes/wifi.yaml')!.contenu.toString();
+    expect(w).toContain('- ssid: !secret wifi_noisy_maison_ssid');
+    expect(w).toContain('priority: 100');                                 // noisy (premier site) préféré
+    expect(w.indexOf('wifi_noisy_maison_ssid')).toBeLessThan(w.indexOf('wifi_ssid'));
+    expect(w).toContain('- ssid: !secret wifi_stfort_garage_ssid');       // 2e réseau du site : noms par défaut
+    expect(w).toContain('ssid: "ecran-noisy secours"');
+    expect(w).toContain('password: !secret wifi_noisy_secours_password'); // secours du PREMIER site
+    expect(w).toContain('ap_timeout: 1min');
+    expect(verif.manifeste.secrets).toEqual(expect.arrayContaining(['wifi_noisy_maison_ssid', 'wifi_noisy_maison_password', 'wifi_noisy_secours_password', 'wifi_stfort_garage_password', 'wifi_ssid', 'wifi_password']));
+    expect(verif.manifeste.secrets).not.toContain('api_ecran-noisy');
+  });
+  it('wifi : site inconnu = erreur claire', () => {
+    ecrire('appareils/ecran-x.yaml', APPAREIL.replace('ecran-salon', 'ecran-x'));
+    ecrire('appareils/ecran-x.fiche.yaml', 'nom: ecran-x\nnom_affichage: "X"\nmateriel: carte-test\nwifi: [inconnu]\n');
+    const r = assemblerPaquet(racine, 'ecran-x', 1);
+    expect(!r.ok && r.erreurs[0]).toMatch(/wifi du site inconnu/);
   });
   it('reproductible : deux assemblages identiques donnent le même paquet', () => {
     const f = () => new Date('2026-10-14T10:00:00Z');

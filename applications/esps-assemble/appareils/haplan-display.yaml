@@ -54,7 +54,7 @@ api:
 
 packages:
   materiel: !include bibliotheque/materiels/sunton-8048s070c/base.yaml
-  wifi: !include bibliotheque/elements/wifi-simple/element.yaml
+  wifi: !include generes/wifi.yaml   # généré d'après `wifi:` de la fiche (réseaux des sites + point d'accès de secours)
   polices_plans: !include bibliotheque/elements/polices-plans/element.yaml
   tailles_plans: !include generes/tailles-plans.yaml   # généré d'après `tailles_plans` de la fiche (icônes, valeurs de capteurs)
   polices_climatisation: !include bibliotheque/elements/polices-climatisation/element.yaml

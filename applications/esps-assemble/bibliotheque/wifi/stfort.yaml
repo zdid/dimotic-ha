@@ -1,0 +1,10 @@
+# Wifi du site Saint Fort : les réseaux (nom court + NOMS des secrets, jamais de mot de passe) ; ordre = préférence dans le site.
+# Les valeurs sont dans le secrets.yaml de l'usine. Le réseau principal garde les noms historiques (wifi_ssid / wifi_password).
+# Autres réseaux du site : ajouter une ligne `- id: garage` (secrets par défaut wifi_stfort_garage_ssid / wifi_stfort_garage_password).
+site: stfort
+reseaux:
+  - id: principal
+    ssid_secret: wifi_ssid
+    password_secret: wifi_password
+# Mot de passe du point d'accès de secours des appareils de ce site (8 caractères au moins) :
+secours_password_secret: wifi_stfort_secours_password

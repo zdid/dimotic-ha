@@ -26,6 +26,8 @@ export const manifesteSchema = z.object({
   esp: z.object({ adresse: z.string().min(1), port: z.number().int().positive().default(6053), portOta: z.number().int().positive().default(3232) }),
   options: z.object({ autoriserAppelsService: z.boolean().default(false) }).default({}),
   wifi: z.array(nom).default([]),
+  // Secrets référencés par les sources (hors clé API de l'appareil) : contrôlés avant la compilation.
+  secrets: z.array(z.string().regex(/^[A-Za-z0-9_.-]+$/)).default([]),
   fichiers: z.record(z.string().regex(/^[a-f0-9]{64}$/))
 });
 export type Manifeste = z.infer<typeof manifesteSchema>;

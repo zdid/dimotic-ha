@@ -27,6 +27,12 @@ export class SecretsStore {
     return typeof this.lire()[this.nomCle(appareil)] === 'string';
   }
 
+  /** Parmi `noms`, ceux qui sont absents (ou vides) du secrets.yaml. */
+  manquants(noms: string[]): string[] {
+    const doc = this.lire();
+    return noms.filter((n) => doc[n] === undefined || doc[n] === null || String(doc[n]) === '');
+  }
+
   /** Crée la clé de l'appareil si elle est absente ; renvoie la clé NEUVE, ou null si elle existait déjà. */
   creerSiAbsente(appareil: string): string | null {
     if (this.existe(appareil)) return null;

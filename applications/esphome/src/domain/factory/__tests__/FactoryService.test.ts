@@ -72,6 +72,17 @@ describe('FactoryService — chemin nominal', () => {
     expect(statuts[statuts.length - 1].mesures).toMatchObject({ flashUtilisee: 760037, ramDisponible: 327680, tailleOctets: 1_000_000 });
   });
 
+  it('secrets référencés absents du secrets.yaml : échec clair AVANT tout dépôt et toute compilation', async () => {
+    fs.writeFileSync(path.join(deps.dossierConfig, 'secrets.yaml'), 'wifi_ssid: "x"\n');
+    const z = paquet({ secrets: ['wifi_ssid', 'wifi_stfort_secours_password'] }); telechargement = async () => z;
+    expect(await new FactoryService(deps).traiter(jobPour(z))).toBe('echec');
+    expect(statuts[statuts.length - 1]).toMatchObject({ etat: 'echec' });
+    expect(statuts[statuts.length - 1].detail).toContain('wifi_stfort_secours_password');
+    expect(statuts[statuts.length - 1].detail).not.toContain('wifi_ssid');
+    expect(docker.appels).toEqual([]);
+    expect(fs.existsSync(path.join(deps.dossierConfig, 'hasat4.yaml'))).toBe(false);
+  });
+
   it('appareil déjà en service : pas de nouvelle clé dans la pose, secrets.yaml inchangé', async () => {
     const z = paquet({}, 'haplan-display'); telechargement = async () => z;
     docker.exec = async function (this: any) { const b = path.join(deps.dossierConfig, '.esphome/build/haplan-display/.pioenvs/haplan-display'); fs.mkdirSync(b, { recursive: true }); fs.writeFileSync(path.join(b, 'firmware.bin'), Buffer.alloc(500, 1)); return reponse; } as any;

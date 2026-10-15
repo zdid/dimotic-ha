@@ -1,0 +1,5 @@
+# Site FICTIF pour l'essai du repli en point d'accès : ses secrets contiennent un réseau qui n'existe pas (wifi_essai_*). Un appareil dont la
+# fiche dit `wifi: [essai]` ne trouve aucun réseau et ouvre son point d'accès de secours (mot de passe : wifi_essai_secours_password).
+site: essai
+reseaux:
+  - id: absent
