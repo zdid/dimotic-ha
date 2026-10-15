@@ -1,6 +1,6 @@
 # Conception — Gestion des pilotes par l'agent IA (ponts, découverts, adoption, remplacement)
 
-*Version 1.4 — 15 octobre 2026 — **étapes 1 (cœur + pont de test), 2 (AREXX) et 3 (RFXCOM : devices, récepteurs, scènes) réalisées et essayées** (`fonctionnelles-supervisor` v2.11 §14ter, `fonctionnelles-arexx` v1.7 §6.5, `fonctionnelles-rfxcom` v7.2 §13bis) ; remplacement AREXX **vérifié dans un vrai HA** (même `entity_id`, aucun doublon, historique continu) ; v1.3 : écarts corrigés §4 testament, §11/§14 signature, §14 retrait complet et états non retenus ; écarts corrigés ici : §4 testament, §11/§14 signature, §14 retrait complet et états non retenus. Décisions issues de la discussion du 15/10/2026. **Changement par rapport à la v1.0 : l'adaptateur zigbee2mqtt n'est plus dans `nommage` mais dans une application `zigbee2mqtt` à part (§9, §12, §14).***
+*Version 1.5 — 15 octobre 2026 — **étape 4 : outils MCP `pilotes_*` dans `ia`** (§12) ; le cœur signe pour l'agent (`supervisor` v2.12 §14ter.7), `fonctionnelles-ia` v1.24 §19.12 ; `CLAUDE.md` des agents réécrits. *Version 1.4 — **étapes 1 (cœur + pont de test), 2 (AREXX) et 3 (RFXCOM : devices, récepteurs, scènes) réalisées et essayées** (`fonctionnelles-supervisor` v2.11 §14ter, `fonctionnelles-arexx` v1.7 §6.5, `fonctionnelles-rfxcom` v7.2 §13bis) ; remplacement AREXX **vérifié dans un vrai HA** (même `entity_id`, aucun doublon, historique continu) ; v1.3 : écarts corrigés §4 testament, §11/§14 signature, §14 retrait complet et états non retenus ; écarts corrigés ici : §4 testament, §11/§14 signature, §14 retrait complet et états non retenus. Décisions issues de la discussion du 15/10/2026. **Changement par rapport à la v1.0 : l'adaptateur zigbee2mqtt n'est plus dans `nommage` mais dans une application `zigbee2mqtt` à part (§9, §12, §14).***
 
 ## 1. Objet
 
@@ -169,8 +169,8 @@ Quel appareil (liste des découverts) ? Nom QUOI---OÙ et pièce ? Pour appairer
 | **Cœur** | reçoit les requêtes MQTT `dimotic/<site>/pilotes/<pont>/requete/*`, les transmet à l'application, renvoie la réponse ; publie la présence des ponts de la machine (avec testament) |
 | **Nouvelle application `zigbee2mqtt`** | pilote z2m (contrat + traduction vers l'API `bridge/request/…` de z2m) ; arrive désactivée ; spécification `fonctionnelles-zigbee2mqtt` à écrire |
 | **Pilotes** | implémentent le contrat (présence, capacités, `lister`, `decouverts`, `adopter`…) — d'abord **AREXX** |
-| **Application `ia`** | nouveaux outils MCP `pilotes_ponts`, `pilotes_lister`, `pilotes_decouverts`, `pilotes_adopter`, `pilotes_remplacer`, `pilotes_effacer`, `pilotes_supprimer`, `pilotes_redemarrer` (aperçu puis `confirme: true`) |
-| **CLAUDE.md des agents** | sections « pilotes » réécrites d'après §10 ; les sections « SSH restreint » actuelles (`sites/noisy2.md`, `sites/ha2.md`) sont remplacées |
+| **Application `ia`** | **réalisé (v1.5)** : trois outils MCP **génériques** `pilotes_ponts`, `pilotes_lire` (lister, decouverts), `pilotes_modifier` (tous les ordres modifiants ; aperçu puis `confirme: true`) plutôt qu'un outil par ordre — le contrat est commun à tous les pilotes. `ia` demande au **cœur** de signer et publier (le secret ne sort pas du cœur) ; il garde le jeton de l'aperçu et refuse d'appliquer sans aperçu préalable |
+| **CLAUDE.md des agents** | **réalisé (v1.5)** : sections « pilotes » de `sites/noisy2.md` et `sites/ha2.md` réécrites d'après §10 (déployées sur les machines à la prochaine mise à jour) |
 | **Specs à faire évoluer** | `fonctionnelles-arexx` (v1.6), `fonctionnelles-rfxcom` (v7.1), spécifications du cœur (canal pilotes), `fonctionnelles-ia` (outils), `fonctionnelles-rpigpio` |
 | **Ponts Mosquitto** | laisser passer `dimotic/<site>/pilotes/#` entre les machines d'un site |
 | **Retirer** | `applications/ia/agent/acces-pilotes/` (accès SSH restreint) si cette conception est retenue |
@@ -179,7 +179,7 @@ Quel appareil (liste des découverts) ? Nom QUOI---OÙ et pièce ? Pour appairer
 
 1. **Cœur** : présence des ponts + réception/relais des requêtes, avec un pont de test (`testcycle`).
 2. **AREXX** : contrat complet (`lister`, `decouverts`, `adopter`, `remplacer`, `effacer`, `ignorer`, `supprimer`, `redemarrer`) ; essai de bout en bout sur noisy2 puis noisy.
-3. **Outils MCP `pilotes_*`** et sections du CLAUDE.md pour l'AREXX.
+3. **Outils MCP `pilotes_*`** et sections du CLAUDE.md — **réalisé (15/10)** ; reste l'essai de bout en bout avec un vrai Claude Code sur noisy2.
 4. **RFXCOM** (devices, puis récepteurs, puis scènes) — **réalisé (15/10)** ; **GPIO**, **zigbee2mqtt**.
 5. Nouvelle image Docker, déploiement noisy, noisy2, ha2, stfort.
 

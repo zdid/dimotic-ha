@@ -25,6 +25,7 @@ import { ConditionEvaluator } from './ConditionEvaluator';
 import { OllamaHttpServer } from './OllamaHttpServer';
 import { McpHttpServer } from './McpHttpServer';
 import { McpToolbox, MCP_TOOLS } from './McpTools';
+import { PilotesClient } from './PilotesClient';
 import { PlannerReader } from './PlannerReader';
 import { HaAutomationClient } from './HaAutomationClient';
 import { IA_TOOLS } from './tools';
@@ -323,6 +324,7 @@ export class IaService implements IIaService {
       excludedQuoiIds: () => this.config.excludedQuoiIds,
       simulate: (phrase, useMistral) => this.simulatePhrase(phrase, useMistral),
       planner: new PlannerReader(this.eventBus),
+      pilotes: new PilotesClient(this.eventBus),
       automations: new HaAutomationClient(this.eventBus, this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia'))
     });
     this.mcpServer = new McpHttpServer({
@@ -356,6 +358,9 @@ export class IaService implements IIaService {
       'phrase sans rien exécuter), executer_action (AGIT RÉELLEMENT sur la maison : vérifier la cible avant).',
       'Automatisations HA : lire_automatisations_ha (liste, définition, sauvegardes), deposer_automatisation et supprimer_automatisation',
       '(AGISSENT sur HA : sans confirme:true ils ne renvoient qu\'un aperçu — le montrer à l\'utilisateur et n\'envoyer confirme:true qu\'après son accord).',
+      'Pilotes (AREXX, RFXCOM…) : pilotes_ponts (EN PREMIER : quels ponts, quelles capacités), pilotes_lire (lister, decouverts), pilotes_modifier',
+      '(adopter, creer, modifier, remplacer, effacer, ignorer, supprimer, redemarrer : sans confirme:true, simple aperçu à montrer à l\'utilisateur ;',
+      'confirme:true seulement après son accord, avec les mêmes paramètres).',
       'Règles complètes de Mistral : ressource dimotic://regles ; catalogue seul : dimotic://catalogue.',
       '',
       this.rulesProvider.buildCatalogText()

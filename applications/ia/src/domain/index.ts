@@ -24,6 +24,7 @@ import { IaService, type IIaService } from './IaService';
 import type { IaConfig } from './config-schema';
 import { PLANNER_READ_EVENTS } from './PlannerReader';
 import { HA_REST_REPLY_EVENT } from './HaAutomationClient';
+import { PILOTES_AGENT_EVENTS } from './PilotesClient';
 
 // ============================================================================
 // Métadonnées UI
@@ -176,7 +177,7 @@ export const IA_APP: ApplicationModule & { menu?: ApplicationMenuConfig } = {
   // planificateur à chaque tentative (voir interpreter/macros.ts).
   // ⭐ 24/09/2026 — planificateur:deploy (réinterprétation complète au déclenchement) remplacé par
   // planificateur:condition (évaluation d'une condition en texte libre, ConditionEvaluator.ts).
-  bridgedEvents: ['ia:tool:execute:reply', 'ia:command:reply', 'planificateur:condition', 'planificateur:macros:list', ...PLANNER_READ_EVENTS, HA_REST_REPLY_EVENT]
+  bridgedEvents: ['ia:tool:execute:reply', 'ia:command:reply', 'planificateur:condition', 'planificateur:macros:list', ...PLANNER_READ_EVENTS, HA_REST_REPLY_EVENT, ...PILOTES_AGENT_EVENTS]
 };
 
 // ============================================================================

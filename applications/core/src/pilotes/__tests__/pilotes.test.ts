@@ -271,4 +271,51 @@ describe('canal pilotes', () => {
       expect(reponse()?.erreur?.code).toBe('delai_depasse');
     });
   });
+
+  describe('côté agent (ia → cœur → MQTT)', () => {
+    /** Fait ce que fait le broker : renvoie au cœur ce qu'il a publié sur un sujet. */
+    function boucle(topic: string): void {
+      const p = [...transport.publies].reverse().find((x) => x.topic === topic);
+      if (p) transport.recevoir(topic, p.payload);
+    }
+
+    it('signe la requête avec le secret du cœur, la publie non retenue, et renvoie la réponse du pont', async () => {
+      demarrer(SECRET);
+      const recues: Array<{ ref: string; reponse: PiloteReponse }> = [];
+      bus.onGeneric('pilotes:agent:reponse', (d) => recues.push(d as never));
+      bus.emitGeneric('pilotes:agent:requete', { ref: 'abc', pont: 'test_bridge_x', ordre: 'lister', parametres: {} });
+      const pub = transport.publies.find((x) => x.topic.includes('/test_bridge_x/requete/'))!;
+      expect(pub.retain).toBe(false);
+      const envoyee = JSON.parse(pub.payload) as PiloteRequete;
+      expect(envoyee.signature).toBe(signerRequete(SECRET, envoyee));
+      transport.recevoir(pub.topic, pub.payload); // le broker la rend au cœur, qui la traite
+      await laisser();
+      boucle(SUJETS.reponse('test_bridge_x', envoyee.id));
+      expect(recues).toHaveLength(1);
+      expect(recues[0].ref).toBe('abc');
+      expect(recues[0].reponse.ok).toBe(true);
+    });
+
+    it('un ordre inconnu est refusé sans rien publier', () => {
+      demarrer(SECRET);
+      const recues: Array<{ reponse: PiloteReponse }> = [];
+      bus.onGeneric('pilotes:agent:reponse', (d) => recues.push(d as never));
+      const avant = transport.publies.length;
+      bus.emitGeneric('pilotes:agent:requete', { ref: 'x', pont: 'test_bridge_x', ordre: 'danser' });
+      expect(transport.publies.length).toBe(avant);
+      expect(recues[0].reponse.erreur?.code).toBe('requete_invalide');
+    });
+
+    it('liste les ponts du site, dont ceux d\'une autre machine, avec leur joignabilité', () => {
+      demarrer(SECRET);
+      const autre = { pont: 'arexx_bridge_noisy', machine: 'noisy_999', appId: 'arexx', type: 'arexx', capacites: ['lister'], etat: 'en_ligne', date: 'x' };
+      transport.recevoir(SUJETS.presence('arexx_bridge_noisy'), autre, true);
+      transport.recevoir(SUJETS.machine('noisy_999'), { machine: 'noisy_999', etat: 'hors_ligne' }, true);
+      let ponts: Array<{ pont: string; joignable: boolean }> = [];
+      bus.onGeneric('pilotes:agent:ponts', (d) => { ponts = (d as { ponts: typeof ponts }).ponts; });
+      bus.emitGeneric('pilotes:agent:ponts:get', { ref: 'p' });
+      expect(ponts.find((p) => p.pont === 'test_bridge_x')?.joignable).toBe(true);
+      expect(ponts.find((p) => p.pont === 'arexx_bridge_noisy')?.joignable).toBe(false);
+    });
+  });
 });

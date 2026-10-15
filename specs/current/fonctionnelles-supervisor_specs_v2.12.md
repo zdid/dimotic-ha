@@ -1,6 +1,7 @@
 # Spécifications Fonctionnelles - Supervision Multi-Machines (SUPERVISOR)
 
-*Version 2.11 - 15 Octobre 2026 — **§14ter (nouveau) : canal MQTT « gestion des pilotes »** — le cœur publie la présence des ponts (pilotes), reçoit les requêtes de l'agent IA, les transmet à l'application par le pont d'événements et publie la réponse ; signature HMAC, aperçu + jeton, jamais de message retenu pour un ordre ; implémenté et essayé de bout en bout avec `testcycle` (pont de test). Voir `conception-gestion-pilotes_specs` v1.2.*
+*Version 2.12 - 15 Octobre 2026 — **§14ter.7 (nouveau) : requêtes de l'application « agent » (`ia`)** — le cœur signe (secret du site) et publie les requêtes que `ia` lui demande par `pilotes:agent:*`, relaie les réponses, liste les ponts de tout le site ; le secret ne quitte jamais le cœur. 25 tests.*
+*Historique — Version 2.11 - 15 Octobre 2026 — **§14ter (nouveau) : canal MQTT « gestion des pilotes »** — le cœur publie la présence des ponts (pilotes), reçoit les requêtes de l'agent IA, les transmet à l'application par le pont d'événements et publie la réponse ; signature HMAC, aperçu + jeton, jamais de message retenu pour un ordre ; implémenté et essayé de bout en bout avec `testcycle` (pont de test). Voir `conception-gestion-pilotes_specs` v1.2.*
 *Historique — Version 2.10 - 24 Septembre 2026 — §8 réécrit (cycle de vie des applications) : le core ne redémarre
 JAMAIS pour une application ; un seul chemin « activer » et un seul « désactiver » ; application
 nouvelle = désactivée (y compris installation neuve) ; racine externe `data/applications/` ; nettoyage
@@ -1334,6 +1335,18 @@ Contrôles de la passerelle, dans l'ordre : sujet (`<pont>/requete/<id>`, id `[A
 Instance isolée du cœur (broker MQTT privé, secret d'essai) + `testcycle` activé à chaud : présence retenue publiée ; `lister`/`decouverts` ; refus sans signature ; aperçu → refus sans jeton → application avec jeton → fichier modifié, sauvegarde créée au 2ᵉ ordre ; qualification incomplète refusée ; jeton rejoué refusé ; application désactivée → `hors_ligne` puis requête `pont_hors_ligne`, réactivée → `en_ligne` ; arrêt brutal du cœur → testament de la machine ; redémarrage → présence fantôme corrigée. 22 tests unitaires (`core/src/pilotes/__tests__/pilotes.test.ts`) ; suite complète du cœur : 232 verts.
 
 ---
+
+### 14ter.7 Requêtes de l'application « agent » (nouveau v2.12)
+
+L'agent IA n'est pas un client MQTT : l'application `ia` (outils MCP `pilotes_*`) demande au **cœur** d'envoyer ses requêtes, pour que **le secret du site ne sorte pas du cœur**.
+
+| Événement | Sens | Contenu |
+|---|---|---|
+| `pilotes:agent:requete` | `ia` → cœur | `ref`, `pont`, `ordre`, `parametres`, `apercu`, `jeton` |
+| `pilotes:agent:reponse` | cœur → `ia` (`bridgedEvents` d'`ia`) | `ref`, `reponse` (celle du pont) |
+| `pilotes:agent:ponts:get` / `pilotes:agent:ponts` | `ia` ↔ cœur | `ref` ; liste des ponts du site |
+
+Le cœur ajoute l'identifiant (`ag…`), la date et la **signature**, publie sur `…/requete/<id>` (QoS 1, jamais retenu) et attend la réponse sur `…/reponse/<id>` (abonnement `+/reponse/+`) ; délai : celui du pont + 5 s (`delai_depasse`). Une requête adressée à un pont d'une autre machine du site passe par le broker comme les autres. Le cœur suit **toutes** les présences du site (retenues) et l'état des machines (`_machines/+`) : un pont est `joignable` s'il est en ligne **et** si sa machine ne l'est pas hors ligne. Sans secret, la requête part non signée (les ordres modifiants sont alors refusés par le pont : `signature_requise`).
 
 ## 15. Annexes
 

@@ -24,6 +24,9 @@ import {
   segmentSite,
   signerRequete,
   sujetsPilotes,
+  type PiloteAgentPontsEvenement,
+  type PiloteAgentRequeteEvenement,
+  type PontSite,
   type PilotePresence,
   type PilotePresenceEvenement,
   type PilotePresencePubliee,
@@ -70,6 +73,12 @@ export class PilotesGateway {
   private readonly delaiHeritageMs: number;
   private readonly maintenant: () => number;
   private demarre = false;
+  /** Présences de TOUT le site (retenues ou non) et état des machines — pour la liste des ponts de l'agent. */
+  private readonly presencesSite = new Map<string, PilotePresencePubliee>();
+  private readonly machinesSite = new Map<string, string>();
+  /** Requêtes de l'agent en attente d'une réponse (clé `pont/id`). */
+  private readonly attentesAgent = new Map<string, { ref: string; timer: NodeJS.Timeout }>();
+  private compteurAgent = 0;
 
   constructor(
     private readonly transport: PilotesTransport,
@@ -98,10 +107,15 @@ export class PilotesGateway {
     this.eventBus.onGeneric<PilotePresenceEvenement>(PILOTES_EVENTS.PRESENCE, (data) => this.surPresenceApplication(data));
     this.eventBus.onGeneric<PiloteReponseEvenement>(PILOTES_EVENTS.REPONSE, (data) => this.surReponseApplication(data));
 
+    this.eventBus.onGeneric<PiloteAgentRequeteEvenement>(PILOTES_EVENTS.AGENT_REQUETE, (data) => this.surRequeteAgent(data));
+    this.eventBus.onGeneric<{ ref: string }>(PILOTES_EVENTS.AGENT_PONTS_DEMANDE, (data) => this.repondrePonts(data?.ref ?? ''));
+
     this.transport.onMessage((message) => this.surMessageMqtt(message));
     this.transport.onConnect(() => {
       this.transport.subscribe(this.sujets.abonnementRequetes, 1);
       this.transport.subscribe(this.sujets.abonnementPresences, 1);
+      this.transport.subscribe(`${this.sujets.racine}/_machines/+`, 1);
+      this.transport.subscribe(`${this.sujets.racine}/+/reponse/+`, 1);
       this.publierMachine('en_ligne');
       // Les applications déjà démarrées s'annoncent à nouveau (broker ou cœur redémarré).
       this.eventBus.emitGeneric(PILOTES_EVENTS.PRESENCE_DEMANDE, {});
@@ -123,6 +137,8 @@ export class PilotesGateway {
     this.publierMachine('hors_ligne');
     for (const timer of this.attentes.values()) clearTimeout(timer);
     this.attentes.clear();
+    for (const a of this.attentesAgent.values()) clearTimeout(a.timer);
+    this.attentesAgent.clear();
     if (this.heritageTimer) clearTimeout(this.heritageTimer);
     this.transport.disconnect();
   }
@@ -202,8 +218,13 @@ export class PilotesGateway {
     if (!message.topic.startsWith(racine)) return;
     const segments = message.topic.slice(racine.length).split('/');
 
-    if (segments.length === 2 && segments[1] === 'presence') {
+    if (segments.length === 2 && segments[0] === '_machines') {
+      this.noterMachine(segments[1] as string, message);
+    } else if (segments.length === 2 && segments[1] === 'presence') {
+      this.noterPresence(segments[0] as string, message);
       this.surPresenceRetenue(segments[0] as string, message);
+    } else if (segments.length === 3 && segments[1] === 'reponse') {
+      this.surReponseMqtt(segments[0] as string, segments[2] as string, message);
     } else if (segments.length === 3 && segments[1] === 'requete') {
       if (message.retain) {
         this.logger.warn('PilotesGateway', `Requête retenue ignorée sur ${message.topic} (une requête ne doit jamais être retenue)`);
@@ -304,5 +325,95 @@ export class PilotesGateway {
       return false;
     }
     return recue.length === attendue.length && timingSafeEqual(recue, attendue);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Côté « agent » : une application (ia) demande au cœur d'envoyer une requête au nom de l'agent.
+  // Le secret du site reste dans le cœur : l'application ne signe rien.
+  // ---------------------------------------------------------------------------
+
+  private noterMachine(machine: string, message: MqttMessage): void {
+    try {
+      const m = JSON.parse(message.payload.toString()) as { etat?: string };
+      if (m.etat) this.machinesSite.set(machine, m.etat);
+    } catch {
+      /* illisible : ignoré */
+    }
+  }
+
+  private noterPresence(pont: string, message: MqttMessage): void {
+    if (message.payload.length === 0) {
+      this.presencesSite.delete(pont);
+      return;
+    }
+    try {
+      this.presencesSite.set(pont, JSON.parse(message.payload.toString()) as PilotePresencePubliee);
+    } catch {
+      /* illisible : ignoré */
+    }
+  }
+
+  /** Ponts du site : ceux des autres machines (présences MQTT) complétés par les nôtres (état courant). */
+  pontsDuSite(): PontSite[] {
+    const tous = new Map(this.presencesSite);
+    for (const [pont, connu] of this.ponts) {
+      tous.set(pont, { ...connu.presence, machine: this.options.machineId, appId: connu.appId, date: new Date(this.maintenant()).toISOString() });
+    }
+    return [...tous.values()]
+      .sort((a, b) => a.pont.localeCompare(b.pont))
+      .map((p) => ({ ...p, joignable: p.etat === 'en_ligne' && this.machinesSite.get(p.machine) !== 'hors_ligne' }));
+  }
+
+  private repondrePonts(ref: string): void {
+    const evenement: PiloteAgentPontsEvenement = { ref, ponts: this.pontsDuSite() };
+    this.eventBus.emitGeneric(PILOTES_EVENTS.AGENT_PONTS, evenement);
+  }
+
+  private surRequeteAgent(data: PiloteAgentRequeteEvenement): void {
+    const ref = String(data?.ref ?? '');
+    const erreur = (code: string, message: string): void => {
+      this.eventBus.emitGeneric(PILOTES_EVENTS.AGENT_REPONSE, {
+        ref,
+        reponse: { id: ref, pont: String(data?.pont ?? ''), ok: false, erreur: { code, message } }
+      });
+    };
+    if (!ref || !data.pont || typeof data.ordre !== 'string' || !estOrdreConnu(data.ordre)) {
+      return erreur('requete_invalide', 'ref, pont et ordre connu obligatoires');
+    }
+    const id = `ag${Date.now().toString(36)}${(this.compteurAgent++).toString(36)}`;
+    const requete: PiloteRequete = {
+      id,
+      pont: data.pont,
+      ordre: data.ordre,
+      parametres: data.parametres ?? {},
+      ...(data.apercu ? { apercu: true } : {}),
+      ...(data.jeton ? { jeton: data.jeton } : {}),
+      emetteur: 'agent-ia',
+      date: new Date(this.maintenant()).toISOString()
+    };
+    const secret = this.options.secret ?? '';
+    if (secret) requete.signature = signerRequete(secret, requete);
+
+    const cle = `${data.pont}/${id}`;
+    const timer = setTimeout(() => {
+      this.attentesAgent.delete(cle);
+      erreur('delai_depasse', `Pas de réponse de ${data.pont} dans le délai`);
+    }, this.delaiReponseMs + 5_000);
+    timer.unref?.();
+    this.attentesAgent.set(cle, { ref, timer });
+    this.transport.publish(this.sujets.requete(data.pont, id), JSON.stringify(requete), 1, false);
+  }
+
+  private surReponseMqtt(pont: string, id: string, message: MqttMessage): void {
+    const attente = this.attentesAgent.get(`${pont}/${id}`);
+    if (!attente) return;
+    clearTimeout(attente.timer);
+    this.attentesAgent.delete(`${pont}/${id}`);
+    try {
+      const reponse = JSON.parse(message.payload.toString()) as PiloteReponse;
+      this.eventBus.emitGeneric(PILOTES_EVENTS.AGENT_REPONSE, { ref: attente.ref, reponse });
+    } catch {
+      this.eventBus.emitGeneric(PILOTES_EVENTS.AGENT_REPONSE, { ref: attente.ref, reponse: { id, pont, ok: false, erreur: { code: 'reponse_illisible', message: 'Réponse non JSON' } } });
+    }
   }
 }

@@ -13,6 +13,7 @@ import { IA_TOOLS } from './tools';
 import type { ToolExecutor } from './ToolExecutor';
 import type { PlannerReader, PlannerSection } from './PlannerReader';
 import type { HaAutomationClient } from './HaAutomationClient';
+import type { PilotesClient } from './PilotesClient';
 
 const CONFIRM_PROP = { type: 'boolean', description: 'false/absent = APERÇU seulement (rien n\'est modifié). true = exécute, À N\'UTILISER QU\'APRÈS l\'accord explicite de l\'utilisateur sur l\'aperçu.' };
 
@@ -47,6 +48,45 @@ export const HA_AUTOMATION_TOOLS: McpToolDef[] = [
     name: 'supprimer_automatisation',
     description: 'SUPPRIME une automatisation de Home Assistant. Sans confirme:true, renvoie seulement un aperçu. La définition est sauvegardée avant suppression.',
     inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Identifiant de configuration' }, confirme: CONFIRM_PROP }, required: ['id'] }
+  }
+];
+
+/** Gestion des pilotes (AREXX, RFXCOM…) par MQTT via le cœur — conception-gestion-pilotes_specs v1.5. */
+export const PILOTES_TOOLS: McpToolDef[] = [
+  {
+    name: 'pilotes_ponts',
+    description: "Liste les PONTS de pilotes du site (une instance d'un pilote sur une machine : arexx_bridge_<machine>, rfx_bridge_<machine>…), toutes machines confondues : type, machine, joignable, capacités (ordres acceptés). À appeler EN PREMIER : s'il y a plusieurs ponts du type voulu, demander à l'utilisateur lequel. LECTURE SEULE.",
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'pilotes_lire',
+    description: "Lit un pont (LECTURE SEULE). ordre `lister` : ressources configurées (AREXX : capteurs ; RFXCOM : devices, recepteurs, scenes — filtre `parametres.ressource`). ordre `decouverts` : appareils détectés mais pas encore adoptés (id, dernière valeur, qualité du signal).",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pont: { type: 'string', description: 'Nom complet du pont (voir pilotes_ponts)' },
+        ordre: { type: 'string', enum: ['lister', 'decouverts'] },
+        parametres: { type: 'object', description: 'Optionnel. RFXCOM lister : { ressource: "devices" | "recepteurs" | "scenes" }' }
+      },
+      required: ['pont', 'ordre']
+    }
+  },
+  {
+    name: 'pilotes_modifier',
+    description:
+      "Ordre MODIFIANT sur un pont : adopter (qualifier un découvert : id, quoi, lieu, lieuPrecis, transmitToHa — le lieu est obligatoire), creer (RFXCOM : ressource recepteur|scene|device), modifier, remplacer (ancien, nouveau : le neuf reprend le nom de l'ancien et le même entity_id), effacer (oublie un découvert), ignorer, supprimer (retire aussi l'entité de HA), redemarrer. " +
+      "Sans confirme:true, renvoie seulement un APERÇU (ce qui serait fait, entités HA touchées) et ne modifie RIEN : le montrer à l'utilisateur et n'envoyer confirme:true (mêmes paramètres) qu'après son accord explicite. Refuse d'appliquer sans aperçu préalable. Une sauvegarde du fichier est faite avant toute écriture. " +
+      "Poser les questions utiles AVANT (quel pont, quel lieu, transmettre à HA ?) ; pour un remplacement RFXCOM, rappeler que l'appairage physique du module se fait hors dimotic-ha. Les pilotes de production (relais) : prévenir avant un redémarrage.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pont: { type: 'string', description: 'Nom complet du pont (voir pilotes_ponts)' },
+        ordre: { type: 'string', enum: ['adopter', 'creer', 'modifier', 'remplacer', 'effacer', 'ignorer', 'supprimer', 'redemarrer'] },
+        parametres: { type: 'object', description: 'Selon l\'ordre. AREXX adopter : { id, quoi, lieu, lieuPrecis?, transmitToHa }. AREXX remplacer : { ancien, nouveau }. RFXCOM voir fonctionnelles-rfxcom §13bis.' },
+        confirme: CONFIRM_PROP
+      },
+      required: ['pont', 'ordre']
+    }
   }
 ];
 
@@ -134,7 +174,8 @@ MCP_ONLY_TOOLS.push({
 export const MCP_TOOLS: McpToolDef[] = [
   ...IA_TOOLS.map((t) => t.function.name === 'lister_entites' ? LISTER_ENTITES_MCP : ({ name: t.function.name, description: t.function.description, inputSchema: t.function.parameters })),
   ...MCP_ONLY_TOOLS,
-  ...HA_AUTOMATION_TOOLS
+  ...HA_AUTOMATION_TOOLS,
+  ...PILOTES_TOOLS
 ];
 
 const NOISY_ATTRIBUTES = new Set(['entity_picture', 'icon', 'supported_features', 'attribution', 'friendly_name', 'editable', 'restored', 'attributs_taxonomie']);
@@ -196,6 +237,8 @@ export interface McpToolboxDeps {
   planner: PlannerReader;
   /** Automatisations HA (lecture / dépôt / suppression, via le pont REST du core). */
   automations: HaAutomationClient;
+  /** Gestion des pilotes via le cœur (PilotesClient). */
+  pilotes: PilotesClient;
 }
 
 export class McpToolbox {
@@ -209,6 +252,9 @@ export class McpToolbox {
       case 'lire_automatisations_ha': return JSON.stringify(await this.readAutomations(args), null, 2);
       case 'deposer_automatisation': return JSON.stringify(await this.deps.automations.deposit(String(args.id ?? ''), args.definition, args.confirme === true), null, 2);
       case 'supprimer_automatisation': return JSON.stringify(await this.deps.automations.remove(String(args.id ?? ''), args.confirme === true), null, 2);
+      case 'pilotes_ponts': return JSON.stringify(await this.deps.pilotes.ponts(), null, 2);
+      case 'pilotes_lire': return JSON.stringify(await this.deps.pilotes.lire(String(args.pont ?? ''), String(args.ordre ?? ''), (args.parametres ?? {}) as Record<string, unknown>), null, 2);
+      case 'pilotes_modifier': return JSON.stringify(await this.deps.pilotes.modifier(String(args.pont ?? ''), String(args.ordre ?? ''), (args.parametres ?? {}) as Record<string, unknown>, args.confirme === true), null, 2);
       case 'lister_entites': return this.listEntities(args);
       case 'tester_phrase': return JSON.stringify(await this.deps.simulate(String(args.phrase ?? ''), args.utiliser_mistral === true), null, 2);
       default:

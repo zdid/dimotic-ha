@@ -6,6 +6,7 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc -b",
+    "test": "../core/node_modules/.bin/vitest run",
     "build:ui": "tsc -p src/presentation/tsconfig.ui.json",
     "watch": "tsc -w"
   },

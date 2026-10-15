@@ -1,9 +1,11 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.23
-**Date :** 8 Octobre 2026
+**Version :** 1.24
+**Date :** 15 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
 
+> **v1.24** : **gestion des pilotes** (§19.12) — outils MCP `pilotes_ponts`, `pilotes_lire`, `pilotes_modifier` (AREXX, RFXCOM) ; aperçu obligatoire avant d'appliquer.
+>
 > **v1.23** : **`quoi_appareil`** (§19.11) — `obtenir_details` (MCP) affiche `classement.quoi_appareil` ; le catalogue de QUOI transmis à
 > Mistral ne contient plus le libellé des entités secondaires (socle v4.40 §8.3.2ter).
 
@@ -1230,3 +1232,18 @@ HA classe ses entités (`entity_category`) : `config` (réglages : seuils, modes
 `quoi` dit ce que l'entité est (« disjoncteur puissance », « pression »). Pour une entité principale, les deux sont égaux. Un terme de lieu égal
 au QUOI de l'appareil qualifie la résolution (« mode indicateur du four ») ; le catalogue transmis à Mistral n'énumère pas les libellés des entités
 secondaires. Détails : socle v4.40 §8.3.2ter, nommage v2.2 §3.3bis. **Non vérifié en réel** (rien de déployé au moment de l'écriture).
+
+### 19.12 Gestion des pilotes (nouveau v1.24)
+
+Trois outils, par le canal « gestion des pilotes » du cœur (`conception-gestion-pilotes_specs` v1.5, `supervisor` §14ter.7). `ia` ne parle pas MQTT et **ne connaît pas le secret** du site : il demande au cœur de signer et publier (`PilotesClient`).
+
+| Outil | Rôle |
+|---|---|
+| `pilotes_ponts` | ponts du site (toutes machines) : type, machine, `joignable`, `capacites` — **à appeler en premier** |
+| `pilotes_lire` | `lister`, `decouverts` (lecture seule) |
+| `pilotes_modifier` | `adopter`, `creer`, `modifier`, `remplacer`, `effacer`, `ignorer`, `supprimer`, `redemarrer` |
+
+- **Aperçu obligatoire** : sans `confirme: true`, `pilotes_modifier` ne change rien et renvoie l'aperçu. `ia` mémorise le **jeton** de l'aperçu (10 min, pour **exactement** le même pont/ordre/paramètres, clés dans n'importe quel ordre) et **refuse d'appliquer sans aperçu préalable**, même si l'agent l'oublie ; l'application consomme le jeton (un seul usage). Le pont refuse en plus si l'état a changé entre-temps (`etat_change`).
+- Les instructions MCP et les `CLAUDE.md` des agents (`sites/noisy2.md`, `sites/ha2.md`) disent quoi demander (quel pont, quoi/lieu/lieu précis, `transmitToHa`, appairage physique RFXCOM) et d'attendre un « oui » explicite.
+- Événements `pilotes:agent:reponse` et `pilotes:agent:ponts` déclarés dans `bridgedEvents`.
+- 9 tests (`PilotesClient.test.ts`). **Non vérifié de bout en bout avec un vrai Claude Code** (le serveur MCP n'ouvre qu'avec HA prêt).

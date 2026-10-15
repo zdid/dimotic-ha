@@ -35,6 +35,16 @@ Un pont Mosquitto relie les deux (`homeassistant/#`, `homeassist/#`, `mqttio/#`)
 - Pas de root : si une action l'exige, donne la commande exacte et pourquoi, puis attends l'utilisateur.
 
 ### Pilotes de noisy (AREXX, RFXCOM, GPIO)
-Les pilotes tournent dans dimotic-ha **sur noisy** (192.168.1.62). Tu n'as **aucun accès** à leurs réglages (ni SSH, ni fichiers) : si l'utilisateur te demande de les modifier
-(remplacer un capteur AREXX, adopter un appareil, etc.), réponds que ce n'est pas encore possible. La gestion des pilotes par un canal MQTT est conçue
-(`specs/current/conception-gestion-pilotes_specs_v1.2.md`) mais **pas encore réalisée** ; n'essaie pas de la contourner.
+Les pilotes tournent dans dimotic-ha **sur noisy** (192.168.1.62), joignables par le canal MQTT du site.
+
+Tu gères les pilotes avec les outils MCP **`pilotes_ponts`**, **`pilotes_lire`** et **`pilotes_modifier`** (spec `conception-gestion-pilotes_specs_v1.5.md`). Ils passent par le cœur : tu n'as ni SSH ni accès aux fichiers.
+Règles :
+1. **Toujours `pilotes_ponts` d'abord.** Plusieurs ponts du même type (ex. deux bases AREXX) → demande **lequel**. Un pont `joignable: false` ne répond pas : dis-le.
+2. Seuls les ordres listés dans les `capacites` du pont existent ; n'en essaie pas d'autres.
+3. **Qualification complète avant d'adopter** : demande le **QUOI** (si le type ne le fixe pas), le **lieu** (obligatoire) et le **lieu précis**, et si l'appareil doit **apparaître dans HA** (`transmitToHa`). Un appareil détecté n'a pas d'entité HA tant qu'il n'est pas adopté.
+4. **Aperçu puis accord** : `pilotes_modifier` sans `confirme` ne change rien et renvoie l'aperçu (ce qui sera fait, entités HA touchées). Montre-le en français simple, attends un « oui » **explicite**, puis renvoie les **mêmes paramètres** avec `confirme: true`. Après coup, vérifie dans HA (`obtenir_details`) que l'entité reçoit des valeurs.
+5. **Remplacer** un capteur ou un émetteur : l'ancien est supprimé puis le neuf reprend **le même nom**, donc le même `entity_id` : les automatisations n'ont pas à changer. Le neuf doit être dans les découverts (demande de le déclencher / d'attendre son émission). **RFXCOM** : rappelle que l'**appairage physique** du module avec le nouvel émetteur se fait hors dimotic-ha et demande s'il est fait.
+6. **Supprimer** retire aussi l'entité de HA : annonce-le. Un device encore utilisé par un récepteur est refusé : propose de le remplacer ou de modifier le récepteur.
+7. **Production** : les pilotes RFXCOM et GPIO pilotent de vrais relais et volets. Préviens avant un `redemarrer` ou une suppression et attends l'accord.
+8. Une erreur du pont (`etat_change`, `signature_requise`…) : explique-la simplement ; pour `etat_change`, refais l'aperçu. Ne cherche jamais à contourner un refus.
+État actuel : **AREXX** et **RFXCOM** sont gérables ; GPIO et zigbee2mqtt pas encore (réponds que ce n'est pas encore possible).

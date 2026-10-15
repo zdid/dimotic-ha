@@ -14,8 +14,41 @@ export const PILOTES_EVENTS = {
   PRESENCE: 'pilotes:presence',
   PRESENCE_DEMANDE: 'pilotes:presence:demande',
   REQUETE: 'pilotes:requete',
-  REPONSE: 'pilotes:reponse'
+  REPONSE: 'pilotes:reponse',
+  /** app « agent » (ia) → cœur : une requête à signer et publier en MQTT (le secret reste dans le cœur). */
+  AGENT_REQUETE: 'pilotes:agent:requete',
+  /** cœur → app « agent » : la réponse du pont. */
+  AGENT_REPONSE: 'pilotes:agent:reponse',
+  /** app « agent » → cœur : liste des ponts du site. */
+  AGENT_PONTS_DEMANDE: 'pilotes:agent:ponts:get',
+  /** cœur → app « agent » : les ponts du site (présences retenues, état de la machine). */
+  AGENT_PONTS: 'pilotes:agent:ponts'
 } as const;
+
+/** Requête d'une application « agent » (ia) : le cœur ajoute id, date, signature. `ref` retrouve la réponse. */
+export interface PiloteAgentRequeteEvenement {
+  ref: string;
+  pont: string;
+  ordre: string;
+  parametres?: Record<string, unknown>;
+  apercu?: boolean;
+  jeton?: string;
+}
+
+export interface PiloteAgentReponseEvenement {
+  ref: string;
+  reponse: PiloteReponse;
+}
+
+export interface PontSite extends PilotePresencePubliee {
+  /** Vrai si le pont est en ligne ET sa machine aussi. */
+  joignable: boolean;
+}
+
+export interface PiloteAgentPontsEvenement {
+  ref: string;
+  ponts: PontSite[];
+}
 
 /** Ordres qui ne modifient rien : permis sans signature. */
 export const PILOTES_ORDRES_LECTURE = ['lister', 'decouverts'] as const;
