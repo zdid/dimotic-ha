@@ -1,6 +1,6 @@
 # CHANGELOG - Historique des Spécifications
 
-**Dernière mise à jour :** 14 Octobre 2026
+**Dernière mise à jour :** 15 Octobre 2026
 
 ---
 
@@ -51,6 +51,8 @@
 | 08/10/2026 | **v1.22** | fonctionnelles-ia_specs_v1.22.md | Claude | **Entités de réglage/diagnostic** (§19.10) : écartées de la vision de Mistral ; `categorie` + filtre dans `lister_entites` (MCP), champs ajoutés à `obtenir_details`. v1.21 archivée. |
 | 08/10/2026 | **v1.21** | fonctionnelles-ia_specs_v1.21.md | Claude | **Dépôt d'automatisations dans HA par Claude Code** (§19.9) : outils MCP `lire_automatisations_ha`, `deposer_automatisation`, `supprimer_automatisation` ; aperçu sans effet par défaut + `confirme: true`, sauvegarde avant remplacement, alerte anti-boucle ; via `HaRestBridge`. v1.20 archivée. |
 | 08/10/2026 | **v1.20** | fonctionnelles-ia_specs_v1.20.md | Claude | **Lecture du planificateur par Claude Code** (§19.8) : outil MCP `lire_planificateur` (statut, planifications, macros, actions reçues, commandes réellement envoyées à HA, YAML), lecture seule, sans modifier `planificateur`. v1.19 archivée. |
+| 15/10/2026 | **v1.6** | fonctionnelles-esphome_specs_v1.6.md | Claude | **Poseur et usine vérifiés en réel** sur l'écran du mur (OTA depuis HA, vérification par la version du firmware, ~1 min 10), `secrets` du manifeste et contrôle avant dépôt, dépôt à la racine du dossier d'ESPHome, adresse IP obligatoire dans le conteneur du poseur, restauration d'un appareil en mode sans échec. v1.5 archivée dans `archives/v1.5-esphome/`. |
+| 15/10/2026 | **v1.2** | fonctionnelles-esps-assemble_specs_v1.2.md | Claude | **Wifi multiples par site** (§4.4 : `bibliotheque/wifi/<site>.yaml`, liste générée, point d'accès de secours par site, secrets du manifeste), **tailles des pages de plans** (`tailles_plans`), **plans à fond transparent inversés**, essai réel de bout en bout et repli en point d'accès. v1.1 archivée dans `archives/v1.1-esps-assemble/`. |
 | 14/10/2026 | **v1.5** | fonctionnelles-esphome_specs_v1.5.md | Claude | **Usine vérifiée en réel sur falbala** depuis une demande de HA : accès du conteneur de l'instance (dossier ESPHome, socket Docker), sujet de la demande « Générer » tranché (`dimotic/esps-assemble/<site>/generer`), `usine.sites[]` distinct de `poseur.mqtt`, compilation interrompue par une recréation du conteneur. v1.4 archivée dans `archives/v1.4-esphome/`. |
 | 14/10/2026 | **v1.1** | fonctionnelles-esps-assemble_specs_v1.1.md | Claude | **Pages de plans générées depuis HA** (§8bis : export de l'intégration Plans, port TypeScript du générateur, image de fond, fiche `plans`, bouton « Générer »), configuration précisée (§3), installation par la racine externe et pièges (§12bis) ; chaîne HA → assembleur → usine → compilation **vérifiée en réel**. v1.0 archivée dans `archives/v1.0-esps-assemble/`. |
 | 14/10/2026 | **v1.0** | fonctionnelles-esps-assemble_specs_v1.0.md | Claude | **Application renommée `esps-assemble`** (ex-`espdisplay`, dont la spec v1.7 est archivée) : fiches de matériel / élément / appareil, résolution, vérifications (compatibilité, broches), paquet zip et manifeste, demande MQTT à l'usine, page, **conversion des coordonnées des plans** (0 pixel d'écart avec l'ancien script), `poele-display` désassemblé ; ancien pipeline SSH retiré ; chaîne assembleur → usine vérifiée en réel. |
