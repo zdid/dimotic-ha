@@ -20,6 +20,9 @@ import { ensureGlobalSshKey } from '../infrastructure/remote/SshClient';
 import { isRunningInDocker } from '../infrastructure/runtime/docker';
 import { getPrimaryIPv4Address } from '../infrastructure/runtime/network';
 import { ProcessSupervisor, SupervisorEventBridge } from '../supervisor';
+import { PilotesGateway } from '../pilotes/PilotesGateway';
+import { PILOTES_EVENTS } from '../pilotes/types';
+import { MqttTransport } from '../infrastructure/transport/MqttTransport';
 import type { RestartManager } from './RestartManager';
 import type { SocketBridge } from './SocketBridge';
 import type { ConfigService } from '../infrastructure/config/ConfigService';
@@ -98,6 +101,7 @@ export class AppService {
   private haQueryBridge: HaQueryBridge;
   // ⭐ fonctionnelles-supervisor_specs v2.6 — applications tournant en process séparé (Phase 1 : espdisplay)
   private processSupervisor: ProcessSupervisor;
+  private pilotesGateway: PilotesGateway | null = null;
   private supervisorBridge: SupervisorEventBridge;
   
   // Instances des services d'application
@@ -185,6 +189,7 @@ export class AppService {
         reconnectDelay: mqttConfig.reconnect_delay
       };
       this.processSupervisor.attachMqttCommandListener(machineId, brokerConfig);
+      this.startPilotesGateway(machineId, bootConfig.core.site, bootConfig.core.pilotes, mqttConfig);
     } else {
       this.logger.debug('AppService', 'ha.mqtt non configuré — commandes MQTT start/stop/restart à distance désactivées (le pont EventBus des apps séparées utilise IPC, indépendant de ha.mqtt)');
     }
@@ -658,6 +663,48 @@ export class AppService {
   }
 
   /**
+   * ⭐ 15/10/2026 (conception-gestion-pilotes_specs v1.1) — démarre le canal MQTT « gestion des pilotes » : présence des
+   * ponts, requêtes de l'agent IA transmises aux applications, réponses. Même broker que les commandes de cycle de vie.
+   */
+  private startPilotesGateway(
+    machineId: string,
+    site: string,
+    reglages: { actif?: boolean; secret?: string } | undefined,
+    mqttConfig: { host: string; port: number; username?: string; password?: string; keepalive?: number; reconnect_delay?: number }
+  ): void {
+    if (reglages?.actif === false) {
+      this.logger.info('AppService', 'Canal pilotes désactivé (core.pilotes.actif = false)');
+      return;
+    }
+    const siteEffectif = site || machineId;
+    if (!site) {
+      this.logger.warn('AppService', `core.site est vide : le canal pilotes est isolé sous l'identité de la machine (${machineId}) ; renseigner core.site pour regrouper les machines d'un site`);
+    }
+    const testament = PilotesGateway.testamentMachine(siteEffectif, machineId);
+    const transport = new MqttTransport(
+      {
+        host: mqttConfig.host,
+        port: mqttConfig.port,
+        clientId: `core-pilotes-${machineId}`,
+        username: mqttConfig.username ?? '',
+        password: mqttConfig.password ?? '',
+        keepalive: mqttConfig.keepalive ?? 60,
+        reconnectDelay: mqttConfig.reconnect_delay ?? 5,
+        protocolVersion: 5,
+        ...testament
+      },
+      this.logger
+    );
+    this.pilotesGateway = new PilotesGateway(transport, this.eventBus, this.logger, {
+      site: siteEffectif,
+      machineId,
+      secret: process.env.DIMOTIC_PILOTES_SECRET || reglages?.secret || ''
+    });
+    this.processSupervisor.onChildExit((info) => this.pilotesGateway?.surArretApplication(info.appId));
+    this.pilotesGateway.start();
+  }
+
+  /**
    * Enregistre le spawn (ProcessSupervisor) et ponte les événements sens core → app
    * (SupervisorEventBridge) pour une application en process séparé — factorisé hors de
    * detectApplicationModules() (⭐ 25/08/2026) pour être réutilisable depuis
@@ -675,6 +722,9 @@ export class AppService {
     this.supervisorBridge.bridgeEvent(appModule.id, 'ha:bridge:reply');
     this.supervisorBridge.bridgeEvent(appModule.id, 'ha:entity:state_changed');
     this.supervisorBridge.bridgeEvent(appModule.id, 'ha:ready');
+    // ⭐ 15/10/2026 — canal « gestion des pilotes » : requêtes du cœur vers l'application, et demande d'annonce de présence.
+    this.supervisorBridge.bridgeEvent(appModule.id, PILOTES_EVENTS.REQUETE);
+    this.supervisorBridge.bridgeEvent(appModule.id, PILOTES_EVENTS.PRESENCE_DEMANDE);
     if (appModule.type === 'integration') {
       this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:command`);
       this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:bridge:connection`);

@@ -37,4 +37,4 @@ Un pont Mosquitto relie les deux (`homeassistant/#`, `homeassist/#`, `mqttio/#`)
 ### Pilotes de noisy (AREXX, RFXCOM, GPIO)
 Les pilotes tournent dans dimotic-ha **sur noisy** (192.168.1.62). Tu n'as **aucun accès** à leurs réglages (ni SSH, ni fichiers) : si l'utilisateur te demande de les modifier
 (remplacer un capteur AREXX, adopter un appareil, etc.), réponds que ce n'est pas encore possible. La gestion des pilotes par un canal MQTT est conçue
-(`specs/current/conception-gestion-pilotes_specs_v1.1.md`) mais **pas encore réalisée** ; n'essaie pas de la contourner.
+(`specs/current/conception-gestion-pilotes_specs_v1.2.md`) mais **pas encore réalisée** ; n'essaie pas de la contourner.

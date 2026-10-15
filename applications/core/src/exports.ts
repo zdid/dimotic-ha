@@ -104,6 +104,9 @@ export type { IpcEnvelope } from './application/IpcEventBus';
 // Superviseur multi-process (fonctionnelles-supervisor_specs v2.6 §3/§5/§6.3/§8.4)
 export * from './supervisor';
 
+// Gestion des pilotes par l'agent IA (conception-gestion-pilotes_specs v1.1) : contrat commun, PilotePont (côté application), PilotesGateway (côté cœur)
+export * from './pilotes';
+
 // SocketBridge - Pont entre EventBus et Socket.io
 export { SocketBridge } from './application/SocketBridge';
 

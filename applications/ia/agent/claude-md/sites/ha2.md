@@ -135,7 +135,7 @@ Règles SSH : une clé dédiée pour ce Claude (à fournir par l'utilisateur, pa
 
 ### Pilotes de stfort (RFXCOM, GPIO, AREXX…)
 Les pilotes tournent dans dimotic-ha **sur stfort** (192.168.1.53). Tu n'as **aucun accès** à leurs réglages tant que la gestion des pilotes par MQTT n'est pas réalisée
-(`specs/current/conception-gestion-pilotes_specs_v1.1.md`) : si l'utilisateur te le demande, réponds que ce n'est pas encore possible.
+(`specs/current/conception-gestion-pilotes_specs_v1.2.md`) : si l'utilisateur te le demande, réponds que ce n'est pas encore possible.
 
 ### 8. Méthode pour créer un automatisme
 

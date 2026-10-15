@@ -1,6 +1,6 @@
 # Conception — Gestion des pilotes par l'agent IA (ponts, découverts, adoption, remplacement)
 
-*Version 1.1 — 15 octobre 2026 — **validée par l'utilisateur le 15/10/2026** ; aucun code écrit. Décisions issues de la discussion du 15/10/2026. **Changement par rapport à la v1.0 : l'adaptateur zigbee2mqtt n'est plus dans `nommage` mais dans une application `zigbee2mqtt` à part (§9, §12, §14).***
+*Version 1.2 — 15 octobre 2026 — **étape 1 (cœur + pont de test) réalisée et essayée** (`fonctionnelles-supervisor` v2.11 §14ter) ; deux écarts corrigés ici (§4 testament, §11/§14 signature). Décisions issues de la discussion du 15/10/2026. **Changement par rapport à la v1.0 : l'adaptateur zigbee2mqtt n'est plus dans `nommage` mais dans une application `zigbee2mqtt` à part (§9, §12, §14).***
 
 ## 1. Objet
 
@@ -40,10 +40,11 @@ Agent Claude ──MCP (app ia)──► MQTT du site ──► cœur du pont �
 
 | Sujet | Contenu | Règles |
 |---|---|---|
-| `dimotic/<site>/pilotes/<pont>/presence` | JSON : `pont`, `machine`, `appId`, `type` (arexx, rfxcom, gpio, zigbee2mqtt…), `version`, `capacites[]`, `etat`, `date` | **retenu** (c'est un état) + **testament** (`etat: hors_ligne`) |
+| `dimotic/<site>/pilotes/<pont>/presence` | JSON : `pont`, `machine`, `appId`, `type` (arexx, rfxcom, gpio, zigbee2mqtt…), `version`, `capacites[]`, `etat`, `date` | **retenu** (c'est un état) |
 | `dimotic/<site>/pilotes/<pont>/requete/<id>` | JSON : `ordre`, `parametres`, `apercu` (booléen), `jeton` (voir §5.3), `emetteur` | **JAMAIS retenu**, QoS 1, durée de vie courte |
 | `dimotic/<site>/pilotes/<pont>/reponse/<id>` | JSON : `ok`, `resultat` ou `erreur` (codes standardisés), `apercu`, `jeton`, `sauvegarde` | non retenu |
 
+- **Testament** (écart constaté à l'essai, v1.2) : MQTT n'en permet qu'**un par connexion**. Il porte donc sur la **machine** (`dimotic/<site>/pilotes/_machines/<machineId>`, retenu) et non sur chaque pont. Après un arrêt brutal du cœur, les présences retenues des ponts restent `en_ligne` : **un pont est injoignable si sa machine est `hors_ligne`**, et le cœur corrige au redémarrage les présences périmées de sa machine (délai 15 s).
 - **`ponts` n'est pas un ordre** : c'est la lecture des messages `presence` retenus de `dimotic/<site>/pilotes/+/presence`. Un pont sans présence est **injoignable**, pas inexistant.
 - Aucun ordre n'est jamais publié en retenu (règle du projet : un ordre ancien ne doit jamais être rejoué au redémarrage).
 - Identifiants et droits du broker : l'agent n'a le droit de publier que sous `…/requete/#` et de lire `…/reponse/#` et `…/presence`.
@@ -191,4 +192,4 @@ Chaque étape est testée **sans Docker d'abord** (instance de développement), 
 - **Présence des ponts** : **tranché (15/10)** — les présences MQTT suffisent : la demande « liste des ponts » reçoit la réponse de ceux qui sont là. Le registre d'applications par gossip reste un **autre sujet** (connaître les machines disparues) et n'est pas utilisé ici.
 - **Où implémenter le pilote z2m** : **tranché (15/10, v1.1)** — application `zigbee2mqtt` à part (en v1.0 : dans `nommage`, écarté car `nommage` sert tous les pilotes).
 - **Scènes RFXCOM**, **teleinfo/tasmota/evoo7** : étape ultérieure.
-- **Authentification des requêtes** au-delà des droits du broker (signature du jeton) : nécessaire ou non entre deux machines d'un même site ?
+- **Authentification des requêtes** : **tranché (15/10, v1.2)** — signature HMAC-SHA256 avec un secret par site (`core.pilotes.secret`, `secrets_config.yaml`), suite de `supervisor` §10 ; **sans secret, lecture seule** (lister, decouverts). Distribution du secret : manuelle ; outil de mise en place à prévoir.

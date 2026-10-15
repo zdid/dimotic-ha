@@ -22,7 +22,8 @@ const DEFAULT_CONFIG: AppConfig = {
   core: {
     machineId: generateRandomMachineId(),
     site: '',
-    appGossipIntervalSeconds: 300
+    appGossipIntervalSeconds: 300,
+    pilotes: { actif: true, secret: '' }
   },
   disabledApps: [],
   targets: [],

@@ -14,7 +14,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData, HaBridgeClient } from '../../../core/dist/exports';
-import { computeBridgeInstance } from '../../../core/dist/exports';
+import { computeBridgeInstance, PilotePont } from '../../../core/dist/exports';
+import { PiloteTest } from './PiloteTest';
 import {
   testcycleConfigSchema,
   testcycleDonneesSchema,
@@ -36,6 +37,8 @@ export class TestCycleService implements ITestCycleService {
   private config: TestcycleConfig;
   private donnees: TestcycleDonnees;
   private readonly bridgeInstance: string;
+  /** ⭐ 15/10/2026 — pont de TEST du canal « gestion des pilotes » (conception-gestion-pilotes_specs v1.1). */
+  private pilotePont: PilotePont | null = null;
   private readonly donneesPath: string;
   private readonly startedAt = new Date();
   private compteur = 0;
@@ -100,11 +103,21 @@ export class TestCycleService implements ITestCycleService {
     this.restartTimer();
     await this.tick();
     this.emitDonnees();
+    this.pilotePont = new PilotePont(this.eventBus, this.logger, {
+      appId: MODULE_NAME,
+      pont: this.bridgeInstance,
+      type: 'test',
+      version: '1.0',
+      capacites: ['lister', 'decouverts', 'adopter', 'remplacer', 'effacer', 'ignorer', 'supprimer', 'redemarrer'],
+      gestionnaire: new PiloteTest(path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', MODULE_NAME, 'pilote-test.json'))
+    });
+    this.pilotePont.start();
     this.logger.info('TestCycleService', `Démarré — bridge ${this.bridgeInstance}, intervalle ${this.config.publishIntervalSec}s`);
   }
 
   async stop(): Promise<void> {
     this.logger.info('TestCycleService', 'Arrêt propre (désenregistrement du bridge MQTT)');
+    this.pilotePont?.stop();
     if (this.timer) clearInterval(this.timer);
     if (this.crashTimer) clearTimeout(this.crashTimer);
     this.eventBus.emitGeneric('integration:bridge:unregister', { moduleName: MODULE_NAME, bridgeInstance: this.bridgeInstance });

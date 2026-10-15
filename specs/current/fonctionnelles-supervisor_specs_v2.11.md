@@ -1,6 +1,7 @@
 # Spécifications Fonctionnelles - Supervision Multi-Machines (SUPERVISOR)
 
-*Version 2.10 - 24 Septembre 2026 — §8 réécrit (cycle de vie des applications) : le core ne redémarre
+*Version 2.11 - 15 Octobre 2026 — **§14ter (nouveau) : canal MQTT « gestion des pilotes »** — le cœur publie la présence des ponts (pilotes), reçoit les requêtes de l'agent IA, les transmet à l'application par le pont d'événements et publie la réponse ; signature HMAC, aperçu + jeton, jamais de message retenu pour un ordre ; implémenté et essayé de bout en bout avec `testcycle` (pont de test). Voir `conception-gestion-pilotes_specs` v1.2.*
+*Historique — Version 2.10 - 24 Septembre 2026 — §8 réécrit (cycle de vie des applications) : le core ne redémarre
 JAMAIS pour une application ; un seul chemin « activer » et un seul « désactiver » ; application
 nouvelle = désactivée (y compris installation neuve) ; racine externe `data/applications/` ; nettoyage
 MQTT par le core à toute fin de process ; état `restarting`/`crashed` visible. Tout validé en réel avec
@@ -140,6 +141,7 @@ ne tient pas face aux chiffres réels mesurés sur `ha2`.*
     - 14.9 [Correctif `app:menu:register` jamais relayé (v2.6)](#149-correctif-appmenuregister-jamais-relayé-nouveau-v26-16082026)
     - 14.10 [Migration différée : ia/planificateur/haplan/arbreouquoi (v2.6)](#1410-migration-différée--iaplanificateurhaplanarbreouquoi-nouveau-v26-16082026)
     - 14.11 [Vérifié en conditions réelles (v2.6)](#1411-vérifié-en-conditions-réelles-v26)
+    - 14ter [Canal « gestion des pilotes » (v2.11)](#14ter-canal--gestion-des-pilotes--nouveau-v211-15102026)
 15. [Annexes](#15-annexes)
 
 ---
@@ -1277,6 +1279,62 @@ correct, ajout/suppression d'un site externe, navigation retour depuis un module
   (aucun trafic cross-site prévu, le gossip reste intra-site par construction).
 - Installation/configuration de WireGuard — infrastructure réseau, hors du dépôt de code.
 
+## 14ter. Canal « gestion des pilotes » (nouveau v2.11, 15/10/2026)
+
+Implémente l'étape 1 de `conception-gestion-pilotes_specs` v1.2 : permettre à l'agent IA d'un site de lister, adopter, remplacer, effacer ou supprimer des ressources d'un pilote (capteurs AREXX, appareils RFXCOM, broches GPIO, appareils Zigbee…) **sans SSH ni accès aux fichiers**, par MQTT, via le cœur.
+
+### 14ter.1 Principe
+
+Le cœur de chaque machine porte une **passerelle** (`PilotesGateway`, `applications/core/src/pilotes/`) qui parle MQTT d'un côté et à l'application pilote de l'autre, par le pont d'événements (`SupervisorEventBridge`, IPC — §14.5), sans nouveau mécanisme entre cœur et application. Côté application, un `PilotePont` (même dossier, exporté par `core/dist/exports`) porte le pont : présence, filtrage des requêtes, aperçu, jeton, réponse. Un pilote n'écrit que son `PiloteGestionnaire` (`lire`, `preparer`, `appliquer`).
+
+Événements locaux (bridgés automatiquement pour toute application en process séparé, `AppService.wireSeparateProcessApp()`) :
+
+| Événement | Sens | Contenu |
+|---|---|---|
+| `pilotes:presence` | app → cœur | `{ appId, presence: { pont, type, version, capacites[], etat } }` |
+| `pilotes:presence:demande` | cœur → app | demande de ré-annonce (connexion MQTT, redémarrage du cœur) |
+| `pilotes:requete` | cœur → app | `{ appId, requete }` (le sujet MQTT fait foi pour `pont` et `id`) |
+| `pilotes:reponse` | app → cœur | `{ reponse }` |
+
+### 14ter.2 Sujets MQTT
+
+Racine `dimotic/<site>/pilotes/` — `<site>` = `core.site` passé en segment de topic (minuscules, `[a-z0-9_-]`) ; **site vide = identité de la machine** (canal isolé, avertissement au démarrage) ; les sites restent étanches.
+
+| Sujet | Contenu | Règles |
+|---|---|---|
+| `<pont>/presence` | `PilotePresence` + `machine`, `appId`, `date` | **retenu**, QoS 1 |
+| `_machines/<machineId>` | `{ machine, etat, date }` | **retenu** ; **testament** `hors_ligne` (une seule dernière volonté par connexion MQTT : elle porte sur la MACHINE, pas sur chaque pont) |
+| `<pont>/requete/<id>` | `PiloteRequete` | **jamais retenu** (une requête retenue reçue est ignorée et journalisée) |
+| `<pont>/reponse/<id>` | `PiloteReponse` | non retenu, QoS 1 |
+
+Connexion MQTT dédiée du cœur (`core-pilotes-<machineId>`, protocole 5), sur le broker `ha.mqtt` (comme les commandes de cycle de vie §8). Aucune connexion si `ha.mqtt` est absent ou `core.pilotes.actif: false`.
+
+### 14ter.3 Présence
+
+- Une application annonce chaque pont au démarrage (`en_ligne`) et à la demande ; le cœur publie la présence retenue avec `machine`, `appId`, `date`.
+- **Fin de process** (arrêt demandé ou plantage, `ProcessSupervisor.onChildExit`) : le cœur publie `hors_ligne` pour les ponts de l'application. L'arrêt propre du cœur publie `hors_ligne` pour tous ses ponts et pour la machine.
+- **Arrêt brutal du cœur** : seul le testament de la machine part ; les présences retenues des ponts restent `en_ligne`. **Un lecteur doit donc considérer un pont comme injoignable si la machine (`_machines/<id>`) est `hors_ligne`.**
+- **Présences périmées** : au démarrage, une présence retenue de CETTE machine qui n'est pas ré-annoncée dans les 15 s est corrigée en `hors_ligne` ; celles des autres machines ne sont jamais touchées.
+- **Plusieurs machines** : un pont inconnu de cette passerelle n'est pas pour elle — aucune réponse, aucune erreur (c'est le pont d'une autre machine du site).
+
+### 14ter.4 Requêtes et sécurité
+
+Contrôles de la passerelle, dans l'ordre : sujet (`<pont>/requete/<id>`, id `[A-Za-z0-9_-]{1,64}`), JSON, ordre connu (`lister`, `decouverts`, `adopter`, `creer`, `modifier`, `remplacer`, `effacer`, `ignorer`, `supprimer`, `redemarrer`, `appairer`), `date` (refus au-delà de ±2 min), signature, pont en ligne, identifiant non déjà en cours. Codes d'erreur : `requete_invalide`, `ordre_inconnu`, `requete_expiree`, `signature_invalide`, `signature_requise`, `pont_hors_ligne`, `requete_en_double`, `delai_depasse` (60 s sans réponse de l'application) ; côté pilote : `ordre_non_declare`, `jeton_requis`, `etat_change`, `erreur_pilote`.
+
+- **Signature (suite de §10)** : HMAC-SHA256 (hex) d'un message canonique `id|pont|ordre|paramètres(JSON à clés triées)|aperçu|jeton|date` avec le **secret du site**, `core.pilotes.secret`, rangé dans `secrets_config.yaml` (jamais diffusé entre machines, masqué dans l'interface) ; la variable `DIMOTIC_PILOTES_SECRET` est prioritaire. Distribution du secret : manuelle, à la mise en place.
+- **Sans secret** : seuls `lister` et `decouverts` sont acceptés ; tout ordre modifiant est refusé (`signature_requise`). Sûr par défaut.
+- **Aperçu et jeton** (côté `PilotePont`) : tout ordre modifiant est d'abord préparé (`apercu: true` : rien n'est modifié) et renvoie un `jeton` = empreinte de l'ordre, des paramètres et de l'état concerné ; l'ordre réel doit présenter ce jeton, sinon `jeton_requis` ou, si l'état a changé, `etat_change`.
+
+### 14ter.5 `testcycle` — pont de test
+
+`testcycle` porte un pont de test `testcycle_<machineId>` (type `test`) avec un pilote factice (`PiloteTest`) : un capteur configuré, deux « découverts » simulés (en mémoire), écriture réelle de `data/testcycle/pilote-test.json` **avec sauvegarde `.bak-…`**, ordres `lister`, `decouverts`, `adopter` (qualification quoi/lieu/lieu précis obligatoire), `remplacer` (suppression puis ajout au même nommage), `effacer`, `ignorer`, `supprimer`, `redemarrer`.
+
+### 14ter.6 Vérifié (15/10/2026)
+
+Instance isolée du cœur (broker MQTT privé, secret d'essai) + `testcycle` activé à chaud : présence retenue publiée ; `lister`/`decouverts` ; refus sans signature ; aperçu → refus sans jeton → application avec jeton → fichier modifié, sauvegarde créée au 2ᵉ ordre ; qualification incomplète refusée ; jeton rejoué refusé ; application désactivée → `hors_ligne` puis requête `pont_hors_ligne`, réactivée → `en_ligne` ; arrêt brutal du cœur → testament de la machine ; redémarrage → présence fantôme corrigée. 22 tests unitaires (`core/src/pilotes/__tests__/pilotes.test.ts`) ; suite complète du cœur : 232 verts.
+
+---
+
 ## 15. Annexes
 
 ### 15.1 Références
@@ -1316,6 +1374,7 @@ correct, ajout/suppression d'un site externe, navigation retour depuis un module
 ### 15.3 Historique
 | Version | Date | Auteur | Changements |
 |---------|------|--------|------------|
+| 2.11 | 2026-10-15 | Claude | **Canal MQTT « gestion des pilotes »** (§14ter, nouveau) : passerelle du cœur (`PilotesGateway`), `PilotePont` côté application, présence retenue + testament de machine, requêtes jamais retenues, signature HMAC (secret du site dans `secrets_config.yaml`, lecture seule sans secret), aperçu + jeton ; pont de test dans `testcycle` ; essayé de bout en bout. |
 | 2.8 | 2026-08-27 | Claude | **Visibilité multi-machines intra-site + page d'accueil** (§14bis, nouveau) — voir aussi `fonctionnelles-core` : registre d'applications par gossip MQTT (`AppGossipService.ts`, même patron que `TargetGossipService`, `dimotic/core/{machineId}/known-apps` retenu, pas de renommage `{machineId}::{id}` — une même app sur plusieurs machines apparaît plusieurs fois, voulu). Entrées distantes affichées en lecture seule à côté du menu existant (pas de fusion dans `ModuleManager`), clic → redirection simple `http://{address}:{webPort}/` (pas de proxy HTTP/WebSocket, vitrine unique déjà assurée par la diffusion du même registre à chaque `core`). Nouveau lien HA local (`app:ha-address`), nouvelle liste personnelle de sites externes jamais gossipée (`core.externalSites`), nouvelle page d'accueil par défaut (`HomeView.ts`). Vocabulaire "site" clarifié en session (propriété/foyer indépendant, aucune fusion cross-site — WireGuard hors périmètre du dépôt). Deux bugs réels trouvés et corrigés en testant : sélection du module par défaut dupliquée dans `ModuleManager.ts` (écrasait "accueil"), `zigbee2mqttTargets` perdu silencieusement par `setDisabledApps()`/`saveConfig()`/`clearHaWsToken()` de `ConfigService` (même classe que l'incident `disabledApps` du 07/08/2026). Vérifié en conditions réelles (broker MQTT réel, navigateur). Besoin d'origine (app hors Docker) différé à une session ultérieure. Toutes demandes utilisateur, session du 27/08/2026. Ancienne version v2.7 archivée. |
 | 2.6 | 2026-08-16 | Claude | **⭐ Phase 2 — migration terminée pour les 6 applications restantes prévues** (`rpigpio`, `teleinfo`, `arexx`, `evoo7`, `nommage`, `rfxcom`) et révision d'architecture en cours de route, §14.5-§14.11 (nouvelles) : pivot du pont EventBus↔app de MQTT (`MqttEventBus`) vers IPC (`IpcEventBus`) — les apps migrées restent sur la même machine que `core`, qui les spawn lui-même, un tuyau `child_process` suffit (§14.5) ; pont générique éliminant `bridgedEvents` manuel via 3 mécanismes automatiques (§14.6) ; rollout des 6 apps avec les écueils rencontrés par app (§14.7) ; présence/heartbeat rpigpio/teleinfo, du point 1 de l'Agent Minimal §11 passé de la conception à une implémentation réelle, teleinfo vérifiée en conditions réelles (§11.5/§14.8) ; correctif du bug préexistant `app:menu:register` trouvé en Phase 1 (§14.9) ; migration différée d'`ia`/`planificateur`/`haplan`/`arbreouquoi`, décision explicite documentée (§14.10). `MqttEventBus`/le pont MQTT générique non supprimés, juste plus utilisés par aucune app (§6.3/§7.1 annotées d'une note v2.6). Ancienne version v2.5 archivée. |
 | 2.5 | 2026-08-16 | Claude | **⭐ Phase 1 implémentée et vérifiée en conditions réelles** (§14, nouvelle) : `espdisplay` migrée en process séparé (`MqttEventBus`, `ProcessSupervisor`, `SupervisorEventBridge`, `standalone.ts`). Deux problèmes réels trouvés en testant : process orphelins au redémarrage de `core` (corrigé, `stopAllSeparateProcesses()` + filet `process.on('exit')`), `app:menu:register` jamais relayé côté socle pour aucune app (préexistant, non corrigé ici, signalé dans `TODO.md`). Deux décisions prises en cours de route : commandes MQTT start/stop/restart généralisées à toute app séparée (pas réservées à l'agent minimal §11), aucune signature sur ce canal pour cette phase (authentification prévue au niveau du broker mosquitto, sujet séparé). Ancienne version v2.4 archivée. |
