@@ -725,6 +725,7 @@ export class AppService {
     // ⭐ 15/10/2026 — canal « gestion des pilotes » : requêtes du cœur vers l'application, et demande d'annonce de présence.
     this.supervisorBridge.bridgeEvent(appModule.id, PILOTES_EVENTS.REQUETE);
     this.supervisorBridge.bridgeEvent(appModule.id, PILOTES_EVENTS.PRESENCE_DEMANDE);
+    this.supervisorBridge.bridgeEvent(appModule.id, PILOTES_EVENTS.HA_RETRAIT_RESULTAT);
     if (appModule.type === 'integration') {
       this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:command`);
       this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:bridge:connection`);

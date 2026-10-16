@@ -12,7 +12,7 @@
 
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData, RemoteAction } from '../../../core/dist/exports';
-import { computeBridgeInstance, isRunningInDocker, ensureGlobalSshKey, PilotePont } from '../../../core/dist/exports';
+import { computeBridgeInstance, isRunningInDocker, ensureGlobalSshKey, PilotePont, attendreRetraitHa } from '../../../core/dist/exports';
 import { arexxConfigSchema, type ArexxConfig } from './config-schema';
 import type { ArexxSensorsConfigFile } from './devices-config-schema';
 import type { ArexxRawReading, ArexxSensorInfo, ArexxStatus } from './types';
@@ -131,6 +131,7 @@ export class ArexxService implements IArexxService {
         publierDecouverte: (capteur) => this.publishSensorDiscovery(capteur),
         retirerDecouverte: (uniqueId) => this.removeSensorDiscovery(uniqueId),
         rafraichir: () => this.emitSensorsList(),
+        attendreRetraitHa: (noms) => attendreRetraitHa(this.eventBus, MODULE_NAME, noms),
         relire: () => this.relireCapteurs()
       })
     });

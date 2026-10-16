@@ -22,7 +22,11 @@ export const PILOTES_EVENTS = {
   /** app « agent » → cœur : liste des ponts du site. */
   AGENT_PONTS_DEMANDE: 'pilotes:agent:ponts:get',
   /** cœur → app « agent » : les ponts du site (présences retenues, état de la machine). */
-  AGENT_PONTS: 'pilotes:agent:ponts'
+  AGENT_PONTS: 'pilotes:agent:ponts',
+  /** app → cœur : « attends que HA ait supprimé ces entités » (remplacement : suppression AVANT création). */
+  HA_RETRAIT_DEMANDE: 'pilotes:ha:retrait:attendre',
+  /** cœur → app : résultat de l'attente (filtré par `appId` / `requestId`). */
+  HA_RETRAIT_RESULTAT: 'pilotes:ha:retrait:resultat'
 } as const;
 
 /** Requête d'une application « agent » (ia) : le cœur ajoute id, date, signature. `ref` retrouve la réponse. */

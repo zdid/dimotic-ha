@@ -25,6 +25,8 @@ export interface Zigbee2mqttPiloteHote {
   enLigne(): boolean;
   /** Envoie `<base>/bridge/request/<suffixe>` et attend la réponse. */
   envoyer(suffixe: string, payload: Record<string, unknown>): Promise<Z2mReponse>;
+  /** Attend que HA ait supprimé les entités de ces noms (suppression AVANT création : sinon HA suffixe `_2`). */
+  attendreRetraitHa(noms: string[]): Promise<{ absent: boolean; attenteMs: number; restantes: string[] }>;
   appairageDefautSec(): number;
   appairageMaxSec(): number;
 }
@@ -103,13 +105,21 @@ export class Zigbee2mqttPilote implements PiloteGestionnaire {
   async appliquer(ordre: string, parametres: Record<string, unknown>): Promise<{ resultat?: unknown; sauvegarde?: string }> {
     const plan = this.planifier(ordre, parametres);
     const faites: string[] = [];
+    let nomRetire: string | undefined;
     for (const o of plan.operations) {
       let r: Z2mReponse;
       if (o.op === 'renommer') {
+        // Le nom de l'ancien appareil sert au neuf : HA doit d'abord avoir SUPPRIMÉ les entités de l'ancien (sinon `_2`).
+        if (nomRetire) {
+          const attente = await this.hote.attendreRetraitHa([nomRetire]);
+          faites.push(attente.absent ? `suppression confirmée par HA (${attente.attenteMs} ms)` : `suppression NON confirmée par HA après ${attente.attenteMs} ms (restent : ${attente.restantes.join(', ') || 'inconnu'}) : vérifier`);
+          nomRetire = undefined;
+        }
         // homeassistant_rename : z2m renomme aussi les entités dans son intégration HA (découverte).
         r = await this.hote.envoyer('device/rename', { from: o.de, to: o.vers, homeassistant_rename: true });
         faites.push(`renommé « ${o.de} » en « ${o.vers} »`);
       } else if (o.op === 'retirer') {
+        nomRetire = this.appareils().find((d) => d.ieee_address === o.id)?.friendly_name;
         r = await this.hote.envoyer('device/remove', { id: o.id, force: o.force });
         faites.push(`retiré « ${o.id} »${o.force ? ' (forcé)' : ''}`);
       } else {

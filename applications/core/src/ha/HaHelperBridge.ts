@@ -15,6 +15,8 @@ import type { IEventBus } from '../application/IEventBus';
 import type { HaWsClient } from './sync/HaWsClient';
 import type { HaStructureRegistry } from './sync/HaStructureRegistry';
 import type { Logger } from '../infrastructure/logger/index';
+import { PILOTES_EVENTS } from '../pilotes/types';
+import { entiteCorrespond, type PiloteRetraitDemande, type PiloteRetraitResultat } from '../pilotes/attenteRetraitHa';
 
 export interface HaHelperRequest {
   appId: string;
@@ -65,6 +67,9 @@ export class HaHelperBridge {
     });
     this.eventBus.onGeneric<HaEntitiesListRequest>('ha:entities:list:request', (req) => {
       this.handleEntitiesListRequest(req);
+    });
+    this.eventBus.onGeneric<PiloteRetraitDemande>(PILOTES_EVENTS.HA_RETRAIT_DEMANDE, (req) => {
+      void this.attendreRetrait(req);
     });
   }
 
@@ -124,5 +129,35 @@ export class HaHelperBridge {
       });
 
     this.eventBus.emitGeneric<HaEntitiesListResult>(replyEvent, { domain: req.domain, entities });
+  }
+
+  /**
+   * ⭐ 16/10/2026 — remplacement d'un capteur/récepteur : HA doit avoir SUPPRIMÉ l'ancienne entité avant que le pilote ne
+   * crée la neuve (sinon HA suffixe `_2`). Attend (sondage 500 ms) que plus aucune entité ne porte les noms donnés.
+   */
+  private async attendreRetrait(req: PiloteRetraitDemande): Promise<void> {
+    const debut = Date.now();
+    const delai = Math.min(Math.max(req.delaiMs ?? 20000, 1000), 120000);
+    const restantes = (): string[] =>
+      (this.haStructureRegistry?.getAllEntities() ?? [])
+        .filter((e) => req.noms.some((n) => entiteCorrespond(n, e.friendly_name)))
+        .map((e) => e.entity_id);
+
+    let presentes = this.haStructureRegistry ? restantes() : [];
+    const vuAuDepart = presentes.length > 0;
+    if (!vuAuDepart) await new Promise((r) => setTimeout(r, 1500)); // rien reconnu : courte marge pour le message déjà en vol
+    else while (presentes.length > 0 && Date.now() - debut < delai) {
+      await new Promise((r) => setTimeout(r, 500));
+      presentes = restantes();
+    }
+    const resultat: PiloteRetraitResultat = {
+      appId: req.appId,
+      requestId: req.requestId,
+      absent: presentes.length === 0,
+      vuAuDepart,
+      attenteMs: Date.now() - debut,
+      restantes: presentes
+    };
+    this.eventBus.emitGeneric(PILOTES_EVENTS.HA_RETRAIT_RESULTAT, resultat);
   }
 }

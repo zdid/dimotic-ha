@@ -37,6 +37,8 @@ export interface RfxcomPiloteHote {
   persister(): void;
   rafraichir(): void;
   /** Retrait complet : entité HA (si transmise) puis registre. */
+  /** Attend que HA ait supprimé les entités de ces noms (suppression AVANT création : sinon HA suffixe `_2`). */
+  attendreRetraitHa(noms: string[]): Promise<{ absent: boolean; attenteMs: number; restantes: string[] }>;
   retirerDevice(id: string): void;
   retirerRecepteur(id: string): void;
   retirerScene(id: string): void;
@@ -168,11 +170,30 @@ export class RfxcomPilote implements PiloteGestionnaire {
     const sauvegarde = modifieFichier ? h.sauvegarder() : undefined;
 
     // 1. Retraits d'abord (libèrent l'entity_id côté HA avant tout ajout — remplacement, modification).
+    const nomsRetires: string[] = [];
     for (const o of plan.operations) {
-      if (o.op === 'retirer-device') h.retirerDevice(o.id);
-      if (o.op === 'retirer-recepteur') h.retirerRecepteur(o.id);
-      if (o.op === 'retirer-scene') h.retirerScene(o.id);
+      if (o.op === 'retirer-device') {
+        const d = h.devices().find((x) => x.uniqueId === o.id);
+        if (d?.transmitToHa) nomsRetires.push(d.name);
+        h.retirerDevice(o.id);
+      }
+      if (o.op === 'retirer-recepteur') {
+        const r = h.recepteurs().find((x) => x.receiverId === o.id);
+        if (r?.transmitToHa) nomsRetires.push(r.name);
+        h.retirerRecepteur(o.id);
+      }
+      if (o.op === 'retirer-scene') {
+        const sc = h.scenes().find((x) => x.receiverId === o.id);
+        if (sc?.transmitToHa) nomsRetires.push(sc.name);
+        h.retirerScene(o.id);
+      }
     }
+    // 1bis. Une création suit : on ATTEND que HA ait réellement supprimé l'ancienne entité (sinon le nom serait pris et HA suffixerait `_2`).
+    let attenteHa: { absent: boolean; attenteMs: number; restantes: string[] } | undefined;
+    const creeDansHa = plan.operations.some(
+      (o) => (o.op === 'definir-device' && o.device.transmitToHa) || ((o.op === 'definir-recepteur' || o.op === 'definir-scene') && o.config.transmitToHa)
+    );
+    if (nomsRetires.length && creeDansHa) attenteHa = await h.attendreRetraitHa(nomsRetires);
     // 2. Définitions (devices avant récepteurs, récepteurs avant scènes).
     const aPublier: Array<{ genre: Genre; id: string }> = [];
     for (const o of plan.operations) {
@@ -214,6 +235,7 @@ export class RfxcomPilote implements PiloteGestionnaire {
     return {
       resultat: {
         ...(creations.length ? { identifiants: creations } : {}),
+        ...(attenteHa ? { attenteSuppressionHa: attenteHa.absent ? `faite en ${attenteHa.attenteMs} ms` : `NON confirmée après ${attenteHa.attenteMs} ms (restent : ${attenteHa.restantes.join(', ') || 'inconnu'}) : vérifier dans HA` } : {}),
         devices: h.devices().length,
         recepteurs: h.recepteurs().length,
         scenes: h.scenes().length,

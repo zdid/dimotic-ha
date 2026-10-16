@@ -9,7 +9,7 @@
  */
 
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
-import { computeBridgeInstance, PilotePont } from '../../../core/dist/exports';
+import { computeBridgeInstance, PilotePont, attendreRetraitHa } from '../../../core/dist/exports';
 import { zigbee2mqttConfigSchema, type Zigbee2mqttConfig } from './config-schema';
 import { Zigbee2mqttPilote } from './Zigbee2mqttPilote';
 import type { Z2mDevice, Z2mReponse } from './types';
@@ -74,6 +74,7 @@ export class Zigbee2mqttService implements IZigbee2mqttService {
         enLigne: () => this.etat === 'online' && this.devices.length > 0,
         envoyer: (suffixe, payload) => this.envoyer(suffixe, payload),
         appairageDefautSec: () => this.config.appairageDefautSec,
+        attendreRetraitHa: (noms) => attendreRetraitHa(this.eventBus, MODULE_NAME, noms),
         appairageMaxSec: () => this.config.appairageMaxSec
       })
     });

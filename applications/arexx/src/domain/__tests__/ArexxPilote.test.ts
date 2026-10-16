@@ -36,6 +36,7 @@ describe('ArexxPilote', () => {
       publierDecouverte: (c) => { appels.push(`publier:${c.uniqueId}`); },
       retirerDecouverte: (id) => { appels.push(`retirer:${id}`); },
       rafraichir: () => {},
+      attendreRetraitHa: async (noms) => { appels.push(`attendre:${noms.join('|')}`); return { absent: true, attenteMs: 1, restantes: [] }; },
       relire: () => { appels.push('relire'); return 3; }
     };
     pilote = new ArexxPilote(hote);
@@ -62,7 +63,7 @@ describe('ArexxPilote', () => {
       await pilote.appliquer('remplacer', { ancien: '8962', nouveau: '7777' });
 
       // retraits HA en premier, puis écriture, puis publications des neufs
-      expect(appels.slice(0, 2)).toEqual(['retirer:arexx_8962', 'retirer:arexx_8962_rh']);
+      expect(appels.slice(0, 3)).toEqual(['retirer:arexx_8962', 'retirer:arexx_8962_rh', 'attendre:Température---salle de bain|Humidité---salle de bain']);
       expect(appels.indexOf('persister')).toBeGreaterThan(appels.indexOf('retirer:arexx_8962_rh'));
       expect(appels.slice(appels.indexOf('persister') + 1).sort()).toEqual(['publier:arexx_7777', 'publier:arexx_7777_rh']);
 
@@ -131,7 +132,7 @@ describe('ArexxPilote', () => {
   describe('modifier', () => {
     it('retire de HA puis redéclare au nouveau nom (une modification = suppression puis ajout)', async () => {
       await pilote.appliquer('modifier', { id: 'arexx_8962', lieu: 'sdb étage' });
-      expect(appels).toEqual(['retirer:arexx_8962', 'persister', 'publier:arexx_8962']);
+      expect(appels).toEqual(['retirer:arexx_8962', 'attendre:Température---salle de bain', 'persister', 'publier:arexx_8962']);
       expect(registry.getSensor('arexx_8962')?.name).toBe('Température---sdb étage');
     });
   });

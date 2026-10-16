@@ -15,10 +15,12 @@ describe('Zigbee2mqttPilote', () => {
   let enLigne: boolean;
   let reponses: Z2mReponse[];
   let pilote: Zigbee2mqttPilote;
+  let attentes: string[][];
 
   beforeEach(() => {
     devices = [coord, { ...frigo }, { ...neuf }, { ...enInterview }];
     envois = [];
+    attentes = [];
     enLigne = true;
     reponses = [];
     const hote: Zigbee2mqttPiloteHote = {
@@ -26,6 +28,7 @@ describe('Zigbee2mqttPilote', () => {
       enLigne: () => enLigne,
       envoyer: async (suffixe, payload) => { envois.push({ suffixe, payload }); return reponses.shift() ?? { ok: true }; },
       appairageDefautSec: () => 120,
+      attendreRetraitHa: async (noms) => { attentes.push(noms); return { absent: true, attenteMs: 1, restantes: [] }; },
       appairageMaxSec: () => 254
     };
     pilote = new Zigbee2mqttPilote(hote);
@@ -92,6 +95,7 @@ describe('Zigbee2mqttPilote', () => {
     await pilote.appliquer('remplacer', { ancien: 'frigo---cuisine--cuisine', nouveau: '0xaaaa' });
     expect(envois.map((e) => e.suffixe)).toEqual(['device/remove', 'device/rename']);
     expect(envois[1].payload).toMatchObject({ from: '0xaaaa', to: 'frigo---cuisine--cuisine' });
+    expect(attentes).toEqual([['frigo---cuisine--cuisine']]); // HA a confirmé la suppression avant le renommage
   });
 
   it('remplacer : le neuf doit exister, être sorti d\'interview et ne pas être déjà qualifié', async () => {

@@ -29,6 +29,8 @@ export interface ArexxPiloteHote {
   /** Retire l'entité de HA : messages vides retenus (découverte, attributs, état). */
   retirerDecouverte(uniqueId: string): void;
   rafraichir(): void;
+  /** Attend que HA ait supprimé les entités de ces noms (suppression AVANT création : sinon HA suffixe `_2`). */
+  attendreRetraitHa(noms: string[]): Promise<{ absent: boolean; attenteMs: number; restantes: string[] }>;
   /** Relit le fichier des capteurs et republie ; renvoie le nombre de capteurs chargés. */
   relire(): number;
 }
@@ -113,7 +115,18 @@ export class ArexxPilote implements PiloteGestionnaire {
     const aPublier: string[] = [];
 
     // 1. Retraits HA d'abord (libère l'entity_id avant l'ajout éventuel — remplacement).
-    for (const o of plan.operations) if (o.op === 'retirer-ha') this.hote.retirerDecouverte(o.id);
+    const nomsRetires: string[] = [];
+    for (const o of plan.operations) {
+      if (o.op !== 'retirer-ha') continue;
+      const c = reg.getSensor(o.id);
+      if (c) nomsRetires.push(c.name);
+      this.hote.retirerDecouverte(o.id);
+    }
+    // 1bis. Une création suit : on ATTEND que HA ait réellement supprimé l'ancienne entité (sinon le nom serait pris et HA suffixerait `_2`).
+    let attenteHa: { absent: boolean; attenteMs: number; restantes: string[] } | undefined;
+    if (nomsRetires.length && plan.operations.some((o) => o.op === 'definir' && o.transmitToHa)) {
+      attenteHa = await this.hote.attendreRetraitHa(nomsRetires);
+    }
     // 2. Suppressions, puis définitions.
     for (const o of plan.operations) if (o.op === 'supprimer') reg.deleteSensor(o.id);
     for (const o of plan.operations) {
@@ -136,7 +149,7 @@ export class ArexxPilote implements PiloteGestionnaire {
       if (capteur) this.hote.publierDecouverte(capteur);
     }
     this.hote.rafraichir();
-    return { resultat: { ...(plan.apercu.resultat as Record<string, unknown> | undefined), capteurs: reg.getConfiguredSensors().length, decouverts: reg.getDiscoveredSensors().length, ...(chargés !== undefined ? { relus: chargés } : {}) }, sauvegarde };
+    return { resultat: { ...(plan.apercu.resultat as Record<string, unknown> | undefined), ...(attenteHa ? { attenteSuppressionHa: attenteHa.absent ? `faite en ${attenteHa.attenteMs} ms` : `NON confirmée après ${attenteHa.attenteMs} ms (restent : ${attenteHa.restantes.join(', ') || 'inconnu'}) : vérifier dans HA`} : {}), capteurs: reg.getConfiguredSensors().length, decouverts: reg.getDiscoveredSensors().length, ...(chargés !== undefined ? { relus: chargés } : {}) }, sauvegarde };
   }
 
   // ---------------------------------------------------------------------------

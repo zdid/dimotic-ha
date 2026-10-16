@@ -12,7 +12,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData } from '../../../core/dist/exports';
-import { createRfxComError, getCommandTopic, computeBridgeInstance, isEmitterQuoi, PilotePont } from '../../../core/dist/exports';
+import { createRfxComError, getCommandTopic, computeBridgeInstance, isEmitterQuoi, PilotePont, attendreRetraitHa } from '../../../core/dist/exports';
 import { rfxcomConfigSchema, type RfxComConfig } from './config-schema';
 import type { RfxComDevicesConfigFile, ReceiverConfigEntry } from './devices-config-schema';
 import type { RfxComRawMessage, RfxComStatus, RfxComDeviceInfo, ReceiverConfig, ReceiverSceneConfig, SceneExecutionResult, RfxComOrderTrace, AssociatedEmitter } from './types';
@@ -1931,6 +1931,7 @@ export class RfxComService implements IRfxComService {
         this.emitReceiversList();
         this.emitScenesList();
       },
+      attendreRetraitHa: (noms) => attendreRetraitHa(this.eventBus, MODULE_NAME, noms),
       retirerDevice: (id) => {
         const device = this.deviceManager.getDevice(id);
         if (!device) return;
