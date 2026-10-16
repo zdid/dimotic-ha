@@ -16,6 +16,7 @@
 | 16/10/2026 | **v1.9** | fonctionnelles-arexx_specs_v1.9.md | Claude | **§6.5 : nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v1.8 archivée. |
 | 16/10/2026 | **v7.4** | fonctionnelles-rfxcom_specs_v7.4.md | Claude | **§13bis : nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v7.3 archivée. |
 | 16/10/2026 | **v1.2** | fonctionnelles-zigbee2mqtt_specs_v1.2.md | Claude | **Nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v1.1 archivée. |
+| 16/10/2026 | **v1.28** | fonctionnelles-ia_specs_v1.28.md | Claude | **Outil MCP `creer_aide_ha`** (§19.11ter) : créer / lister / supprimer des aides HA (minuteries, input_*) via le pont d'aides du cœur, aperçu puis confirmation, sauvegarde avant suppression |
 | 16/10/2026 | **v1.27** | fonctionnelles-ia_specs_v1.27.md | Claude | **Outil MCP `renommer_entite_ha`** (§19.11bis) : renommer une entité de HA (entity_id et/ou nom) via le registre des entités, aperçu puis confirmation, avertit des références à corriger |
 | 16/10/2026 | **v1.26** | fonctionnelles-ia_specs_v1.26.md | Claude | **§19.12 : nommage corrigé** donné à l'agent (père / grand-père facultatifs, pas d'étage ni de bâtiment imposés). v1.25 archivée. |
 | 16/10/2026 | **v2.14** | fonctionnelles-supervisor_specs_v2.14.md | Claude | **§14ter.8 corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v2.13 archivée. |

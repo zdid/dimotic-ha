@@ -29,6 +29,7 @@ import { PilotesClient } from './PilotesClient';
 import { PlannerReader } from './PlannerReader';
 import { HaAutomationClient } from './HaAutomationClient';
 import { HaEntiteRenamer } from './HaEntiteRenamer';
+import { HaAideClient } from './HaAideClient';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
@@ -328,6 +329,7 @@ export class IaService implements IIaService {
       planner: new PlannerReader(this.eventBus),
       pilotes: new PilotesClient(this.eventBus),
       automations,
+      aides: new HaAideClient(this.eventBus, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia')),
       entites: new HaEntiteRenamer(this.haBridgeClient, async (entityId) => {
         const citees: string[] = [];
         for (const a of automations.list()) {
@@ -369,6 +371,7 @@ export class IaService implements IIaService {
       'phrase sans rien exécuter), executer_action (AGIT RÉELLEMENT sur la maison : vérifier la cible avant).',
       'Automatisations HA : lire_automatisations_ha (liste, définition, sauvegardes), deposer_automatisation et supprimer_automatisation',
       '(AGISSENT sur HA : sans confirme:true ils ne renvoient qu\'un aperçu — le montrer à l\'utilisateur et n\'envoyer confirme:true qu\'après son accord).',
+      'Aides HA (minuteries…) : creer_aide_ha (lister, creer, supprimer ; sans confirme:true, simple aperçu à montrer à l\'utilisateur).',
       'Entités HA : renommer_entite_ha (nouvel entity_id et/ou nom ; sans confirme:true, simple aperçu à montrer à l\'utilisateur ; HA ne réécrit pas les références).',
       'Pilotes (AREXX, RFXCOM…) : pilotes_ponts (EN PREMIER : quels ponts, quelles capacités), pilotes_lire (lister, decouverts), pilotes_modifier',
       '(adopter, creer, modifier, remplacer, effacer, ignorer, supprimer, redemarrer : sans confirme:true, simple aperçu à montrer à l\'utilisateur ;',

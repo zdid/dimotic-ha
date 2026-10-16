@@ -15,6 +15,7 @@ import type { PlannerReader, PlannerSection } from './PlannerReader';
 import type { HaAutomationClient } from './HaAutomationClient';
 import type { PilotesClient } from './PilotesClient';
 import type { HaEntiteRenamer } from './HaEntiteRenamer';
+import type { HaAideClient } from './HaAideClient';
 
 const CONFIRM_PROP = { type: 'boolean', description: 'false/absent = APERÇU seulement (rien n\'est modifié). true = exécute, À N\'UTILISER QU\'APRÈS l\'accord explicite de l\'utilisateur sur l\'aperçu.' };
 
@@ -66,6 +67,26 @@ export const HA_ENTITE_TOOLS: McpToolDef[] = [
         confirme: CONFIRM_PROP
       },
       required: ['entity_id']
+    }
+  }
+];
+
+/** Aides HA (minuteries, interrupteurs virtuels…) : création / liste / suppression, aperçu d'abord. */
+export const HA_AIDE_TOOLS: McpToolDef[] = [
+  {
+    name: 'creer_aide_ha',
+    description: 'CRÉE, LISTE ou SUPPRIME une aide Home Assistant (timer, input_boolean, input_number, input_text, input_select, input_datetime, counter). action=lister (lecture), creer (nom + options, ex. timer : {"duration":"24:00:00","restore":true}), supprimer (id = identifiant sans le domaine). Sans confirme:true, créer et supprimer renvoient seulement un APERÇU (entity_id prévu, collision éventuelle) et ne modifient RIEN. Une aide supprimée est sauvegardée avant.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['lister', 'creer', 'supprimer'], description: 'Défaut : creer' },
+        domaine: { type: 'string', enum: ['timer', 'input_boolean', 'input_number', 'input_text', 'input_select', 'input_datetime', 'counter'] },
+        nom: { type: 'string', description: 'Nom affiché (creer) ; l\'entity_id en est tiré (ex. « Minuterie salle tele » → timer.minuterie_salle_tele)' },
+        options: { type: 'object', description: 'Réglages propres au domaine (creer), ex. timer : duration, restore ; input_number : min, max, step' },
+        id: { type: 'string', description: 'Identifiant de l\'aide sans le domaine (supprimer)' },
+        confirme: CONFIRM_PROP
+      },
+      required: ['domaine']
     }
   }
 ];
@@ -196,6 +217,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   ...MCP_ONLY_TOOLS,
   ...HA_AUTOMATION_TOOLS,
   ...HA_ENTITE_TOOLS,
+  ...HA_AIDE_TOOLS,
   ...PILOTES_TOOLS
 ];
 
@@ -260,6 +282,8 @@ export interface McpToolboxDeps {
   automations: HaAutomationClient;
   /** Renommage d'entités HA (registre des entités). */
   entites: HaEntiteRenamer;
+  /** Aides HA (timer, input_*…). */
+  aides: HaAideClient;
   /** Gestion des pilotes via le cœur (PilotesClient). */
   pilotes: PilotesClient;
 }
@@ -275,6 +299,13 @@ export class McpToolbox {
       case 'lire_automatisations_ha': return JSON.stringify(await this.readAutomations(args), null, 2);
       case 'deposer_automatisation': return JSON.stringify(await this.deps.automations.deposit(String(args.id ?? ''), args.definition, args.confirme === true), null, 2);
       case 'supprimer_automatisation': return JSON.stringify(await this.deps.automations.remove(String(args.id ?? ''), args.confirme === true), null, 2);
+      case 'creer_aide_ha': {
+        const domaine = String(args.domaine ?? '');
+        const action = String(args.action ?? 'creer');
+        if (action === 'lister') return JSON.stringify(await this.deps.aides.lister(domaine), null, 2);
+        if (action === 'supprimer') return JSON.stringify(await this.deps.aides.supprimer(domaine, String(args.id ?? ''), args.confirme === true), null, 2);
+        return JSON.stringify(await this.deps.aides.creer(domaine, String(args.nom ?? ''), (args.options ?? {}) as Record<string, unknown>, args.confirme === true), null, 2);
+      }
       case 'renommer_entite_ha': return JSON.stringify(await this.deps.entites.renommer(String(args.entity_id ?? ''), args.nouvel_entity_id === undefined ? undefined : String(args.nouvel_entity_id), args.nom === undefined ? undefined : String(args.nom), args.confirme === true), null, 2);
       case 'pilotes_ponts': return JSON.stringify(await this.deps.pilotes.ponts(), null, 2);
       case 'pilotes_lire': return JSON.stringify(await this.deps.pilotes.lire(String(args.pont ?? ''), String(args.ordre ?? ''), (args.parametres ?? {}) as Record<string, unknown>), null, 2);
