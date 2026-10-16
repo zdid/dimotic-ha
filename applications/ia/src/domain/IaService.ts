@@ -28,6 +28,7 @@ import { McpToolbox, MCP_TOOLS } from './McpTools';
 import { PilotesClient } from './PilotesClient';
 import { PlannerReader } from './PlannerReader';
 import { HaAutomationClient } from './HaAutomationClient';
+import { HaEntiteRenamer } from './HaEntiteRenamer';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
@@ -318,6 +319,7 @@ export class IaService implements IIaService {
       this.logger.warn('IaService', 'Accès MCP activé mais aucun jeton défini — serveur MCP NON démarré');
       return;
     }
+    const automations = new HaAutomationClient(this.eventBus, this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia'));
     const toolbox = new McpToolbox({
       toolExecutor: this.toolExecutor,
       registry: this.haBridgeClient,
@@ -325,7 +327,16 @@ export class IaService implements IIaService {
       simulate: (phrase, useMistral) => this.simulatePhrase(phrase, useMistral),
       planner: new PlannerReader(this.eventBus),
       pilotes: new PilotesClient(this.eventBus),
-      automations: new HaAutomationClient(this.eventBus, this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia'))
+      automations,
+      entites: new HaEntiteRenamer(this.haBridgeClient, async (entityId) => {
+        const citees: string[] = [];
+        for (const a of automations.list()) {
+          if (!a.id) continue;
+          const def = await automations.get(a.id);
+          if (def.ok && JSON.stringify(def.config).includes(entityId)) citees.push(`${a.alias} (id ${a.id})`);
+        }
+        return citees;
+      })
     });
     this.mcpServer = new McpHttpServer({
       host: this.config.mcpHost,
@@ -358,6 +369,7 @@ export class IaService implements IIaService {
       'phrase sans rien exécuter), executer_action (AGIT RÉELLEMENT sur la maison : vérifier la cible avant).',
       'Automatisations HA : lire_automatisations_ha (liste, définition, sauvegardes), deposer_automatisation et supprimer_automatisation',
       '(AGISSENT sur HA : sans confirme:true ils ne renvoient qu\'un aperçu — le montrer à l\'utilisateur et n\'envoyer confirme:true qu\'après son accord).',
+      'Entités HA : renommer_entite_ha (nouvel entity_id et/ou nom ; sans confirme:true, simple aperçu à montrer à l\'utilisateur ; HA ne réécrit pas les références).',
       'Pilotes (AREXX, RFXCOM…) : pilotes_ponts (EN PREMIER : quels ponts, quelles capacités), pilotes_lire (lister, decouverts), pilotes_modifier',
       '(adopter, creer, modifier, remplacer, effacer, ignorer, supprimer, redemarrer : sans confirme:true, simple aperçu à montrer à l\'utilisateur ;',
       'confirme:true seulement après son accord, avec les mêmes paramètres).',

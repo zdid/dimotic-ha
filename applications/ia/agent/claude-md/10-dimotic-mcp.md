@@ -10,6 +10,8 @@ Tu disposes des mêmes outils que l'assistant vocal Mistral, plus des outils de 
 - `lire_automatisations_ha` — automatisations de Home Assistant (liste, définition, sauvegardes) ;
 - `deposer_automatisation`, `supprimer_automatisation` — AGISSENT sur Home Assistant : sans `confirme: true` ils renvoient un APERÇU
   sans rien modifier ; montre-le à l'utilisateur et n'envoie `confirme: true` qu'après son accord explicite ;
+- `renommer_entite_ha` — renomme une entité de HA (nouvel `entity_id` et/ou nom affiché) ; sans `confirme: true`, APERÇU seulement
+  (identifiant libre ou pris, automatisations qui citent l'ancien) ; HA ne réécrit pas les références : à corriger ensuite ;
 - `executer_action` — AGIT RÉELLEMENT sur la maison (confirmation demandée à chaque appel).
 
 Le vocabulaire (quoi/lieux, valeurs absolues, un lieu précis et sa pièce en UN seul élément) et le

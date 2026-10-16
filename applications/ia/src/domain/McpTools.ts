@@ -14,6 +14,7 @@ import type { ToolExecutor } from './ToolExecutor';
 import type { PlannerReader, PlannerSection } from './PlannerReader';
 import type { HaAutomationClient } from './HaAutomationClient';
 import type { PilotesClient } from './PilotesClient';
+import type { HaEntiteRenamer } from './HaEntiteRenamer';
 
 const CONFIRM_PROP = { type: 'boolean', description: 'false/absent = APERÇU seulement (rien n\'est modifié). true = exécute, À N\'UTILISER QU\'APRÈS l\'accord explicite de l\'utilisateur sur l\'aperçu.' };
 
@@ -48,6 +49,24 @@ export const HA_AUTOMATION_TOOLS: McpToolDef[] = [
     name: 'supprimer_automatisation',
     description: 'SUPPRIME une automatisation de Home Assistant. Sans confirme:true, renvoie seulement un aperçu. La définition est sauvegardée avant suppression.',
     inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Identifiant de configuration' }, confirme: CONFIRM_PROP }, required: ['id'] }
+  }
+];
+
+/** Renommage d'entité HA (registre des entités) : aperçu d'abord, confirmation ensuite. */
+export const HA_ENTITE_TOOLS: McpToolDef[] = [
+  {
+    name: 'renommer_entite_ha',
+    description: 'RENOMME une entité de Home Assistant (nouvel entity_id et/ou nom affiché) via le registre des entités. Sans confirme:true, renvoie seulement un aperçu (état actuel, identifiant libre ou déjà pris, automatisations qui citent l\'ancien identifiant) et ne modifie RIEN. HA ne réécrit pas les références : à corriger ensuite. Le domaine ne peut pas changer.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entity_id: { type: 'string', description: 'entity_id actuel (ex. sensor.temperature_salon)' },
+        nouvel_entity_id: { type: 'string', description: 'Nouvel entity_id (même domaine). Absent = inchangé' },
+        nom: { type: 'string', description: 'Nouveau nom affiché. Chaîne vide = revenir au nom d\'origine. Absent = inchangé' },
+        confirme: CONFIRM_PROP
+      },
+      required: ['entity_id']
+    }
   }
 ];
 
@@ -176,6 +195,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   ...IA_TOOLS.map((t) => t.function.name === 'lister_entites' ? LISTER_ENTITES_MCP : ({ name: t.function.name, description: t.function.description, inputSchema: t.function.parameters })),
   ...MCP_ONLY_TOOLS,
   ...HA_AUTOMATION_TOOLS,
+  ...HA_ENTITE_TOOLS,
   ...PILOTES_TOOLS
 ];
 
@@ -238,6 +258,8 @@ export interface McpToolboxDeps {
   planner: PlannerReader;
   /** Automatisations HA (lecture / dépôt / suppression, via le pont REST du core). */
   automations: HaAutomationClient;
+  /** Renommage d'entités HA (registre des entités). */
+  entites: HaEntiteRenamer;
   /** Gestion des pilotes via le cœur (PilotesClient). */
   pilotes: PilotesClient;
 }
@@ -253,6 +275,7 @@ export class McpToolbox {
       case 'lire_automatisations_ha': return JSON.stringify(await this.readAutomations(args), null, 2);
       case 'deposer_automatisation': return JSON.stringify(await this.deps.automations.deposit(String(args.id ?? ''), args.definition, args.confirme === true), null, 2);
       case 'supprimer_automatisation': return JSON.stringify(await this.deps.automations.remove(String(args.id ?? ''), args.confirme === true), null, 2);
+      case 'renommer_entite_ha': return JSON.stringify(await this.deps.entites.renommer(String(args.entity_id ?? ''), args.nouvel_entity_id === undefined ? undefined : String(args.nouvel_entity_id), args.nom === undefined ? undefined : String(args.nom), args.confirme === true), null, 2);
       case 'pilotes_ponts': return JSON.stringify(await this.deps.pilotes.ponts(), null, 2);
       case 'pilotes_lire': return JSON.stringify(await this.deps.pilotes.lire(String(args.pont ?? ''), String(args.ordre ?? ''), (args.parametres ?? {}) as Record<string, unknown>), null, 2);
       case 'pilotes_modifier': return JSON.stringify(await this.deps.pilotes.modifier(String(args.pont ?? ''), String(args.ordre ?? ''), (args.parametres ?? {}) as Record<string, unknown>, args.confirme === true), null, 2);
