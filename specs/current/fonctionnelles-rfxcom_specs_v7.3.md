@@ -1,7 +1,7 @@
 # Spécifications — Module RFXCOM
 
-**Version :** 7.2
-**Date :** 15 Octobre 2026
+**Version :** 7.3
+**Date :** 16 Octobre 2026
 **Statut :** En production
 **Type :** Application d'intégration
 **Dépend de :** `fonctionnelles-nommage_specs` (protocole de taxonomie QUOI/OÙ), `techniques-socle-ha-mqtt_specs`
@@ -869,14 +869,16 @@ Le module implémente le contrat de `conception-gestion-pilotes_specs` (v1.4) : 
 |---|---|
 | `lister` | devices, récepteurs, scènes et liste d'exclusion ; filtrable par `ressource` (`devices`, `recepteurs`, `scenes`) |
 | `decouverts` | devices détectés non adoptés (identifiant, type, QUOI proposé, date), hors liste d'exclusion |
-| `adopter` | `id`, `lieu` (obligatoire), `lieuPrecis`, `quoi` (prérempli depuis le type : « Bouton », « Température »…), `transmitToHa` explicite |
+| `adopter` | `id`, `lieu` (obligatoire), `lieuPrecis`, `lieuPere` (étage), `lieuGrandPere` (bâtiment), `quoi` (prérempli depuis le type : « Bouton », « Température »…), `transmitToHa` explicite |
 | `creer` | `ressource` = `recepteur` (`switch`, `light`, `cover` ; `emetteurPrincipal` pris parmi les devices **adoptés**, `emetteurs[]` : `emitterId`, `action`, `value`, `followReceivedSignal` ; `light` : `variable`, `niveauParDefaut` ; `cover` : `coverType`, `ouvertureSec`, `fermetureSec`), `scene` (`sceneType`, `delaiEntreCommandesMs`, `actions[]` sur des récepteurs existants) ou `device` (volet Somfy RFY créé à la main : `sensorId`, `unitCode`) ; l'identifiant `recepteur_<horodatage>` / `scene_<horodatage>` est attribué à l'application et renvoyé |
-| `modifier` | nom (quoi, lieu, lieu précis), `transmitToHa`, et selon la ressource : émetteurs, type, réglages du récepteur, actions de la scène. **Une modification qui change le nom, le type ou la présence dans HA = retrait de l'entité PUIS recréation** (même `entity_id`) ; sinon remplacement sans toucher à HA. Changer le **type** d'un récepteur repart sans derniers états |
+| `modifier` | nom (quoi, lieu, lieu précis, lieu père, lieu grand-père), `transmitToHa`, et selon la ressource : émetteurs, type, réglages du récepteur, actions de la scène. **Une modification qui change le nom, le type ou la présence dans HA = retrait de l'entité PUIS recréation** (même `entity_id`) ; sinon remplacement sans toucher à HA. Changer le **type** d'un récepteur repart sans derniers états |
 | `remplacer` | **un device** (émetteur, capteur) : l'ancien est supprimé (retrait HA), le neuf (un découvert **de même nature**) reprend **le même nommage**, et remplace l'ancien **partout** (émetteur principal et émetteurs associés de tous les récepteurs, sans doublon). L'appairage **physique** du module avec le nouvel émetteur se fait hors dimotic-ha : l'aperçu le rappelle |
 | `effacer` | oublie un découvert (ou tous : `tout: true`) en mémoire ; il revient s'il émet de nouveau ; HA non touché |
 | `ignorer` | met un découvert en liste d'exclusion (`rfxcom_ignored`, fichier de configuration) : plus jamais proposé, ni dans l'écran web |
 | `supprimer` | supprime un device, un récepteur ou une scène (et son entité HA si elle était transmise : messages vides retenus sur découverte, attributs et état). **Refusé** si la ressource est encore utilisée : device cité par un récepteur, récepteur cité par une scène — le message nomme les utilisateurs |
 | `redemarrer` | relit le fichier de configuration, retire de HA ce qui a disparu, republie le reste ; **le transceiver n'est pas touché** |
+
+**Nommage (v7.3)** : La distribution est **positionnelle** : sans précis ni père `quoi---lieu` ; un père (ou un grand-père) **sans lieu précis** répète le lieu en tête (`quoi---lieu--lieu--père`, forme déjà utilisée comme `frigo---cuisine--cuisine`) ; **un grand-père exige un père**. Paramètres des ordres : `quoi`, `lieu` (obligatoires), `lieuPrecis`, `lieuPere`, `lieuGrandPere` (facultatifs) ; avec `modifier`, seules les parties données changent (`""` efface une partie). Une seule fonction les compose (`composerNom` / `decomposerNom`, cœur `pilotes/nom.ts`), utilisée par tous les pilotes. L'agent lit d'abord les noms existants pour reprendre l'étage et le bâtiment du site, et ne demande que ce qui manque.
 
 Règles communes : aperçu + jeton avant tout ordre modifiant ; sauvegarde horodatée du fichier (`<fichier>.bak-AAAAMMJJ-HHMMSS`) avant chaque écriture ; validation par le schéma du fichier (un récepteur invalide est refusé avec le champ fautif) ; qualification **complète** exigée (lieu) ; `--` interdit dans les parties du nom. Le pilote réutilise les registres et les publications de l'écran web (`DeviceManager`, `ReceiverManager`, `SceneManager`) : aucun chemin parallèle.
 

@@ -1,9 +1,11 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.24
-**Date :** 15 Octobre 2026
+**Version :** 1.25
+**Date :** 16 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
 
+> **v1.25** : **règle de nommage complète** donnée à l'agent (§19.12) : lieu père (étage) et lieu grand-père (bâtiment), lecture des noms existants avant de proposer un nom.
+>
 > **v1.24** : **gestion des pilotes** (§19.12) — outils MCP `pilotes_ponts`, `pilotes_lire`, `pilotes_modifier` (AREXX, RFXCOM) ; aperçu obligatoire avant d'appliquer.
 >
 > **v1.23** : **`quoi_appareil`** (§19.11) — `obtenir_details` (MCP) affiche `classement.quoi_appareil` ; le catalogue de QUOI transmis à
@@ -1247,3 +1249,4 @@ Trois outils, par le canal « gestion des pilotes » du cœur (`conception-gesti
 - Les instructions MCP et les `CLAUDE.md` des agents (`sites/noisy2.md`, `sites/ha2.md`) disent quoi demander (quel pont, quoi/lieu/lieu précis, `transmitToHa`, appairage physique RFXCOM) et d'attendre un « oui » explicite.
 - Événements `pilotes:agent:reponse` et `pilotes:agent:ponts` déclarés dans `bridgedEvents`.
 - 9 tests (`PilotesClient.test.ts`). **Non vérifié de bout en bout avec un vrai Claude Code** (le serveur MCP n'ouvre qu'avec HA prêt).
+- **Nommage (v1.25)** : la description de `pilotes_modifier` et les `CLAUDE.md` des agents donnent la règle complète — `quoi` et `lieu` obligatoires, `lieuPrecis`, `lieuPere` (étage), `lieuGrandPere` (bâtiment) facultatifs, un grand-père exige un père — et demandent de lire les noms existants (`pilotes_lire` `lister`) pour reprendre l'étage et le bâtiment du site.

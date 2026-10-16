@@ -1,6 +1,6 @@
 # Conception — Gestion des pilotes par l'agent IA (ponts, découverts, adoption, remplacement)
 
-*Version 1.6 — 16 octobre 2026 — **étape 5 : pilote zigbee2mqtt réalisé** (application `zigbee2mqtt`, `fonctionnelles-zigbee2mqtt` v1.0 : lister, decouverts, adopter, modifier, remplacer, supprimer, appairer ; pas d'effacer/ignorer/redemarrer). *Version 1.5 — 15 octobre 2026 — **étape 4 : outils MCP `pilotes_*` dans `ia`** (§12) ; le cœur signe pour l'agent (`supervisor` v2.12 §14ter.7), `fonctionnelles-ia` v1.24 §19.12 ; `CLAUDE.md` des agents réécrits. *Version 1.4 — **étapes 1 (cœur + pont de test), 2 (AREXX) et 3 (RFXCOM : devices, récepteurs, scènes) réalisées et essayées** (`fonctionnelles-supervisor` v2.11 §14ter, `fonctionnelles-arexx` v1.7 §6.5, `fonctionnelles-rfxcom` v7.2 §13bis) ; remplacement AREXX **vérifié dans un vrai HA** (même `entity_id`, aucun doublon, historique continu) ; v1.3 : écarts corrigés §4 testament, §11/§14 signature, §14 retrait complet et états non retenus ; écarts corrigés ici : §4 testament, §11/§14 signature, §14 retrait complet et états non retenus. Décisions issues de la discussion du 15/10/2026. **Changement par rapport à la v1.0 : l'adaptateur zigbee2mqtt n'est plus dans `nommage` mais dans une application `zigbee2mqtt` à part (§9, §12, §14).***
+*Version 1.7 — 16 octobre 2026 — **règle de nommage complète** (lieu père = étage, lieu grand-père = bâtiment ; §5.4). *Version 1.6 — 16 octobre 2026 — **étape 5 : pilote zigbee2mqtt réalisé** (application `zigbee2mqtt`, `fonctionnelles-zigbee2mqtt` v1.0 : lister, decouverts, adopter, modifier, remplacer, supprimer, appairer ; pas d'effacer/ignorer/redemarrer). *Version 1.5 — 15 octobre 2026 — **étape 4 : outils MCP `pilotes_*` dans `ia`** (§12) ; le cœur signe pour l'agent (`supervisor` v2.12 §14ter.7), `fonctionnelles-ia` v1.24 §19.12 ; `CLAUDE.md` des agents réécrits. *Version 1.4 — **étapes 1 (cœur + pont de test), 2 (AREXX) et 3 (RFXCOM : devices, récepteurs, scènes) réalisées et essayées** (`fonctionnelles-supervisor` v2.11 §14ter, `fonctionnelles-arexx` v1.7 §6.5, `fonctionnelles-rfxcom` v7.2 §13bis) ; remplacement AREXX **vérifié dans un vrai HA** (même `entity_id`, aucun doublon, historique continu) ; v1.3 : écarts corrigés §4 testament, §11/§14 signature, §14 retrait complet et états non retenus ; écarts corrigés ici : §4 testament, §11/§14 signature, §14 retrait complet et états non retenus. Décisions issues de la discussion du 15/10/2026. **Changement par rapport à la v1.0 : l'adaptateur zigbee2mqtt n'est plus dans `nommage` mais dans une application `zigbee2mqtt` à part (§9, §12, §14).***
 
 ## 1. Objet
 
@@ -57,7 +57,7 @@ Agent Claude ──MCP (app ia)──► MQTT du site ──► cœur du pont �
 |---|---|---|
 | `lister` | ressources configurées du pont (filtrables par type de ressource) | non |
 | `decouverts` | ressources détectées non adoptées : identifiant, dernière valeur, date, **qualité de réception**, pont(s) qui l'entendent | non |
-| `adopter` | qualifie un découvert (taxonomie QUOI---OÙ complète : quoi, lieu, lieu précis…) puis le déclare ; `transmitToHa` explicite | oui |
+| `adopter` | qualifie un découvert (taxonomie QUOI---OÙ complète : quoi, lieu, lieu précis, lieu père, lieu grand-père — §5.4) puis le déclare ; `transmitToHa` explicite | oui |
 | `creer` | crée une ressource **non découvrable** (récepteur, scène RFXCOM ; broche GPIO) | oui |
 | `modifier` | change des champs d'une ressource configurée | oui |
 | `remplacer` | l'ancienne ressource est remplacée par le neuf **en gardant nom, place et réglages** ; réalisé comme **une suppression suivie d'un ajout qui reprend le même nommage** (§7.2) ; corrige toutes les références | oui |
@@ -77,6 +77,10 @@ Chaque pilote **déclare ses capacités** dans sa présence : l'agent n'essaie j
 4. **Validation** : YAML/JSON contrôlé ; vocabulaire de nommage (quoi, lieux, lieu précis) vérifié contre `nommage` ; refus de tout ce qui contient un secret.
 5. **Une modification à la fois**, **idempotente** (rejouer le même ordre ne duplique rien), **journalisée** (qui, quand, quoi, résultat).
 6. **Vérification après coup** : le pont renvoie l'état ; l'agent contrôle dans HA (outils MCP existants) que l'entité reçoit des valeurs.
+
+### 5.4 Règle de nommage
+
+**Règle de nommage commune des pilotes (v1.7, 16/10/2026).** Le nom d'une ressource suit le protocole `nommage_specs` §3.3 : `quoi---lieu_précis--lieu--lieu_père--lieu_grand_père` (étage = `lieuPere`, bâtiment = `lieuGrandPere`). La distribution est **positionnelle** : sans précis ni père `quoi---lieu` ; un père (ou un grand-père) **sans lieu précis** répète le lieu en tête (`quoi---lieu--lieu--père`, forme déjà utilisée comme `frigo---cuisine--cuisine`) ; **un grand-père exige un père**. Paramètres des ordres : `quoi`, `lieu` (obligatoires), `lieuPrecis`, `lieuPere`, `lieuGrandPere` (facultatifs) ; avec `modifier`, seules les parties données changent (`""` efface une partie). Une seule fonction les compose (`composerNom` / `decomposerNom`, cœur `pilotes/nom.ts`), utilisée par tous les pilotes. L'agent lit d'abord les noms existants pour reprendre l'étage et le bâtiment du site, et ne demande que ce qui manque.
 
 ### 5.3 Jeton d'aperçu
 

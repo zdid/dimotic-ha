@@ -10,6 +10,12 @@
 
 | Date | Version | Fichier | Auteur | Changements |
 |------|---------|---------|--------|-------------|
+| 16/10/2026 | **v1.7** | conception-gestion-pilotes_specs_v1.7.md | Claude | **Règle de nommage complète des pilotes** (§5.4) : lieu père (étage) et lieu grand-père (bâtiment) ajoutés aux paramètres, composition positionnelle, un grand-père exige un père. v1.6 archivée. |
+| 16/10/2026 | **v1.8** | fonctionnelles-arexx_specs_v1.8.md | Claude | **§6.5 : nommage complet** — `adopter`/`modifier` acceptent `lieuPere` (étage) et `lieuGrandPere` (bâtiment) ; fonction de nommage commune du cœur. v1.7 archivée. |
+| 16/10/2026 | **v7.3** | fonctionnelles-rfxcom_specs_v7.3.md | Claude | **§13bis : nommage complet** — `lieuPere` (étage) et `lieuGrandPere` (bâtiment) pour adopter/creer/modifier ; fonction commune. v7.2 archivée. |
+| 16/10/2026 | **v1.1** | fonctionnelles-zigbee2mqtt_specs_v1.1.md | Claude | **Nommage complet** — `lieuPere` (étage) et `lieuGrandPere` (bâtiment) ; `modifier` : « cuisine--cuisine » et « cuisine » ne sont pas un changement. v1.0 archivée. |
+| 16/10/2026 | **v1.25** | fonctionnelles-ia_specs_v1.25.md | Claude | **§19.12 : règle de nommage complète** donnée à l'agent (lieu père, lieu grand-père, lecture des noms existants). v1.24 archivée. |
+| 16/10/2026 | **v2.13** | fonctionnelles-supervisor_specs_v2.13.md | Claude | **§14ter.8 — nommage commun des pilotes** : `composerNom` / `decomposerNom` exportées par le cœur. v2.12 archivée. |
 | 16/10/2026 | **v1.6** | conception-gestion-pilotes_specs_v1.6.md | Claude | **Étape 5 : pilote zigbee2mqtt réalisé** ; plan de réalisation mis à jour. v1.5 archivée. |
 | 16/10/2026 | **v1.0** | fonctionnelles-zigbee2mqtt_specs_v1.0.md | Claude | **Nouvelle spécification — pilote zigbee2mqtt** (application autonome, désactivée par défaut) : pont `z2m_bridge_<machine>`, ordres lister, decouverts, adopter, modifier, remplacer (supprimer puis renommer au même nom), supprimer, appairer (durée plafonnée) ; transactions des réponses ; z2m 1.x/2.x ; 15 tests, essai réel avec un faux zigbee2mqtt. Non vérifié avec un vrai appareil. |
 | 15/10/2026 | **v1.5** | conception-gestion-pilotes_specs_v1.5.md | Claude | **Étape 4 : outils MCP `pilotes_*`** (trois outils génériques) et `CLAUDE.md` des agents ; le cœur signe pour l'agent. v1.4 archivée. |

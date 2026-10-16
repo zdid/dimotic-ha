@@ -74,15 +74,16 @@ export const PILOTES_TOOLS: McpToolDef[] = [
   {
     name: 'pilotes_modifier',
     description:
-      "Ordre MODIFIANT sur un pont : adopter (qualifier un découvert : id, quoi, lieu, lieuPrecis, transmitToHa — le lieu est obligatoire), creer (RFXCOM : ressource recepteur|scene|device), modifier, remplacer (ancien, nouveau : le neuf reprend le nom de l'ancien et le même entity_id), effacer (oublie un découvert), ignorer, supprimer (retire aussi l'entité de HA), redemarrer. " +
+      "Ordre MODIFIANT sur un pont : adopter (qualifier un découvert : id, quoi, lieu, lieuPrecis, lieuPere, lieuGrandPere, transmitToHa — quoi et lieu sont obligatoires), creer (RFXCOM : ressource recepteur|scene|device), modifier, remplacer (ancien, nouveau : le neuf reprend le nom de l'ancien et le même entity_id), effacer (oublie un découvert), ignorer, supprimer (retire aussi l'entité de HA), redemarrer. " +
       "Sans confirme:true, renvoie seulement un APERÇU (ce qui serait fait, entités HA touchées) et ne modifie RIEN : le montrer à l'utilisateur et n'envoyer confirme:true (mêmes paramètres) qu'après son accord explicite. Refuse d'appliquer sans aperçu préalable. Une sauvegarde du fichier est faite avant toute écriture. " +
-      "Poser les questions utiles AVANT (quel pont, quel lieu, transmettre à HA ?) ; pour un remplacement RFXCOM, rappeler que l'appairage physique du module se fait hors dimotic-ha. Les pilotes de production (relais) : prévenir avant un redémarrage.",
+      "NOMMAGE (obligatoire pour adopter, creer, modifier) : le nom est composé d'après le protocole QUOI---OÙ à partir de `quoi` (ce que c'est : Température, Bouton, Lumière…), `lieu` (la pièce, OBLIGATOIRE), `lieuPrecis` (sous-zone dans la pièce : coin canapé, évier…), `lieuPere` (l'ÉTAGE : Rez-de-Chaussée…) et `lieuGrandPere` (le BÂTIMENT : Maison…) → `quoi---lieuPrecis--lieu--lieuPere--lieuGrandPere`. Les niveaux absents se laissent de côté, MAIS lieuGrandPere exige lieuPere. Avant de proposer un nom, lire les noms déjà présents (pilotes_lire lister) pour reprendre l'étage et le bâtiment du site, et demander ceux qui manquent. Avec `modifier`, seules les parties données changent (\"\" efface une partie). " +
+      "Poser les questions utiles AVANT (quel pont, quel lieu, quel étage / bâtiment, transmettre à HA ?) ; pour un remplacement RFXCOM, rappeler que l'appairage physique du module se fait hors dimotic-ha. Les pilotes de production (relais) : prévenir avant un redémarrage.",
     inputSchema: {
       type: 'object',
       properties: {
         pont: { type: 'string', description: 'Nom complet du pont (voir pilotes_ponts)' },
         ordre: { type: 'string', enum: ['adopter', 'creer', 'modifier', 'remplacer', 'effacer', 'ignorer', 'supprimer', 'redemarrer'] },
-        parametres: { type: 'object', description: 'Selon l\'ordre. AREXX adopter : { id, quoi, lieu, lieuPrecis?, transmitToHa }. AREXX remplacer : { ancien, nouveau }. RFXCOM voir fonctionnelles-rfxcom §13bis.' },
+        parametres: { type: 'object', description: 'Selon l\'ordre. AREXX adopter : { id, quoi, lieu, lieuPrecis?, lieuPere?, lieuGrandPere?, transmitToHa }. AREXX remplacer : { ancien, nouveau }. RFXCOM voir fonctionnelles-rfxcom §13bis.' },
         confirme: CONFIRM_PROP
       },
       required: ['pont', 'ordre']

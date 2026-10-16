@@ -69,8 +69,16 @@ describe('Zigbee2mqttPilote', () => {
 
   it('modifier : repart du nom actuel pour ce qui ne change pas', async () => {
     await pilote.appliquer('modifier', { id: 'frigo---cuisine--cuisine', lieu: 'garage' });
-    expect(envois[0].payload).toMatchObject({ from: 'frigo---cuisine--cuisine', to: 'frigo---cuisine--garage' });
+    expect(envois[0].payload).toMatchObject({ from: 'frigo---cuisine--cuisine', to: 'frigo---garage' });
+    await pilote.appliquer('modifier', { id: 'frigo---cuisine--cuisine', lieuPere: 'Rez-de-Chaussée', lieuGrandPere: 'Maison' });
+    expect(envois[1].payload).toMatchObject({ to: 'frigo---cuisine--cuisine--Rez-de-Chaussée--Maison' });
     await expect(pilote.preparer('modifier', { id: '0x70b3d52b60043075', quoi: 'frigo' })).rejects.toThrow(/ne change pas/);
+  });
+
+  it('adopter : lieu père (étage) et grand-père (bâtiment), positions respectées', async () => {
+    await pilote.appliquer('adopter', { id: '0xaaaa', quoi: 'Température', lieu: 'Chambre', lieuPrecis: 'Lit', lieuPere: 'Étage', lieuGrandPere: 'Maison' });
+    expect(envois[0].payload).toMatchObject({ to: 'Température---Lit--Chambre--Étage--Maison' });
+    await expect(pilote.preparer('adopter', { id: '0xaaaa', quoi: 'T', lieu: 'C', lieuGrandPere: 'Maison' })).rejects.toThrow(/lieuPere/);
   });
 
   it('supprimer : normal ou forcé', async () => {

@@ -195,4 +195,12 @@ describe('RfxcomPilote', () => {
   it('ordre inconnu refusé', async () => {
     await expect(pilote.preparer('danser', {})).rejects.toThrow(/non géré/);
   });
+
+  it('adopter : lieu père (étage) et grand-père (bâtiment) font partie du nom ; modifier garde les parties non changées', async () => {
+    await pilote.appliquer('adopter', { id: 'lighting2_ac_0xbbb_2', lieu: 'Cuisine', lieuPrecis: 'Évier', lieuPere: 'Rez-de-Chaussée', lieuGrandPere: 'Maison' });
+    expect(devices.getDevice('lighting2_ac_0xbbb_2')?.name).toBe('Bouton---Évier--Cuisine--Rez-de-Chaussée--Maison');
+    await pilote.appliquer('modifier', { id: 'lighting2_ac_0xbbb_2', lieu: 'Salon' });
+    expect(devices.getDevice('lighting2_ac_0xbbb_2')?.name).toBe('Bouton---Évier--Salon--Rez-de-Chaussée--Maison');
+    await expect(pilote.preparer('adopter', { id: 'lighting2_ac_0xccc_3', lieu: 'X', lieuGrandPere: 'Maison' })).rejects.toThrow(/lieuPere/);
+  });
 });

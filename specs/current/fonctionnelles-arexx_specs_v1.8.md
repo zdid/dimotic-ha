@@ -1,7 +1,8 @@
 # Spécifications Fonctionnelles - Module AREXX
 
-*Version 1.7 - 15 Octobre 2026*
-*v1.7 : **gestion des capteurs par l'agent IA** (§6.5, conception-gestion-pilotes) — le pont `arexx_bridge_<machine>` répond
+*Version 1.8 - 16 Octobre 2026*
+*v1.8 : **nommage complet** (§6.5) — `lieuPere` (étage) et `lieuGrandPere` (bâtiment) acceptés par adopter/modifier.*
+*Historique — v1.7 (15 Octobre 2026) : **gestion des capteurs par l'agent IA** (§6.5, conception-gestion-pilotes) — le pont `arexx_bridge_<machine>` répond
 aux ordres lister, découverts, adopter, modifier, remplacer, effacer, ignorer, supprimer, redémarrer ; liste d'exclusion
 `arexx_ignored` ; **les états ne sont plus retenus sur le broker** (seule la découverte l'est) ; **suppression complète**
 (§7.4 réécrit) : messages vides retenus sur la découverte, les attributs ET l'état.*
@@ -446,8 +447,8 @@ le cœur publie sa présence et relaie les requêtes MQTT (`fonctionnelles-super
 |---|---|---|
 | `lister` | capteurs configurés (id, numéro, type, nom, transmitToHa, dernière valeur) + exclus | — |
 | `decouverts` | capteurs détectés non adoptés (id, type, dernière valeur, signal dBm, date) | en mémoire ; **aucune entité HA** |
-| `adopter` `{id, quoi, lieu, lieuPrecis?, transmitToHa?}` | promeut un découvert | nom `quoi---lieuPrécis--lieu` (ou `quoi---lieu`) ; **quoi et lieu obligatoires** ; `--` refusé dans un champ ; `transmitToHa` faux par défaut ; la validation contre le vocabulaire de `nommage` reste **à faire** |
-| `modifier` `{id, quoi?, lieu?, lieuPrecis?, transmitToHa?}` | renomme / (dés)active la transmission | une modification = suppression HA puis ajout |
+| `adopter` `{id, quoi, lieu, lieuPrecis?, lieuPere?, lieuGrandPere?, transmitToHa?}` | promeut un découvert | nom `quoi---lieuPrécis--lieu` (ou `quoi---lieu`) ; **quoi et lieu obligatoires** ; `--` refusé dans un champ ; `transmitToHa` faux par défaut ; la validation contre le vocabulaire de `nommage` reste **à faire** |
+| `modifier` `{id, quoi?, lieu?, lieuPrecis?, lieuPere?, lieuGrandPere?, transmitToHa?}` | renomme / (dés)active la transmission | une modification = suppression HA puis ajout |
 | `remplacer` `{ancien, nouveau}` | numéros bruts (« 8962 » ou `arexx_8962`) | **retrait HA de l'ancien d'abord**, puis ajout du neuf **au même nommage** ; refusé si le neuf (et son humidité si l'ancien en avait) n'est pas dans les découverts |
 | `effacer` `{id}` ou `{tout:true}` | retire des découverts | mémoire seulement ; réapparaît s'il émet ; HA non touché |
 | `ignorer` `{id}` | liste d'exclusion persistée | jamais reproposé ; HA non touché |
@@ -458,6 +459,8 @@ Tout ordre modifiant : aperçu (rien n'est modifié) → jeton → application ;
 avant écriture (en plus du `.bak` ordinaire). Le numéro n'apparaît pas dans le nom HA : le remplacement redonne le même `entity_id`
 **à vérifier dans un vrai HA** (essayé ici sur broker de test : sujets retenus de l'ancien vidés, ceux du neuf publiés).
 ---
+
+**Nommage (v1.8)** : La distribution est **positionnelle** : sans précis ni père `quoi---lieu` ; un père (ou un grand-père) **sans lieu précis** répète le lieu en tête (`quoi---lieu--lieu--père`, forme déjà utilisée comme `frigo---cuisine--cuisine`) ; **un grand-père exige un père**. Paramètres des ordres : `quoi`, `lieu` (obligatoires), `lieuPrecis`, `lieuPere`, `lieuGrandPere` (facultatifs) ; avec `modifier`, seules les parties données changent (`""` efface une partie). Une seule fonction les compose (`composerNom` / `decomposerNom`, cœur `pilotes/nom.ts`), utilisée par tous les pilotes. L'agent lit d'abord les noms existants pour reprendre l'étage et le bâtiment du site, et ne demande que ce qui manque.
 
 ## 7. Taxonomie et Découverte HA
 

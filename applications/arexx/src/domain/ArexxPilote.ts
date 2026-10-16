@@ -13,7 +13,7 @@
  * - sauvegarde horodatée du fichier avant toute écriture.
  */
 
-import type { PiloteGestionnaire } from '../../../core/dist/exports';
+import { composerNom, decomposerNom, type PiloteGestionnaire } from '../../../core/dist/exports';
 import { SensorRegistry } from './SensorRegistry';
 import type { ArexxSensorInfo } from './types';
 import { buildDisplayName, extractTaxonomy } from './taxonomy';
@@ -158,18 +158,12 @@ export class ArexxPilote implements PiloteGestionnaire {
     }
   }
 
-  /** Nom complet `quoi---lieuPrécis--lieu` ou `quoi---lieu` ; refuse une qualification incomplète. */
-  private composerNom(p: Record<string, unknown>): string {
-    const champ = (nom: string, obligatoire: boolean): string => {
-      const v = typeof p[nom] === 'string' ? String(p[nom]).trim() : '';
-      if (!v && obligatoire) throw new Error(`Qualification incomplète : « ${nom} » est obligatoire`);
-      if (v.includes('--')) throw new Error(`« ${nom} » ne doit pas contenir « -- » (séparateur du nommage)`);
-      return v;
-    };
-    const quoi = champ('quoi', true);
-    const lieu = champ('lieu', true);
-    const precis = champ('lieuPrecis', false);
-    const nom = precis ? `${quoi}---${precis}--${lieu}` : `${quoi}---${lieu}`;
+  /**
+   * Nom complet `quoi---lieuPrécis--lieu--lieuPère--lieuGrandPère` (nommage_specs §3.3, fonction commune du cœur) ; refuse une
+   * qualification incomplète. `defauts` : parties reprises du nom actuel quand `p` ne les change pas (modifier).
+   */
+  private composerNom(p: Record<string, unknown>, defauts?: string): string {
+    const nom = composerNom(p, defauts ? decomposerNom(defauts) : undefined);
     const t = extractTaxonomy(nom);
     if (!t.rawQuoi || !t.nomLieu) throw new Error(`Nom « ${nom} » invalide`);
     return nom;
@@ -201,7 +195,7 @@ export class ArexxPilote implements PiloteGestionnaire {
     const reg = this.hote.registry;
     const c = reg.getSensor(id);
     if (!c) throw new Error(`Capteur « ${id} » inconnu`);
-    const nom = p.quoi !== undefined || p.lieu !== undefined || p.lieuPrecis !== undefined ? this.composerNom({ quoi: extractTaxonomy(c.name).rawQuoi, ...p }) : c.name;
+    const nom = ['quoi', 'lieu', 'lieuPrecis', 'lieuPere', 'lieuGrandPere'].some((k) => p[k] !== undefined) ? this.composerNom(p, c.name) : c.name;
     const transmit = typeof p.transmitToHa === 'boolean' ? p.transmitToHa : c.transmitToHa;
     const ops: Operation[] = [];
     // « Une modification = une suppression puis un ajout » : si le capteur était dans HA, on le retire avant de le redéclarer.

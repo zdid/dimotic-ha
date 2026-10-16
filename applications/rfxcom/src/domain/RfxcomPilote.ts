@@ -17,7 +17,7 @@
  * - sauvegarde horodatée du fichier avant toute écriture.
  */
 
-import type { PiloteGestionnaire } from '../../../core/dist/exports';
+import { composerNom, decomposerNom, type PiloteGestionnaire } from '../../../core/dist/exports';
 import { receiverConfigSchema } from './devices-config-schema';
 import { getDefaultComponent } from './classification';
 import { DeviceManager } from './devices/DeviceManager';
@@ -261,36 +261,26 @@ export class RfxcomPilote implements PiloteGestionnaire {
     return r && r.type !== 'scene' ? r : undefined;
   }
 
-  /** Nom complet `quoi---lieuPrécis--lieu` ou `quoi---lieu` ; refuse une qualification incomplète. */
-  private composerNom(p: Record<string, unknown>, quoiParDefaut?: string): string {
-    const champ = (nom: string, obligatoire: boolean, defaut?: string): string => {
-      const v = typeof p[nom] === 'string' ? String(p[nom]).trim() : defaut ?? '';
-      if (!v && obligatoire) throw new Error(`Qualification incomplète : « ${nom} » est obligatoire`);
-      if (v.includes('--')) throw new Error(`« ${nom} » ne doit pas contenir « -- » (séparateur du nommage)`);
-      return v;
-    };
-    const quoi = champ('quoi', true, quoiParDefaut);
-    const lieu = champ('lieu', true);
-    const precis = champ('lieuPrecis', false);
-    const nom = precis ? `${quoi}---${precis}--${lieu}` : `${quoi}---${lieu}`;
+  /**
+   * Nom complet `quoi---lieuPrécis--lieu--lieuPère--lieuGrandPère` (nommage_specs §3.3, fonction commune du cœur) ; refuse une
+   * qualification incomplète. `quoiParDefaut` : QUOI proposé par le type (« Bouton »…) ; `actuel` : nom dont `p` ne change
+   * que certaines parties (modifier).
+   */
+  private composerNom(p: Record<string, unknown>, quoiParDefaut?: string, actuel?: string): string {
+    const defauts = actuel ? decomposerNom(actuel) : quoiParDefaut ? { quoi: quoiParDefaut, lieu: '' } : undefined;
+    const nom = composerNom(p, defauts);
     const t = extractTaxonomy(nom);
     if (!t.rawQuoi || !t.nomLieu) throw new Error(`Nom « ${nom} » invalide`);
     return nom;
   }
 
   private qualifie(p: Record<string, unknown>): boolean {
-    return p.quoi !== undefined || p.lieu !== undefined || p.lieuPrecis !== undefined;
+    return ['quoi', 'lieu', 'lieuPrecis', 'lieuPere', 'lieuGrandPere'].some((k) => p[k] !== undefined);
   }
 
   /** Reprend les parties du nom actuel que `p` ne change pas. */
   private recomposerNom(actuel: string, p: Record<string, unknown>): string {
-    const t = extractTaxonomy(actuel);
-    return this.composerNom({
-      quoi: t.rawQuoi,
-      lieu: t.nomLieu ?? undefined,
-      lieuPrecis: t.nomPrecis ?? undefined,
-      ...p
-    });
+    return this.composerNom(p, undefined, actuel);
   }
 
   private decrireHa(nom: string, transmit: boolean, avant?: 'supprimee' | 'recreee'): string {

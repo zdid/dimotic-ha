@@ -174,4 +174,10 @@ describe('ArexxPilote', () => {
     const b = await pilote.preparer('supprimer', { id: 'arexx_5000' });
     expect(JSON.stringify(a.etat)).not.toBe(JSON.stringify(b.etat));
   });
+
+  it('adopter : lieu père (étage) et grand-père (bâtiment) font partie du nom', async () => {
+    const { apercu } = await pilote.preparer('adopter', { id: 'arexx_7777', quoi: 'Température', lieu: 'Chambre', lieuPrecis: 'Lit', lieuPere: 'Étage', lieuGrandPere: 'Maison' });
+    expect(JSON.stringify(apercu)).toContain('Température---Lit--Chambre--Étage--Maison');
+    await expect(pilote.preparer('adopter', { id: 'arexx_7777', quoi: 'T', lieu: 'C', lieuGrandPere: 'Maison' })).rejects.toThrow(/lieuPere/);
+  });
 });

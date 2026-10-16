@@ -1,6 +1,6 @@
 # Spécifications Fonctionnelles - Supervision Multi-Machines (SUPERVISOR)
 
-*Version 2.12 - 15 Octobre 2026 — **§14ter.7 (nouveau) : requêtes de l'application « agent » (`ia`)** — le cœur signe (secret du site) et publie les requêtes que `ia` lui demande par `pilotes:agent:*`, relaie les réponses, liste les ponts de tout le site ; le secret ne quitte jamais le cœur. 25 tests.*
+*Version 2.13 - 16 Octobre 2026 — **§14ter.8 (nouveau) : nommage commun des pilotes** (`composerNom` / `decomposerNom`). *Historique — Version 2.12 - 15 Octobre 2026 — **§14ter.7 (nouveau) : requêtes de l'application « agent » (`ia`)** — le cœur signe (secret du site) et publie les requêtes que `ia` lui demande par `pilotes:agent:*`, relaie les réponses, liste les ponts de tout le site ; le secret ne quitte jamais le cœur. 25 tests.*
 *Historique — Version 2.11 - 15 Octobre 2026 — **§14ter (nouveau) : canal MQTT « gestion des pilotes »** — le cœur publie la présence des ponts (pilotes), reçoit les requêtes de l'agent IA, les transmet à l'application par le pont d'événements et publie la réponse ; signature HMAC, aperçu + jeton, jamais de message retenu pour un ordre ; implémenté et essayé de bout en bout avec `testcycle` (pont de test). Voir `conception-gestion-pilotes_specs` v1.2.*
 *Historique — Version 2.10 - 24 Septembre 2026 — §8 réécrit (cycle de vie des applications) : le core ne redémarre
 JAMAIS pour une application ; un seul chemin « activer » et un seul « désactiver » ; application
@@ -1347,6 +1347,10 @@ L'agent IA n'est pas un client MQTT : l'application `ia` (outils MCP `pilotes_*`
 | `pilotes:agent:ponts:get` / `pilotes:agent:ponts` | `ia` ↔ cœur | `ref` ; liste des ponts du site |
 
 Le cœur ajoute l'identifiant (`ag…`), la date et la **signature**, publie sur `…/requete/<id>` (QoS 1, jamais retenu) et attend la réponse sur `…/reponse/<id>` (abonnement `+/reponse/+`) ; délai : celui du pont + 5 s (`delai_depasse`). Une requête adressée à un pont d'une autre machine du site passe par le broker comme les autres. Le cœur suit **toutes** les présences du site (retenues) et l'état des machines (`_machines/+`) : un pont est `joignable` s'il est en ligne **et** si sa machine ne l'est pas hors ligne. Sans secret, la requête part non signée (les ordres modifiants sont alors refusés par le pont : `signature_requise`).
+
+### 14ter.8 Nommage commun des pilotes (nouveau v2.13)
+
+Le cœur exporte `composerNom` et `decomposerNom` (`pilotes/nom.ts`), utilisées par tous les pilotes pour composer et décomposer `quoi---lieu_précis--lieu--lieu_père--lieu_grand_père`. La distribution est **positionnelle** : sans précis ni père `quoi---lieu` ; un père (ou un grand-père) **sans lieu précis** répète le lieu en tête (`quoi---lieu--lieu--père`, forme déjà utilisée comme `frigo---cuisine--cuisine`) ; **un grand-père exige un père**. Paramètres des ordres : `quoi`, `lieu` (obligatoires), `lieuPrecis`, `lieuPere`, `lieuGrandPere` (facultatifs) ; avec `modifier`, seules les parties données changent (`""` efface une partie). Une seule fonction les compose (`composerNom` / `decomposerNom`, cœur `pilotes/nom.ts`), utilisée par tous les pilotes. L'agent lit d'abord les noms existants pour reprendre l'étage et le bâtiment du site, et ne demande que ce qui manque.
 
 ## 15. Annexes
 

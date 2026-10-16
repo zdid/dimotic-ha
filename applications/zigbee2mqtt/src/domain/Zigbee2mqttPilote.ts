@@ -16,7 +16,7 @@
  * sujets MQTT de l'appareil et les entity_id dans HA : l'aperçu le précise.
  */
 
-import type { PiloteGestionnaire } from '../../../core/dist/exports';
+import { composerNom, decomposerNom, type PiloteGestionnaire } from '../../../core/dist/exports';
 import type { Z2mDevice, Z2mReponse } from './types';
 
 export interface Zigbee2mqttPiloteHote {
@@ -140,27 +140,12 @@ export class Zigbee2mqttPilote implements PiloteGestionnaire {
     }
   }
 
-  /** Nom complet `quoi---lieuPrécis--lieu` ou `quoi---lieu` ; refuse une qualification incomplète. */
+  /**
+   * Nom complet `quoi---lieuPrécis--lieu--lieuPère--lieuGrandPère` (nommage_specs §3.3, fonction commune du cœur) ; refuse une
+   * qualification incomplète. `repli` : nom actuel dont `p` ne change que certaines parties (modifier).
+   */
   private composerNom(p: Record<string, unknown>, repli?: string): string {
-    const base = repli && estQualifie(repli) ? this.decomposer(repli) : { quoi: '', lieu: '', precis: '' };
-    const champ = (nom: string, obligatoire: boolean, defaut: string): string => {
-      const v = typeof p[nom] === 'string' ? String(p[nom]).trim() : defaut;
-      if (!v && obligatoire) throw new Error(`Qualification incomplète : « ${nom} » est obligatoire`);
-      if (v.includes('--')) throw new Error(`« ${nom} » ne doit pas contenir « -- » (séparateur du nommage)`);
-      return v;
-    };
-    const quoi = champ('quoi', true, base.quoi);
-    const lieu = champ('lieu', true, base.lieu);
-    const precis = champ('lieuPrecis', false, base.precis);
-    return precis ? `${quoi}---${precis}--${lieu}` : `${quoi}---${lieu}`;
-  }
-
-  private decomposer(nom: string): { quoi: string; lieu: string; precis: string } {
-    const [quoi, reste = ''] = nom.split('---');
-    const parties = reste.split('--').map((s) => s.trim());
-    return parties.length > 1
-      ? { quoi: quoi.trim(), precis: parties[0], lieu: parties[1] }
-      : { quoi: quoi.trim(), precis: '', lieu: parties[0] };
+    return composerNom(p, repli && estQualifie(repli) ? decomposerNom(repli) : undefined);
   }
 
   private verifierNomLibre(nom: string, sauf?: Z2mDevice): void {
@@ -194,7 +179,8 @@ export class Zigbee2mqttPilote implements PiloteGestionnaire {
     const d = this.trouver(p.id);
     if (!d) throw new Error(`Appareil « ${String(p.id)} » inconnu`);
     const nom = this.composerNom(p, d.friendly_name);
-    if (nom === d.friendly_name) throw new Error('Le nom ne change pas');
+    // « cuisine--cuisine » et « cuisine » désignent le même lieu (précis == lieu = pas de précision distincte) : pas un vrai changement
+    if (nom === d.friendly_name || (estQualifie(d.friendly_name) && nom === composerNom({}, decomposerNom(d.friendly_name)))) throw new Error('Le nom ne change pas');
     this.verifierNomLibre(nom, d);
     return {
       apercu: { avant: d.friendly_name, apres: nom, id: d.ieee_address, avertissement: this.avertissementRenommage(), note: NOTE_Z2M },

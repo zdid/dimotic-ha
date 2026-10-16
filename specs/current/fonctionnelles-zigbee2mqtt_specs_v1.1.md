@@ -1,6 +1,6 @@
 # Spécifications — Pilote zigbee2mqtt
 
-**Version :** 1.0
+**Version :** 1.1
 **Date :** 16 Octobre 2026
 **Statut :** Réalisé et essayé sur une instance de développement isolée (faux zigbee2mqtt) ; pas encore déployé
 **Type :** Application d'intégration (process séparé), arrive **désactivée** (activation à chaud)
@@ -33,11 +33,13 @@ Le pont déclare : `lister`, `decouverts`, `adopter`, `modifier`, `remplacer`, `
 |---|---|
 | `lister` | appareils du réseau, **sans le coordinateur** : id (adresse IEEE), nom, type, modèle, fabricant, interview (`en cours`/`terminée`/`incomplète`), `reconnu`, `desactive`, `qualifie` (nom au format `quoi---lieu`) |
 | `decouverts` | appareils pas encore qualifiés : **interview en cours** ou nom **sans `---`** (souvent l'adresse IEEE) |
-| `adopter` | `id` (IEEE ou nom), `quoi` et `lieu` **obligatoires**, `lieuPrecis` facultatif → `device/rename` avec `homeassistant_rename: true`. Refusé : appareil en interview (attendre la fin), déjà qualifié (utiliser `modifier`), nom déjà pris |
+| `adopter` | `id` (IEEE ou nom), `quoi` et `lieu` **obligatoires**, `lieuPrecis`, `lieuPere` (étage), `lieuGrandPere` (bâtiment) facultatifs → `device/rename` avec `homeassistant_rename: true`. Refusé : appareil en interview (attendre la fin), déjà qualifié (utiliser `modifier`), nom déjà pris |
 | `modifier` | renomme un appareil déjà qualifié ; les parties non données reprennent le nom actuel ; refusé si le nom ne change pas |
 | `supprimer` | `device/remove` ; `force: true` pour un appareil mort qui ne répond plus (il n'est alors pas prévenu : s'il est encore sous tension, il se reconnectera) |
 | `remplacer` | `ancien`, `nouveau` : **suppression de l'ancien PUIS renommage du neuf avec le nom de l'ancien** (même nommage → mêmes `entity_id`, comme pour l'AREXX). Le neuf doit être **déjà appairé**, sorti d'interview et non qualifié. `force` comme `supprimer`. Si la suppression échoue, le renommage n'est pas tenté |
 | `appairer` | `permit_join` pour `duree` secondes (défaut `appairageDefautSec` 120), **plafonnée** à `appairageMaxSec` (254). Mettre l'appareil en mode appairage est une action **physique** : l'aperçu le rappelle |
+
+**Nommage (v1.1)** : La distribution est **positionnelle** : sans précis ni père `quoi---lieu` ; un père (ou un grand-père) **sans lieu précis** répète le lieu en tête (`quoi---lieu--lieu--père`, forme déjà utilisée comme `frigo---cuisine--cuisine`) ; **un grand-père exige un père**. Paramètres des ordres : `quoi`, `lieu` (obligatoires), `lieuPrecis`, `lieuPere`, `lieuGrandPere` (facultatifs) ; avec `modifier`, seules les parties données changent (`""` efface une partie). Une seule fonction les compose (`composerNom` / `decomposerNom`, cœur `pilotes/nom.ts`), utilisée par tous les pilotes. L'agent lit d'abord les noms existants pour reprendre l'étage et le bâtiment du site, et ne demande que ce qui manque.
 
 Règles communes (contrat) : aperçu + jeton (l'état concerné = appareils, noms, interviews, état de z2m), accord explicite, une modification à la fois, validation du nommage (`--` interdit dans les parties).
 
