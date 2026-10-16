@@ -1,0 +1,21 @@
+{
+  "name": "zigbee2mqtt",
+  "version": "1.0.0",
+  "description": "Pilote zigbee2mqtt : gestion des appareils Zigbee (liste, appairage, nommage QUOI---OÙ, suppression, remplacement) par le canal « gestion des pilotes »",
+  "main": "dist/domain/index.js",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -b",
+    "watch": "tsc -w",
+    "test": "../core/node_modules/.bin/vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

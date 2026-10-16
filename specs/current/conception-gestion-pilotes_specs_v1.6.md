@@ -1,6 +1,6 @@
 # Conception — Gestion des pilotes par l'agent IA (ponts, découverts, adoption, remplacement)
 
-*Version 1.5 — 15 octobre 2026 — **étape 4 : outils MCP `pilotes_*` dans `ia`** (§12) ; le cœur signe pour l'agent (`supervisor` v2.12 §14ter.7), `fonctionnelles-ia` v1.24 §19.12 ; `CLAUDE.md` des agents réécrits. *Version 1.4 — **étapes 1 (cœur + pont de test), 2 (AREXX) et 3 (RFXCOM : devices, récepteurs, scènes) réalisées et essayées** (`fonctionnelles-supervisor` v2.11 §14ter, `fonctionnelles-arexx` v1.7 §6.5, `fonctionnelles-rfxcom` v7.2 §13bis) ; remplacement AREXX **vérifié dans un vrai HA** (même `entity_id`, aucun doublon, historique continu) ; v1.3 : écarts corrigés §4 testament, §11/§14 signature, §14 retrait complet et états non retenus ; écarts corrigés ici : §4 testament, §11/§14 signature, §14 retrait complet et états non retenus. Décisions issues de la discussion du 15/10/2026. **Changement par rapport à la v1.0 : l'adaptateur zigbee2mqtt n'est plus dans `nommage` mais dans une application `zigbee2mqtt` à part (§9, §12, §14).***
+*Version 1.6 — 16 octobre 2026 — **étape 5 : pilote zigbee2mqtt réalisé** (application `zigbee2mqtt`, `fonctionnelles-zigbee2mqtt` v1.0 : lister, decouverts, adopter, modifier, remplacer, supprimer, appairer ; pas d'effacer/ignorer/redemarrer). *Version 1.5 — 15 octobre 2026 — **étape 4 : outils MCP `pilotes_*` dans `ia`** (§12) ; le cœur signe pour l'agent (`supervisor` v2.12 §14ter.7), `fonctionnelles-ia` v1.24 §19.12 ; `CLAUDE.md` des agents réécrits. *Version 1.4 — **étapes 1 (cœur + pont de test), 2 (AREXX) et 3 (RFXCOM : devices, récepteurs, scènes) réalisées et essayées** (`fonctionnelles-supervisor` v2.11 §14ter, `fonctionnelles-arexx` v1.7 §6.5, `fonctionnelles-rfxcom` v7.2 §13bis) ; remplacement AREXX **vérifié dans un vrai HA** (même `entity_id`, aucun doublon, historique continu) ; v1.3 : écarts corrigés §4 testament, §11/§14 signature, §14 retrait complet et états non retenus ; écarts corrigés ici : §4 testament, §11/§14 signature, §14 retrait complet et états non retenus. Décisions issues de la discussion du 15/10/2026. **Changement par rapport à la v1.0 : l'adaptateur zigbee2mqtt n'est plus dans `nommage` mais dans une application `zigbee2mqtt` à part (§9, §12, §14).***
 
 ## 1. Objet
 
@@ -180,7 +180,7 @@ Quel appareil (liste des découverts) ? Nom QUOI---OÙ et pièce ? Pour appairer
 1. **Cœur** : présence des ponts + réception/relais des requêtes, avec un pont de test (`testcycle`).
 2. **AREXX** : contrat complet (`lister`, `decouverts`, `adopter`, `remplacer`, `effacer`, `ignorer`, `supprimer`, `redemarrer`) ; essai de bout en bout sur noisy2 puis noisy.
 3. **Outils MCP `pilotes_*`** et sections du CLAUDE.md — **réalisé (15/10)** ; reste l'essai de bout en bout avec un vrai Claude Code sur noisy2.
-4. **RFXCOM** (devices, puis récepteurs, puis scènes) — **réalisé (15/10)** ; **GPIO**, **zigbee2mqtt**.
+4. **RFXCOM** (devices, puis récepteurs, puis scènes) — **réalisé (15/10)** ; **zigbee2mqtt** — **réalisé (16/10, essai avec un faux z2m)** ; **GPIO** reste à faire.
 5. Nouvelle image Docker, déploiement noisy, noisy2, ha2, stfort.
 
 Chaque étape est testée **sans Docker d'abord** (instance de développement), puis en réel.

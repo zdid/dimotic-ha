@@ -10,6 +10,8 @@
 
 | Date | Version | Fichier | Auteur | Changements |
 |------|---------|---------|--------|-------------|
+| 16/10/2026 | **v1.6** | conception-gestion-pilotes_specs_v1.6.md | Claude | **Étape 5 : pilote zigbee2mqtt réalisé** ; plan de réalisation mis à jour. v1.5 archivée. |
+| 16/10/2026 | **v1.0** | fonctionnelles-zigbee2mqtt_specs_v1.0.md | Claude | **Nouvelle spécification — pilote zigbee2mqtt** (application autonome, désactivée par défaut) : pont `z2m_bridge_<machine>`, ordres lister, decouverts, adopter, modifier, remplacer (supprimer puis renommer au même nom), supprimer, appairer (durée plafonnée) ; transactions des réponses ; z2m 1.x/2.x ; 15 tests, essai réel avec un faux zigbee2mqtt. Non vérifié avec un vrai appareil. |
 | 15/10/2026 | **v1.5** | conception-gestion-pilotes_specs_v1.5.md | Claude | **Étape 4 : outils MCP `pilotes_*`** (trois outils génériques) et `CLAUDE.md` des agents ; le cœur signe pour l'agent. v1.4 archivée. |
 | 15/10/2026 | **v2.12** | fonctionnelles-supervisor_specs_v2.12.md | Claude | **§14ter.7 — requêtes de l'application « agent »** (`pilotes:agent:*`) : le cœur signe et publie, relaie les réponses, liste les ponts de tout le site (joignabilité par machine). v2.11 archivée. |
 | 15/10/2026 | **v1.24** | fonctionnelles-ia_specs_v1.24.md | Claude | **§19.12 — gestion des pilotes** : outils MCP `pilotes_ponts`, `pilotes_lire`, `pilotes_modifier` ; aperçu obligatoire, jeton gardé par `ia`. v1.23 archivée. |
