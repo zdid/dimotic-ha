@@ -1,8 +1,8 @@
 # Spécifications Fonctionnelles - Module AREXX
 
-*Version 1.8 - 16 Octobre 2026*
-*v1.8 : **nommage complet** (§6.5) — `lieuPere` (étage) et `lieuGrandPere` (bâtiment) acceptés par adopter/modifier.*
-*Historique — v1.7 (15 Octobre 2026) : **gestion des capteurs par l'agent IA** (§6.5, conception-gestion-pilotes) — le pont `arexx_bridge_<machine>` répond
+*Version 1.9 - 16 Octobre 2026*
+*v1.9 : **nommage corrigé** (§6.5) — lieu précis absent = lieu ; `lieuPere` / `lieuGrandPere` facultatifs (souvent étage et bâtiment, pas une règle).*
+*Historique — v1.8 : nommage complet ; v1.7 (15 Octobre 2026) : **gestion des capteurs par l'agent IA** (§6.5, conception-gestion-pilotes) — le pont `arexx_bridge_<machine>` répond
 aux ordres lister, découverts, adopter, modifier, remplacer, effacer, ignorer, supprimer, redémarrer ; liste d'exclusion
 `arexx_ignored` ; **les états ne sont plus retenus sur le broker** (seule la découverte l'est) ; **suppression complète**
 (§7.4 réécrit) : messages vides retenus sur la découverte, les attributs ET l'état.*
@@ -460,7 +460,7 @@ avant écriture (en plus du `.bak` ordinaire). Le numéro n'apparaît pas dans l
 **à vérifier dans un vrai HA** (essayé ici sur broker de test : sujets retenus de l'ancien vidés, ceux du neuf publiés).
 ---
 
-**Nommage (v1.8)** : La distribution est **positionnelle** : sans précis ni père `quoi---lieu` ; un père (ou un grand-père) **sans lieu précis** répète le lieu en tête (`quoi---lieu--lieu--père`, forme déjà utilisée comme `frigo---cuisine--cuisine`) ; **un grand-père exige un père**. Paramètres des ordres : `quoi`, `lieu` (obligatoires), `lieuPrecis`, `lieuPere`, `lieuGrandPere` (facultatifs) ; avec `modifier`, seules les parties données changent (`""` efface une partie). Une seule fonction les compose (`composerNom` / `decomposerNom`, cœur `pilotes/nom.ts`), utilisée par tous les pilotes. L'agent lit d'abord les noms existants pour reprendre l'étage et le bâtiment du site, et ne demande que ce qui manque.
+**Nommage (v1.9)** : Le nom d'une ressource suit le protocole `nommage_specs` §3.3 : `quoi---lieu_précis--lieu--lieu_père--lieu_grand_père`. `quoi` et `lieu` sont **obligatoires**. `lieu_précis` est facultatif : **absent, il vaut le `lieu`** (d'où `quoi---lieu` quand seul le lieu est donné). `lieu_père` et `lieu_grand_père` sont **facultatifs** : ce sont **souvent** l'étage et le bâtiment, **mais ce n'est pas une règle** (aucun sens imposé, ne pas les deviner). La distribution est **positionnelle** : sans précis ni père `quoi---lieu` ; un père (ou un grand-père) **sans lieu précis** répète le lieu en tête (`quoi---lieu--lieu--père`, forme déjà utilisée comme `frigo---cuisine--cuisine`) ; **un grand-père exige un père** (sa position dans le nom). Paramètres des ordres : `quoi`, `lieu`, `lieuPrecis`, `lieuPere`, `lieuGrandPere` ; avec `modifier`, seules les parties données changent (`""` efface une partie). Une seule fonction les compose (`composerNom` / `decomposerNom`, cœur `pilotes/nom.ts`), utilisée par tous les pilotes. L'agent lit d'abord les noms existants pour reprendre la convention du site et ne demande père / grand-père que s'ils y sont d'usage ou si l'utilisateur en parle.
 
 ## 7. Taxonomie et Découverte HA
 

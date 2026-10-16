@@ -10,6 +10,12 @@
 
 | Date | Version | Fichier | Auteur | Changements |
 |------|---------|---------|--------|-------------|
+| 16/10/2026 | **v1.8** | conception-gestion-pilotes_specs_v1.8.md | Claude | **Nommage corrigé (§5.4)** : lieu précis absent = lieu ; lieu père et grand-père facultatifs (souvent étage et bâtiment, pas une règle). v1.7 archivée. |
+| 16/10/2026 | **v1.9** | fonctionnelles-arexx_specs_v1.9.md | Claude | **§6.5 : nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v1.8 archivée. |
+| 16/10/2026 | **v7.4** | fonctionnelles-rfxcom_specs_v7.4.md | Claude | **§13bis : nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v7.3 archivée. |
+| 16/10/2026 | **v1.2** | fonctionnelles-zigbee2mqtt_specs_v1.2.md | Claude | **Nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v1.1 archivée. |
+| 16/10/2026 | **v1.26** | fonctionnelles-ia_specs_v1.26.md | Claude | **§19.12 : nommage corrigé** donné à l'agent (père / grand-père facultatifs, pas d'étage ni de bâtiment imposés). v1.25 archivée. |
+| 16/10/2026 | **v2.14** | fonctionnelles-supervisor_specs_v2.14.md | Claude | **§14ter.8 corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v2.13 archivée. |
 | 16/10/2026 | **v1.7** | conception-gestion-pilotes_specs_v1.7.md | Claude | **Règle de nommage complète des pilotes** (§5.4) : lieu père (étage) et lieu grand-père (bâtiment) ajoutés aux paramètres, composition positionnelle, un grand-père exige un père. v1.6 archivée. |
 | 16/10/2026 | **v1.8** | fonctionnelles-arexx_specs_v1.8.md | Claude | **§6.5 : nommage complet** — `adopter`/`modifier` acceptent `lieuPere` (étage) et `lieuGrandPere` (bâtiment) ; fonction de nommage commune du cœur. v1.7 archivée. |
 | 16/10/2026 | **v7.3** | fonctionnelles-rfxcom_specs_v7.3.md | Claude | **§13bis : nommage complet** — `lieuPere` (étage) et `lieuGrandPere` (bâtiment) pour adopter/creer/modifier ; fonction commune. v7.2 archivée. |

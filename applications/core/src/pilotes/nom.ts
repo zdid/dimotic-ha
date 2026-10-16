@@ -3,6 +3,8 @@
  *
  *   quoi---lieu_precis--lieu--lieu_pere--lieu_grand_pere
  *
+ * `lieu_precis` absent = égal au `lieu` (donc `quoi---lieu` suffit quand seul le lieu est donné). `lieu_pere` et `lieu_grand_pere` sont
+ * FACULTATIFS : souvent l'étage et le bâtiment, mais ce n'est PAS une règle (aucun sens imposé).
  * La distribution est POSITIONNELLE (N = nombre de segments après `---`) :
  *   N=1 lieu | N=2 précis, lieu | N=3 précis, lieu, père (étage) | N≥4 précis, lieu, père, grand-père (bâtiment).
  * Conséquences pour la composition :
@@ -16,9 +18,9 @@ export interface QualificationNom {
   quoi: string;
   lieu: string;
   lieuPrecis?: string;
-  /** Étage (ex. « Rez-de-Chaussée »). */
+  /** Niveau au-dessus du lieu (souvent l'étage, ex. « Rez-de-Chaussée » — pas une règle). Facultatif. */
   lieuPere?: string;
-  /** Bâtiment (ex. « Maison »). */
+  /** Niveau au-dessus du père (souvent le bâtiment, ex. « Maison » — pas une règle). Facultatif ; exige `lieuPere`. */
   lieuGrandPere?: string;
 }
 
