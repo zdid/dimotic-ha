@@ -47,6 +47,7 @@ describe('RfxcomPilote', () => {
       sauvegarder: () => { appels.push('sauvegarder'); return '/data/rfxcom/machine_x.yaml.bak-X'; },
       persister: () => { appels.push('persister'); },
       rafraichir: () => {},
+      renommerEntityIdHa: async (nom) => { appels.push(`renommer-entity-id:${nom}`); return { renommes: [], inchanges: [], bloques: [], introuvable: false }; },
       attendreRetraitHa: async (noms) => { appels.push(`attendre:${noms.join('|')}`); return { absent: true, attenteMs: 1, restantes: [] }; },
       retirerDevice: (id) => { appels.push(`retirer-device:${id}`); devices.deleteDevice(id); },
       retirerRecepteur: (id) => { appels.push(`retirer-recepteur:${id}`); recepteurs.removeReceiver(id); },

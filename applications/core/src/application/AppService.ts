@@ -726,6 +726,7 @@ export class AppService {
     this.supervisorBridge.bridgeEvent(appModule.id, PILOTES_EVENTS.REQUETE);
     this.supervisorBridge.bridgeEvent(appModule.id, PILOTES_EVENTS.PRESENCE_DEMANDE);
     this.supervisorBridge.bridgeEvent(appModule.id, PILOTES_EVENTS.HA_RETRAIT_RESULTAT);
+    this.supervisorBridge.bridgeEvent(appModule.id, PILOTES_EVENTS.HA_RENOMMER_RESULTAT);
     if (appModule.type === 'integration') {
       this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:command`);
       this.supervisorBridge.bridgeEvent(appModule.id, `integration:${appModule.id}:bridge:connection`);

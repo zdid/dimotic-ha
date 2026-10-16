@@ -39,6 +39,8 @@ export interface RfxcomPiloteHote {
   /** Retrait complet : entité HA (si transmise) puis registre. */
   /** Attend que HA ait supprimé les entités de ces noms (suppression AVANT création : sinon HA suffixe `_2`). */
   attendreRetraitHa(noms: string[]): Promise<{ absent: boolean; attenteMs: number; restantes: string[] }>;
+  /** Fait suivre l'entity_id de HA au nouveau nom (HA garde l'ancien après une suppression + recréation). */
+  renommerEntityIdHa(nom: string): Promise<{ renommes: Array<{ de: string; vers: string }>; inchanges: string[]; bloques: Array<{ entityId: string; raison: string }>; introuvable: boolean }>;
   retirerDevice(id: string): void;
   retirerRecepteur(id: string): void;
   retirerScene(id: string): void;
@@ -227,6 +229,16 @@ export class RfxcomPilote implements PiloteGestionnaire {
       else if (p.genre === 'recepteur') h.publierRecepteur(p.id);
       else h.publierScene(p.id);
     }
+    // Modification d'un nom : HA reprend l'ancien entity_id (entrée du registre conservée) → on le fait suivre au nouveau nom.
+    const renommagesHa: unknown[] = [];
+    if (ordre === 'modifier' && nomsRetires.length) {
+      const nouveaux = plan.operations.flatMap((o) =>
+        o.op === 'definir-device' && o.device.transmitToHa ? [o.device.name]
+        : (o.op === 'definir-recepteur' || o.op === 'definir-scene') && o.config.transmitToHa ? [o.config.name]
+        : []
+      ).filter((n) => !nomsRetires.includes(n));
+      for (const nom of new Set(nouveaux)) renommagesHa.push({ nom, ...(await h.renommerEntityIdHa(nom)) });
+    }
     h.rafraichir();
 
     const creations = plan.operations
@@ -235,6 +247,7 @@ export class RfxcomPilote implements PiloteGestionnaire {
     return {
       resultat: {
         ...(creations.length ? { identifiants: creations } : {}),
+        ...(renommagesHa.length ? { renommageEntityIdHa: renommagesHa } : {}),
         ...(attenteHa ? { attenteSuppressionHa: attenteHa.absent ? `faite en ${attenteHa.attenteMs} ms` : `NON confirmée après ${attenteHa.attenteMs} ms (restent : ${attenteHa.restantes.join(', ') || 'inconnu'}) : vérifier dans HA` } : {}),
         devices: h.devices().length,
         recepteurs: h.recepteurs().length,

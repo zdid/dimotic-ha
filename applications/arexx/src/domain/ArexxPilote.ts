@@ -31,6 +31,8 @@ export interface ArexxPiloteHote {
   rafraichir(): void;
   /** Attend que HA ait supprimé les entités de ces noms (suppression AVANT création : sinon HA suffixe `_2`). */
   attendreRetraitHa(noms: string[]): Promise<{ absent: boolean; attenteMs: number; restantes: string[] }>;
+  /** Fait suivre l'entity_id de HA au nouveau nom (HA garde l'ancien après une suppression + recréation). */
+  renommerEntityIdHa(nom: string): Promise<{ renommes: Array<{ de: string; vers: string }>; inchanges: string[]; bloques: Array<{ entityId: string; raison: string }>; introuvable: boolean }>;
   /** Relit le fichier des capteurs et republie ; renvoie le nombre de capteurs chargés. */
   relire(): number;
 }
@@ -148,8 +150,16 @@ export class ArexxPilote implements PiloteGestionnaire {
       const capteur = reg.getSensor(id);
       if (capteur) this.hote.publierDecouverte(capteur);
     }
+    // Modification d'un nom : HA reprend l'ancien entity_id (entrée du registre conservée) → on le fait suivre au nouveau nom.
+    const renommagesHa: unknown[] = [];
+    if (ordre === 'modifier' && nomsRetires.length) {
+      for (const id of aPublier) {
+        const capteur = reg.getSensor(id);
+        if (capteur && !nomsRetires.includes(capteur.name)) renommagesHa.push({ nom: capteur.name, ...(await this.hote.renommerEntityIdHa(capteur.name)) });
+      }
+    }
     this.hote.rafraichir();
-    return { resultat: { ...(plan.apercu.resultat as Record<string, unknown> | undefined), ...(attenteHa ? { attenteSuppressionHa: attenteHa.absent ? `faite en ${attenteHa.attenteMs} ms` : `NON confirmée après ${attenteHa.attenteMs} ms (restent : ${attenteHa.restantes.join(', ') || 'inconnu'}) : vérifier dans HA`} : {}), capteurs: reg.getConfiguredSensors().length, decouverts: reg.getDiscoveredSensors().length, ...(chargés !== undefined ? { relus: chargés } : {}) }, sauvegarde };
+    return { resultat: { ...(plan.apercu.resultat as Record<string, unknown> | undefined), ...(renommagesHa.length ? { renommageEntityIdHa: renommagesHa } : {}), ...(attenteHa ? { attenteSuppressionHa: attenteHa.absent ? `faite en ${attenteHa.attenteMs} ms` : `NON confirmée après ${attenteHa.attenteMs} ms (restent : ${attenteHa.restantes.join(', ') || 'inconnu'}) : vérifier dans HA`} : {}), capteurs: reg.getConfiguredSensors().length, decouverts: reg.getDiscoveredSensors().length, ...(chargés !== undefined ? { relus: chargés } : {}) }, sauvegarde };
   }
 
   // ---------------------------------------------------------------------------

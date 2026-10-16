@@ -10,6 +10,7 @@
 
 | Date | Version | Fichier | Auteur | Changements |
 |------|---------|---------|--------|-------------|
+| 16/10/2026 | **v1.10** | conception-gestion-pilotes_specs_v1.10.md | Claude | **Modification d'un nom : l'entity_id de HA suit** (§7.2) — HA gardait l'ancien entity_id après suppression + recréation ; le cœur le renomme (`config/entity_registry/update`, événements `pilotes:ha:renommer:*`) pour AREXX et RFXCOM |
 | 16/10/2026 | **v1.9** | conception-gestion-pilotes_specs_v1.9.md | Claude | **Remplacement : attendre la suppression dans HA avant de créer** (§7.2) — événement cœur `pilotes:ha:retrait:attendre`/`resultat` (`attendreRetraitHa`), branché dans AREXX, RFXCOM et zigbee2mqtt ; `attenteSuppressionHa` dans la réponse |
 | 16/10/2026 | **v1.8** | conception-gestion-pilotes_specs_v1.8.md | Claude | **Nommage corrigé (§5.4)** : lieu précis absent = lieu ; lieu père et grand-père facultatifs (souvent étage et bâtiment, pas une règle). v1.7 archivée. |
 | 16/10/2026 | **v1.9** | fonctionnelles-arexx_specs_v1.9.md | Claude | **§6.5 : nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v1.8 archivée. |

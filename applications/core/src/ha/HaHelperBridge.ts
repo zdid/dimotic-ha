@@ -16,7 +16,7 @@ import type { HaWsClient } from './sync/HaWsClient';
 import type { HaStructureRegistry } from './sync/HaStructureRegistry';
 import type { Logger } from '../infrastructure/logger/index';
 import { PILOTES_EVENTS } from '../pilotes/types';
-import { entiteCorrespond, type PiloteRetraitDemande, type PiloteRetraitResultat } from '../pilotes/attenteRetraitHa';
+import { entiteCorrespond, entiteDeCeNom, slugHa, type PiloteRetraitDemande, type PiloteRetraitResultat, type PiloteRenommerDemande, type PiloteRenommerResultat } from '../pilotes/attenteRetraitHa';
 
 export interface HaHelperRequest {
   appId: string;
@@ -67,6 +67,9 @@ export class HaHelperBridge {
     });
     this.eventBus.onGeneric<HaEntitiesListRequest>('ha:entities:list:request', (req) => {
       this.handleEntitiesListRequest(req);
+    });
+    this.eventBus.onGeneric<PiloteRenommerDemande>(PILOTES_EVENTS.HA_RENOMMER_DEMANDE, (req) => {
+      void this.renommerEntityId(req);
     });
     this.eventBus.onGeneric<PiloteRetraitDemande>(PILOTES_EVENTS.HA_RETRAIT_DEMANDE, (req) => {
       void this.attendreRetrait(req);
@@ -159,5 +162,38 @@ export class HaHelperBridge {
       restantes: presentes
     };
     this.eventBus.emitGeneric(PILOTES_EVENTS.HA_RETRAIT_RESULTAT, resultat);
+  }
+
+  /**
+   * ⭐ 16/10/2026 — après la modification d'un nom : HA garde l'ancien `entity_id` (l'entrée du registre survit à la
+   * suppression de la découverte MQTT). On attend que l'entité réapparaisse sous le NOUVEAU nom, puis on fait suivre
+   * l'`entity_id` (domaine + slug du nom affiché) par `config/entity_registry/update`, si l'identifiant visé est libre.
+   */
+  private async renommerEntityId(req: PiloteRenommerDemande): Promise<void> {
+    const debut = Date.now();
+    const delai = Math.min(Math.max(req.delaiMs ?? 20000, 1000), 120000);
+    const resultat: PiloteRenommerResultat = { appId: req.appId, requestId: req.requestId, renommes: [], inchanges: [], bloques: [], introuvable: false };
+    const trouvees = () => (this.haStructureRegistry?.getAllEntities() ?? []).filter((e) => entiteDeCeNom(req.nom, e.friendly_name));
+
+    let cibles = trouvees();
+    while (cibles.length === 0 && Date.now() - debut < delai) {
+      await new Promise((r) => setTimeout(r, 500));
+      cibles = trouvees();
+    }
+    if (cibles.length === 0 || !this.haWsClient) resultat.introuvable = true;
+    else {
+      for (const e of cibles) {
+        const visé = `${e.entity_id.split('.')[0]}.${slugHa(e.friendly_name)}`;
+        if (visé === e.entity_id) { resultat.inchanges.push(e.entity_id); continue; }
+        if (this.haStructureRegistry?.getEntity(visé)) { resultat.bloques.push({ entityId: e.entity_id, raison: `« ${visé} » existe déjà` }); continue; }
+        try {
+          await this.haWsClient.callWs({ type: 'config/entity_registry/update', entity_id: e.entity_id, new_entity_id: visé });
+          resultat.renommes.push({ de: e.entity_id, vers: visé });
+        } catch (error) {
+          resultat.bloques.push({ entityId: e.entity_id, raison: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    }
+    this.eventBus.emitGeneric(PILOTES_EVENTS.HA_RENOMMER_RESULTAT, resultat);
   }
 }

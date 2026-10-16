@@ -26,7 +26,11 @@ export const PILOTES_EVENTS = {
   /** app → cœur : « attends que HA ait supprimé ces entités » (remplacement : suppression AVANT création). */
   HA_RETRAIT_DEMANDE: 'pilotes:ha:retrait:attendre',
   /** cœur → app : résultat de l'attente (filtré par `appId` / `requestId`). */
-  HA_RETRAIT_RESULTAT: 'pilotes:ha:retrait:resultat'
+  HA_RETRAIT_RESULTAT: 'pilotes:ha:retrait:resultat',
+  /** app → cœur : « fais suivre l'entity_id au nouveau nom » (modification d'un nom : HA garde l'ancien entity_id). */
+  HA_RENOMMER_DEMANDE: 'pilotes:ha:renommer:demander',
+  /** cœur → app : résultat du renommage d'entity_id. */
+  HA_RENOMMER_RESULTAT: 'pilotes:ha:renommer:resultat'
 } as const;
 
 /** Requête d'une application « agent » (ia) : le cœur ajoute id, date, signature. `ref` retrouve la réponse. */

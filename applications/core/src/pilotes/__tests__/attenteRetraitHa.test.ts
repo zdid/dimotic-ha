@@ -12,3 +12,18 @@ describe('entiteCorrespond', () => {
     expect(entiteCorrespond('Température---salon', undefined)).toBe(false);
   });
 });
+
+import { slugHa, entiteDeCeNom } from '../attenteRetraitHa';
+
+describe('renommage d\'entity_id', () => {
+  it('slugHa suit la règle de HA', () => {
+    expect(slugHa('Température salle de bain')).toBe('temperature_salle_de_bain');
+    expect(slugHa(' Humidité — Salon (canapé) ')).toBe('humidite_salon_canape');
+  });
+  it('entiteDeCeNom : nom affiché (quoi, précis, lieu) ou son début ; pas un autre lieu', () => {
+    expect(entiteDeCeNom('Température---canapé--salon--étage', 'Température Canapé Salon')).toBe(true);
+    expect(entiteDeCeNom('Température---salon--salon', 'Température Salon')).toBe(true);
+    expect(entiteDeCeNom('Température---salon--salon', 'Température Salon batterie')).toBe(true);
+    expect(entiteDeCeNom('Température---salon', 'Température Cuisine')).toBe(false);
+  });
+});

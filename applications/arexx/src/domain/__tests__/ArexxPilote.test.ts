@@ -36,6 +36,7 @@ describe('ArexxPilote', () => {
       publierDecouverte: (c) => { appels.push(`publier:${c.uniqueId}`); },
       retirerDecouverte: (id) => { appels.push(`retirer:${id}`); },
       rafraichir: () => {},
+      renommerEntityIdHa: async (nom) => { appels.push(`renommer-entity-id:${nom}`); return { renommes: [], inchanges: [], bloques: [], introuvable: false }; },
       attendreRetraitHa: async (noms) => { appels.push(`attendre:${noms.join('|')}`); return { absent: true, attenteMs: 1, restantes: [] }; },
       relire: () => { appels.push('relire'); return 3; }
     };
@@ -130,9 +131,9 @@ describe('ArexxPilote', () => {
   });
 
   describe('modifier', () => {
-    it('retire de HA puis redéclare au nouveau nom (une modification = suppression puis ajout)', async () => {
+    it('retire de HA, redéclare au nouveau nom, puis fait suivre l\'entity_id', async () => {
       await pilote.appliquer('modifier', { id: 'arexx_8962', lieu: 'sdb étage' });
-      expect(appels).toEqual(['retirer:arexx_8962', 'attendre:Température---salle de bain', 'persister', 'publier:arexx_8962']);
+      expect(appels).toEqual(['retirer:arexx_8962', 'attendre:Température---salle de bain', 'persister', 'publier:arexx_8962', 'renommer-entity-id:Température---sdb étage']);
       expect(registry.getSensor('arexx_8962')?.name).toBe('Température---sdb étage');
     });
   });

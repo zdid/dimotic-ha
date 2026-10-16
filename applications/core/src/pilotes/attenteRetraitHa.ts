@@ -68,3 +68,64 @@ export function attendreRetraitHa(
     eventBus.emitGeneric<PiloteRetraitDemande>(PILOTES_EVENTS.HA_RETRAIT_DEMANDE, { appId, requestId, noms, delaiMs });
   });
 }
+
+// ---------------------------------------------------------------------------
+// Renommage d'entity_id après une modification de nom (HA garde l'ancien entity_id : l'entrée du registre survit à la
+// suppression de la découverte MQTT et est reprise à la recréation).
+// ---------------------------------------------------------------------------
+
+export interface PiloteRenommerDemande { appId: string; requestId: string; nom: string; delaiMs?: number }
+
+export interface PiloteRenommerResultat {
+  appId: string;
+  requestId: string;
+  renommes: Array<{ de: string; vers: string }>;
+  /** Entités déjà à la bonne valeur. */
+  inchanges: string[];
+  /** Impossible : identifiant visé déjà pris, ou erreur de HA. */
+  bloques: Array<{ entityId: string; raison: string }>;
+  /** Aucune entité reconnue (délai dépassé). */
+  introuvable: boolean;
+}
+
+/** Slug d'identifiant HA : sans accents, minuscules, tout bloc non alphanumérique devient `_`. */
+export function slugHa(texte: string): string {
+  return texte.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/**
+ * Le nom d'entité de HA est-il celui de ce nom de pilote ? Nom affiché = quoi + lieu précis + lieu (lieu omis s'il répète
+ * le précis ; lieux père et grand-père absents) : on compare au nom affiché reconstitué, ou à son début (plusieurs
+ * entités par appareil : « Température salon » + « Humidité salon » ne sont pas concernées, « … batterie » oui).
+ */
+export function entiteDeCeNom(nomPilote: string, nomEntite: string | undefined): boolean {
+  if (!nomEntite) return false;
+  const parties = nomPilote.split(/-{2,}/).map(normaliser).filter(Boolean).slice(0, 3);
+  const affiche = parties.filter((p, i) => i === 0 || p !== parties[i - 1]).join('');
+  if (!affiche) return false;
+  const cible = normaliser(nomEntite);
+  return cible === affiche || cible.startsWith(affiche);
+}
+
+export function renommerEntityIdHa(
+  eventBus: IEventBus,
+  appId: string,
+  nom: string,
+  delaiMs = 20000
+): Promise<PiloteRenommerResultat> {
+  const requestId = `${appId}-ren-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return new Promise((resolve) => {
+    const ecouteur = (r: PiloteRenommerResultat): void => {
+      if (r?.requestId !== requestId) return;
+      clearTimeout(garde);
+      eventBus.offGeneric(PILOTES_EVENTS.HA_RENOMMER_RESULTAT, ecouteur);
+      resolve(r);
+    };
+    const garde = setTimeout(() => {
+      eventBus.offGeneric(PILOTES_EVENTS.HA_RENOMMER_RESULTAT, ecouteur);
+      resolve({ appId, requestId, renommes: [], inchanges: [], bloques: [], introuvable: true });
+    }, delaiMs + 10000);
+    eventBus.onGeneric<PiloteRenommerResultat>(PILOTES_EVENTS.HA_RENOMMER_RESULTAT, ecouteur);
+    eventBus.emitGeneric<PiloteRenommerDemande>(PILOTES_EVENTS.HA_RENOMMER_DEMANDE, { appId, requestId, nom, delaiMs });
+  });
+}
