@@ -22,12 +22,35 @@ export function lwtTopic(machineId: string): string {
   return `app/dimotic-core-appgossip-${machineId}/status`;
 }
 
+/** Segment de site, comme le cœur et l'agent : minuscules, [a-z0-9_-]. */
+export function segmentSite(site: string): string {
+  return site.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+}
+
+/** Topic où le bouton « Installer » de HA publie (écouté par l'agent `maj` de la machine). */
+export function installerTopic(site: string, machineId: string): string {
+  return `dimotic/${segmentSite(site)}/maj/${machineId}/installer`;
+}
+
+/** État de mise à jour d'une machine, publié (retenu) par la supervision pour l'entité `update` de HA. */
+export function majEtatTopic(machineId: string): string {
+  return `dimotic/supervision/maj/${machineId}/etat`;
+}
+
+export interface MajEtat { installed_version: string; latest_version: string; in_progress: boolean }
+
+/** `latest_version` absent (hub pas encore lu) : on répète l'installée, HA n'affiche alors aucune mise à jour. */
+export function majEtat(installee: string | undefined, derniere: string | null, enCours: boolean): MajEtat {
+  const inst = installee && installee.length ? installee : 'inconnue';
+  return { installed_version: inst, latest_version: derniere ?? inst, in_progress: enCours };
+}
+
 export function knownAppsTopic(machineId: string): string {
   return `dimotic/core/${machineId}/known-apps`;
 }
 
 /** Messages de découverte HA d'une machine (3 entités). */
-export function machineDiscovery(machineId: string): DiscoveryMessage[] {
+export function machineDiscovery(machineId: string, siteAgent?: string): DiscoveryMessage[] {
   const id = slug(machineId);
   const device = {
     identifiers: [`dimotic_ha_${id}`],
@@ -55,8 +78,10 @@ export function machineDiscovery(machineId: string): DiscoveryMessage[] {
       topic: `${DISCOVERY_PREFIX}/update/dimotic_${id}/maj/config`,
       payload: {
         name: 'Mise à jour', unique_id: `dimotic_${id}_maj`, device,
-        state_topic: knownAppsTopic(machineId), value_template: "{{ value_json.dimoticVersion | default('inconnue', true) }}",
-        latest_version_topic: HUB_LATEST_TOPIC, entity_picture: 'https://brands.home-assistant.io/_/docker/icon.png'
+        state_topic: majEtatTopic(machineId),
+        // Le bouton « Installer » n'existe que si l'agent `maj` de cette machine s'est fait connaître (son site est alors connu).
+        ...(siteAgent ? { command_topic: installerTopic(siteAgent, machineId), payload_install: 'INSTALL' } : {}),
+        entity_picture: 'https://brands.home-assistant.io/_/docker/icon.png'
       }
     }
   ];

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { estCoeurDeDev, machineRetrait, machineDiscovery, hubDiscovery, latestVersion, lwtTopic, knownAppsTopic, HUB_LATEST_TOPIC } from '../HaDeclaration';
+import { majEtat, majEtatTopic, installerTopic, estCoeurDeDev, machineRetrait, machineDiscovery, hubDiscovery, latestVersion, lwtTopic, knownAppsTopic, HUB_LATEST_TOPIC } from '../HaDeclaration';
 
 describe('HaDeclaration', () => {
   it('une machine = 3 entités : en ligne (LWT), version installée, mise à jour', () => {
@@ -13,7 +13,8 @@ describe('HaDeclaration', () => {
     expect(online).toMatchObject({ state_topic: lwtTopic('ha2_811876'), payload_on: 'online', payload_off: 'offline', device_class: 'connectivity' });
     expect(version).toMatchObject({ state_topic: knownAppsTopic('ha2_811876') });
     expect(String(version.value_template)).toContain('dimoticVersion');
-    expect(maj).toMatchObject({ state_topic: knownAppsTopic('ha2_811876'), latest_version_topic: HUB_LATEST_TOPIC });
+    expect(maj).toMatchObject({ state_topic: majEtatTopic('ha2_811876') });
+    expect(maj.command_topic).toBeUndefined(); // pas d'agent connu : pas de bouton « Installer »
     // un seul appareil HA par machine
     expect(new Set(msgs.map((m) => JSON.stringify((m.payload.device as { identifiers: string[] }).identifiers))).size).toBe(1);
   });
@@ -40,5 +41,17 @@ describe('HaDeclaration', () => {
     const retrait = machineRetrait('falbala_817412');
     expect(retrait).toHaveLength(3);
     expect(retrait.every((m) => m.payload === '' && m.topic.startsWith('homeassistant/'))).toBe(true);
+  });
+
+  it("bouton Installer : seulement quand l'agent maj de la machine est connu", () => {
+    const maj = machineDiscovery('ha2_811876', 'Stfort')[2].payload;
+    expect(maj).toMatchObject({ command_topic: 'dimotic/stfort/maj/ha2_811876/installer', payload_install: 'INSTALL' });
+    expect(installerTopic('Mon Site', 'm1')).toBe('dimotic/mon_site/maj/m1/installer');
+  });
+
+  it('état de mise à jour : versions et mise à jour en cours', () => {
+    expect(majEtat('3.9.5', '3.9.6', false)).toEqual({ installed_version: '3.9.5', latest_version: '3.9.6', in_progress: false });
+    expect(majEtat('3.9.6', null, true)).toEqual({ installed_version: '3.9.6', latest_version: '3.9.6', in_progress: true });
+    expect(majEtat(undefined, '3.9.6', false).installed_version).toBe('inconnue');
   });
 });

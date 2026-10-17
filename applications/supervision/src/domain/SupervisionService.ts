@@ -25,13 +25,16 @@ import {
   type SupervisionConfig
 } from './config-schema';
 import { evaluateBackup, type BackupMachineReport, type BackupView } from './BackupEvaluation';
-import { machineDiscovery, machineRetrait, estCoeurDeDev, hubDiscovery, latestVersion, fetchHubTags, HUB_LATEST_TOPIC, type DiscoveryMessage } from './HaDeclaration';
+import { machineDiscovery, machineRetrait, estCoeurDeDev, hubDiscovery, latestVersion, fetchHubTags, majEtat, majEtatTopic, HUB_LATEST_TOPIC, type DiscoveryMessage } from './HaDeclaration';
 import { SUPERVISION_SOCKET_EVENTS, SUPERVISION_CLIENT_EVENTS } from './socket-events';
 
 const MODULE_NAME = 'supervision';
 const KNOWN_APPS_TOPIC = 'dimotic/core/+/known-apps';
 const LWT_TOPIC = 'app/+/status';
 const SELECTION_TOPIC = 'dimotic/supervision/selection';
+/** État publié par l'agent de mise à jour `maj` de chaque machine (retenu) : dimotic/<site>/maj/<machine>/etat. */
+const MAJ_ETAT_TOPIC = 'dimotic/+/maj/+/etat';
+const MAJ_ETAT_RE = /^dimotic\/([^/]+)\/maj\/([^/]+)\/etat$/;
 const KNOWN_APPS_RE = /^dimotic\/core\/([^/]+)\/known-apps$/;
 const LWT_RE = /^app\/dimotic-core-appgossip-(.+)\/status$/;
 /** Laisse arriver la sélection retenue du broker avant de décider s'il faut publier la copie locale. */
@@ -106,6 +109,14 @@ export class SupervisionService implements ISupervisionService {
   /** Machines déjà déclarées dans HA depuis ce démarrage. */
   private readonly declared = new Set<string>();
   private hubDeclared = false;
+  /** Dernière version X.Y.Z lue sur le Docker Hub. */
+  private hubLatest: string | null = null;
+  /** Agents `maj` connus : site (pour le topic du bouton « Installer ») et mise à jour en cours. */
+  private readonly agents = new Map<string, { site: string; enCours: boolean }>();
+  /** Cœurs de développement (jamais déclarés dans HA). */
+  private readonly devMachines = new Set<string>();
+  /** Dernier état de mise à jour publié par machine (évite de republier à l'identique). */
+  private readonly majPublie = new Map<string, string>();
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -182,6 +193,7 @@ export class SupervisionService implements ISupervisionService {
     this.declared.add(machineId);
     // Cœur de développement (hors image) : pas une machine du site — on ne le déclare pas et on retire ce qui l'aurait été.
     if (estCoeurDeDev(version)) {
+      this.devMachines.add(machineId);
       for (const m of machineRetrait(machineId)) {
         this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:publish`, {
           bridgeInstance: this.bridgeInstance, topic: m.topic, payload: m.payload, qos: 1, retain: true
@@ -189,11 +201,37 @@ export class SupervisionService implements ISupervisionService {
       }
       return;
     }
-    this.publishDiscovery(machineDiscovery(machineId));
+    this.publishDiscovery(machineDiscovery(machineId, this.agents.get(machineId)?.site));
+    this.publishMajEtat(machineId);
     if (!this.hubDeclared) {
       this.hubDeclared = true;
       this.publishDiscovery(hubDiscovery(this.config.hubRepository));
     }
+  }
+
+  /** État de mise à jour (versions, en cours) lu par l'entité `update` de HA ; publié retenu, seulement s'il change. */
+  private publishMajEtat(machineId: string): void {
+    if (!this.declared.has(machineId) || this.devMachines.has(machineId)) return;
+    const etat = majEtat(this.announcements.get(machineId)?.dimoticVersion, this.hubLatest, this.agents.get(machineId)?.enCours === true);
+    const payload = JSON.stringify(etat);
+    if (this.majPublie.get(machineId) === payload) return;
+    this.majPublie.set(machineId, payload);
+    this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:publish`, {
+      bridgeInstance: this.bridgeInstance, topic: majEtatTopic(machineId), payload, qos: 1, retain: true
+    });
+  }
+
+  /** L'agent `maj` d'une machine annonce son état : on retient son site (bouton « Installer ») et si une mise à jour tourne. */
+  private handleAgentMaj(site: string, machineId: string, payload: string): void {
+    let etat: string | undefined;
+    try { etat = (JSON.parse(payload) as { etat?: string }).etat; } catch { return; }
+    const avant = this.agents.get(machineId);
+    this.agents.set(machineId, { site, enCours: etat === 'en_cours' });
+    if (!avant || avant.site !== site) {
+      // L'agent vient de se faire connaître : la déclaration de la machine gagne le bouton « Installer ».
+      if (this.declared.has(machineId) && !this.devMachines.has(machineId)) this.publishDiscovery(machineDiscovery(machineId, site));
+    }
+    this.publishMajEtat(machineId);
   }
 
   private restartHubTimer(): void {
@@ -211,6 +249,8 @@ export class SupervisionService implements ISupervisionService {
       this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:publish`, {
         bridgeInstance: this.bridgeInstance, topic: HUB_LATEST_TOPIC, payload: version, qos: 1, retain: true
       });
+      this.hubLatest = version;
+      for (const id of this.declared) this.publishMajEtat(id);
     } catch (error) {
       this.logger.warn('SupervisionService', `Lecture du Docker Hub impossible : ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -226,7 +266,7 @@ export class SupervisionService implements ISupervisionService {
       if (data.bridgeInstance !== this.bridgeInstance) return;
       this.logger.info('SupervisionService', `Connexion MQTT du socle ${data.connected ? 'établie' : 'perdue'}`);
       if (!data.connected) return;
-      for (const topic of [KNOWN_APPS_TOPIC, LWT_TOPIC, SELECTION_TOPIC]) {
+      for (const topic of [KNOWN_APPS_TOPIC, LWT_TOPIC, SELECTION_TOPIC, MAJ_ETAT_TOPIC]) {
         this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:subscribe`, { bridgeInstance: this.bridgeInstance, topic, qos: 1 });
       }
       if (this.settleTimer) clearTimeout(this.settleTimer);
@@ -271,12 +311,18 @@ export class SupervisionService implements ISupervisionService {
         try {
           this.announcements.set(m[1], JSON.parse(payload) as Announcement);
           this.declareMachine(m[1], this.announcements.get(m[1])?.dimoticVersion);
+          this.publishMajEtat(m[1]);
         } catch {
           this.logger.warn('SupervisionService', `Annonce illisible ignorée sur ${topic}`);
           return;
         }
       }
       this.scheduleEmit();
+      return;
+    }
+    m = MAJ_ETAT_RE.exec(topic);
+    if (m) {
+      if (payload.trim() !== '') this.handleAgentMaj(m[1], m[2], payload);
       return;
     }
     m = LWT_RE.exec(topic);
