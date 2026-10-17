@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { machineDiscovery, hubDiscovery, latestVersion, lwtTopic, knownAppsTopic, HUB_LATEST_TOPIC } from '../HaDeclaration';
+import { estCoeurDeDev, machineRetrait, machineDiscovery, hubDiscovery, latestVersion, lwtTopic, knownAppsTopic, HUB_LATEST_TOPIC } from '../HaDeclaration';
 
 describe('HaDeclaration', () => {
   it('une machine = 3 entités : en ligne (LWT), version installée, mise à jour', () => {
@@ -31,5 +31,14 @@ describe('HaDeclaration', () => {
     expect(latestVersion(['latest', '3.9.5', '3.10.0', '3.9.12', '4.0.0-rc1', '3.7.0'])).toBe('3.10.0');
     expect(latestVersion(['latest', 'dev'])).toBeNull();
     expect(latestVersion([])).toBeNull();
+  });
+
+  it('cœur de dev : exclu, et retrait des entités par payload vide', () => {
+    expect(estCoeurDeDev('dev')).toBe(true);
+    expect(estCoeurDeDev('3.9.6')).toBe(false);
+    expect(estCoeurDeDev(undefined)).toBe(false);
+    const retrait = machineRetrait('falbala_817412');
+    expect(retrait).toHaveLength(3);
+    expect(retrait.every((m) => m.payload === '' && m.topic.startsWith('homeassistant/'))).toBe(true);
   });
 });

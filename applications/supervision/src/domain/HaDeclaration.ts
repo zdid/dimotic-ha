@@ -62,6 +62,16 @@ export function machineDiscovery(machineId: string): DiscoveryMessage[] {
   ];
 }
 
+/** Un cœur lancé hors image (`APP_VERSION` absent → `dev`) n'est pas une vraie machine du site : jamais déclaré dans HA. */
+export function estCoeurDeDev(version: string | undefined): boolean {
+  return version === 'dev';
+}
+
+/** Messages qui RETIRENT de HA les entités d'une machine (payload vide retenu sur chaque topic de découverte). */
+export function machineRetrait(machineId: string): Array<{ topic: string; payload: '' }> {
+  return machineDiscovery(machineId).map((m) => ({ topic: m.topic, payload: '' as const }));
+}
+
 /** Appareil « Docker Hub » : dernière version publiée. */
 export function hubDiscovery(repository: string): DiscoveryMessage[] {
   return [{

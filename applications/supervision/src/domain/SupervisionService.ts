@@ -25,7 +25,7 @@ import {
   type SupervisionConfig
 } from './config-schema';
 import { evaluateBackup, type BackupMachineReport, type BackupView } from './BackupEvaluation';
-import { machineDiscovery, hubDiscovery, latestVersion, fetchHubTags, HUB_LATEST_TOPIC, type DiscoveryMessage } from './HaDeclaration';
+import { machineDiscovery, machineRetrait, estCoeurDeDev, hubDiscovery, latestVersion, fetchHubTags, HUB_LATEST_TOPIC, type DiscoveryMessage } from './HaDeclaration';
 import { SUPERVISION_SOCKET_EVENTS, SUPERVISION_CLIENT_EVENTS } from './socket-events';
 
 const MODULE_NAME = 'supervision';
@@ -49,6 +49,8 @@ interface Announcement {
   addresses?: string[];
   webPort?: number;
   runningInDocker?: boolean;
+  /** Version de l'image (`APP_VERSION`) ; `dev` = cœur lancé hors image. */
+  dimoticVersion?: string;
   apps?: AnnouncedApp[];
   publishedAt?: string;
 }
@@ -175,9 +177,18 @@ export class SupervisionService implements ISupervisionService {
   }
 
   /** Déclare dans HA chaque machine vue dans l'inventaire (une fois par démarrage ; retenu, donc idempotent). */
-  private declareMachine(machineId: string): void {
+  private declareMachine(machineId: string, version?: string): void {
     if (!this.config.declarerDansHa || this.declared.has(machineId)) return;
     this.declared.add(machineId);
+    // Cœur de développement (hors image) : pas une machine du site — on ne le déclare pas et on retire ce qui l'aurait été.
+    if (estCoeurDeDev(version)) {
+      for (const m of machineRetrait(machineId)) {
+        this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:publish`, {
+          bridgeInstance: this.bridgeInstance, topic: m.topic, payload: m.payload, qos: 1, retain: true
+        });
+      }
+      return;
+    }
     this.publishDiscovery(machineDiscovery(machineId));
     if (!this.hubDeclared) {
       this.hubDeclared = true;
@@ -259,7 +270,7 @@ export class SupervisionService implements ISupervisionService {
       } else {
         try {
           this.announcements.set(m[1], JSON.parse(payload) as Announcement);
-          this.declareMachine(m[1]);
+          this.declareMachine(m[1], this.announcements.get(m[1])?.dimoticVersion);
         } catch {
           this.logger.warn('SupervisionService', `Annonce illisible ignorée sur ${topic}`);
           return;
