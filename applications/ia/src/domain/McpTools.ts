@@ -16,6 +16,7 @@ import type { HaAutomationClient } from './HaAutomationClient';
 import type { PilotesClient } from './PilotesClient';
 import type { HaEntiteRenamer } from './HaEntiteRenamer';
 import type { HaAideClient } from './HaAideClient';
+import type { HaTableauClient } from './HaTableauClient';
 
 const CONFIRM_PROP = { type: 'boolean', description: 'false/absent = APERÇU seulement (rien n\'est modifié). true = exécute, À N\'UTILISER QU\'APRÈS l\'accord explicite de l\'utilisateur sur l\'aperçu.' };
 
@@ -88,6 +89,39 @@ export const HA_AIDE_TOOLS: McpToolDef[] = [
       },
       required: ['domaine']
     }
+  }
+];
+
+/** Tableaux de bord (graphes, cartes) et configuration Énergie de HA : lecture, puis dépôt avec aperçu et sauvegarde. */
+export const HA_TABLEAU_TOOLS: McpToolDef[] = [
+  {
+    name: 'lire_tableaux_de_bord',
+    description: 'Lit les tableaux de bord de Home Assistant (lecture seule). Sans paramètre : liste des tableaux. Avec url_path : leur configuration complète (vues et cartes, y compris les graphes) ; url_path vide ("") = le tableau par défaut. À utiliser AVANT de modifier un tableau.',
+    inputSchema: { type: 'object', properties: { url_path: { type: 'string', description: 'Identifiant du tableau (ex. energie-direct) ; "" = tableau par défaut' } } }
+  },
+  {
+    name: 'deposer_tableau_de_bord',
+    description: 'CRÉE ou REMPLACE un tableau de bord de Home Assistant (vues et cartes : graphes history-graph / statistics-graph, jauges, énergie…). Sans confirme:true, renvoie seulement un aperçu (vues avant/après) et ne modifie RIEN. L\'existant est sauvegardé avant remplacement. La config est REMPLACÉE ENTIÈRE : partir de lire_tableaux_de_bord, modifier, renvoyer le tout. Pour un tableau nouveau, donner creer {titre, icone} et un url_path avec un tiret.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url_path: { type: 'string', description: 'Identifiant du tableau (minuscules, chiffres, au moins un tiret) ; "" = tableau par défaut' },
+        config: { type: 'object', description: 'Configuration Lovelace complète : { views: [ { title, path, cards: [...] } ] }' },
+        creer: { type: 'object', description: 'Si le tableau n\'existe pas : { titre, icone } (ex. icone mdi:chart-line)' },
+        confirme: CONFIRM_PROP
+      },
+      required: ['url_path', 'config']
+    }
+  },
+  {
+    name: 'lire_energie',
+    description: 'Lit la configuration du tableau Énergie de Home Assistant (sources, consommateurs). Lecture seule.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'deposer_energie',
+    description: 'MODIFIE la configuration du tableau Énergie de HA (clés permises : energy_sources, device_consumption, device_consumption_water). Chaque clé donnée est remplacée ENTIÈRE. Sans confirme:true, aperçu seulement. L\'existant est sauvegardé avant.',
+    inputSchema: { type: 'object', properties: { prefs: { type: 'object', description: 'Ex. { device_consumption: [ { stat_consumption: "sensor.x_energie" } ] }' }, confirme: CONFIRM_PROP }, required: ['prefs'] }
   }
 ];
 
@@ -218,6 +252,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   ...HA_AUTOMATION_TOOLS,
   ...HA_ENTITE_TOOLS,
   ...HA_AIDE_TOOLS,
+  ...HA_TABLEAU_TOOLS,
   ...PILOTES_TOOLS
 ];
 
@@ -284,6 +319,8 @@ export interface McpToolboxDeps {
   entites: HaEntiteRenamer;
   /** Aides HA (timer, input_*…). */
   aides: HaAideClient;
+  /** Tableaux de bord et Énergie de HA. */
+  tableaux: HaTableauClient;
   /** Gestion des pilotes via le cœur (PilotesClient). */
   pilotes: PilotesClient;
 }
@@ -299,6 +336,13 @@ export class McpToolbox {
       case 'lire_automatisations_ha': return JSON.stringify(await this.readAutomations(args), null, 2);
       case 'deposer_automatisation': return JSON.stringify(await this.deps.automations.deposit(String(args.id ?? ''), args.definition, args.confirme === true), null, 2);
       case 'supprimer_automatisation': return JSON.stringify(await this.deps.automations.remove(String(args.id ?? ''), args.confirme === true), null, 2);
+      case 'lire_tableaux_de_bord': return JSON.stringify(await this.deps.tableaux.lire(args.url_path === undefined ? undefined : String(args.url_path)), null, 2);
+      case 'deposer_tableau_de_bord': {
+        const up = String(args.url_path ?? '');
+        return JSON.stringify(await this.deps.tableaux.deposer(up === '' ? null : up, args.config, args.creer as { titre?: string; icone?: string } | undefined, args.confirme === true), null, 2);
+      }
+      case 'lire_energie': return JSON.stringify(await this.deps.tableaux.lireEnergie(), null, 2);
+      case 'deposer_energie': return JSON.stringify(await this.deps.tableaux.deposerEnergie(args.prefs, args.confirme === true), null, 2);
       case 'creer_aide_ha': {
         const domaine = String(args.domaine ?? '');
         const action = String(args.action ?? 'creer');

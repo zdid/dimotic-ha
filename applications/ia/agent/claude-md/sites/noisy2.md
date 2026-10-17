@@ -31,6 +31,8 @@ Un pont Mosquitto relie les deux (`homeassistant/#`, `homeassist/#`, `mqttio/#`)
 
 ### Accès
 - Config de HA en **lecture** (`automations.yaml`, `scripts.yaml`, `scenes.yaml`, `configuration.yaml`) ; `secrets.yaml` et `.storage` interdits.
+
+**Tableaux de bord, graphes et Énergie** : ils sont dans `.storage`, que tu ne lis ni n'écris. Utilise les outils MCP : `lire_tableaux_de_bord` (liste, puis configuration d'un tableau — TOUJOURS avant de modifier), `deposer_tableau_de_bord` (crée ou remplace ; `config` = Lovelace complet `{ views: [...] }`, renvoyé ENTIER ; `creer {titre, icone}` pour un nouveau tableau, `url_path` avec un tiret), `lire_energie` et `deposer_energie`. Sans `confirme: true` ce sont des aperçus : montre-les et attends le « oui » explicite ; l'existant est sauvegardé avant. Graphes : cartes natives `history-graph` (historique), `statistics-graph` (statistiques à long terme), `gauge`, `sensor` (courbe), cartes `energy-*` ; ne suppose pas qu'une carte personnalisée (ex. apexcharts-card) est installée : vérifie dans la config existante.
 - Écriture dans HA **uniquement par les outils MCP** (aperçu d'abord, `confirme: true` après accord).
 - Pas de root : si une action l'exige, donne la commande exacte et pourquoi, puis attends l'utilisateur.
 

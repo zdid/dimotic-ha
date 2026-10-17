@@ -10,6 +10,8 @@ tout ce que tu fais via les outils MCP agit sur la **production**, habitants à 
 - **Fichiers de configuration de HA** : ils sont sur ha2, tu les lis par SSH, en lecture seule :
   `ssh -i ~/.ssh/ha2-claude/id_ed25519 claude@ha2.local 'cat /docker/homeassistant/config/automations.yaml'` (idem `scripts.yaml`,
   `scenes.yaml`, `configuration.yaml`). `secrets.yaml` et `.storage` sont interdits. Aucune écriture sur ha2 par SSH : le dépôt passe par les outils MCP.
+
+**Tableaux de bord, graphes et Énergie** : ils sont dans `.storage`, que tu ne lis ni n'écris. Utilise les outils MCP : `lire_tableaux_de_bord` (liste, puis configuration d'un tableau — TOUJOURS avant de modifier), `deposer_tableau_de_bord` (crée ou remplace ; `config` = Lovelace complet `{ views: [...] }`, renvoyé ENTIER ; `creer {titre, icone}` pour un nouveau tableau, `url_path` avec un tiret), `lire_energie` et `deposer_energie`. Sans `confirme: true` ce sont des aperçus : montre-les et attends le « oui » explicite ; l'existant est sauvegardé avant. Graphes : cartes natives `history-graph` (historique), `statistics-graph` (statistiques à long terme), `gauge`, `sensor` (courbe), cartes `energy-*` ; ne suppose pas qu'une carte personnalisée (ex. apexcharts-card) est installée : vérifie dans la config existante.
 - **Pas de jeton Home Assistant** ici : l'état se lit par les outils MCP (`obtenir_etat`, `obtenir_details`, `lire_automatisations_ha`).
 - Le poêle est en production : ne pas y toucher. Ne pas relancer d'applications ni de services : dis à l'utilisateur ce qu'il faut faire.
 
