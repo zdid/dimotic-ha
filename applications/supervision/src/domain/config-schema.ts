@@ -12,7 +12,13 @@ export const supervisionConfigSchema = z.object({
   /** Rafraîchissement automatique de l'état des sauvegardes. */
   backupRefreshMinutes: z.coerce.number().int().min(5).max(1440).default(60),
   /** Délai de réponse de l'application sauvegarde. */
-  backupTimeoutSec: z.coerce.number().int().min(10).max(600).default(60)
+  backupTimeoutSec: z.coerce.number().int().min(10).max(600).default(60),
+  /** Déclare les machines dimotic-ha dans Home Assistant (en ligne, version, mise à jour) — §3ter. */
+  declarerDansHa: z.coerce.boolean().default(true),
+  /** Dépôt Docker Hub dont on suit la dernière version. */
+  hubRepository: z.string().default('zdid2/dimotic-ha'),
+  /** Fréquence de lecture du Docker Hub (heures). */
+  hubRefreshHours: z.coerce.number().int().min(1).max(168).default(6)
 });
 
 export type SupervisionConfig = z.infer<typeof supervisionConfigSchema>;

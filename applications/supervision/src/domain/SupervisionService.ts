@@ -25,6 +25,7 @@ import {
   type SupervisionConfig
 } from './config-schema';
 import { evaluateBackup, type BackupMachineReport, type BackupView } from './BackupEvaluation';
+import { machineDiscovery, hubDiscovery, latestVersion, fetchHubTags, HUB_LATEST_TOPIC, type DiscoveryMessage } from './HaDeclaration';
 import { SUPERVISION_SOCKET_EVENTS, SUPERVISION_CLIENT_EVENTS } from './socket-events';
 
 const MODULE_NAME = 'supervision';
@@ -99,6 +100,10 @@ export class SupervisionService implements ISupervisionService {
   private tickTimer: NodeJS.Timeout | null = null;
   private backupTimer: NodeJS.Timeout | null = null;
   private settleTimer: NodeJS.Timeout | null = null;
+  private hubTimer: NodeJS.Timeout | null = null;
+  /** Machines déjà déclarées dans HA depuis ce démarrage. */
+  private readonly declared = new Set<string>();
+  private hubDeclared = false;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -146,14 +151,58 @@ export class SupervisionService implements ISupervisionService {
     // Recalcul périodique des états qui dépendent de l'heure (annonce périmée).
     this.tickTimer = setInterval(() => this.scheduleEmit(), 60_000);
     this.restartBackupTimer();
+    this.restartHubTimer();
     setTimeout(() => this.requestBackups(), 10_000);
     this.scheduleEmit();
   }
 
   async stop(): Promise<void> {
     for (const t of [this.emitTimer, this.settleTimer, this.pendingBackupRequest?.timer]) if (t) clearTimeout(t);
-    for (const t of [this.tickTimer, this.backupTimer]) if (t) clearInterval(t);
+    for (const t of [this.tickTimer, this.backupTimer, this.hubTimer]) if (t) clearInterval(t);
     this.eventBus.emitGeneric('integration:bridge:unregister', { moduleName: MODULE_NAME, bridgeInstance: this.bridgeInstance });
+  }
+
+  // ==========================================================================
+  // Déclaration dans Home Assistant (§3ter)
+  // ==========================================================================
+
+  private publishDiscovery(messages: DiscoveryMessage[]): void {
+    for (const m of messages) {
+      this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:publish`, {
+        bridgeInstance: this.bridgeInstance, topic: m.topic, payload: m.payload, qos: 1, retain: true
+      });
+    }
+  }
+
+  /** Déclare dans HA chaque machine vue dans l'inventaire (une fois par démarrage ; retenu, donc idempotent). */
+  private declareMachine(machineId: string): void {
+    if (!this.config.declarerDansHa || this.declared.has(machineId)) return;
+    this.declared.add(machineId);
+    this.publishDiscovery(machineDiscovery(machineId));
+    if (!this.hubDeclared) {
+      this.hubDeclared = true;
+      this.publishDiscovery(hubDiscovery(this.config.hubRepository));
+    }
+  }
+
+  private restartHubTimer(): void {
+    if (this.hubTimer) clearInterval(this.hubTimer);
+    if (!this.config.declarerDansHa) return;
+    this.hubTimer = setInterval(() => void this.refreshHubVersion(), this.config.hubRefreshHours * 3_600_000);
+    setTimeout(() => void this.refreshHubVersion(), 15_000);
+  }
+
+  /** Lit la dernière version du Docker Hub et la publie (retenue) ; un échec réseau est seulement journalisé. */
+  private async refreshHubVersion(): Promise<void> {
+    try {
+      const version = latestVersion(await fetchHubTags(this.config.hubRepository));
+      if (!version) { this.logger.warn('SupervisionService', `Aucune version X.Y.Z trouvée sur le Docker Hub (${this.config.hubRepository})`); return; }
+      this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:publish`, {
+        bridgeInstance: this.bridgeInstance, topic: HUB_LATEST_TOPIC, payload: version, qos: 1, retain: true
+      });
+    } catch (error) {
+      this.logger.warn('SupervisionService', `Lecture du Docker Hub impossible : ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private restartBackupTimer(): void {
@@ -193,6 +242,7 @@ export class SupervisionService implements ISupervisionService {
       this.configProvider.reload();
       this.config = this.loadConfig();
       this.restartBackupTimer();
+      this.restartHubTimer();
       this.scheduleEmit();
     });
   }
@@ -209,6 +259,7 @@ export class SupervisionService implements ISupervisionService {
       } else {
         try {
           this.announcements.set(m[1], JSON.parse(payload) as Announcement);
+          this.declareMachine(m[1]);
         } catch {
           this.logger.warn('SupervisionService', `Annonce illisible ignorée sur ${topic}`);
           return;
