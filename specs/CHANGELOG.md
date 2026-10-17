@@ -10,6 +10,7 @@
 
 | Date | Version | Fichier | Auteur | Changements |
 |------|---------|---------|--------|-------------|
+| 17/10/2026 | **v1.0** | conception-mise-a-jour-dimotic_specs_v1.0.md | Claude | **Conception** de la mise à jour de dimotic-ha par commande MQTT : agent hôte `maj-dimotic` (hors conteneur), tag X.Y.Z vérifié sur le Docker Hub, ordres signés (secret propre), aperçu puis exécution, retour arrière automatique, diffusion avec l'image / le déploiement distant / la carte SD ; aucun outil pour l'agent IA ; aucun code |
 | 16/10/2026 | **v1.10** | conception-gestion-pilotes_specs_v1.10.md | Claude | **Modification d'un nom : l'entity_id de HA suit** (§7.2) — HA gardait l'ancien entity_id après suppression + recréation ; le cœur le renomme (`config/entity_registry/update`, événements `pilotes:ha:renommer:*`) pour AREXX et RFXCOM |
 | 16/10/2026 | **v1.9** | conception-gestion-pilotes_specs_v1.9.md | Claude | **Remplacement : attendre la suppression dans HA avant de créer** (§7.2) — événement cœur `pilotes:ha:retrait:attendre`/`resultat` (`attendreRetraitHa`), branché dans AREXX, RFXCOM et zigbee2mqtt ; `attenteSuppressionHa` dans la réponse |
 | 16/10/2026 | **v1.8** | conception-gestion-pilotes_specs_v1.8.md | Claude | **Nommage corrigé (§5.4)** : lieu précis absent = lieu ; lieu père et grand-père facultatifs (souvent étage et bâtiment, pas une règle). v1.7 archivée. |
