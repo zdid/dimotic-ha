@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Ménage des anciennes versions de zdid2/dimotic-ha sur le Docker Hub (décision du 18/10/2026) :
-# on GARDE 3.9.12 (actuelle), 3.9.11 (retour arrière), 3.8.0 et 3.7.2, plus le tag « latest » ; tout le reste est supprimé.
+# on GARDE 3.9.13 (actuelle), 3.9.12 et 3.9.11 (retours arrière, versions en service), 3.8.0 et 3.7.2, plus le tag « latest » ; tout le reste est supprimé.
 # L'image de l'agent (zdid2/dimotic-maj) n'est pas touchée.
 #
 # Usage :
@@ -14,7 +14,7 @@
 # =============================================================================
 set -euo pipefail
 REPO="zdid2/dimotic-ha"
-GARDER=("3.9.12" "3.9.11" "3.8.0" "3.7.2" "latest")
+GARDER=("3.9.13" "3.9.12" "3.9.11" "3.8.0" "3.7.2" "latest")
 MODE="essai"; [ "${1:-}" = "--supprimer" ] && MODE="supprimer"
 command -v curl >/dev/null && command -v python3 >/dev/null || { echo "curl et python3 sont nécessaires" >&2; exit 1; }
 
@@ -30,7 +30,7 @@ PY
 estgarde() { local t; for t in "${GARDER[@]}"; do [ "$t" = "$1" ] && return 0; done; return 1; }
 
 # Garde-fou : la version actuelle doit exister, sinon on ne supprime rien.
-echo "$TAGS" | grep -qx "3.9.12" || { echo "ERREUR : 3.9.12 n'existe pas sur le hub — rien à supprimer." >&2; exit 1; }
+echo "$TAGS" | grep -qx "3.9.13" || { echo "ERREUR : 3.9.13 n'existe pas sur le hub — rien à supprimer." >&2; exit 1; }
 
 A_SUPPRIMER=()
 while IFS= read -r t; do [ -n "$t" ] && ! estgarde "$t" && A_SUPPRIMER+=("$t"); done <<< "$TAGS"
