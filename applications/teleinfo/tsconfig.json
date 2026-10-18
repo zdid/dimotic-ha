@@ -18,5 +18,5 @@
   },
   "references": [{ "path": "../core" }],
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "src/presentation/ts/**/*"]
+  "exclude": ["node_modules", "dist", "src/presentation/ts/**/*", "**/*.test.ts", "vitest.config.ts"]
 }

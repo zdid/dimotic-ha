@@ -12,6 +12,7 @@ const yaml = require('js-yaml');
 const { createGpioSwitch } = require('./gpio-switch');
 const teleinfoService = require('./teleinfo-service');
 const { createHaPublisher } = require('./ha-publisher');
+const { createCycleWatch } = require('./cycle-watch');
 
 function loadConfig() {
   const configPath = path.join(__dirname, 'config.yaml');
@@ -51,15 +52,28 @@ function main() {
   publisher.declareCompteurs(config.compteurs);
   publisher.connect();
 
+  // ⭐ 18/10/2026 — plus de message à chaque trame reçue (bruit) ; en revanche un message quand aucune trame n'arrive ou
+  // qu'un compteur déclaré manque (ex. un seul sur deux), voir cycle-watch.js.
+  const watch = createCycleWatch({
+    attendus: () => config.compteurs.map((c) => Number(c.adco)),
+    signaler: (alerte) => {
+      // Journal seulement (pas de message MQTT).
+      if (alerte.niveau === 'alerte') console.warn('[teleinfo] ALERTE —', alerte.message);
+      else console.log('[teleinfo]', alerte.message);
+    },
+    journal: (msg) => console.warn('[teleinfo] ALERTE —', msg)
+  });
+
   teleinfoService.start(
     config.port,
     gpioSwitch,
     (frame) => {
-      console.log('[teleinfo] Trame reçue, ADCO:', frame.ADCO);
       publisher.publishFrame(frame);
+      watch.trame(frame.ADCO);
     },
     (err) => {
       console.warn('[teleinfo] Anomalie de lecture:', err);
+      watch.erreur();
     },
     cycleIntervalMs,
     debug
