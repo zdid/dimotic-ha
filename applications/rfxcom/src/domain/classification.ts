@@ -89,6 +89,15 @@ export function getDefaultComponent(type: RfxComDeviceType, subType: string): { 
  * (recepteurs-emetteurs-rfxcom_specs §8.5.1) : `{protocole}_{sousProtocole}__{sensorId}_{unitCode}`.
  * Distinct de `uniqueId` (`<protocole>_<sensorId>`, utilisé dans le topic de découverte HA).
  */
+/**
+ * ⭐ 18/10/2026 — commande de GROUPE d'une trame Lighting2 (`Group On`, `Group off`, `Set Group Level`). Une telle trame est reçue
+ * avec `unitCode = 1` (le premier code, convention de la bibliothèque : « unitCode 0 = groupe » à l'émission, envoyé avec le
+ * code 1) : sans correction elle prenait l'identifiant du bouton 1. Le code de groupe n'a PAS de numéro de bouton.
+ */
+export function estCommandeGroupe(command: unknown): boolean {
+  return typeof command === 'string' && /group/i.test(command);
+}
+
 export function buildStateDeviceId(protocole: string, subType: string, sensorId: string, unitCode?: number): string {
   const base = `${protocole}_${subType.toLowerCase()}__${sensorId.toLowerCase()}`;
   return unitCode !== undefined ? `${base}_${unitCode}` : base;

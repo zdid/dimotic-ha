@@ -22,6 +22,7 @@
 import * as rfxcom from 'rfxcom';
 import type { Logger } from '../../../../core/dist/exports';
 import type { RfxComRawMessage, RfxComDeviceType } from '../types';
+import { estCommandeGroupe } from '../classification';
 
 export interface RfxComTransceiverOptions {
   port: string;
@@ -243,13 +244,19 @@ export class RfxComTransceiver {
   private setupProtocolListeners(device: rfxcom.RfxCom): void {
     for (const [eventName, { type, table }] of Object.entries(LIGHTING_EVENTS)) {
       device.on(eventName, (evt: any) => {
-        const { sensorId, unitCode } = this.resolveSensorIdentity(type, evt);
+        const identite = this.resolveSensorIdentity(type, evt);
+        const { sensorId } = identite;
+        // Commande de GROUPE (Lighting2) : le numéro de bouton reçu (toujours 1) est EFFACÉ et non transmis — l'émetteur de
+        // groupe est le device « sans numéro de bouton », distinct du bouton 1. Pour le commander, la bibliothèque attend
+        // « id/0 » (unitCode 0 = groupe).
+        const groupe = type === 'Lighting2' && estCommandeGroupe(evt.command);
+        const unitCode = groupe ? undefined : identite.unitCode;
         this.emitMessage({
           type,
           subType: table[evt.subtype] ?? String(evt.subtype),
           sensorId,
           unitCode,
-          commandDeviceId: this.buildCommandDeviceId(type, evt),
+          commandDeviceId: groupe ? `${evt.id}/0` : this.buildCommandDeviceId(type, evt),
           seqNbr: evt.seqnbr,
           signalLevel: evt.rssi ?? 0,
           batteryLevel: evt.battery ?? 0,
