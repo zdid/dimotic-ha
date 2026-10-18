@@ -72,7 +72,7 @@ Conséquences pour les automatismes :
   - Pourquoi : le nom du device HA est souvent le lieu précis (« Bureau ») et l'entity_id ne suit pas toujours le QUOI (`event.bouton_bureau_salle_a_manger_action`) ; l'Area peut diverger.
   - Usage : filtrer `/api/states` sur `attributs_taxonomie.slug_quoi` + `slug_lieu` (template : `states | selectattr('attributes.attributs_taxonomie','defined')`). Si l'Area HA contredit la taxonomie, suivre la taxonomie et signaler l'écart.
 - **Cibler par Area ou par étiquette** plutôt que lister des entity_id quand c'est possible ; chercher une entité par son QUOI + lieu (taxonomie d'abord, Area ensuite).
-- **Ne jamais renommer à la main** (UI de HA, fichiers) une entité/Area gérée par ce système — sauf avec l'outil `renommer_entite_ha` (aperçu puis accord de l'utilisateur) ou par l'ordre `modifier` du pilote : le renommage est recalculé (les entity_id d'un plan peuvent devenir obsolètes — risque déjà constaté).
+- **Ne jamais renommer à la main** (UI de HA, fichiers) une entité/Area gérée par ce système — sauf avec les outils `renommer_entite_ha`, `renommer_piece_ha` et `affecter_piece_ha` (aperçu puis accord de l'utilisateur) ou par l'ordre `modifier` du pilote : le renommage est recalculé (les entity_id d'un plan peuvent devenir obsolètes — risque déjà constaté).
 - Si une entité n'a pas d'Area : problème de nommage à signaler, pas à contourner par du code.
 
 ### 4. Applications dimotic-ha (fonctionnel)

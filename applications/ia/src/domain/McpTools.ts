@@ -17,6 +17,7 @@ import type { PilotesClient } from './PilotesClient';
 import type { HaEntiteRenamer } from './HaEntiteRenamer';
 import type { HaAideClient } from './HaAideClient';
 import type { HaTableauClient } from './HaTableauClient';
+import type { HaPieceClient } from './HaPieceClient';
 
 const CONFIRM_PROP = { type: 'boolean', description: 'false/absent = APERÇU seulement (rien n\'est modifié). true = exécute, À N\'UTILISER QU\'APRÈS l\'accord explicite de l\'utilisateur sur l\'aperçu.' };
 
@@ -122,6 +123,39 @@ export const HA_TABLEAU_TOOLS: McpToolDef[] = [
     name: 'deposer_energie',
     description: 'MODIFIE la configuration du tableau Énergie de HA (clés permises : energy_sources, device_consumption, device_consumption_water). Chaque clé donnée est remplacée ENTIÈRE. Sans confirme:true, aperçu seulement. L\'existant est sauvegardé avant.',
     inputSchema: { type: 'object', properties: { prefs: { type: 'object', description: 'Ex. { device_consumption: [ { stat_consumption: "sensor.x_energie" } ] }' }, confirme: CONFIRM_PROP }, required: ['prefs'] }
+  }
+];
+
+/** Pièces (areas) de HA : lecture, affectation, renommage, suppression des pièces vides. */
+export const HA_PIECE_TOOLS: McpToolDef[] = [
+  {
+    name: 'lire_pieces_ha',
+    description: 'Liste les pièces (areas) de Home Assistant avec, pour chacune, le nombre d\'appareils et d\'entités affectés et si elle est VIDE. Lecture seule.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'affecter_piece_ha',
+    description: 'AFFECTE des entités (entity_id) et/ou des appareils (device_id) à une pièce de HA ; la pièce est créée si elle n\'existe pas (première lettre en majuscule). piece="" retire l\'affectation directe. Sans confirme:true, aperçu seulement (avant/après). Attention : nommage recalcule les pièces depuis le nom, une affectation contraire au nom peut être écrasée.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entites: { type: 'array', items: { type: 'string' }, description: 'entity_id à affecter' },
+        appareils: { type: 'array', items: { type: 'string' }, description: 'device_id à affecter' },
+        piece: { type: 'string', description: 'Nom (ou area_id) de la pièce ; "" = retirer' },
+        confirme: CONFIRM_PROP
+      },
+      required: ['piece']
+    }
+  },
+  {
+    name: 'renommer_piece_ha',
+    description: 'RENOMME une pièce de HA (première lettre en majuscule ; l\'area_id ne change pas). Sans confirme:true, aperçu seulement (contenu, automatisations qui la citent). Refuse un nom déjà pris. Attention : nommage recrée l\'ancienne pièce tant que des noms d\'appareils portent l\'ancien lieu.',
+    inputSchema: { type: 'object', properties: { piece: { type: 'string', description: 'Nom ou area_id actuel' }, nouveau_nom: { type: 'string' }, confirme: CONFIRM_PROP }, required: ['piece', 'nouveau_nom'] }
+  },
+  {
+    name: 'supprimer_pieces_vides_ha',
+    description: 'SUPPRIME des pièces VIDES de HA (aucun appareil ni entité). Sans « pieces » : toutes les pièces vides. Sans confirme:true, aperçu seulement (liste, automatisations qui les citent). Une pièce non vide est refusée. La définition supprimée est sauvegardée avant.',
+    inputSchema: { type: 'object', properties: { pieces: { type: 'array', items: { type: 'string' }, description: 'Noms ou area_id (facultatif)' }, confirme: CONFIRM_PROP } }
   }
 ];
 
@@ -253,6 +287,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   ...HA_ENTITE_TOOLS,
   ...HA_AIDE_TOOLS,
   ...HA_TABLEAU_TOOLS,
+  ...HA_PIECE_TOOLS,
   ...PILOTES_TOOLS
 ];
 
@@ -321,6 +356,8 @@ export interface McpToolboxDeps {
   aides: HaAideClient;
   /** Tableaux de bord et Énergie de HA. */
   tableaux: HaTableauClient;
+  /** Pièces (areas) de HA. */
+  pieces: HaPieceClient;
   /** Gestion des pilotes via le cœur (PilotesClient). */
   pilotes: PilotesClient;
 }
@@ -336,6 +373,12 @@ export class McpToolbox {
       case 'lire_automatisations_ha': return JSON.stringify(await this.readAutomations(args), null, 2);
       case 'deposer_automatisation': return JSON.stringify(await this.deps.automations.deposit(String(args.id ?? ''), args.definition, args.confirme === true), null, 2);
       case 'supprimer_automatisation': return JSON.stringify(await this.deps.automations.remove(String(args.id ?? ''), args.confirme === true), null, 2);
+      case 'lire_pieces_ha': return JSON.stringify(await this.deps.pieces.lire(), null, 2);
+      case 'affecter_piece_ha': return JSON.stringify(await this.deps.pieces.affecter(
+        Array.isArray(args.entites) ? args.entites.map(String) : [], Array.isArray(args.appareils) ? args.appareils.map(String) : [],
+        String(args.piece ?? ''), args.confirme === true), null, 2);
+      case 'renommer_piece_ha': return JSON.stringify(await this.deps.pieces.renommer(String(args.piece ?? ''), String(args.nouveau_nom ?? ''), args.confirme === true), null, 2);
+      case 'supprimer_pieces_vides_ha': return JSON.stringify(await this.deps.pieces.supprimerVides(Array.isArray(args.pieces) ? args.pieces.map(String) : undefined, args.confirme === true), null, 2);
       case 'lire_tableaux_de_bord': return JSON.stringify(await this.deps.tableaux.lire(args.url_path === undefined ? undefined : String(args.url_path)), null, 2);
       case 'deposer_tableau_de_bord': {
         const up = String(args.url_path ?? '');

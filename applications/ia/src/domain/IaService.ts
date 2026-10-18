@@ -31,6 +31,7 @@ import { HaAutomationClient } from './HaAutomationClient';
 import { HaEntiteRenamer } from './HaEntiteRenamer';
 import { HaAideClient } from './HaAideClient';
 import { HaTableauClient } from './HaTableauClient';
+import { HaPieceClient } from './HaPieceClient';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
@@ -330,6 +331,15 @@ export class IaService implements IIaService {
       planner: new PlannerReader(this.eventBus),
       pilotes: new PilotesClient(this.eventBus),
       automations,
+      pieces: new HaPieceClient(this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia'), async (texte) => {
+        const citees: string[] = [];
+        for (const a of automations.list()) {
+          if (!a.id) continue;
+          const def = await automations.get(a.id);
+          if (def.ok && JSON.stringify(def.config).includes(texte)) citees.push(`${a.alias} (id ${a.id})`);
+        }
+        return citees;
+      }),
       tableaux: new HaTableauClient(this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia')),
       aides: new HaAideClient(this.eventBus, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia')),
       entites: new HaEntiteRenamer(this.haBridgeClient, async (entityId) => {
@@ -373,6 +383,7 @@ export class IaService implements IIaService {
       'phrase sans rien exécuter), executer_action (AGIT RÉELLEMENT sur la maison : vérifier la cible avant).',
       'Automatisations HA : lire_automatisations_ha (liste, définition, sauvegardes), deposer_automatisation et supprimer_automatisation',
       '(AGISSENT sur HA : sans confirme:true ils ne renvoient qu\'un aperçu — le montrer à l\'utilisateur et n\'envoyer confirme:true qu\'après son accord).',
+      'Pièces : lire_pieces_ha, affecter_piece_ha, renommer_piece_ha, supprimer_pieces_vides_ha (sans confirme:true, simple aperçu à montrer à l\'utilisateur).',
       'Tableaux de bord et graphes : lire_tableaux_de_bord (AVANT), deposer_tableau_de_bord ; Énergie : lire_energie, deposer_energie (sans confirme:true, simple aperçu à montrer à l\'utilisateur ; sauvegarde avant remplacement).',
       'Aides HA (minuteries…) : creer_aide_ha (lister, creer, supprimer ; sans confirme:true, simple aperçu à montrer à l\'utilisateur).',
       'Entités HA : renommer_entite_ha (nouvel entity_id et/ou nom ; sans confirme:true, simple aperçu à montrer à l\'utilisateur ; HA ne réécrit pas les références).',
