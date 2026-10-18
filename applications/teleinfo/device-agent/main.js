@@ -13,6 +13,7 @@ const { createGpioSwitch } = require('./gpio-switch');
 const teleinfoService = require('./teleinfo-service');
 const { createHaPublisher } = require('./ha-publisher');
 const { createCycleWatch } = require('./cycle-watch');
+const { createRencontres } = require('./rencontres');
 
 function loadConfig() {
   const configPath = path.join(__dirname, 'config.yaml');
@@ -64,15 +65,25 @@ function main() {
     journal: (msg) => console.warn('[teleinfo] ALERTE —', msg)
   });
 
+  // ⭐ 18/10/2026 — au démarrage, les ADCO des compteurs rencontrés sont écrits dans le journal (une ligne par compteur, puis un
+  // récapitulatif après le premier cycle) ; ensuite plus rien à chaque trame.
+  const rencontres = createRencontres({
+    declares: () => config.compteurs,
+    journal: (msg) => console.log('[teleinfo]', msg)
+  });
+  console.log('[teleinfo] Compteurs déclarés :', config.compteurs.length ? config.compteurs.map((c) => 'ADCO ' + c.adco).join(', ') : 'aucun');
+
   teleinfoService.start(
     config.port,
     gpioSwitch,
     (frame) => {
       publisher.publishFrame(frame);
+      rencontres.trame(frame.ADCO);
       watch.trame(frame.ADCO);
     },
     (err) => {
       console.warn('[teleinfo] Anomalie de lecture:', err);
+      rencontres.erreur();
       watch.erreur();
     },
     cycleIntervalMs,

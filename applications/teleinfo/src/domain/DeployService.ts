@@ -63,7 +63,7 @@ const DEVICE_AGENT_LOCAL_DIR = path.join(__dirname, '..', '..', 'device-agent');
  */
 export const AGENT_FILES = [
   'gpio-switch.js', 'teleinfo-reader.js', 'teleinfo-service.js',
-  'ha-publisher.js', 'cycle-watch.js', 'main.js', 'package.json'
+  'ha-publisher.js', 'cycle-watch.js', 'rencontres.js', 'main.js', 'package.json'
 ];
 
 // js-yaml/argparse : pures JS, pas de compilation native, absentes du node_modules partagé de
