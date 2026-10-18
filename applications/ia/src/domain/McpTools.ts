@@ -94,6 +94,33 @@ export const HA_AIDE_TOOLS: McpToolDef[] = [
   }
 ];
 
+/** Scripts de HA : lecture, dépôt (aperçu puis confirmation, sauvegarde avant remplacement), suppression. */
+export const HA_SCRIPT_TOOLS: McpToolDef[] = [
+  {
+    name: 'lire_scripts_ha',
+    description: 'Lit les scripts de Home Assistant (lecture seule). Sans paramètre : liste (id, nom, état). Avec id : définition complète. Avec sauvegardes=true : sauvegardes faites avant remplacement/suppression (et leur contenu si fichier est donné).',
+    inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'Identifiant du script (script.<id>)' }, sauvegardes: { type: 'boolean' }, fichier: { type: 'string', description: 'Nom d\'un fichier de sauvegarde à lire (avec sauvegardes=true)' } } }
+  },
+  {
+    name: 'deposer_script',
+    description: 'DÉPOSE (crée ou remplace) un script dans Home Assistant, puis recharge les scripts. Sans confirme:true, renvoie seulement un aperçu et ne modifie RIEN. L\'existant est sauvegardé avant remplacement. Définition JSON équivalente au YAML : alias (nom) et description OBLIGATOIRES, fields (paramètres, chacun avec name et description), mode, sequence (liste d\'actions). Appel depuis une automatisation : action script.<id> avec data = les champs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Identifiant stable du script (lettres, chiffres, _ et -)' },
+        definition: { type: 'object', description: 'Définition JSON du script : alias (nom) et description obligatoires, mode, fields, sequence' },
+        confirme: CONFIRM_PROP
+      },
+      required: ['id', 'definition']
+    }
+  },
+  {
+    name: 'supprimer_script',
+    description: 'SUPPRIME un script de Home Assistant. Sans confirme:true, renvoie seulement un aperçu. La définition est sauvegardée avant suppression. Vérifier avant qu\'aucune automatisation ne l\'appelle (verifier_entity_ids).',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, confirme: CONFIRM_PROP }, required: ['id'] }
+  }
+];
+
 /** Tableaux de bord (graphes, cartes) et configuration Énergie de HA : lecture, puis dépôt avec aperçu et sauvegarde. */
 export const HA_TABLEAU_TOOLS: McpToolDef[] = [
   {
@@ -297,6 +324,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   ...HA_ENTITE_TOOLS,
   ...HA_AIDE_TOOLS,
   ...HA_TABLEAU_TOOLS,
+  ...HA_SCRIPT_TOOLS,
   ...HA_PIECE_TOOLS,
   ...HA_REFERENCES_TOOLS,
   ...PILOTES_TOOLS
@@ -361,6 +389,8 @@ export interface McpToolboxDeps {
   planner: PlannerReader;
   /** Automatisations HA (lecture / dépôt / suppression, via le pont REST du core). */
   automations: HaAutomationClient;
+  /** Scripts de HA (même client, domaine `script`). */
+  scripts: HaAutomationClient;
   /** Renommage d'entités HA (registre des entités). */
   entites: HaEntiteRenamer;
   /** Aides HA (timer, input_*…). */
@@ -393,6 +423,9 @@ export class McpToolbox {
         String(args.piece ?? ''), args.confirme === true), null, 2);
       case 'renommer_piece_ha': return JSON.stringify(await this.deps.pieces.renommer(String(args.piece ?? ''), String(args.nouveau_nom ?? ''), args.confirme === true), null, 2);
       case 'supprimer_pieces_vides_ha': return JSON.stringify(await this.deps.pieces.supprimerVides(Array.isArray(args.pieces) ? args.pieces.map(String) : undefined, args.confirme === true), null, 2);
+      case 'lire_scripts_ha': return JSON.stringify(await this.readScripts(args), null, 2);
+      case 'deposer_script': return JSON.stringify(await this.deps.scripts.deposit(String(args.id ?? ''), args.definition, args.confirme === true), null, 2);
+      case 'supprimer_script': return JSON.stringify(await this.deps.scripts.remove(String(args.id ?? ''), args.confirme === true), null, 2);
       case 'lire_tableaux_de_bord': return JSON.stringify(await this.deps.tableaux.lire(args.url_path === undefined ? undefined : String(args.url_path)), null, 2);
       case 'deposer_tableau_de_bord': {
         const up = String(args.url_path ?? '');
@@ -432,8 +465,16 @@ export class McpToolbox {
     return JSON.stringify({ entities, ...(wanted !== 'toutes' ? { filtre_categorie: wanted, ecartees: all.length - entities.length } : {}) });
   }
 
-  private async readAutomations(args: Record<string, unknown>): Promise<unknown> {
-    const automations = this.deps.automations;
+  private async readScripts(args: Record<string, unknown>): Promise<unknown> {
+    const r = await this.readAutomations(args, this.deps.scripts);
+    // la liste d'un script porte `automatisations` dans la version générique : renommée
+    return r && typeof r === 'object' && 'automatisations' in (r as object)
+      ? { total: (r as { total: number }).total, scripts: (r as { automatisations: unknown }).automatisations }
+      : r;
+  }
+
+  private async readAutomations(args: Record<string, unknown>, client?: HaAutomationClient): Promise<unknown> {
+    const automations = client ?? this.deps.automations;
     const id = typeof args.id === 'string' && args.id.trim() ? args.id.trim() : undefined;
     if (args.sauvegardes === true) {
       if (typeof args.fichier === 'string' && args.fichier) {

@@ -108,9 +108,37 @@ export class HaBridgeClient {
     }
   }
 
+  /** Rechargement groupé déclenché par une entité inconnue du cache (3 s : plusieurs créations d'un coup = un seul rechargement). */
+  private rechargementPlanifie: NodeJS.Timeout | null = null;
+  /** Entités restées absentes du cache APRÈS un rechargement (exclues volontairement, ex. sans pièce) : on n'y revient pas. */
+  private readonly absentesApresRechargement = new Set<string>();
+  private candidatesRechargement = new Set<string>();
+  private dernierRechargement = 0;
+
   private patchCachedState(raw: HaRawEntity): void {
     const cached = this.entities.get(raw.entity_id);
-    if (!cached) return;
+    if (!cached) {
+      // ⭐ 18/10/2026 — entité CRÉÉE après le dernier rechargement (script, aide, nouvel appareil…) : sans cela elle restait invisible
+      // du cache (donc des outils des agents) jusqu'au prochain `ha:ready`. Un seul rechargement pour une rafale de créations.
+      if (this.available && !this.rechargementPlanifie && !this.absentesApresRechargement.has(raw.entity_id)) {
+        this.candidatesRechargement.add(raw.entity_id);
+        // au plus un rechargement par minute (garde-fou : un cache qui exclut volontairement des entités ne doit pas boucler)
+        const attente = Math.max(3000, 60000 - (Date.now() - this.dernierRechargement));
+        this.rechargementPlanifie = setTimeout(() => {
+          this.rechargementPlanifie = null;
+          this.dernierRechargement = Date.now();
+          const candidates = this.candidatesRechargement;
+          this.candidatesRechargement = new Set();
+          this.refreshCache()
+            .then(() => { for (const id of candidates) if (!this.entities.has(id)) this.absentesApresRechargement.add(id); })
+            .catch((error) => this.logger.warn('HaBridgeClient', `Rechargement après nouvelle entité échoué: ${error}`));
+        }, attente);
+        this.rechargementPlanifie.unref?.();
+      } else if (this.available) {
+        this.candidatesRechargement.add(raw.entity_id);
+      }
+      return;
+    }
     this.entities.set(raw.entity_id, {
       ...cached,
       state: raw.state,

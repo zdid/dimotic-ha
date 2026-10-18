@@ -109,7 +109,8 @@ export class HaReferencesClient {
   constructor(
     private readonly ha: Ha,
     private readonly automations: Pick<HaAutomationClient, 'list' | 'get'>,
-    private readonly tableaux: Pick<HaTableauClient, 'lire' | 'lireEnergie'>
+    private readonly tableaux: Pick<HaTableauClient, 'lire' | 'lireEnergie'>,
+    private readonly scripts?: Pick<HaAutomationClient, 'list' | 'get'>
   ) {}
 
   /**
@@ -181,8 +182,15 @@ export class HaReferencesClient {
         examines++; examiner(`automatisation ${a.id}`, a.alias, def.config);
       }
     }
+    if (portee.includes('scripts') && this.scripts) {
+      for (const sc of this.scripts.list()) {
+        const def = await this.scripts.get(sc.id);
+        if (!def.ok) { erreurs.push(`script ${sc.id} : ${def.error}`); continue; }
+        examines++; examiner(`script ${sc.id}`, sc.alias, def.config);
+      }
+    }
     for (const [cle, domaine] of [['scripts', 'script'], ['scenes', 'scene']] as const) {
-      if (!portee.includes(cle)) continue;
+      if (!portee.includes(cle) || (cle === 'scripts' && this.scripts)) continue;
       for (const e of this.ha.getAllEntities().filter((x) => x.entity_id.startsWith(`${domaine}.`))) {
         const idConfig = domaine === 'script' ? e.entity_id.split('.')[1] : String(e.attributes?.id ?? '');
         if (!idConfig) continue;

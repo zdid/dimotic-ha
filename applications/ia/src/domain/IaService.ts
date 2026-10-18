@@ -324,6 +324,7 @@ export class IaService implements IIaService {
       return;
     }
     const automations = new HaAutomationClient(this.eventBus, this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia'));
+    const scriptsClient = new HaAutomationClient(this.eventBus, this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia'), 'script');
     const tableauxClient = new HaTableauClient(this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia'));
     const toolbox = new McpToolbox({
       toolExecutor: this.toolExecutor,
@@ -333,6 +334,7 @@ export class IaService implements IIaService {
       planner: new PlannerReader(this.eventBus),
       pilotes: new PilotesClient(this.eventBus),
       automations,
+      scripts: scriptsClient,
       pieces: new HaPieceClient(this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia'), async (texte) => {
         const citees: string[] = [];
         for (const a of automations.list()) {
@@ -343,7 +345,7 @@ export class IaService implements IIaService {
         return citees;
       }),
       tableaux: tableauxClient,
-      references: new HaReferencesClient(this.haBridgeClient, automations, tableauxClient),
+      references: new HaReferencesClient(this.haBridgeClient, automations, tableauxClient, scriptsClient),
       aides: new HaAideClient(this.eventBus, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia')),
       entites: new HaEntiteRenamer(this.haBridgeClient, async (entityId) => {
         const citees: string[] = [];
@@ -384,6 +386,7 @@ export class IaService implements IIaService {
       'Outils : lister_entites / obtenir_etat / obtenir_details (lecture), diagnostiquer_resolution (pourquoi une entité ne ressort pas),',
       'lire_planificateur (planifications, macros, actions reçues, commandes réellement envoyées à HA), tester_phrase (simule une',
       'phrase sans rien exécuter), executer_action (AGIT RÉELLEMENT sur la maison : vérifier la cible avant).',
+      'Scripts HA : lire_scripts_ha, deposer_script, supprimer_script (sans confirme:true, simple aperçu à montrer à l\'utilisateur ; sauvegarde avant remplacement).',
       'Automatisations HA : lire_automatisations_ha (liste, définition, sauvegardes), deposer_automatisation et supprimer_automatisation',
       '(AGISSENT sur HA : sans confirme:true ils ne renvoient qu\'un aperçu — le montrer à l\'utilisateur et n\'envoyer confirme:true qu\'après son accord).',
       'Vérification : verifier_entity_ids (LECTURE SEULE : entity_id cités dans les automatisations, scripts, scènes, tableaux, Énergie et plans qui n\'existent plus, avec suggestions).',

@@ -30,12 +30,21 @@ const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 export interface AutomationSummary { id: string; alias: string; etat: string; entity_id: string; derniere_execution?: unknown }
 
+/**
+ * ⭐ 18/10/2026 — le même client sert aux SCRIPTS (`genre = 'script'`) : même route de config REST de HA, mêmes garde-fous (aperçu,
+ * sauvegarde avant remplacement, rechargement). Seuls changent le domaine, le dossier de sauvegardes et le contrôle de la définition
+ * (un script a `sequence`, pas de déclencheur).
+ */
+export type GenreConfig = 'automation' | 'script';
+
 export class HaAutomationClient {
   private readonly waiting = new Map<string, Array<(r: RestResult) => void>>();
   private readonly backupDir: string;
+  private readonly nom: string;
 
-  constructor(private readonly eventBus: IEventBus, private readonly registry: HaBridgeClient, dataDir: string) {
-    this.backupDir = path.join(dataDir, 'automations-backups');
+  constructor(private readonly eventBus: IEventBus, private readonly registry: HaBridgeClient, dataDir: string, private readonly genre: GenreConfig = 'automation') {
+    this.backupDir = path.join(dataDir, genre === 'script' ? 'scripts-backups' : 'automations-backups');
+    this.nom = genre === 'script' ? 'script' : 'automatisation';
     this.eventBus.onGeneric<RestResult>(HA_REST_REPLY_EVENT, (r) => {
       const next = this.waiting.get(r.id)?.shift();
       if (next) next(r);
@@ -48,9 +57,10 @@ export class HaAutomationClient {
   list(): AutomationSummary[] {
     if (!this.registry.isAvailable()) return [];
     return this.registry.getAllEntities()
-      .filter((e) => e.entity_id.startsWith('automation.'))
+      .filter((e) => e.entity_id.startsWith(`${this.genre}.`))
       .map((e) => ({
-        id: String(e.attributes?.id ?? ''),
+        // automation : id de config = attribut `id` ; script : id de config = nom de l'entité (script.<id>)
+        id: this.genre === 'script' ? e.entity_id.split('.')[1] : String(e.attributes?.id ?? ''),
         alias: String(e.friendly_name ?? e.attributes?.friendly_name ?? e.entity_id),
         etat: String(e.state),
         entity_id: e.entity_id,
@@ -84,7 +94,7 @@ export class HaAutomationClient {
 
     const existing = await this.get(id);
     const exists = existing.ok;
-    const warnings = this.loopWarnings(def);
+    const warnings = this.genre === 'script' ? [] : this.loopWarnings(def);
     if (!exists && existing.ok === false && !/HTTP 404/.test(existing.error)) {
       return { error: `lecture de l'existant impossible : ${existing.error}` };
     }
@@ -108,10 +118,10 @@ export class HaAutomationClient {
       effectue: true,
       action: exists ? 'remplacement' : 'création',
       id,
-      automatisations_rechargees: true,
+      [this.genre === 'script' ? 'scripts_recharges' : 'automatisations_rechargees']: true,
       ...(backup ? { sauvegarde: backup } : {}),
       ...(warnings.length ? { avertissements: warnings } : {}),
-      annuler: exists ? `redéposer le contenu de la sauvegarde « ${backup} » (lire_automatisations_ha, sauvegardes)` : `supprimer_automatisation id=${id}`
+      annuler: exists ? `redéposer le contenu de la sauvegarde « ${backup} » (${this.genre === 'script' ? 'lire_scripts_ha' : 'lire_automatisations_ha'}, sauvegardes)` : `${this.genre === 'script' ? 'supprimer_script' : 'supprimer_automatisation'} id=${id}`
     };
   }
 
@@ -119,7 +129,7 @@ export class HaAutomationClient {
     const idError = this.checkId(id);
     if (idError) return { error: idError };
     const existing = await this.get(id);
-    if (!existing.ok) return { error: `automatisation « ${id} » introuvable ou illisible : ${existing.error}` };
+    if (!existing.ok) return { error: `${this.nom} « ${id} » introuvable ou illisible : ${existing.error}` };
     if (!confirm) {
       return {
         action: 'suppression', id, effectue: false,
@@ -151,9 +161,15 @@ export class HaAutomationClient {
     const problems: string[] = [];
     if (!def || typeof def !== 'object' || Array.isArray(def)) return ['la définition doit être un objet JSON (équivalent du YAML d\'une automatisation)'];
     const d = def as Record<string, unknown>;
-    if (typeof d.alias !== 'string' || !d.alias.trim()) problems.push('alias obligatoire (nom lisible de l\'automatisation)');
-    if (!(d.trigger ?? d.triggers)) problems.push('trigger/triggers obligatoire');
-    if (!(d.action ?? d.actions)) problems.push('action/actions obligatoire');
+    if (typeof d.alias !== 'string' || !d.alias.trim()) problems.push(`alias obligatoire (nom lisible du ${this.nom})`);
+    if (this.genre === 'script') {
+      // ⭐ 18/10/2026 (demande utilisateur) — un script se dépose toujours avec un NOM (alias) et une DESCRIPTION.
+      if (typeof d.description !== 'string' || !d.description.trim()) problems.push('description obligatoire (à quoi sert le script, comment l\'appeler, ses paramètres)');
+      if (!d.sequence) problems.push('sequence obligatoire (liste d\'actions du script)');
+    } else {
+      if (!(d.trigger ?? d.triggers)) problems.push('trigger/triggers obligatoire');
+      if (!(d.action ?? d.actions)) problems.push('action/actions obligatoire');
+    }
     if (d.mode !== undefined && !['single', 'restart', 'queued', 'parallel'].includes(String(d.mode))) problems.push('mode doit être single, restart, queued ou parallel');
     return problems;
   }
@@ -203,7 +219,7 @@ export class HaAutomationClient {
       const queue = this.waiting.get(id) ?? [];
       queue.push(resolver);
       this.waiting.set(id, queue);
-      this.eventBus.emitGeneric('ha:rest:request', { appId: 'ia', method, domain: 'automation', id, ...(config !== undefined ? { config } : {}) });
+      this.eventBus.emitGeneric('ha:rest:request', { appId: 'ia', method, domain: this.genre, id, ...(config !== undefined ? { config } : {}) });
     });
   }
 }

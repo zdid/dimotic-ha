@@ -323,10 +323,13 @@ export class HaWsClient {
     const invalid = validateRestCall(method, apiPath);
     if (invalid) throw new Error(invalid);
     const url = `http://${this.currentConfig.host}:${this.currentConfig.port}${apiPath}`;
+    // ⭐ 18/10/2026 — `body` arrive en `null` (et non `undefined`) après le passage par le pont IPC : un GET avec corps `"null"` était refusé
+    // par fetch (« Request with GET/HEAD method cannot have body »). Pas de corps pour GET, ni quand il est absent/null.
+    const avecCorps = method !== 'GET' && body !== undefined && body !== null;
     const response = await fetch(url, {
       method,
-      headers: { Authorization: `Bearer ${this.currentConfig.token}`, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      headers: { Authorization: `Bearer ${this.currentConfig.token}`, ...(avecCorps ? { 'Content-Type': 'application/json' } : {}) },
+      ...(avecCorps ? { body: JSON.stringify(body) } : {}),
     });
     const text = await response.text().catch(() => '');
     let parsed: unknown = text;
