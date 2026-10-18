@@ -30,7 +30,7 @@ describe('HaReferencesClient', () => {
   const ha = {
     getAllEntities: () => [{ entity_id: 'light.salon', attributes: {}, friendly_name: 'Salon' }, { entity_id: 'script.s1', attributes: {}, friendly_name: 'S1' }],
     callWs: async (m: Record<string, unknown>) => {
-      if (m.type === 'config/entity_registry/list') return [{ entity_id: 'sensor.desactive' }];
+      if (m.type === 'config/entity_registry/list') return [{ entity_id: 'sensor.desactive', disabled_by: 'user' }, { entity_id: 'light.orpheline' }];
       if (m.type === 'get_services') return { light: { turn_on: {} } };
       throw new Error('inconnu');
     },
@@ -38,7 +38,7 @@ describe('HaReferencesClient', () => {
   };
   const automations = {
     list: () => [{ id: 'a1', alias: 'Mon auto', etat: 'on', entity_id: 'automation.a1' }],
-    get: async () => ({ ok: true as const, config: { triggers: [{ entity_id: 'light.salon' }, { entity_id: 'sensor.desactive' }, { entity_id: 'light.salin' }] } })
+    get: async () => ({ ok: true as const, config: { triggers: [{ entity_id: 'light.salon' }, { entity_id: 'sensor.desactive' }, { entity_id: 'light.salin' }, { entity_id: 'light.orpheline' }] } })
   };
   const tableaux = {
     lire: async (u?: string | null) => (u === undefined ? { tableaux: [{ url_path: 'plan-x', title: 'Plan' }] } : { existe: true, config: { views: [{ cards: [{ entity: 'light.disparu' }] }] } }),
@@ -51,8 +51,11 @@ describe('HaReferencesClient', () => {
     };
     expect(r.rapports.map((x) => x.source).sort()).toEqual(['automatisation a1', 'script s1', 'tableau plan-x']);
     const auto = r.rapports.find((x) => x.source === 'automatisation a1')!;
-    expect(auto.manquants).toEqual([{ type: 'entité', id: 'light.salin', suggestions: ['light.salon'] }]);
-    expect(r.references_manquantes).toBe(3);
+    expect(auto.manquants).toEqual([
+      { type: 'entité', id: 'light.salin', suggestions: ['light.salon'] },
+      { type: 'entité orpheline', id: 'light.orpheline', suggestions: [] }
+    ]);
+    expect(r.references_manquantes).toBe(4);
   });
 
   it('portée limitée : seules les sources demandées sont lues', async () => {

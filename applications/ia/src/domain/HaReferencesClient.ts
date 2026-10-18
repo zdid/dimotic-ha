@@ -101,7 +101,7 @@ export function messageErreur(e: unknown): string {
   return String(e);
 }
 
-export interface Manquant { type: 'entité' | 'service' | 'appareil' | 'pièce'; id: string; suggestions: string[] }
+export interface Manquant { type: 'entité' | 'entité orpheline' | 'service' | 'appareil' | 'pièce'; id: string; suggestions: string[] }
 export interface RapportSource { source: string; nom?: string; manquants: Manquant[] }
 
 export class HaReferencesClient {
@@ -111,13 +111,22 @@ export class HaReferencesClient {
     private readonly tableaux: Pick<HaTableauClient, 'lire' | 'lireEnergie'>
   ) {}
 
-  private async existants(): Promise<{ ids: Set<string>; liste: string[] }> {
-    const ids = new Set<string>(this.ha.getAllEntities().map((e) => e.entity_id));
+  /**
+   * `ids` = entités qui existent (états OU registre) ; `orphelines` = entités du registre, non désactivées, SANS état dans HA (ex. un
+   * appareil supprimé dont l'entrée de registre subsiste) : citées, elles ne répondent plus jamais.
+   */
+  private async existants(): Promise<{ ids: Set<string>; liste: string[]; orphelines: Set<string> }> {
+    const etats = new Set<string>(this.ha.getAllEntities().map((e) => e.entity_id));
+    const ids = new Set<string>(etats);
+    const orphelines = new Set<string>();
     try {
-      const reg = (await this.ha.callWs({ type: 'config/entity_registry/list' }, 30000)) as Array<{ entity_id: string }>;
-      for (const e of reg) ids.add(e.entity_id);
+      const reg = (await this.ha.callWs({ type: 'config/entity_registry/list' }, 30000)) as Array<{ entity_id: string; disabled_by?: string | null }>;
+      for (const e of reg) {
+        ids.add(e.entity_id);
+        if (!etats.has(e.entity_id) && !e.disabled_by) orphelines.add(e.entity_id);
+      }
     } catch { /* le cache des états seul */ }
-    return { ids, liste: [...ids] };
+    return { ids, liste: [...etats], orphelines };
   }
 
   /** Identifiants d'appareils et de pièces existants (registres de HA). */
@@ -142,7 +151,7 @@ export class HaReferencesClient {
   }
 
   async verifier(portee: string[] = ['automatisations', 'scripts', 'scenes', 'tableaux', 'energie', 'plans']): Promise<unknown> {
-    const { ids, liste } = await this.existants();
+    const { ids, liste, orphelines } = await this.existants();
     const services = await this.services();
     const reg = await this.registres();
     const rapports: RapportSource[] = [];
@@ -151,6 +160,7 @@ export class HaReferencesClient {
       const c = extraireCitations(objet, services);
       const manquants: Manquant[] = [
         ...c.entites.filter((e) => !ids.has(e)).map((e) => ({ type: 'entité' as const, id: e, suggestions: suggerer(e, liste) })),
+        ...c.entites.filter((e) => orphelines.has(e)).map((e) => ({ type: 'entité orpheline' as const, id: e, suggestions: suggerer(e, liste) })),
         // Un service cité qui n'existe plus (intégration retirée, application mobile renommée…) : seulement si la liste des services est connue.
         ...(services.size ? c.services.filter((x) => !services.has(x)).map((x) => ({ type: 'service' as const, id: x, suggestions: suggerer(x, [...services]) })) : []),
         ...(reg.appareils ? c.appareils.filter((x) => !reg.appareils!.has(x)).map((x) => ({ type: 'appareil' as const, id: x, suggestions: [] })) : []),
@@ -205,7 +215,7 @@ export class HaReferencesClient {
       references_manquantes: rapports.reduce((n, r) => n + r.manquants.length, 0),
       rapports,
       ...(erreurs.length ? { erreurs_de_lecture: erreurs } : {}),
-      note: "Lecture seule. Vérifie les entités, les services (clés action/service), les appareils (device_id) et les pièces (area_id). Une entité est « manquante » si elle n'est ni dans les états ni dans le registre de HA (une entité désactivée existe). Les suggestions sont les entités existantes les plus proches : à confirmer avant de corriger. Faux positifs possibles : texte libre contenant « domaine.nom » dans une description."
+      note: "Lecture seule. Vérifie les entités, les services (clés action/service), les appareils (device_id) et les pièces (area_id). Une entité est « manquante » si elle n'est ni dans les états ni dans le registre de HA (une entité désactivée existe). « Entité orpheline » = présente dans le registre mais sans état dans HA (ne répond plus jamais). Les suggestions sont les entités existantes les plus proches : à confirmer avant de corriger. Faux positifs possibles : texte libre contenant « domaine.nom » dans une description."
     };
   }
 }
