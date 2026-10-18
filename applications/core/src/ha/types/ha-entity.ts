@@ -242,6 +242,8 @@ export interface HaEntityRegistryUpdatedMessage extends HaWsMessage {
   type: 'entity_registry_updated';
   data: {
     entity_id: string;
+    /** Présent quand l'entity_id a CHANGÉ (renommage dans HA) : l'ancien identifiant. */
+    old_entity_id?: string;
     action: 'create' | 'update' | 'delete';
     entity?: {
       name: string;

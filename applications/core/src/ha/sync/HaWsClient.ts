@@ -10,6 +10,7 @@ import {
 import type { HaRawEntity, HaStateChangedMessage, HaAreaRegistryUpdatedMessage, HaDeviceRegistryUpdatedMessage, HaEntityRegistryUpdatedMessage, HaWsMessage } from '../types/ha-entity';
 import { HaWsConfig } from '../../infrastructure/config/schema';
 import { Logger } from '../../infrastructure/logger/index';
+import { metaDepuisEvenementRegistre } from './entityRegistryEvent';
 import { validateWsMessage, validateRestCall, type HaRestMethod } from './haGenerique';
 
 // =============================================================================
@@ -30,7 +31,7 @@ type RegistryAction = 'create' | 'update' | 'delete';
 type EntityStateCallback = (entity: HaRawEntity) => void;
 type AreaUpdatedCallback = (area: { area_id: string; name: string; picture?: string; action: RegistryAction }) => void;
 type DeviceUpdatedCallback = (device: { device_id: string; name: string; area_id?: string; action: RegistryAction }) => void;
-type EntityUpdatedCallback = (entity: { entity_id: string; domain: string; device_class?: string; area_id?: string; action: RegistryAction }) => void;
+type EntityUpdatedCallback = (entity: { entity_id: string; old_entity_id?: string; domain: string; device_class?: string; area_id?: string; action: RegistryAction }) => void;
 type ConnectCallback = () => void;
 type DisconnectCallback = (reason?: string) => void;
 type ErrorCallback = (error: Error) => void;
@@ -491,17 +492,7 @@ export class HaWsClient {
   }
 
   private handleEntityRegistryUpdated(message: HaEntityRegistryUpdatedMessage): void {
-    const entity = {
-      entity_id: message.data.entity_id,
-      domain: message.data.entity?.domain || '',
-      device_class: message.data.entity?.device_class,
-      area_id: message.data.entity?.area_id,
-      entity_category: message.data.entity?.entity_category,
-      hidden_by: message.data.entity?.hidden_by,
-      disabled_by: message.data.entity?.disabled_by,
-      platform: message.data.entity?.platform,
-      action: message.data.action,
-    };
+    const entity = metaDepuisEvenementRegistre(message);
     this.notifyEntityUpdated(entity);
   }
 

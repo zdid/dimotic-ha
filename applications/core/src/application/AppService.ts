@@ -1857,7 +1857,10 @@ export class AppService {
         // Pas d'état dans un entity_registry_updated (métadonnées seules) — on préserve le
         // dernier état connu du registre s'il existe, sinon un état minimal en attendant le
         // prochain state_changed.
-        const existing = registry.getEntity(entityMeta.entity_id);
+        // Renommage d'entity_id : l'ancien disparaît du cache, le nouveau reprend son dernier état connu.
+        const ancien = entityMeta.old_entity_id ? registry.getEntity(entityMeta.old_entity_id) : undefined;
+        if (entityMeta.old_entity_id) registry.removeEntity(entityMeta.old_entity_id);
+        const existing = registry.getEntity(entityMeta.entity_id) ?? ancien;
         const rawEntity: HaRawEntity = {
           entity_id: entityMeta.entity_id,
           state: existing?.state ?? 'unknown',
