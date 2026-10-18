@@ -18,6 +18,7 @@ import type { HaEntiteRenamer } from './HaEntiteRenamer';
 import type { HaAideClient } from './HaAideClient';
 import type { HaTableauClient } from './HaTableauClient';
 import type { HaPieceClient } from './HaPieceClient';
+import type { HaEtiquetteClient } from './HaEtiquetteClient';
 import type { HaReferencesClient } from './HaReferencesClient';
 
 const CONFIRM_PROP = { type: 'boolean', description: 'false/absent = APERÇU seulement (rien n\'est modifié). true = exécute, À N\'UTILISER QU\'APRÈS l\'accord explicite de l\'utilisateur sur l\'aperçu.' };
@@ -196,6 +197,30 @@ export const HA_PIECE_TOOLS: McpToolDef[] = [
   }
 ];
 
+/** Étiquettes de HA : rangement des automatisations/scripts dans le tableau « Automatisations ». */
+export const HA_ETIQUETTE_TOOLS: McpToolDef[] = [
+  {
+    name: 'lire_etiquettes_ha',
+    description: 'LECTURE SEULE. Liste les étiquettes (labels) de Home Assistant avec les automatisations/scripts qui les portent, et les automatisations/scripts SANS étiquette (ils tombent dans « Autres » du tableau « Automatisations »). À appeler AVANT de proposer une catégorie à l\'utilisateur.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  {
+    name: 'etiqueter_ha',
+    description: 'POSE (ou retire) des étiquettes sur des entités (automation.*, script.*…). À faire pour CHAQUE automatisation/script déposé, après avoir demandé ou proposé la catégorie à l\'utilisateur. Sans confirme:true, aperçu seulement (avant/après). Une étiquette inconnue est refusée sauf creer:true (après accord : une nouvelle étiquette = une carte à ajouter au tableau « Automatisations »).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entites: { type: 'array', items: { type: 'string' }, description: 'entity_id à étiqueter' },
+        etiquettes: { type: 'array', items: { type: 'string' }, description: 'Noms ou identifiants d\'étiquettes' },
+        mode: { type: 'string', enum: ['ajouter', 'remplacer', 'retirer'], description: 'Défaut : ajouter' },
+        creer: { type: 'boolean', description: 'Autorise la création d\'une étiquette inconnue' },
+        confirme: CONFIRM_PROP
+      },
+      required: ['entites', 'etiquettes']
+    }
+  }
+];
+
 /** Gestion des pilotes (AREXX, RFXCOM…) par MQTT via le cœur — conception-gestion-pilotes_specs v1.5. */
 export const PILOTES_TOOLS: McpToolDef[] = [
   {
@@ -326,6 +351,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   ...HA_TABLEAU_TOOLS,
   ...HA_SCRIPT_TOOLS,
   ...HA_PIECE_TOOLS,
+  ...HA_ETIQUETTE_TOOLS,
   ...HA_REFERENCES_TOOLS,
   ...PILOTES_TOOLS
 ];
@@ -399,6 +425,8 @@ export interface McpToolboxDeps {
   tableaux: HaTableauClient;
   /** Pièces (areas) de HA. */
   pieces: HaPieceClient;
+  /** Étiquettes de HA. */
+  etiquettes: HaEtiquetteClient;
   /** Vérification des références d'entités (lecture seule). */
   references: HaReferencesClient;
   /** Gestion des pilotes via le cœur (PilotesClient). */
@@ -417,6 +445,12 @@ export class McpToolbox {
       case 'deposer_automatisation': return JSON.stringify(await this.deps.automations.deposit(String(args.id ?? ''), args.definition, args.confirme === true), null, 2);
       case 'supprimer_automatisation': return JSON.stringify(await this.deps.automations.remove(String(args.id ?? ''), args.confirme === true), null, 2);
       case 'verifier_entity_ids': return JSON.stringify(await this.deps.references.verifier(Array.isArray(args.portee) ? args.portee.map(String) : undefined), null, 2);
+      case 'lire_etiquettes_ha': return JSON.stringify(await this.deps.etiquettes.lire(), null, 2);
+      case 'etiqueter_ha': return JSON.stringify(await this.deps.etiquettes.etiqueter(
+        Array.isArray(args.entites) ? args.entites.map(String) : [],
+        Array.isArray(args.etiquettes) ? args.etiquettes.map(String) : [],
+        args.mode === 'remplacer' || args.mode === 'retirer' ? args.mode : 'ajouter',
+        args.creer === true, args.confirme === true), null, 2);
       case 'lire_pieces_ha': return JSON.stringify(await this.deps.pieces.lire(), null, 2);
       case 'affecter_piece_ha': return JSON.stringify(await this.deps.pieces.affecter(
         Array.isArray(args.entites) ? args.entites.map(String) : [], Array.isArray(args.appareils) ? args.appareils.map(String) : [],

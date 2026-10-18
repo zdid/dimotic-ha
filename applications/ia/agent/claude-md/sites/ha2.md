@@ -167,3 +167,5 @@ Règles :
 - Ports réels (HA 8123, dimotic-ha ; z2m = 8085) et méthode d'accès à l'API HA (jeton longue durée à demander, ne pas le stocker en clair dans un dépôt).
 - Où sont les étiquettes/Areas déjà définies.
 - ha2 est un **Raspberry Pi 4 (2 Go de RAM)** : mémoire limitée, éviter les tâches lourdes (pas de build, pas d'ESPHome compile ; ces opérations se font sur une autre machine).
+
+- **Automatisations créées pour l'utilisateur** : rangées par **étiquette** HA, **sans préfixe dans le nom** (étiquettes existantes : `ballon`, `lumieres`, `association`, `rappels`). Le tableau de bord « Automatisations » (`/liste-automatisations`) a une carte par étiquette ; sans étiquette → « Autres ». **À chaque nouvelle automatisation ou script, propose (ou demande) la catégorie, puis pose-la avec `etiqueter_ha`** ; une nouvelle étiquette = accord de l'utilisateur + une carte à ajouter au tableau.

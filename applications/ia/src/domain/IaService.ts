@@ -32,6 +32,7 @@ import { HaEntiteRenamer } from './HaEntiteRenamer';
 import { HaAideClient } from './HaAideClient';
 import { HaTableauClient } from './HaTableauClient';
 import { HaPieceClient } from './HaPieceClient';
+import { HaEtiquetteClient } from './HaEtiquetteClient';
 import { HaReferencesClient } from './HaReferencesClient';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
@@ -345,6 +346,7 @@ export class IaService implements IIaService {
         return citees;
       }),
       tableaux: tableauxClient,
+      etiquettes: new HaEtiquetteClient(this.haBridgeClient),
       references: new HaReferencesClient(this.haBridgeClient, automations, tableauxClient, scriptsClient),
       aides: new HaAideClient(this.eventBus, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia')),
       entites: new HaEntiteRenamer(this.haBridgeClient, async (entityId) => {
