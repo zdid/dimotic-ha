@@ -15,6 +15,7 @@
  * fonctionnelles-teleinfo_specs).
  */
 
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   runSsh,
@@ -59,8 +60,20 @@ const DEVICE_AGENT_LOCAL_DIR = path.join(__dirname, '..', '..', 'device-agent');
 // js-yaml/argparse : pures JS, pas de compilation native, absentes du node_modules partagé de
 // l'ancienne domotique (PROVEN_NODE_MODULES_PATH) — embarquées directement depuis ce dépôt plutôt
 // que résolues sur la cible (voir resolveDependenciesTargeted, réservé aux modules natifs partagés).
-const JS_YAML_LOCAL_PATH = path.join(__dirname, '..', '..', 'node_modules', 'js-yaml');
-const ARGPARSE_LOCAL_PATH = path.join(__dirname, '..', '..', '..', '..', 'node_modules', 'argparse');
+//
+// ⭐ 18/10/2026 — dans l'IMAGE Docker, chaque application a son propre node_modules (pas de node_modules à la racine du projet,
+// où npm hisse `argparse` dans l'arbre de développement) : le déploiement depuis ha2 échouait avec
+// « scp: stat local "/app/node_modules/argparse": No such file or directory ». On prend donc le premier chemin existant.
+export function resolveLocalModule(name: string, base: string = __dirname): string {
+  const candidats = [
+    path.join(base, '..', '..', 'node_modules', name), // node_modules de l'application (image Docker)
+    path.join(base, '..', '..', '..', '..', 'node_modules', name), // racine du projet (arbre de développement)
+    path.join(base, '..', '..', '..', 'core', 'node_modules', name) // repli : node_modules du cœur
+  ];
+  return candidats.find((c) => fs.existsSync(c)) ?? candidats[0];
+}
+const JS_YAML_LOCAL_PATH = resolveLocalModule('js-yaml');
+const ARGPARSE_LOCAL_PATH = resolveLocalModule('argparse');
 const PROVEN_NODE_MODULES_PATH = '/home/domotique/node_applications/node_modules';
 
 // teleinfo est connecté en root sur le RPi1 (pas besoin de sudo) — contrairement à rpigpio/stfort.
