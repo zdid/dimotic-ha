@@ -91,6 +91,14 @@ verifie "  sans confirme : aperçu, .env intact" "$(tag)" "3.9.5"
 MAJ_SECRET="" ; unset MAJ_SECRET; traiter_commande "$(ordre a6 ha2_test "$(date +%s)" true x)" >/dev/null 2>&1
 verifie "sans secret : lecture seule" "$(echo "$rep" | jq -r .erreur | cut -c1-17)" "aucun secret de m"
 
+echo "== verrou libéré après chaque mise à jour (l'agent d'écoute ne se termine jamais)"
+unset MAJ_SECRET
+raz; cmd_mettre_a_jour 3.9.6 --oui >/dev/null 2>&1; verifie "première mise à jour réussie" "$(tag)" "3.9.6"
+verifie "  verrou libéré sans quitter le processus" "$([ -d "$T/dir/.maj.lock" ] && echo non || echo oui)" "oui"
+cmd_mettre_a_jour 3.9.7 --oui >/dev/null 2>&1; verifie "deuxième mise à jour dans le même processus" "$(tag)" "3.9.7"
+raz; MAJ_FAUX_PULL=ko cmd_mettre_a_jour 3.9.6 --oui >/dev/null 2>&1; verifie "  après un échec aussi, verrou libéré" "$([ -d "$T/dir/.maj.lock" ] && echo non || echo oui)" "oui"
+raz; MAJ_FAUX_SANTE=unhealthy cmd_mettre_a_jour 3.9.6 --oui >/dev/null 2>&1; verifie "  après un retour arrière aussi" "$([ -d "$T/dir/.maj.lock" ] && echo non || echo oui)" "oui"
+
 echo "== bouton Installer de HA"
 unset MAJ_SECRET
 raz; traiter_installation_ha >/dev/null 2>&1; verifie "installe la dernière version du hub (3.10.0)" "$(tag)" "3.10.0"

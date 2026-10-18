@@ -10,6 +10,7 @@
 
 | Date | Version | Fichier | Auteur | Changements |
 |------|---------|---------|--------|-------------|
+| 18/10/2026 | **v1.2** | conception-mise-a-jour-dimotic_specs_v1.2.md | Claude | **Correctif du verrou** de l'agent `maj` : libéré à la fin de chaque mise à jour (il restait posé et refusait la suivante) ; 40 vérifications |
 | 17/10/2026 | **v1.1** | conception-mise-a-jour-dimotic_specs_v1.1.md | Claude | **Réalisation** : agent = conteneur `maj` (profil du compose, image `zdid2/dimotic-maj`, écoute MQTT lui-même), `maj-dimotic.sh` testé (35 vérifications), `definir-secret-maj.sh`, **bouton « Installer » de HA** (installe seulement la dernière version officielle, sans signature) ; ordres signés réservés aux versions précises |
 | 17/10/2026 | **v1.0** | conception-mise-a-jour-dimotic_specs_v1.0.md | Claude | **Conception** de la mise à jour de dimotic-ha par commande MQTT : agent hôte `maj-dimotic` (hors conteneur), tag X.Y.Z vérifié sur le Docker Hub, ordres signés (secret propre), aperçu puis exécution, retour arrière automatique, diffusion avec l'image / le déploiement distant / la carte SD ; aucun outil pour l'agent IA ; aucun code |
 | 16/10/2026 | **v1.10** | conception-gestion-pilotes_specs_v1.10.md | Claude | **Modification d'un nom : l'entity_id de HA suit** (§7.2) — HA gardait l'ancien entity_id après suppression + recréation ; le cœur le renomme (`config/entity_registry/update`, événements `pilotes:ha:renommer:*`) pour AREXX et RFXCOM |

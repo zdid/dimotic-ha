@@ -137,18 +137,9 @@ cmd_verifier() {
   if existe_sur_hub "$1"; then jq -cn --arg v "$1" '{version:$v, existe:true}'; else jq -cn --arg v "$1" '{version:$v, existe:false}'; return 1; fi
 }
 
-cmd_mettre_a_jour() {
-  cible="${1:-}"; oui="${2:-}"
-  version_valide "$cible" || { log "ERREUR : version « $cible » invalide (X.Y.Z attendu)"; return 2; }
-  actuelle="$(version_courante)"
-  [ "$cible" = "$actuelle" ] && { jq -cn --arg v "$cible" '{effectue:false, raison:"déjà à cette version", version:$v}'; return 0; }
-  existe_sur_hub "$cible" || { log "ERREUR : la version $cible n'existe pas sur le hub pour $(architecture)"; return 3; }
-  if [ "$oui" != "--oui" ]; then
-    jq -cn --arg de "$actuelle" --arg vers "$cible" --arg a "$(architecture)" \
-      '{effectue:false, apercu:true, de:$de, vers:$vers, architecture:$a, redemarre:"dimotic-ha (cœur et applications, environ une minute)", message:"Aucune modification faite. Relancer avec confirmation."}'
-    return 0
-  fi
-  verrouiller || return 4
+# Déroulement d'une mise à jour confirmée (verrou déjà pris par l'appelant).
+executer_maj() {
+  cible="$1"; actuelle="$2"
   log "Mise à jour $actuelle -> $cible"
   publier_etat en_cours "$cible" telechargement
   cp -p "$ENV_FILE" "$ENV_FILE.bak-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
@@ -173,6 +164,26 @@ cmd_mettre_a_jour() {
   publier_etat echec "$cible" retour_arriere
   jq -cn --arg de "$actuelle" --arg vers "$cible" '{effectue:false, raison:"le nouveau conteneur n a pas démarré correctement", retour:$de}'
   return 6
+}
+
+cmd_mettre_a_jour() {
+  cible="${1:-}"; oui="${2:-}"
+  version_valide "$cible" || { log "ERREUR : version « $cible » invalide (X.Y.Z attendu)"; return 2; }
+  actuelle="$(version_courante)"
+  [ "$cible" = "$actuelle" ] && { jq -cn --arg v "$cible" '{effectue:false, raison:"déjà à cette version", version:$v}'; return 0; }
+  existe_sur_hub "$cible" || { log "ERREUR : la version $cible n'existe pas sur le hub pour $(architecture)"; return 3; }
+  if [ "$oui" != "--oui" ]; then
+    jq -cn --arg de "$actuelle" --arg vers "$cible" --arg a "$(architecture)" \
+      '{effectue:false, apercu:true, de:$de, vers:$vers, architecture:$a, redemarre:"dimotic-ha (cœur et applications, environ une minute)", message:"Aucune modification faite. Relancer avec confirmation."}'
+    return 0
+  fi
+  verrouiller || return 4
+  # Le verrou est libéré ICI (et pas seulement à la fin du processus : l'agent d'écoute ne se termine jamais, un verrou
+  # resté posé bloquait toute mise à jour suivante — constaté le 18/10/2026).
+  executer_maj "$cible" "$actuelle"
+  code=$?
+  rmdir "$LOCK" 2>/dev/null
+  return $code
 }
 
 cmd_revenir() {
