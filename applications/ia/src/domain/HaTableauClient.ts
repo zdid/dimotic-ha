@@ -38,7 +38,7 @@ export class HaTableauClient {
   }
 
   private ws(message: Record<string, unknown>): Promise<unknown> {
-    return this.ha.callWs(message);
+    return this.ha.callWs(message, 30000);
   }
 
   /** Liste des tableaux (le tableau par défaut a `url_path` null) ; avec `urlPath` : sa configuration complète. */

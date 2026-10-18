@@ -40,7 +40,7 @@ export class HaPieceClient {
   }
 
   private ws<T = unknown>(message: Record<string, unknown>): Promise<T> {
-    return this.ha.callWs(message) as Promise<T>;
+    return this.ha.callWs(message, 30000) as Promise<T>;
   }
 
   private async charger(): Promise<{ pieces: Piece[]; appareils: Appareil[]; entites: Entite[] }> {
