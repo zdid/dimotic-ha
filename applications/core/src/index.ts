@@ -265,6 +265,9 @@ class ApplicationBootstrap {
           this.logger
         );
         this.integrationBridge.attachAreaEnsureService(areaEnsureService);
+        // ⭐ 18/10/2026 — la pièce suggérée ne vaut qu'à la création de l'appareil : on corrige la pièce RÉELLE à chaque passage.
+        const deviceAreaModule = await import('./ha/sync/DeviceAreaAssigner');
+        this.integrationBridge.attachDeviceAreaAssigner(new deviceAreaModule.DeviceAreaAssigner(this.haWsClient, this.logger));
       }
 
       // Sauvegarde/rechargement des automatisations HA (routes REST /api/ha/automations/*, voir

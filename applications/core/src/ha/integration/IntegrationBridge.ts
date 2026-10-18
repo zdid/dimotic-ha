@@ -16,6 +16,7 @@ import type { EssentialEntityData } from './discovery';
 import type { HaMqttStateMessage } from './types/ha-mqtt';
 import { DEFAULT_DISCOVERY_PREFIX, isEmitterQuoi } from './types/ha-mqtt';
 import type { AreaEnsureService } from '../sync/AreaEnsureService';
+import type { DeviceAreaAssigner } from '../sync/DeviceAreaAssigner';
 
 // =============================================================================
 // Types des événements EventBus (voir techniques-socle-ha-mqtt_specs §8.5.5)
@@ -106,6 +107,8 @@ export class IntegrationBridge {
   private mqttEnabled: boolean;
   /** Optionnel : absent si ha.ws_enable est désactivé (Mode A/B indépendants) — voir attachAreaEnsureService. */
   private areaEnsureService?: AreaEnsureService;
+  /** Corrige la pièce réelle de l'appareil dans HA à chaque passage (suggested_area ne vaut qu'à la création). */
+  private deviceAreaAssigner?: DeviceAreaAssigner;
 
   /** Bridges enregistrés par les modules, indépendamment de l'état connecté/déconnecté. */
   private registeredBridges: Map<string, BridgeRegisterEvent> = new Map();
@@ -134,6 +137,10 @@ export class IntegrationBridge {
    * sans effet (comportement inchangé). Doit être appelé après la création du HaWsClient/
    * HaStructureRegistry, avant toute découverte.
    */
+  attachDeviceAreaAssigner(assigner: DeviceAreaAssigner): void {
+    this.deviceAreaAssigner = assigner;
+  }
+
   attachAreaEnsureService(areaEnsureService: AreaEnsureService): void {
     this.areaEnsureService = areaEnsureService;
     this.logger.info('bridge', 'AreaEnsureService attaché');
@@ -305,6 +312,7 @@ export class IntegrationBridge {
       if (this.areaEnsureService) {
         await this.areaEnsureService.ensureArea(capitalized, this.shouldWaitIndefinitelyForArea(moduleName));
       }
+      this.deviceAreaAssigner?.request((data.essential.device as { identifiers?: unknown } | undefined)?.identifiers, capitalized);
     }
     // Via NOMMAGE (préfixe alternatif) : la taxonomie est recalculée par NOMMAGE depuis device.name — on n'en publie pas.
     const viaNommage = !!data.discoveryPrefix && data.discoveryPrefix !== DEFAULT_DISCOVERY_PREFIX;
@@ -328,6 +336,7 @@ export class IntegrationBridge {
       if (this.areaEnsureService) {
         await this.areaEnsureService.ensureArea(capitalized, this.shouldWaitIndefinitelyForArea(moduleName));
       }
+      this.deviceAreaAssigner?.request((payload?.device as { identifiers?: unknown } | undefined)?.identifiers, capitalized);
     }
 
     // Même règle que RFXCOM (taxonomy.ts::buildDisplayName) : device.name raccourci (lieu précis,
