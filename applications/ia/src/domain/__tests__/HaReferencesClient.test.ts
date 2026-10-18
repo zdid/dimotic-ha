@@ -74,6 +74,7 @@ describe('extraireCitations', () => {
       triggers: [{ platform: 'event', event_type: 'timer.finished' }, { platform: 'state', entity_id: ['sensor.x'], device_id: ['b'.repeat(32)] }]
     });
     expect(c.services).toEqual(['light.turn_on', 'notify.mobile_app_sm_g970f', 'timer.start']);
+    expect(extraireCitations({ target: { entity_id: 'notify.administrateurs' } }).ambigus).toEqual(['notify.administrateurs']);
     expect(c.entites).toEqual(['light.salon', 'sensor.x']);   // ni timer.finished (événement) ni timer.minuterie_ (début de nom)
     expect(c.pieces).toEqual(['salon']);
     expect(c.appareils).toEqual(['a'.repeat(32), 'b'.repeat(32)]);

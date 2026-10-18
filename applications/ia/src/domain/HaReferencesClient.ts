@@ -24,7 +24,7 @@ export const DOMAINES = new Set([
 /** Types d'événements (pas des entités) qui ressemblent à `domaine.nom`. */
 const EVENEMENTS = new Set(['timer.finished', 'timer.started', 'timer.cancelled', 'timer.paused', 'timer.restarted', 'script.started', 'automation.triggered', 'automation.reloaded']);
 
-export interface Citations { entites: string[]; services: string[]; appareils: string[]; pieces: string[] }
+export interface Citations { entites: string[]; services: string[]; appareils: string[]; pieces: string[]; ambigus: string[] }
 
 const HEX32 = /^[0-9a-f]{32}$/;
 
@@ -35,13 +35,14 @@ const HEX32 = /^[0-9a-f]{32}$/;
  *  - appareils (`device_id`, 32 caractères hexadécimaux) et pièces (`area_id`).
  */
 export function extraireCitations(objet: unknown, services: Set<string> = new Set()): Citations {
-  const entites = new Set<string>(); const svc = new Set<string>(); const appareils = new Set<string>(); const pieces = new Set<string>();
+  const entites = new Set<string>(); const ambigus = new Set<string>(); const svc = new Set<string>(); const appareils = new Set<string>(); const pieces = new Set<string>();
   const texte = (t: string): void => {
     for (const m of t.replace(/states\./g, '').matchAll(/(?<![A-Za-z0-9_.])([a-z_]+)\.([a-z0-9_]+)(?![A-Za-z0-9_(])/g)) {
       const [complet, domaine] = m;
       if (!DOMAINES.has(domaine) || services.has(complet) || EVENEMENTS.has(complet) || complet.endsWith('_')) continue;
-      // `notify.*` et `tts.*` sont des SERVICES (notifications des applications mobiles) cités aussi dans des modèles ou des données.
-      if (domaine === 'notify' || domaine === 'tts') svc.add(complet);
+      // `notify.*` et `tts.*` peuvent être un SERVICE (application mobile : notify.mobile_app_x) OU une ENTITÉ (groupe de notification
+      // créé dans l'interface : notify.administrateurs, utilisé avec notify.send_message) : classés à part, vérifiés contre les deux.
+      if (domaine === 'notify' || domaine === 'tts') ambigus.add(complet);
       else entites.add(complet);
     }
   };
@@ -62,7 +63,7 @@ export function extraireCitations(objet: unknown, services: Set<string> = new Se
     }
   };
   parcourir(objet);
-  return { entites: [...entites].sort(), services: [...svc].sort(), appareils: [...appareils].sort(), pieces: [...pieces].sort() };
+  return { entites: [...entites].sort(), services: [...svc].sort(), appareils: [...appareils].sort(), pieces: [...pieces].sort(), ambigus: [...ambigus].sort() };
 }
 
 /** Entités citées (compatibilité : voir extraireCitations). */
@@ -162,6 +163,8 @@ export class HaReferencesClient {
         ...c.entites.filter((e) => !ids.has(e)).map((e) => ({ type: 'entité' as const, id: e, suggestions: suggerer(e, liste) })),
         ...c.entites.filter((e) => orphelines.has(e)).map((e) => ({ type: 'entité orpheline' as const, id: e, suggestions: suggerer(e, liste) })),
         // Un service cité qui n'existe plus (intégration retirée, application mobile renommée…) : seulement si la liste des services est connue.
+        // notify.* : manquant seulement s'il n'est NI une entité NI un service
+        ...c.ambigus.filter((x) => !ids.has(x) && !services.has(x)).map((x) => ({ type: 'service' as const, id: x, suggestions: suggerer(x, [...services, ...liste]) })),
         ...(services.size ? c.services.filter((x) => !services.has(x)).map((x) => ({ type: 'service' as const, id: x, suggestions: suggerer(x, [...services]) })) : []),
         ...(reg.appareils ? c.appareils.filter((x) => !reg.appareils!.has(x)).map((x) => ({ type: 'appareil' as const, id: x, suggestions: [] })) : []),
         ...(reg.pieces ? c.pieces.filter((x) => !reg.pieces!.has(x)).map((x) => ({ type: 'pièce' as const, id: x, suggestions: [] })) : [])
