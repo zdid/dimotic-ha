@@ -28,7 +28,22 @@ interface TeleinfoStatus {
   projectRoot: string;
   agentOnline: boolean | null;
   agentLastSeenAt: string | null;
+  adcoVus?: AdcoVu[];
 }
+
+/** ADCO vu par l'agent (voir domain/adco-vus.ts). */
+interface AdcoVu {
+  adco: number;
+  declare: boolean;
+  nom: string | null;
+  derniereTrame: string | null;
+  papp: number | null;
+  iinst: number | null;
+}
+
+/** Au-delà de ce délai sans trame, un compteur est signalé « silencieux » (cycle ≈ 30 s). */
+const SILENCE_MS = 2 * 60 * 1000;
+let dernierAdcoVus: AdcoVu[] = [];
 
 let socket: any | null = null;
 let listenersReady = false;
@@ -39,6 +54,7 @@ function init(): void {
     socket = window.app.socketService.getSocket();
 
     if (!listenersReady) {
+      setInterval(renderAdcoVus, 10000); // rafraîchit les « il y a … s » entre deux statuts
       setupEventListeners();
       listenersReady = true;
     }
@@ -104,6 +120,9 @@ function updateStatusDisplay(status: TeleinfoStatus): void {
     lastSeenEl.textContent = status.agentLastSeenAt ? new Date(status.agentLastSeenAt).toLocaleString('fr-FR') : '—';
   }
 
+  dernierAdcoVus = status.adcoVus ?? [];
+  renderAdcoVus();
+
   const statusCard = $('status-card');
   if (statusCard) statusCard.style.display = 'block';
 
@@ -125,6 +144,42 @@ function updateStatusDisplay(status: TeleinfoStatus): void {
       }
     });
   }
+}
+
+function ageTexte(iso: string): string {
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  if (s < 60) return `il y a ${s} s`;
+  if (s < 3600) return `il y a ${Math.floor(s / 60)} min`;
+  return `il y a ${Math.floor(s / 3600)} h`;
+}
+
+/** Bloc « ADCO rencontrés par l'agent » : dernière trame de chaque ADCO, avec alerte si un compteur est silencieux ou inconnu. */
+function renderAdcoVus(): void {
+  const section = $('adco-vus-section');
+  const el = $('adco-vus');
+  if (!section || !el) return;
+  section.style.display = 'block';
+  if (dernierAdcoVus.length === 0) {
+    el.innerHTML = '<div class="empty">Aucun ADCO rencontré pour le moment.</div>';
+    return;
+  }
+  el.innerHTML = dernierAdcoVus.map((v) => {
+    const silencieux = v.derniereTrame === null || Date.now() - Date.parse(v.derniereTrame) > SILENCE_MS;
+    let badge = '<span class="adco-badge adco-ok">✔ reçu</span>';
+    if (!v.declare) badge = '<span class="adco-badge adco-warn">⚠ non déclaré</span>';
+    else if (v.derniereTrame === null) badge = '<span class="adco-badge adco-warn">⚠ jamais vu</span>';
+    else if (silencieux) badge = '<span class="adco-badge adco-warn">⚠ silencieux</span>';
+    const trame = v.derniereTrame ? `dernière trame ${ageTexte(v.derniereTrame)}` : 'aucune trame reçue depuis le démarrage';
+    const mesures = [v.papp !== null ? `${v.papp} VA` : '', v.iinst !== null ? `${v.iinst} A` : ''].filter(Boolean).join(' · ');
+    return `
+      <div class="adco-row">
+        <div>
+          <div class="adco-nom">ADCO ${v.adco}${v.nom ? ' — ' + escapeHtml(v.nom) : ''}</div>
+          <div class="adco-detail">${trame}${mesures ? ' · ' + mesures : ''}</div>
+        </div>
+        ${badge}
+      </div>`;
+  }).join('');
 }
 
 function showMainContent(): void {

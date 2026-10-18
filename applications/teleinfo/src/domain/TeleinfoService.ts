@@ -31,6 +31,8 @@ const AGENT_DISCOVERED_TOPIC_PREFIX = 'teleinfo/agent/discovered/';
 /** Lieu des compteurs créés automatiquement ou proposé à la saisie d'un nouveau compteur (modifiable ensuite). */
 export const LIEU_PAR_DEFAUT = 'infra';
 
+import { AdcoVus, adcoDuTopic, type AdcoVu } from './adco-vus';
+
 export interface TeleinfoStatus {
   compteursCount: number;
   targets: { id: string; host: string; serviceName: string }[];
@@ -45,6 +47,8 @@ export interface TeleinfoStatus {
   /** Horodatage ISO de la dernière fois qu'un message de présence a été reçu (quel que soit son
    *  contenu) — permet d'afficher "dernier contact" même si l'agent est actuellement hors ligne. */
   agentLastSeenAt: string | null;
+  /** ADCO vus par l'agent (trames reçues) : déclarés puis inconnus — voir adco-vus.ts. */
+  adcoVus: AdcoVu[];
 }
 
 export interface ITeleinfoService {
@@ -60,6 +64,8 @@ export class TeleinfoService implements ITeleinfoService {
   private compteurs: CompteurDefinition[];
   private readonly deployService: DeployService;
   private agentTransport: MqttTransport | null = null;
+  private readonly adcoVus = new AdcoVus();
+  private statutTimer: NodeJS.Timeout | null = null;
   private agentOnline: boolean | null = null;
   private agentLastSeenAt: string | null = null;
 
@@ -151,6 +157,7 @@ export class TeleinfoService implements ITeleinfoService {
 
   async stop(): Promise<void> {
     this.logger.info('TeleinfoService', 'Arrêt du service teleinfo');
+    if (this.statutTimer) { clearTimeout(this.statutTimer); this.statutTimer = null; }
     this.agentTransport?.disconnect();
     this.agentTransport = null;
   }
@@ -181,6 +188,14 @@ export class TeleinfoService implements ITeleinfoService {
         return;
       }
 
+      // Trame d'un compteur (publiée par l'agent pour HA) : on retient la dernière réception de chaque ADCO pour l'écran.
+      const adcoTrame = adcoDuTopic(message.topic, this.config.mqtt.discoveryPrefix);
+      if (adcoTrame !== null) {
+        try { this.adcoVus.enregistrer(adcoTrame, JSON.parse(payloadString)); } catch { /* trame illisible : ignorée */ }
+        this.emitStatusSoon();
+        return;
+      }
+
       let parsed: { status?: string } | null = null;
       try {
         parsed = JSON.parse(payloadString);
@@ -195,6 +210,7 @@ export class TeleinfoService implements ITeleinfoService {
     });
     this.agentTransport.subscribe(AGENT_PRESENCE_TOPIC, 1);
     this.agentTransport.subscribe(AGENT_DISCOVERED_TOPIC_FILTER, 1);
+    this.agentTransport.subscribe(`${this.config.mqtt.discoveryPrefix}/sensor/+/state`, 0);
     this.agentTransport.connect();
   }
 
@@ -369,9 +385,16 @@ export class TeleinfoService implements ITeleinfoService {
       isRunningInDocker: isRunningInDocker(),
       projectRoot: process.env.PROJECT_ROOT || process.cwd(),
       agentOnline: this.agentOnline,
-      agentLastSeenAt: this.agentLastSeenAt
+      agentLastSeenAt: this.agentLastSeenAt,
+      adcoVus: this.adcoVus.liste(this.compteurs)
     };
     this.eventBus.emit(TELEINFO_SOCKET_EVENTS.STATUS, status);
+  }
+
+  /** Les trames arrivent toutes les ~30 s par compteur : l'état est envoyé à l'écran au plus toutes les 5 s. */
+  private emitStatusSoon(): void {
+    if (this.statutTimer) return;
+    this.statutTimer = setTimeout(() => { this.statutTimer = null; this.emitStatus(); }, 5000);
   }
 
   private emitError(message: string): void {
