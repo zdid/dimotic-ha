@@ -28,6 +28,9 @@ const AGENT_PRESENCE_TOPIC = 'teleinfo/agent/status';
 const AGENT_DISCOVERED_TOPIC_FILTER = 'teleinfo/agent/discovered/+';
 const AGENT_DISCOVERED_TOPIC_PREFIX = 'teleinfo/agent/discovered/';
 
+/** Lieu des compteurs créés automatiquement ou proposé à la saisie d'un nouveau compteur (modifiable ensuite). */
+export const LIEU_PAR_DEFAUT = 'infra';
+
 export interface TeleinfoStatus {
   compteursCount: number;
   targets: { id: string; host: string; serviceName: string }[];
@@ -197,7 +200,7 @@ export class TeleinfoService implements ITeleinfoService {
 
   /**
    * ⭐ 05/09/2026 (demande utilisateur) — un ADCO lu par l'agent mais pas encore déclaré crée
-   * automatiquement l'entrée compteur correspondante (quoi/lieu provisoires, "à identifier" —
+   * automatiquement l'entrée compteur correspondante (quoi « compteur », lieu par défaut « infra » —
    * modifiable ensuite via le formulaire existant, comme n'importe quel compteur). Pas d'action si
    * cet ADCO est déjà connu (relecture d'un message retenu après redémarrage de l'agent, ou trame
    * répétée) ou si les 2 emplacements physiques sont déjà occupés — même limite que
@@ -220,7 +223,9 @@ export class TeleinfoService implements ITeleinfoService {
     }
 
     this.logger.info('TeleinfoService', `ADCO ${adco} découvert sur l'agent RPi1 — création automatique de l'entrée compteur`);
-    this.handleSaveCompteur({ adco, quoi: 'compteur', lieu: 'a-identifier' });
+    // ⭐ 18/10/2026 — lieu par défaut « infra » (local technique) : « a-identifier » créait une pièce factice dans HA
+    // (« A-identifier »), que HA ne quitte plus ensuite (la pièce suggérée n'est appliquée qu'à la création de l'appareil).
+    this.handleSaveCompteur({ adco, quoi: 'compteur', lieu: LIEU_PAR_DEFAUT });
   }
 
   // ==========================================================================

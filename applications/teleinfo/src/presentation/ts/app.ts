@@ -232,7 +232,7 @@ function clearCompteurForm(): void {
   setInputValue('compteur-adco', '');
   setInputValue('compteur-quoi', '');
   setInputValue('compteur-lieu-precis', '');
-  setInputValue('compteur-lieu', '');
+  setInputValue('compteur-lieu', 'infra'); // lieu par défaut d'un nouveau compteur (modifiable)
   setInputValue('compteur-lieu-pere', '');
   setInputValue('compteur-lieu-grand-pere', '');
   hideElement('compteur-form-error');
