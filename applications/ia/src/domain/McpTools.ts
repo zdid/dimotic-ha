@@ -18,6 +18,7 @@ import type { HaEntiteRenamer } from './HaEntiteRenamer';
 import type { HaAideClient } from './HaAideClient';
 import type { HaTableauClient } from './HaTableauClient';
 import type { HaPieceClient } from './HaPieceClient';
+import type { HaReferencesClient } from './HaReferencesClient';
 
 const CONFIRM_PROP = { type: 'boolean', description: 'false/absent = APERÇU seulement (rien n\'est modifié). true = exécute, À N\'UTILISER QU\'APRÈS l\'accord explicite de l\'utilisateur sur l\'aperçu.' };
 
@@ -123,6 +124,15 @@ export const HA_TABLEAU_TOOLS: McpToolDef[] = [
     name: 'deposer_energie',
     description: 'MODIFIE la configuration du tableau Énergie de HA (clés permises : energy_sources, device_consumption, device_consumption_water). Chaque clé donnée est remplacée ENTIÈRE. Sans confirme:true, aperçu seulement. L\'existant est sauvegardé avant.',
     inputSchema: { type: 'object', properties: { prefs: { type: 'object', description: 'Ex. { device_consumption: [ { stat_consumption: "sensor.x_energie" } ] }' }, confirme: CONFIRM_PROP }, required: ['prefs'] }
+  }
+];
+
+/** Vérification des références d'entités (lecture seule). */
+export const HA_REFERENCES_TOOLS: McpToolDef[] = [
+  {
+    name: 'verifier_entity_ids',
+    description: 'LECTURE SEULE. Parcourt les automatisations, scripts, scènes, tableaux de bord, la configuration Énergie et les plans de Home Assistant et liste les entity_id cités qui N\'EXISTENT PLUS (après un renommage, par exemple), avec les entités existantes les plus proches en suggestion. À utiliser avant de corriger : confirmer chaque suggestion avec l\'utilisateur.',
+    inputSchema: { type: 'object', properties: { portee: { type: 'array', items: { type: 'string', enum: ['automatisations', 'scripts', 'scenes', 'tableaux', 'energie', 'plans'] }, description: 'Sources à examiner (défaut : toutes)' } } }
   }
 ];
 
@@ -288,6 +298,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   ...HA_AIDE_TOOLS,
   ...HA_TABLEAU_TOOLS,
   ...HA_PIECE_TOOLS,
+  ...HA_REFERENCES_TOOLS,
   ...PILOTES_TOOLS
 ];
 
@@ -358,6 +369,8 @@ export interface McpToolboxDeps {
   tableaux: HaTableauClient;
   /** Pièces (areas) de HA. */
   pieces: HaPieceClient;
+  /** Vérification des références d'entités (lecture seule). */
+  references: HaReferencesClient;
   /** Gestion des pilotes via le cœur (PilotesClient). */
   pilotes: PilotesClient;
 }
@@ -373,6 +386,7 @@ export class McpToolbox {
       case 'lire_automatisations_ha': return JSON.stringify(await this.readAutomations(args), null, 2);
       case 'deposer_automatisation': return JSON.stringify(await this.deps.automations.deposit(String(args.id ?? ''), args.definition, args.confirme === true), null, 2);
       case 'supprimer_automatisation': return JSON.stringify(await this.deps.automations.remove(String(args.id ?? ''), args.confirme === true), null, 2);
+      case 'verifier_entity_ids': return JSON.stringify(await this.deps.references.verifier(Array.isArray(args.portee) ? args.portee.map(String) : undefined), null, 2);
       case 'lire_pieces_ha': return JSON.stringify(await this.deps.pieces.lire(), null, 2);
       case 'affecter_piece_ha': return JSON.stringify(await this.deps.pieces.affecter(
         Array.isArray(args.entites) ? args.entites.map(String) : [], Array.isArray(args.appareils) ? args.appareils.map(String) : [],

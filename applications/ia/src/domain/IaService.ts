@@ -32,6 +32,7 @@ import { HaEntiteRenamer } from './HaEntiteRenamer';
 import { HaAideClient } from './HaAideClient';
 import { HaTableauClient } from './HaTableauClient';
 import { HaPieceClient } from './HaPieceClient';
+import { HaReferencesClient } from './HaReferencesClient';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
@@ -323,6 +324,7 @@ export class IaService implements IIaService {
       return;
     }
     const automations = new HaAutomationClient(this.eventBus, this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia'));
+    const tableauxClient = new HaTableauClient(this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia'));
     const toolbox = new McpToolbox({
       toolExecutor: this.toolExecutor,
       registry: this.haBridgeClient,
@@ -340,7 +342,8 @@ export class IaService implements IIaService {
         }
         return citees;
       }),
-      tableaux: new HaTableauClient(this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia')),
+      tableaux: tableauxClient,
+      references: new HaReferencesClient(this.haBridgeClient, automations, tableauxClient),
       aides: new HaAideClient(this.eventBus, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia')),
       entites: new HaEntiteRenamer(this.haBridgeClient, async (entityId) => {
         const citees: string[] = [];
@@ -383,6 +386,7 @@ export class IaService implements IIaService {
       'phrase sans rien exécuter), executer_action (AGIT RÉELLEMENT sur la maison : vérifier la cible avant).',
       'Automatisations HA : lire_automatisations_ha (liste, définition, sauvegardes), deposer_automatisation et supprimer_automatisation',
       '(AGISSENT sur HA : sans confirme:true ils ne renvoient qu\'un aperçu — le montrer à l\'utilisateur et n\'envoyer confirme:true qu\'après son accord).',
+      'Vérification : verifier_entity_ids (LECTURE SEULE : entity_id cités dans les automatisations, scripts, scènes, tableaux, Énergie et plans qui n\'existent plus, avec suggestions).',
       'Pièces : lire_pieces_ha, affecter_piece_ha, renommer_piece_ha, supprimer_pieces_vides_ha (sans confirme:true, simple aperçu à montrer à l\'utilisateur).',
       'Tableaux de bord et graphes : lire_tableaux_de_bord (AVANT), deposer_tableau_de_bord ; Énergie : lire_energie, deposer_energie (sans confirme:true, simple aperçu à montrer à l\'utilisateur ; sauvegarde avant remplacement).',
       'Aides HA (minuteries…) : creer_aide_ha (lister, creer, supprimer ; sans confirme:true, simple aperçu à montrer à l\'utilisateur).',

@@ -91,7 +91,15 @@ export class HaQueryBridge {
       const reply: HaBridgeReply = { correlation_id, ok: true, result };
       this.eventBus.emitGeneric(REPLY_EVENT, reply);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      // ⭐ 18/10/2026 — une erreur de HA est souvent un objet { code, message } (pas un Error) : String() donnait « [object Object] »
+      // et faisait perdre le code (ex. config_not_found) aux applications.
+      const message = error instanceof Error
+        ? error.message
+        : error && typeof error === 'object'
+          ? ((error as { message?: string; code?: string }).code && (error as { message?: string }).message
+              ? `${(error as { code: string }).code}: ${(error as { message: string }).message}`
+              : (error as { message?: string; code?: string }).message ?? (error as { code?: string }).code ?? JSON.stringify(error))
+          : String(error);
       this.logger.warn('HaQueryBridge', `Échec ${method}: ${message}`);
       const reply: HaBridgeReply = { correlation_id, ok: false, error: message };
       this.eventBus.emitGeneric(REPLY_EVENT, reply);
