@@ -57,6 +57,15 @@ const NPM_INSTALL_TIMEOUT_MS = 300000; // compilation native sur RPi1 : peut êt
 // trop menait à applications/device-agent/ au lieu de applications/teleinfo/device-agent/).
 const DEVICE_AGENT_LOCAL_DIR = path.join(__dirname, '..', '..', 'device-agent');
 
+/**
+ * Fichiers de l'agent copiés sur le RPi1. ⭐ 18/10/2026 : `cycle-watch.js` ajouté (requis par main.js) — tout fichier local
+ * `require('./x')` de l'agent DOIT figurer ici (vérifié par DeployService.test.ts), sinon l'agent plante au démarrage.
+ */
+export const AGENT_FILES = [
+  'gpio-switch.js', 'teleinfo-reader.js', 'teleinfo-service.js',
+  'ha-publisher.js', 'cycle-watch.js', 'main.js', 'package.json'
+];
+
 // js-yaml/argparse : pures JS, pas de compilation native, absentes du node_modules partagé de
 // l'ancienne domotique (PROVEN_NODE_MODULES_PATH) — embarquées directement depuis ce dépôt plutôt
 // que résolues sur la cible (voir resolveDependenciesTargeted, réservé aux modules natifs partagés).
@@ -110,10 +119,7 @@ export class DeployService {
     const mkdir = await runSsh(target, `mkdir -p ${shellQuote(target.remoteDir)}`);
     if (!mkdir.success) return { success: false, step: 'copy-agent', error: mkdir.error };
 
-    const agentFiles = [
-      'gpio-switch.js', 'teleinfo-reader.js', 'teleinfo-service.js',
-      'ha-publisher.js', 'main.js', 'package.json'
-    ].map((f) => path.join(DEVICE_AGENT_LOCAL_DIR, f));
+    const agentFiles = AGENT_FILES.map((f) => path.join(DEVICE_AGENT_LOCAL_DIR, f));
 
     const copyAgent = await runScp(target, agentFiles, target.remoteDir);
     if (!copyAgent.success) {
