@@ -34,6 +34,12 @@ export function installerTopic(site: string, machineId: string): string {
 
 /** État de mise à jour d'une machine, publié (retenu) par la supervision pour l'entité `update` de HA. */
 export function majEtatTopic(machineId: string): string {
+  // Volontairement PAS sous `dimotic/<site>/maj/<machine>/etat` (celui des agents) : l'abonnement aux agents le reconnaîtrait.
+  return `dimotic/supervision/maj-etat/${machineId}`;
+}
+
+/** Ancien emplacement (v1.9 initiale), confondu avec l'état d'un agent de site « supervision » : à vider une fois. */
+export function majEtatTopicAncien(machineId: string): string {
   return `dimotic/supervision/maj/${machineId}/etat`;
 }
 

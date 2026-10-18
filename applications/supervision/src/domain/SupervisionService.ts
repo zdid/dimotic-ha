@@ -25,7 +25,7 @@ import {
   type SupervisionConfig
 } from './config-schema';
 import { evaluateBackup, type BackupMachineReport, type BackupView } from './BackupEvaluation';
-import { machineDiscovery, machineRetrait, estCoeurDeDev, hubDiscovery, latestVersion, fetchHubTags, majEtat, majEtatTopic, HUB_LATEST_TOPIC, type DiscoveryMessage } from './HaDeclaration';
+import { machineDiscovery, machineRetrait, estCoeurDeDev, hubDiscovery, latestVersion, fetchHubTags, majEtat, majEtatTopic, majEtatTopicAncien, HUB_LATEST_TOPIC, type DiscoveryMessage } from './HaDeclaration';
 import { SUPERVISION_SOCKET_EVENTS, SUPERVISION_CLIENT_EVENTS } from './socket-events';
 
 const MODULE_NAME = 'supervision';
@@ -215,6 +215,12 @@ export class SupervisionService implements ISupervisionService {
     const etat = majEtat(this.announcements.get(machineId)?.dimoticVersion, this.hubLatest, this.agents.get(machineId)?.enCours === true);
     const payload = JSON.stringify(etat);
     if (this.majPublie.get(machineId) === payload) return;
+    if (!this.majPublie.has(machineId)) {
+      // Une seule fois par démarrage : vide l'ancien topic retenu (v1.9 initiale).
+      this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:publish`, {
+        bridgeInstance: this.bridgeInstance, topic: majEtatTopicAncien(machineId), payload: '', qos: 1, retain: true
+      });
+    }
     this.majPublie.set(machineId, payload);
     this.eventBus.emitGeneric(`integration:${MODULE_NAME}:passthrough:publish`, {
       bridgeInstance: this.bridgeInstance, topic: majEtatTopic(machineId), payload, qos: 1, retain: true
@@ -223,6 +229,7 @@ export class SupervisionService implements ISupervisionService {
 
   /** L'agent `maj` d'une machine annonce son état : on retient son site (bouton « Installer ») et si une mise à jour tourne. */
   private handleAgentMaj(site: string, machineId: string, payload: string): void {
+    if (site === 'supervision') return; // jamais un agent : ce sont nos propres états (ancien emplacement retenu)
     let etat: string | undefined;
     try { etat = (JSON.parse(payload) as { etat?: string }).etat; } catch { return; }
     const avant = this.agents.get(machineId);

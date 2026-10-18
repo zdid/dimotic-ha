@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { majEtat, majEtatTopic, installerTopic, estCoeurDeDev, machineRetrait, machineDiscovery, hubDiscovery, latestVersion, lwtTopic, knownAppsTopic, HUB_LATEST_TOPIC } from '../HaDeclaration';
+import { majEtat, majEtatTopic, majEtatTopicAncien, installerTopic, estCoeurDeDev, machineRetrait, machineDiscovery, hubDiscovery, latestVersion, lwtTopic, knownAppsTopic, HUB_LATEST_TOPIC } from '../HaDeclaration';
 
 describe('HaDeclaration', () => {
   it('une machine = 3 entités : en ligne (LWT), version installée, mise à jour', () => {
@@ -53,5 +53,11 @@ describe('HaDeclaration', () => {
     expect(majEtat('3.9.5', '3.9.6', false)).toEqual({ installed_version: '3.9.5', latest_version: '3.9.6', in_progress: false });
     expect(majEtat('3.9.6', null, true)).toEqual({ installed_version: '3.9.6', latest_version: '3.9.6', in_progress: true });
     expect(majEtat(undefined, '3.9.6', false).installed_version).toBe('inconnue');
+  });
+
+  it("l'état publié par la supervision ne correspond jamais au motif des états d'agents", () => {
+    const motifAgents = /^dimotic\/([^/]+)\/maj\/([^/]+)\/etat$/;
+    expect(motifAgents.test(majEtatTopic('ha2_811876'))).toBe(false);
+    expect(motifAgents.test(majEtatTopicAncien('ha2_811876'))).toBe(true); // d'où le garde `supervision` du service
   });
 });
