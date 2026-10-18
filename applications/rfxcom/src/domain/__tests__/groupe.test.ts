@@ -43,3 +43,12 @@ describe('réception Lighting2 : commande de groupe', () => {
     expect(recus.map((m) => m.commandDeviceId)).toEqual(['0x02780002/1', '0x02780002/13']);
   });
 });
+
+import { estEmetteurRadio } from '../classification';
+
+describe('estEmetteurRadio (pas de rejeu d\'état au démarrage)', () => {
+  it('télécommandes et boutons (Lighting*) : oui ; capteurs et compteurs : non', () => {
+    for (const t of ['Lighting1', 'Lighting2', 'Lighting4', 'Lighting5', 'Lighting6']) expect(estEmetteurRadio(t)).toBe(true);
+    for (const t of ['RFXSensor', 'RFXMeter', 'Blinds1', 'Temp', '']) expect(estEmetteurRadio(t)).toBe(false);
+  });
+});

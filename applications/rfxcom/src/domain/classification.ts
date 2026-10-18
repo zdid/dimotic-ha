@@ -94,6 +94,15 @@ export function getDefaultComponent(type: RfxComDeviceType, subType: string): { 
  * avec `unitCode = 1` (le premier code, convention de la bibliothèque : « unitCode 0 = groupe » à l'émission, envoyé avec le
  * code 1) : sans correction elle prenait l'identifiant du bouton 1. Le code de groupe n'a PAS de numéro de bouton.
  */
+/**
+ * ⭐ 18/10/2026 — émetteur radio (télécommande, bouton mural) : protocoles Lighting*. Son état n'a de sens qu'au moment d'un APPUI réel ;
+ * il ne doit JAMAIS être rejoué au démarrage (les automatisations HA qui écoutent « chaque message » le prendraient pour un appui :
+ * constaté le 18/10/2026, la salle à manger s'est éteinte à la mise à jour de stfort).
+ */
+export function estEmetteurRadio(type: string): boolean {
+  return typeof type === 'string' && type.startsWith('Lighting');
+}
+
 export function estCommandeGroupe(command: unknown): boolean {
   return typeof command === 'string' && /group/i.test(command);
 }

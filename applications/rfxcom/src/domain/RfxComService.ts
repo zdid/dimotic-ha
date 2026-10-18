@@ -26,7 +26,7 @@ import { RfxComTransceiver } from './transceiver/RfxComTransceiver';
 import { detectRfxComPort } from './transceiver/PortDetector';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { LastStatesStore, type LastStatesFile } from './state/LastStatesStore';
-import { getDefaultComponent, getDefaultUnit, buildStateDeviceId } from './classification';
+import { getDefaultComponent, getDefaultUnit, buildStateDeviceId, estEmetteurRadio } from './classification';
 import { extractTaxonomy, buildAttributsTaxonomie, buildDisplayName, buildBoutonDisplayName } from './taxonomy';
 import { RfxcomPilote } from './RfxcomPilote';
 
@@ -990,6 +990,10 @@ export class RfxComService implements IRfxComService {
    * jusqu'à la prochaine réception RF433 réelle.
    */
   private publishDeviceStateAtStartup(device: RfxComDeviceInfo): void {
+    // ⭐ 18/10/2026 — jamais pour un ÉMETTEUR (télécommande, bouton) : rejouer son dernier état déclenchait les automatisations HA
+    // « chaque message on/off » (association télécommande → lumières) à chaque redémarrage de RFXCOM. Capteurs et compteurs, eux,
+    // sont toujours rejoués.
+    if (estEmetteurRadio(device.type)) return;
     if (device.lastValue === undefined) return;
 
     const deviceId = buildStateDeviceId(device.protocole, device.subType, device.sensorId, device.unitCode);
