@@ -379,7 +379,13 @@ preload_dimotic_image() {
   local tag="${DIMOTIC_TAG:-latest}" ref plat tar
   ref="$(grep -m1 '^ *image: *zdid2/dimotic-ha' "$ROOTFS/docker/dimotic-ha/compose.yaml" | awk '{print $2}' | sed "s/\${DIMOTIC_TAG:-latest}/$tag/")"
   [ -n "$ref" ] || ref="zdid2/dimotic-ha:$tag"
-  case "$QEMU_BIN" in qemu-aarch64-static) plat=linux/arm64 ;; *) plat=linux/arm/v7 ;; esac
+  # QEMU_BIN n'est posé que par setup_chroot (absent quand aucun WiFi n'est demandé) : on détecte l'architecture ici aussi.
+  local qb="${QEMU_BIN:-}"
+  if [ -z "$qb" ]; then
+    local probe="$ROOTFS/usr/bin/dpkg"; [ -f "$probe" ] || probe="$ROOTFS/bin/bash"
+    case "$(file -bL "$probe")" in *aarch64*) qb=qemu-aarch64-static ;; *) qb=qemu-arm-static ;; esac
+  fi
+  case "$qb" in qemu-aarch64-static) plat=linux/arm64 ;; *) plat=linux/arm/v7 ;; esac
   if ! command -v docker >/dev/null 2>&1; then
     echo "AVERTISSEMENT : docker absent de l'hôte — image $ref non pré-chargée (téléchargée au premier démarrage)." >&2; return 0
   fi
