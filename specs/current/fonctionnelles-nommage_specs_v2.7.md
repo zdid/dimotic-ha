@@ -1,6 +1,6 @@
 # Spécifications — Application NOMMAGE
 
-**Version :** 2.6
+**Version :** 2.7
 **Date :** 18 Octobre 2026
 **Auteur :** Mistral Vibe / Claude
 **Statut :** En production
@@ -189,6 +189,10 @@ connexion MQTT, de ses propres identifiants, et de ses propres topics de découv
 **Sorties :**
 - Événement interne `nommage:discovery:raw` sur EventBus, avec l'**identifiant de la source**
   d'origine dans le payload (`sourceId`) — voir §4.2
+
+### 3.1bis ⭐ Découverte en clés abrégées (ESPHome) (nouveau v2.7)
+
+Certaines sources (ESPHome en MQTT) publient leur découverte avec les **abréviations de Home Assistant** : `dev` au lieu de `device`, et dans l'appareil `ids`, `mf`, `mdl`, `sw`, `sa`…, plus `uniq_id`, `obj_id`, `dev_cla`, `ent_cat` à la racine. NOMMAGE lisait seulement `device.name` : le nom de l'appareil (porteur de la convention `QUOI---OÙ`) restait introuvable, l'entité principale n'avait que `name: ""`, et la taxonomie sortait **vide** (`quoi: ""`). Avant tout traitement, NOMMAGE **développe** donc ces clés (`expandHaAbbreviations`, `ha-abbreviations.ts`) ; une clé longue déjà présente l'emporte, les autres clés abrégées (`stat_t`, `cmd_t`…) sont laissées telles quelles, HA les comprenant. Aucun changement pour les sources déjà en clés longues. Cas réel : module 4 relais du poêle de Saint Fort, ESPHome sur MQTT (préfixe `homeassist`).
 
 ### 3.2 Parsing QUOI/OÙ
 

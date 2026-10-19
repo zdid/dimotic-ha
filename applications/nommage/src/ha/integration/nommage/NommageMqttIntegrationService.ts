@@ -17,6 +17,7 @@
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../../../core/dist/exports';
 import { nommageConfigSchema, discoveryTopicsFor, type NommageConfig } from '../../../domain/config-schema';
 import type { DiscoveryMessage, SourceStatus } from '../../../domain/types';
+import { expandHaAbbreviations } from '../../../domain/ha-abbreviations';
 
 const MODULE_NAME = 'nommage';
 
@@ -153,6 +154,8 @@ export class NommageMqttIntegrationService implements INommageMqttIntegrationSer
   }
 
   private processDiscoveryMessage(sourceId: string, topic: string, payload: Record<string, unknown>): void {
+    // ⭐ 19/10/2026 — ESPHome publie la découverte en clés abrégées (`dev`, `uniq_id`…) : on les développe d'abord.
+    payload = expandHaAbbreviations(payload);
     let rawName: string;
 
     // device.name en priorité : la convention de nommage "QUOI---LIEU" (nommage_specs §2) est
