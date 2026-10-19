@@ -24,11 +24,25 @@ const DELAI_LOT_MS = 4000;
 const MAX_ESSAIS = 3;
 /** Une même demande identique n'est pas revérifiée avant ce délai. */
 const REVERIFICATION_MS = 10 * 60 * 1000;
+/** Réconciliation périodique des appareils (hors MQTT compris) dont le NOM suit la convention `quoi---précis--lieu…`. */
+const RECONCILIATION_DELAI_MS = 60 * 1000;
+const RECONCILIATION_PERIODE_MS = 10 * 60 * 1000;
+
+/** Lieu (pièce) lu dans un nom `quoi---[précis--]lieu[--père[--grand-père]]` ; null si le nom ne suit pas la convention. */
+export function lieuDuNom(nom: string): string | null {
+  const i = nom.indexOf('---');
+  if (i < 0) return null;
+  const segments = nom.slice(i + 3).split('--').map((x) => x.trim()).filter(Boolean);
+  if (!segments.length) return null;
+  return (segments.length === 1 ? segments[0] : segments[1]) ?? null;
+}
 
 export class DeviceAreaAssigner {
   private readonly file = new Map<string, Demande>();
   private readonly dernieres = new Map<string, { areaName: string; quand: number }>();
   private minuteur?: NodeJS.Timeout;
+  private reconciliation?: NodeJS.Timeout;
+  private readonly piecesAbsentesTracees = new Set<string>();
 
   constructor(
     private readonly ha: Ws,
@@ -53,6 +67,59 @@ export class DeviceAreaAssigner {
   stop(): void {
     if (this.minuteur) clearTimeout(this.minuteur);
     this.minuteur = undefined;
+    if (this.reconciliation) clearInterval(this.reconciliation);
+    this.reconciliation = undefined;
+  }
+
+  /**
+   * Contrôle périodique de TOUS les appareils de HA dont le nom suit la convention (appareils d'intégrations natives
+   * renommés par l'utilisateur ou par l'agent, qui ne passent jamais par une découverte MQTT) : leur pièce doit être le
+   * lieu du nom. Le nom reste la source de vérité. Une pièce absente de HA n'est pas créée (ignorée, tracée).
+   */
+  demarrerReconciliation(delaiMs = RECONCILIATION_DELAI_MS, periodeMs = RECONCILIATION_PERIODE_MS): void {
+    if (this.reconciliation) return;
+    const premier = setTimeout(() => { void this.reconcilierNoms(); }, delaiMs);
+    premier.unref?.();
+    this.reconciliation = setInterval(() => { void this.reconcilierNoms(); }, periodeMs);
+    this.reconciliation.unref?.();
+  }
+
+  /** Une passe de réconciliation (publique pour les essais). Ne lève jamais. Retourne le nombre d'appareils corrigés. */
+  async reconcilierNoms(): Promise<number> {
+    let appareils: Device[];
+    let pieces: Area[];
+    try {
+      appareils = (await this.ha.callWs({ type: 'config/device_registry/list' })) as Device[];
+      const brut = (await this.ha.callWs({ type: 'config/area_registry/list' })) as Area[] | { areas: Area[] };
+      pieces = Array.isArray(brut) ? brut : brut.areas ?? [];
+    } catch (e) {
+      this.logger.debug('DeviceAreaAssigner', `Réconciliation : registres HA illisibles : ${e instanceof Error ? e.message : e}`);
+      return 0;
+    }
+    let corriges = 0;
+    for (const appareil of appareils) {
+      const nom = (appareil.name_by_user ?? appareil.name ?? '').trim();
+      const lieu = lieuDuNom(nom);
+      if (!lieu) continue;
+      const piece = pieces.find((p) => p.name.trim().toLowerCase() === lieu.toLowerCase());
+      if (!piece) {
+        if (!this.piecesAbsentesTracees.has(lieu.toLowerCase())) {
+          this.piecesAbsentesTracees.add(lieu.toLowerCase());
+          this.logger.info('DeviceAreaAssigner', `Réconciliation : pièce « ${lieu} » absente de HA (appareil « ${nom} ») — non créée, à créer dans HA`);
+        }
+        continue;
+      }
+      if (appareil.area_id === piece.area_id) continue;
+      const avant = pieces.find((p) => p.area_id === appareil.area_id)?.name ?? 'aucune';
+      try {
+        await this.ha.callWs({ type: 'config/device_registry/update', device_id: appareil.id, area_id: piece.area_id });
+        corriges++;
+        this.logger.info('DeviceAreaAssigner', `Réconciliation : appareil « ${nom} » : pièce ${avant} → ${piece.name}`);
+      } catch (e) {
+        this.logger.warn('DeviceAreaAssigner', `Réconciliation : « ${nom} » vers ${piece.name} refusée : ${e instanceof Error ? e.message : e}`);
+      }
+    }
+    return corriges;
   }
 
   private programmer(): void {

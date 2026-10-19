@@ -267,7 +267,10 @@ class ApplicationBootstrap {
         this.integrationBridge.attachAreaEnsureService(areaEnsureService);
         // ⭐ 18/10/2026 — la pièce suggérée ne vaut qu'à la création de l'appareil : on corrige la pièce RÉELLE à chaque passage.
         const deviceAreaModule = await import('./ha/sync/DeviceAreaAssigner');
-        this.integrationBridge.attachDeviceAreaAssigner(new deviceAreaModule.DeviceAreaAssigner(this.haWsClient, this.logger));
+        const deviceAreaAssigner = new deviceAreaModule.DeviceAreaAssigner(this.haWsClient, this.logger);
+        this.integrationBridge.attachDeviceAreaAssigner(deviceAreaAssigner);
+        // ⭐ 19/10/2026 — les appareils hors MQTT (intégrations natives) renommés selon la convention suivent aussi leur lieu.
+        deviceAreaAssigner.demarrerReconciliation();
       }
 
       // Sauvegarde/rechargement des automatisations HA (routes REST /api/ha/automations/*, voir

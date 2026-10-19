@@ -1815,6 +1815,40 @@ export class AppService {
    * Idempotent (haEventsWired) : onConnect peut se redéclencher à chaque reconnexion, il ne faut
    * jamais souscrire deux fois (callbacks empilés en double sur HaWsClient sinon).
    */
+  private rafraichissementsAppareils = new Map<string, NodeJS.Timeout>();
+
+  /**
+   * ⭐ 19/10/2026 — un appareil qui change de pièce n'était jamais répercuté sur ses entités du cache (HA ne donne pas la
+   * nouvelle pièce dans l'événement) : « zone_ha » restait l'ancienne. On relit les registres (regroupé, 1,5 s après le
+   * dernier événement de cet appareil) et on déplace ses entités.
+   */
+  private programmerRafraichissementAppareil(deviceId: string): void {
+    const ancien = this.rafraichissementsAppareils.get(deviceId);
+    if (ancien) clearTimeout(ancien);
+    const t = setTimeout(() => {
+      this.rafraichissementsAppareils.delete(deviceId);
+      void this.rafraichirAppareil(deviceId);
+    }, 1500);
+    t.unref?.();
+    this.rafraichissementsAppareils.set(deviceId, t);
+  }
+
+  private async rafraichirAppareil(deviceId: string): Promise<void> {
+    const registry = this.haStructureRegistry;
+    if (!this.haWsClient || !registry) return;
+    try {
+      const appareils = (await this.haWsClient.callWs({ type: 'config/device_registry/list' })) as Array<{ id: string; area_id?: string | null }>;
+      const appareil = appareils.find((d) => d.id === deviceId);
+      if (!appareil) return;
+      const entites = (await this.haWsClient.callWs({ type: 'config/entity_registry/list' })) as Array<{ entity_id: string; device_id?: string | null; area_id?: string | null }>;
+      const propres = new Map<string, string | undefined>(entites.filter((e) => e.device_id === deviceId).map((e) => [e.entity_id, e.area_id ?? undefined]));
+      const n = registry.reaffecterAppareil(deviceId, appareil.area_id ?? undefined, propres);
+      if (n > 0) this.logger?.debug('AppService', `Appareil ${deviceId} : ${n} entité(s) déplacée(s) vers sa nouvelle pièce dans le cache`);
+    } catch (error) {
+      this.logger?.debug('AppService', `Rafraîchissement de l'appareil ${deviceId} impossible : ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
   private wireHaRegistryEvents(): void {
     if (this.haEventsWired || !this.haWsClient || !this.haStructureRegistry) return;
     this.haEventsWired = true;
@@ -1843,6 +1877,7 @@ export class AppService {
         registry.addDevice(device);
       } else {
         registry.updateDevice(device);
+        this.programmerRafraichissementAppareil(device.device_id);
       }
       this.haRegistryTracer.logChange({ type: 'device', action: device.action, id: device.device_id, name: device.name });
       this.eventBus.emitGeneric('ha:device:updated', device);

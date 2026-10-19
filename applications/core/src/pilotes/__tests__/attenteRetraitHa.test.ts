@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { entiteCorrespond } from '../attenteRetraitHa';
+import { entiteCorrespond, entityIdVise } from '../attenteRetraitHa';
 
 describe('entiteCorrespond', () => {
   it('reconnaît un nom de pilote dans le nom d\'entité de HA (casse, accents, ponctuation)', () => {
@@ -27,3 +27,20 @@ describe('renommage d\'entity_id', () => {
     expect(entiteDeCeNom('Température---salon', 'Température Cuisine')).toBe(false);
   });
 });
+
+describe('entityIdVise', () => {
+  const PIECES = ['Salon', 'Salle', 'Salle à manger', 'Cuisine'];
+  it('identifiant fabriqué par HA (pièce_nom) : garde la forme avec la pièce ACTUELLE', () => {
+    expect(entityIdVise('binary_sensor.salon_bouton_salle_salon', 'Bouton Salon Salle', 'Salle', PIECES)).toBe('binary_sensor.salle_bouton_salon_salle');
+  });
+  it('identifiant sans préfixe de pièce : ancien comportement (nom seul)', () => {
+    expect(entityIdVise('sensor.mon_capteur', 'Température Salle de bain', 'Salle', PIECES)).toBe('sensor.temperature_salle_de_bain');
+  });
+  it('appareil sans pièce : pas de préfixe', () => {
+    expect(entityIdVise('light.salon_lampe', 'Lampe', null, PIECES)).toBe('light.lampe');
+  });
+  it('accents et espaces : pièce « Salle à manger » → salle_a_manger', () => {
+    expect(entityIdVise('light.salle_a_manger_plafonnier', 'Plafonnier', 'Salle à manger', PIECES)).toBe('light.salle_a_manger_plafonnier');
+  });
+});
+

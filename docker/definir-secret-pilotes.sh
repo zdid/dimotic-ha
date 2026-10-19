@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Définit le secret du canal « gestion des pilotes » (core.pilotes.secret) — le MÊME sur ha2, stfort et le dev (falbala).
+# Définit le secret du canal « gestion des pilotes » (core.pilotes.secret) — le MÊME sur toutes les machines d'UN site
+# (Saint Fort : ha2, stfort, dev ; site noisy : noisy et noisy2 — lancer alors avec --seulement noisy --seulement noisy2 pour
+# avoir un secret distinct de celui de Saint Fort).
 # conception-gestion-pilotes_specs v1.6 §11 : signature HMAC des ordres ; sans secret, les pilotes sont en lecture seule.
 #
 # Le secret est généré ici (openssl rand -hex 32), JAMAIS affiché ni passé en argument de commande : il circule par
@@ -11,7 +13,7 @@
 # Usage :
 #   ./docker/definir-secret-pilotes.sh                  # ha2 + stfort + dev, avec confirmation avant chaque redémarrage
 #   ./docker/definir-secret-pilotes.sh --sans-redemarrage
-#   ./docker/definir-secret-pilotes.sh --seulement dev|ha2|stfort   # (répétable)
+#   ./docker/definir-secret-pilotes.sh --seulement dev|ha2|stfort|noisy|noisy2   # (répétable)
 #   ./docker/definir-secret-pilotes.sh --essai          # n'écrit rien : montre seulement ce qui serait fait
 #
 # Le secret n'est lu qu'au DÉMARRAGE du cœur : sans redémarrage, il ne sert qu'après le prochain démarrage.
@@ -26,6 +28,10 @@ DEV_DIR="${DEV_DIR:-$PWD}"
 HA2_HOST="${HA2_HOST:-192.168.1.51}"
 HA2_KEY="${HA2_SSH_KEY:-$HOME/.ssh/ha2-claude/id_ed25519}"
 STFORT_HOST="${STFORT_HOST:-192.168.1.53}"
+# Site noisy : joint par WireGuard/rebond (alias SSH « noisy2 » de falbala) ; noisy par le rebond dimoticnoisy.duckdns.org.
+NOISY_REBOND="${NOISY_REBOND:-root@dimoticnoisy.duckdns.org}"
+NOISY_HOST="${NOISY_HOST:-192.168.1.62}"
+NOISY2_HOST="${NOISY2_HOST:-192.168.1.201}"
 REMOTE_FILE="/docker/dimotic-ha/data/core/secrets_config.yaml"
 
 REDEMARRER=ask
@@ -120,6 +126,8 @@ distant() {  # nom  commande-ssh  [préfixe sudo]
 
 voulu ha2 && distant "ha2" "ssh -i $HA2_KEY -o ConnectTimeout=10 claude@$HA2_HOST" "sudo " || true
 voulu stfort && distant "stfort" "ssh -o ConnectTimeout=10 root@$STFORT_HOST" "" || true
+voulu noisy && distant "noisy" "ssh -J $NOISY_REBOND -o ConnectTimeout=15 root@$NOISY_HOST" "" || true
+voulu noisy2 && distant "noisy2" "ssh -J $NOISY_REBOND -o ConnectTimeout=15 root@$NOISY2_HOST" "" || true
 
 unset PILOTES_SECRET
 echo "=== Terminé. Vérification : les ordres modifiants (adopter, supprimer…) sont acceptés quand le même secret est chargé partout."

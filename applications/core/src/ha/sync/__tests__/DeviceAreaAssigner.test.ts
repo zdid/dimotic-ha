@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DeviceAreaAssigner } from '../DeviceAreaAssigner';
+import { DeviceAreaAssigner, lieuDuNom } from '../DeviceAreaAssigner';
 
 const logger = { debug() {}, info() {}, warn() {}, error() {} } as never;
 
@@ -77,4 +77,36 @@ describe('DeviceAreaAssigner', () => {
     expect(f.appels.filter((x) => x.type === 'config/device_registry/list')).toHaveLength(1);
     expect(f.appels.filter((x) => x.type === 'config/device_registry/update')).toHaveLength(2);
   });
+
+  describe('réconciliation des noms (appareils hors MQTT)', () => {
+    const PIECES2 = [{ area_id: 'salle', name: 'Salle' }, { area_id: 'sam', name: 'Salle à manger' }, { area_id: 'cuisine', name: 'Cuisine' }];
+
+    it('lieuDuNom : précis absent = lieu ; précis puis lieu sinon', () => {
+      expect(lieuDuNom('Température---salle de bain')).toBe('salle de bain');
+      expect(lieuDuNom('poêle---Salle à manger--salle--rez-de-chaussée--maison')).toBe('salle');
+      expect(lieuDuNom('lumière---plafonnier--toilettes du haut--étage')).toBe('toilettes du haut');
+      expect(lieuDuNom('Thermostat')).toBeNull();
+      expect(lieuDuNom('x---')).toBeNull();
+    });
+
+    it('corrige un appareil natif rangé dans la pièce de son lieu précis ; ignore les noms hors convention et les pièces absentes', async () => {
+      const f = fausse([
+        { id: 'd1', name: 'MCZ', name_by_user: 'poêle---Salle à manger--salle--rez-de-chaussée--maison', area_id: 'sam' },
+        { id: 'd2', name: 'Box', area_id: 'cuisine' },
+        { id: 'd3', name: 'x---frigo--garage', area_id: 'cuisine' },
+        { id: 'd4', name: 'ok---evier--cuisine', area_id: 'cuisine' }
+      ], PIECES2);
+      const a = new DeviceAreaAssigner(f.ha as never, logger, () => 0, -1);
+      expect(await a.reconcilierNoms()).toBe(1);
+      const ecritures = f.appels.filter((m) => m.type === 'config/device_registry/update');
+      expect(ecritures).toEqual([{ type: 'config/device_registry/update', device_id: 'd1', area_id: 'salle' }]);
+    });
+
+    it('registres illisibles : aucune écriture, aucune exception', async () => {
+      const ha = { callWs: async () => { throw new Error('ws fermé'); } };
+      const a = new DeviceAreaAssigner(ha as never, logger, () => 0, -1);
+      expect(await a.reconcilierNoms()).toBe(0);
+    });
+  });
 });
+

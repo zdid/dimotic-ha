@@ -16,7 +16,8 @@ import type { HaWsClient } from './sync/HaWsClient';
 import type { HaStructureRegistry } from './sync/HaStructureRegistry';
 import type { Logger } from '../infrastructure/logger/index';
 import { PILOTES_EVENTS } from '../pilotes/types';
-import { entiteCorrespond, entiteDeCeNom, slugHa, type PiloteRetraitDemande, type PiloteRetraitResultat, type PiloteRenommerDemande, type PiloteRenommerResultat } from '../pilotes/attenteRetraitHa';
+import { lieuDuNom } from './sync/DeviceAreaAssigner';
+import { entiteCorrespond, entiteDeCeNom, entityIdVise, slugHa, type PiloteRetraitDemande, type PiloteRetraitResultat, type PiloteRenommerDemande, type PiloteRenommerResultat } from '../pilotes/attenteRetraitHa';
 
 export interface HaHelperRequest {
   appId: string;
@@ -169,6 +170,35 @@ export class HaHelperBridge {
    * suppression de la découverte MQTT). On attend que l'entité réapparaisse sous le NOUVEAU nom, puis on fait suivre
    * l'`entity_id` (domaine + slug du nom affiché) par `config/entity_registry/update`, si l'identifiant visé est libre.
    */
+  /** Noms des pièces de HA ([] si illisibles). */
+  private async nomsPieces(): Promise<string[]> {
+    try {
+      const brut = (await this.haWsClient?.callWs({ type: 'config/area_registry/list' })) as Array<{ name: string }> | { areas: Array<{ name: string }> } | undefined;
+      const liste = Array.isArray(brut) ? brut : brut?.areas ?? [];
+      return liste.map((a) => a.name);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Pièce actuelle d'une entité (la sienne, sinon celle de son appareil) lue dans les registres de HA ; null si aucune. */
+  private async pieceDe(entityId: string): Promise<string | null> {
+    try {
+      const ent = (await this.haWsClient?.callWs({ type: 'config/entity_registry/get', entity_id: entityId })) as { area_id?: string | null; device_id?: string | null } | undefined;
+      let areaId = ent?.area_id ?? null;
+      if (!areaId && ent?.device_id) {
+        const appareils = (await this.haWsClient?.callWs({ type: 'config/device_registry/list' })) as Array<{ id: string; area_id?: string | null }> | undefined;
+        areaId = appareils?.find((d) => d.id === ent.device_id)?.area_id ?? null;
+      }
+      if (!areaId) return null;
+      const brut = (await this.haWsClient?.callWs({ type: 'config/area_registry/list' })) as Array<{ area_id: string; name: string }> | { areas: Array<{ area_id: string; name: string }> } | undefined;
+      const liste = Array.isArray(brut) ? brut : brut?.areas ?? [];
+      return liste.find((a) => a.area_id === areaId)?.name ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private async renommerEntityId(req: PiloteRenommerDemande): Promise<void> {
     const debut = Date.now();
     const delai = Math.min(Math.max(req.delaiMs ?? 20000, 1000), 120000);
@@ -182,8 +212,18 @@ export class HaHelperBridge {
     }
     if (cibles.length === 0 || !this.haWsClient) resultat.introuvable = true;
     else {
+      const nomsPieces = await this.nomsPieces();
+      const lieuAttendu = lieuDuNom(req.nom);
       for (const e of cibles) {
-        const visé = `${e.entity_id.split('.')[0]}.${slugHa(e.friendly_name)}`;
+        // La pièce de l'appareil change environ 5 à 20 s après la republication (DeviceAreaAssigner) : on l'attend, bornée,
+        // car HA préfixe l'identifiant par la pièce.
+        let piece = await this.pieceDe(e.entity_id);
+        const limite = Date.now() + 15000;
+        while (lieuAttendu && (piece ?? '').trim().toLowerCase() !== lieuAttendu.toLowerCase() && Date.now() < limite) {
+          await new Promise((r) => setTimeout(r, 1000));
+          piece = await this.pieceDe(e.entity_id);
+        }
+        const visé = entityIdVise(e.entity_id, e.friendly_name, piece, nomsPieces);
         if (visé === e.entity_id) { resultat.inchanges.push(e.entity_id); continue; }
         if (this.haStructureRegistry?.getEntity(visé)) { resultat.bloques.push({ entityId: e.entity_id, raison: `« ${visé} » existe déjà` }); continue; }
         try {

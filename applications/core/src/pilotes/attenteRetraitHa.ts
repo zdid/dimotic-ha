@@ -98,6 +98,21 @@ export function slugHa(texte: string): string {
  * le précis ; lieux père et grand-père absents) : on compare au nom affiché reconstitué, ou à son début (plusieurs
  * entités par appareil : « Température salon » + « Humidité salon » ne sont pas concernées, « … batterie » oui).
  */
+/**
+ * Identifiant visé après renommage. HA fabrique `<domaine>.<pièce>_<nom affiché>` pour les appareils d'une pièce : si
+ * l'identifiant actuel est de cette forme (il commence par le nom d'une pièce de HA), on garde la forme avec la pièce
+ * ACTUELLE de l'appareil ; sinon (identifiant posé à la main ou par un `object_id`), `<domaine>.<nom affiché>` seul.
+ */
+export function entityIdVise(entityIdActuel: string, nomAffiche: string, piece: string | null, nomsPieces: string[]): string {
+  const point = entityIdActuel.indexOf('.');
+  const domaine = point < 0 ? entityIdActuel : entityIdActuel.slice(0, point);
+  const objet = point < 0 ? '' : entityIdActuel.slice(point + 1);
+  const slug = slugHa(nomAffiche);
+  const prefixee = nomsPieces.map(slugHa).filter(Boolean).some((p) => objet.startsWith(`${p}_`));
+  const prefixe = prefixee && piece ? slugHa(piece) : '';
+  return prefixe ? `${domaine}.${prefixe}_${slug}` : `${domaine}.${slug}`;
+}
+
 export function entiteDeCeNom(nomPilote: string, nomEntite: string | undefined): boolean {
   if (!nomEntite) return false;
   const parties = nomPilote.split(/-{2,}/).map(normaliser).filter(Boolean).slice(0, 3);
@@ -124,7 +139,7 @@ export function renommerEntityIdHa(
     const garde = setTimeout(() => {
       eventBus.offGeneric(PILOTES_EVENTS.HA_RENOMMER_RESULTAT, ecouteur);
       resolve({ appId, requestId, renommes: [], inchanges: [], bloques: [], introuvable: true });
-    }, delaiMs + 10000);
+    }, delaiMs + 25000);
     eventBus.onGeneric<PiloteRenommerResultat>(PILOTES_EVENTS.HA_RENOMMER_RESULTAT, ecouteur);
     eventBus.emitGeneric<PiloteRenommerDemande>(PILOTES_EVENTS.HA_RENOMMER_DEMANDE, { appId, requestId, nom, delaiMs });
   });

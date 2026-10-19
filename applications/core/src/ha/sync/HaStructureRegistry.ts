@@ -659,6 +659,30 @@ export class HaStructureRegistry {
   }
 
   /**
+   * Un appareil change de pièce : ses entités (sauf celles qui ont leur PROPRE pièce dans le registre des entités) suivent.
+   * L'événement `device_registry_updated` de HA ne porte pas la nouvelle pièce (seulement l'ancienne dans `changes`) :
+   * l'appelant relit donc les registres et fournit ici la pièce de l'appareil et les pièces propres de ses entités.
+   * Retourne le nombre d'entités déplacées.
+   */
+  reaffecterAppareil(deviceId: string, deviceAreaId: string | undefined, areaPropreParEntite: Map<string, string | undefined>): number {
+    const device = this.devices.get(deviceId);
+    if (!device) return 0;
+    device.area_id = deviceAreaId;
+    let deplacees = 0;
+    for (const entity of [...device.entities]) {
+      const voulue = areaPropreParEntite.get(entity.entity_id) || deviceAreaId || undefined;
+      if ((entity.area_id || undefined) === voulue) continue;
+      this.removeEntityFromStructure(entity); // la retire aussi de device.entities
+      entity.area_id = voulue;
+      device.entities.push(entity);
+      this.addEntityToStructure(entity);
+      deplacees++;
+    }
+    if (deplacees > 0) this.invalidateLieuGraph();
+    return deplacees;
+  }
+
+  /**
    * Supprime un device du registre.
    * 
    * @param deviceId - ID du device à supprimer
