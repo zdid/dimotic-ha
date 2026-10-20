@@ -1,0 +1,13 @@
+[Unit]
+Description=Lecture du UPS HAT (E) (I2C 0x2D) vers MQTT / Home Assistant
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/ups-hat-e/ups_hat_e.py
+Restart=always
+RestartSec=10
+User=root
+
+[Install]
+WantedBy=multi-user.target
