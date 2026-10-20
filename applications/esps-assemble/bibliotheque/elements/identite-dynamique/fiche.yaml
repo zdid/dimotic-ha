@@ -1,0 +1,22 @@
+id: identite-dynamique
+nom: "Identité dynamique : taxonomie mémorisée dans l'ESP, modifiable sans reflashage"
+description: "Comme identite-taxonomie, mais les cinq parties du nom (quoi, lieu précis, lieu, père, grand-père) sont MÉMORISÉES dans la flash de l'ESP et modifiables par cinq champs texte (MQTT ou HA), sans reflashage. Rien de mémorisé : elles sont créées à partir des paramètres (les valeurs du code) ; ensuite tout part de ce qui est mémorisé. Le nom est republié dans la découverte (NOMMAGE en tire la taxonomie). Les identifiants des entités ne changent pas. Exige transport-mqtt."
+parametres:
+  - nom: quoi
+    description: "Ce qu'est l'appareil (ex. poêle, lumière, bouton)."
+  - nom: lieu_precis
+    description: "Emplacement précis dans le lieu (ex. switch thermostat, plafonnier). Absent = le lieu."
+    requis: false
+    defaut: ""
+  - nom: lieu
+    description: "La pièce (ex. salle, cuisine d'été). C'est la pièce de HA."
+  - nom: pere
+    description: "Lieu père (ex. rez de chaussée, étage)."
+    requis: false
+    defaut: ""
+  - nom: grand_pere
+    description: "Lieu grand-père (ex. maison). Exige un père."
+    requis: false
+    defaut: ""
+exigences:
+  elements: [transport-mqtt]

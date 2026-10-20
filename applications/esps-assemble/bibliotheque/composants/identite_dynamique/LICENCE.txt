@@ -1,0 +1,1 @@
+Composant propre au projet dimotic-ha, licence MIT (comme le reste du dépôt).

@@ -90,3 +90,21 @@ describe('transport et identité à l\'assemblage', () => {
     expect(() => resoudreAppareil(racine, 'test')).toThrow(ResolutionImpossible);
   });
 });
+
+describe('bibliothèque réelle : appareils à identité', () => {
+  const racineReelle = path.resolve(__dirname, '../../../..');
+  it('essai-identite (identité dynamique) : assemblé, composant embarqué, un seul transport', () => {
+    const r = assemblerPaquet(racineReelle, 'essai-identite', 1);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(Object.keys(r.manifeste.fichiers)).toEqual(expect.arrayContaining(['components/identite_dynamique/identite_dynamique.cpp', 'components/identite_dynamique/__init__.py']));
+      expect(r.avertissements).toEqual([]);
+    }
+  });
+  it('poele-thermostat-sam et essai-cuisine-ete s\'assemblent sans erreur', () => {
+    for (const nom of ['poele-thermostat-sam', 'essai-cuisine-ete']) {
+      const r = assemblerPaquet(racineReelle, nom, 1);
+      expect(r.ok, nom).toBe(true);
+    }
+  });
+});

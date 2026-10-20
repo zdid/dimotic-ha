@@ -7,7 +7,7 @@ packages:
   materiel: !include bibliotheque/materiels/module-4-relais-esp8266/base.yaml
   wifi: !include generes/wifi.yaml   # généré d'après `wifi:` de la fiche
   identite: !include
-    file: bibliotheque/elements/identite-taxonomie/element.yaml
+    file: bibliotheque/elements/identite-dynamique/element.yaml
     vars:
       quoi: "poêle"
       lieu_precis: "switch thermostat"

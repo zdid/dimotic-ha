@@ -1,6 +1,6 @@
 # Conception — Assembleur de sources ESPHome et agent `esphome`
 
-*Version 1.5 — 20 Octobre 2026 (§3.11 : identité/taxonomie et transport = éléments) — Version 1.4 — 13 Octobre 2026 — **décisions techniques pour la réalisation (§11) et plan de tests par étape et par endroit (§12)**, validés par l'utilisateur ; instance réelle de falbala installée et paramétrée (§6). v1.3 : plusieurs sites, mêmes modules partout, trois rôles, flux à deux messages ; **conception, rien n'est encore codé** (sauf la phase 1 de la bibliothèque d'éléments, voir `fonctionnelles-espdisplay_specs_v1.5.md` §10, et le port 8088 forcé du dev, §6).*
+*Version 1.6 — 20 Octobre 2026 (§3.12 : identité dynamique, taxonomie modifiable sans reflashage) — Version 1.5 — 20 Octobre 2026 (§3.11 : identité/taxonomie et transport = éléments) — Version 1.4 — 13 Octobre 2026 — **décisions techniques pour la réalisation (§11) et plan de tests par étape et par endroit (§12)**, validés par l'utilisateur ; instance réelle de falbala installée et paramétrée (§6). v1.3 : plusieurs sites, mêmes modules partout, trois rôles, flux à deux messages ; **conception, rien n'est encore codé** (sauf la phase 1 de la bibliothèque d'éléments, voir `fonctionnelles-espdisplay_specs_v1.5.md` §10, et le port 8088 forcé du dev, §6).*
 
 ## 1. Objet
 
@@ -119,6 +119,18 @@ La **taxonomie** d'un appareil (QUOI, lieu précis, lieu, père, grand-père) n'
 - **Composants ESPHome locaux** : un `external_components` de type `local` est résolu dans `bibliotheque/composants/<id>/`, et ses fichiers sont embarqués dans le paquet sous `components/<id>/`. Premier cas : `magic_switch` (Sonoff Basic R4), repris de Tasmota (GPL v3), crédit conservé.
 - **Matériels ajoutés** : `module-4-relais-esp8266` (relais 1 = GPIO5, ex-Tasmota « Generic » du poêle de Saint Fort) et `sonoff-basic-r4` (ESP32-C3, Magic Switch, non testé sur le matériel). **Appareils** : `poele-thermostat-sam` (flashé le 19-20/10/2026 avec la même configuration) et `essai-cuisine-ete` (brouillon).
 - **Piste non retenue** : recharger la taxonomie sans reflashage (table de surcharge dans NOMMAGE par appareil, ou entité texte persistante dans l'ESP republiant sa découverte) : à reprendre si le besoin revient.
+
+### 3.12 Identité dynamique : taxonomie modifiable sans reflashage (décision du 20/10/2026)
+
+Principe demandé : **la taxonomie vit à la source de l'émission** (l'appareil), pas dans NOMMAGE. Si la « surcharge » est vide, elle est **créée à partir du code** ; ensuite **tout le traitement part de la surcharge**.
+
+- **Élément `identite-dynamique`** (mêmes paramètres que `identite-taxonomie`, exige `transport-mqtt`) + composant ESPHome local `identite_dynamique` (code propre, MIT). Les cinq parties du nom (QUOI, lieu précis, lieu, père, grand-père) sont **mémorisées dans la flash** de l'ESP. Rien de mémorisé : elles prennent les valeurs des paramètres (le code) ; sinon la valeur mémorisée l'emporte. Elle survit à un reflashage.
+- **Cinq champs texte de configuration** (« Taxonomie : quoi », « … lieu précis », « … lieu », « … père », « … grand-père »), modifiables par MQTT (`<préfixe>/text/<champ>/command`) ou depuis HA. Un jeu de parties hors convention (QUOI ou lieu vide, grand-père sans père, `--`, `/`, `\\`, `#`, `+`, `"`, tiret en début ou fin) est **refusé** : l'état du champ est rétabli à la valeur mémorisée, rien n'est republié.
+- **Application d'un changement accepté** : le nom composé remplace le `friendly_name` de l'application (le module MQTT d'ESPHome le relit à chaque envoi de découverte), puis la connexion MQTT est coupée et rétablie (≈ 1,5 s : `mqtt.disable` / `mqtt.enable`) : toutes les découvertes sont republiées avec le nouveau `device.name`, que NOMMAGE lit.
+- **Identité des entités stable** : les sujets et l'`unique_id` d'ESPHome MQTT sont calculés d'après le NOM de l'entité. Une entité « sans nom » (`name: None`) prend le nom de l'appareil et changerait donc d'identité à chaque renommage (nouvelle entité, ancienne orpheline : constaté sur le banc d'essai). Règle : **l'entité principale d'un matériel porte un nom constant, `Switch`** (identifiant « switch », lu comme principal par NOMMAGE, comme pour zigbee2mqtt) ; les cinq champs texte ont des noms constants. Vérifié sur le banc : trois renommages successifs, six découvertes retenues, aucun orphelin.
+- **Conséquences pour HA** : le nom de l'appareil et la pièce suivent (contrôle de pièce du cœur) ; l'`entity_id` de HA, attribué une seule fois, ne se renomme pas (voir la réflexion sur un contrôle facultatif d'`entity_id`, hors périmètre de cette version).
+- **Banc d'essai** : appareil `essai-identite` (ESP8266 4 Mo branché en USB sur falbala), découverte sur un préfixe privé (`essai_identite`) que NOMMAGE n'écoute pas. Reste à valider : la chaîne complète avec NOMMAGE et HA (préfixe `homeassist`).
+- **Passage de l'appareil `poele-thermostat-sam`** à l'identité dynamique : l'entité principale change d'identité (`switch` au lieu du nom de l'appareil) ; le thermostat « Poêle » de HA devra être repointé sur le nouvel `entity_id`, l'ancienne entité nettoyée. Non fait à la date de cette version.
 
 ## 4. Flux de bout en bout (décisions de l'utilisateur du 13/10/2026)
 

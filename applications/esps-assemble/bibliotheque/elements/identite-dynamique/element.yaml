@@ -1,0 +1,121 @@
+# Élément : identité dynamique — voir fiche.yaml. Le nom compilé (Jinja, comme identite-taxonomie) n'est que la VALEUR DE DÉPART : le composant
+# local identite_dynamique le remplace, au démarrage et à chaque changement, par le nom composé des parties mémorisées dans la flash.
+substitutions:
+  lieu_precis: ""
+  pere: ""
+  grand_pere: ""
+
+esphome:
+  friendly_name: "${ quoi ~ '---' ~ ((lieu_precis ~ '--') if lieu_precis else '') ~ lieu ~ (('--' ~ pere) if pere else '') ~ (('--' ~ grand_pere) if grand_pere else '') }"
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          id(tx_quoi).publish_state(id(identite).get_part(0));
+          id(tx_lieu_precis).publish_state(id(identite).get_part(1));
+          id(tx_lieu).publish_state(id(identite).get_part(2));
+          id(tx_pere).publish_state(id(identite).get_part(3));
+          id(tx_grand_pere).publish_state(id(identite).get_part(4));
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [identite_dynamique]
+
+identite_dynamique:
+  id: identite
+  quoi: "${quoi}"
+  lieu_precis: "${lieu_precis}"
+  lieu: "${lieu}"
+  pere: "${pere}"
+  grand_pere: "${grand_pere}"
+
+# Cinq champs texte de configuration. L'état publié est TOUJOURS la valeur mémorisée : une valeur refusée (nom hors convention)
+# est rétablie dans le champ. Une valeur acceptée est mémorisée, puis la découverte est republiée (reconnexion MQTT d'environ une
+# seconde) pour que NOMMAGE relise le nouveau nom.
+text:
+  - platform: template
+    id: tx_quoi
+    name: "Taxonomie : quoi"
+    mode: text
+    entity_category: config
+    max_length: 47
+    update_interval: never
+    lambda: 'return id(identite).get_part(0);'
+    set_action:
+      - if:
+          condition:
+            lambda: 'return id(identite).set_part(0, x);'
+          then:
+            - script.execute: republier_decouverte
+      - lambda: 'id(tx_quoi).publish_state(id(identite).get_part(0));'
+  - platform: template
+    id: tx_lieu_precis
+    name: "Taxonomie : lieu précis"
+    mode: text
+    entity_category: config
+    max_length: 47
+    update_interval: never
+    lambda: 'return id(identite).get_part(1);'
+    set_action:
+      - if:
+          condition:
+            lambda: 'return id(identite).set_part(1, x);'
+          then:
+            - script.execute: republier_decouverte
+      - lambda: 'id(tx_lieu_precis).publish_state(id(identite).get_part(1));'
+  - platform: template
+    id: tx_lieu
+    name: "Taxonomie : lieu"
+    mode: text
+    entity_category: config
+    max_length: 47
+    update_interval: never
+    lambda: 'return id(identite).get_part(2);'
+    set_action:
+      - if:
+          condition:
+            lambda: 'return id(identite).set_part(2, x);'
+          then:
+            - script.execute: republier_decouverte
+      - lambda: 'id(tx_lieu).publish_state(id(identite).get_part(2));'
+  - platform: template
+    id: tx_pere
+    name: "Taxonomie : père"
+    mode: text
+    entity_category: config
+    max_length: 47
+    update_interval: never
+    lambda: 'return id(identite).get_part(3);'
+    set_action:
+      - if:
+          condition:
+            lambda: 'return id(identite).set_part(3, x);'
+          then:
+            - script.execute: republier_decouverte
+      - lambda: 'id(tx_pere).publish_state(id(identite).get_part(3));'
+  - platform: template
+    id: tx_grand_pere
+    name: "Taxonomie : grand-père"
+    mode: text
+    entity_category: config
+    max_length: 47
+    update_interval: never
+    lambda: 'return id(identite).get_part(4);'
+    set_action:
+      - if:
+          condition:
+            lambda: 'return id(identite).set_part(4, x);'
+          then:
+            - script.execute: republier_decouverte
+      - lambda: 'id(tx_grand_pere).publish_state(id(identite).get_part(4));'
+
+script:
+  - id: republier_decouverte
+    mode: restart
+    then:
+      - delay: 500ms
+      - mqtt.disable:
+      - delay: 1s
+      - mqtt.enable:

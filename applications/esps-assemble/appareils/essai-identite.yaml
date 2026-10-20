@@ -1,0 +1,21 @@
+# Appareil essai-identite : banc d'essai de l'identité dynamique (ESP8266 branché en USB sur falbala). Découverte sur un préfixe PRIVÉ
+# (essai_identite) que NOMMAGE n'écoute pas : rien n'arrive dans Home Assistant.
+substitutions:
+  device_name: essai-identite
+
+packages:
+  materiel: !include bibliotheque/materiels/module-4-relais-esp8266/base.yaml
+  wifi: !include generes/wifi.yaml   # généré d'après `wifi:` de la fiche
+  identite: !include
+    file: bibliotheque/elements/identite-dynamique/element.yaml
+    vars:
+      quoi: "essai"
+      lieu_precis: "banc"
+      lieu: "bureau falbala"
+      pere: "étage"
+      grand_pere: "maison"
+  transport: !include
+    file: bibliotheque/elements/transport-mqtt/element.yaml
+    vars:
+      broker: "192.168.1.51"
+      prefixe_decouverte: "essai_identite"

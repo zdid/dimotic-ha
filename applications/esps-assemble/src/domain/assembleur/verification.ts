@@ -80,18 +80,18 @@ export function verifier(appareil: FicheAppareil, sources: SourcesAppareil, ctx:
   else if (!sources.transports.api && !sources.transports.mqtt) avertissements.push(`aucun transport vers Home Assistant (ni « api: » ni « mqtt: »)`);
 
   // Identité (nom au format de la convention, élément identite-taxonomie) : contrôle des parties, ou rappel si MQTT sans identité.
-  const identite = sources.elements.find((e) => e.id === 'identite-taxonomie');
+  const identite = sources.elements.find((e) => e.id === 'identite-taxonomie' || e.id === 'identite-dynamique');
   if (identite) {
     const v = identite.vars;
     const erreursNom = validerNom({ quoi: v.quoi ?? '', lieuPrecis: v.lieu_precis, lieu: v.lieu ?? '', pere: v.pere, grandPere: v.grand_pere });
-    for (const e of erreursNom) erreurs.push(`élément identite-taxonomie : ${e}`);
+    for (const e of erreursNom) erreurs.push(`élément ${identite.id} : ${e}`);
     if (erreursNom.length === 0) {
       const nom = composerNom({ quoi: v.quoi, lieuPrecis: v.lieu_precis, lieu: v.lieu, pere: v.pere, grandPere: v.grand_pere });
       if (nom.length > 90) avertissements.push(`le nom « ${nom} » fait ${nom.length} caractères : long pour un nom d'appareil`);
     }
-    if (sources.transports.api && !sources.transports.mqtt) avertissements.push(`l'élément identite-taxonomie nomme l'appareil, mais sans MQTT la taxonomie n'est pas calculée (NOMMAGE ne voit pas l'API native)`);
+    if (sources.transports.api && !sources.transports.mqtt) avertissements.push(`l'élément ${identite.id} nomme l'appareil, mais sans MQTT la taxonomie n'est pas calculée (NOMMAGE ne voit pas l'API native)`);
   } else if (sources.transports.mqtt) {
-    avertissements.push(`MQTT sans élément identite-taxonomie : si le nom de l'appareil ne suit pas la convention quoi---lieu, NOMMAGE ne le classera pas`);
+    avertissements.push(`MQTT sans élément identite-taxonomie ni identite-dynamique : si le nom de l'appareil ne suit pas la convention quoi---lieu, NOMMAGE ne le classera pas`);
   }
 
   if (sources.annexesManquantes.length > 0) avertissements.push(`fichiers annexes introuvables (non embarqués) : ${sources.annexesManquantes.join(', ')}`);

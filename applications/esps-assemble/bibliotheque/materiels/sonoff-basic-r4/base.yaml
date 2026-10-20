@@ -42,7 +42,7 @@ switch:
   - platform: output
     output: sortie_relais
     id: relais
-    name: None                         # entité principale : prend le nom de l'appareil
+    name: "Switch"                     # entité principale : nom CONSTANT (identité stable) ; « switch » = identifiant lu comme principal par NOMMAGE
     restore_mode: RESTORE_DEFAULT_OFF
     on_turn_on:
       - output.turn_on: sortie_led

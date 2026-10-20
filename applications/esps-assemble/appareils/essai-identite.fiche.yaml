@@ -1,0 +1,9 @@
+# Fiche de l'appareil essai-identite (banc d'essai, ESP8266 4 Mo branché en USB sur falbala). Adresse : à relever après la première connexion.
+nom: essai-identite
+nom_affichage: "Essai identité dynamique (banc)"
+materiel: module-4-relais-esp8266
+esp:
+  adresse: ""
+options:
+  autoriser_appels_service: false
+wifi: [stfort]
