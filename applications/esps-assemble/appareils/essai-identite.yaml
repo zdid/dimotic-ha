@@ -1,4 +1,4 @@
-# Appareil essai-identite : banc d'essai de l'identité dynamique (ESP8266 branché en USB sur falbala). Découverte sur un préfixe PRIVÉ
+# Appareil essai-identite : banc d'essai de l'identité dynamique (ESP8266 branché en USB sur falbala). Découverte sur un préfixe PRIVÉ (essai_identite) que NOMMAGE n'écoute pas : rien n'arrive dans HA (pour la chaîne complète, passer prefixe_decouverte à homeassist, puis supprimer l'appareil de HA).
 # (essai_identite) que NOMMAGE n'écoute pas : rien n'arrive dans Home Assistant.
 substitutions:
   device_name: essai-identite
