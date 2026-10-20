@@ -7,6 +7,9 @@
  *  - `identifiantsDecales` : entités dont l'`entity_id` commence par le nom d'une pièce (la forme fabriquée par HA : `<pièce>_<nom>`) qui
  *    n'est PLUS leur pièce actuelle (appareil déplacé depuis), avec l'identifiant qu'on aurait aujourd'hui. Seules les entités RATTACHÉES À UN
  *    APPAREIL sont examinées (HA ne préfixe par la pièce que celles-là : automatisations, scripts et aides n'ont pas de pièce).
+ * Ne sont PAS examinés : les téléphones (plateforme `mobile_app`) et les appareils de supervision de dimotic-ha (« dimotic-ha / Docker »,
+ * « Docker Hub »), qui ne sont pas du matériel de la maison. Un préfixe d'identifiant qui est un lieu de la taxonomie de l'entité (lieu précis,
+ * père…) n'est pas « décalé » : c'est la forme voulue (`<lieu précis>_<nom>`) même si la pièce de HA est le lieu principal.
  * Rien n'est modifié. Renommer : `renommer_entite_ha` (identifiant) après `verifier_entity_ids` (références).
  */
 
@@ -48,6 +51,14 @@ export class HaAuditNomsClient {
       this.ws<Entite[]>({ type: 'config/entity_registry/list' }),
       this.ws<Array<{ entity_id: string; attributes?: Record<string, unknown> }>>({ type: 'get_states' })
     ]);
+    const lieuxTaxonomie = new Map<string, Set<string>>();
+    for (const st of Array.isArray(etats) ? etats : []) {
+      const t = st.attributes?.attributs_taxonomie;
+      if (!t || typeof t !== 'object') continue;
+      const slugs = new Set<string>();
+      for (const [cle, val] of Object.entries(t as Record<string, unknown>)) if (/^lieu/.test(cle) && typeof val === 'string' && slug(val)) slugs.add(slug(val));
+      lieuxTaxonomie.set(st.entity_id, slugs);
+    }
     const avecTaxonomie = new Set((Array.isArray(etats) ? etats : []).filter((s) => s.attributes && typeof s.attributes.attributs_taxonomie === 'object').map((s) => s.entity_id));
     const nomPiece = (areaId?: string | null): string | null => (areaId ? pieces.find((p) => p.area_id === areaId)?.name ?? null : null);
     const actives = entites.filter((e) => !e.disabled_by);
@@ -61,6 +72,7 @@ export class HaAuditNomsClient {
       if (!mesEntites.length) continue;
       appareilsExamines++;
       const nom = (d.name_by_user ?? d.name ?? '').trim();
+      if (mesEntites.some((e) => e.platform === 'mobile_app') || (d.manufacturer === 'dimotic-ha' && d.model === 'Docker') || d.manufacturer === 'Docker Hub') { appareilsExamines--; continue; }
       if (suitLaConvention(nom) || mesEntites.some((e) => avecTaxonomie.has(e.entity_id))) continue;
       const piece = nomPiece(d.area_id);
       horsConvention.push({
@@ -88,6 +100,7 @@ export class HaAuditNomsClient {
       const domaine = e.entity_id.slice(0, point), objet = e.entity_id.slice(point + 1);
       const prefixe = slugsPieces.find((x) => objet.startsWith(`${x.s}_`));
       if (!prefixe || prefixe.piece.area_id === areaActuelle) continue;
+      if (lieuxTaxonomie.get(e.entity_id)?.has(prefixe.s)) continue; // le préfixe est un lieu de la taxonomie (ex. lieu précis) : voulu
       const reste = objet.slice(prefixe.s.length + 1);
       const actuelle = areaActuelle ? pieces.find((p) => p.area_id === areaActuelle) : undefined;
       const attendu = `${domaine}.${actuelle ? `${slug(actuelle.name)}_` : ''}${reste}`;

@@ -75,4 +75,27 @@ describe('HaAuditNomsClient', () => {
     const tout = (await new HaAuditNomsClient(ha).auditer('identifiants', 50)) as { identifiantsDecales: Array<{ entity_id: string; attendu: string; attendu_deja_pris: boolean }> };
     expect(tout.identifiantsDecales.find((x) => x.entity_id === 'switch.salle_banc_switch')).toMatchObject({ attendu: 'switch.garage_banc_switch', attendu_deja_pris: true });
   });
+
+  it('exclut les téléphones et les appareils de supervision ; un préfixe égal au lieu précis de la taxonomie n\'est pas « décalé »', async () => {
+    const donnees: Record<string, unknown> = {
+      'config/area_registry/list': [{ area_id: 'salle', name: 'Salle' }, { area_id: 'salon', name: 'Salon' }],
+      'config/device_registry/list': [
+        { id: 'p1', name: 'Galaxy', area_id: null },
+        { id: 'p2', name: 'dimotic-ha noisy2', manufacturer: 'dimotic-ha', model: 'Docker' },
+        { id: 'p3', name: 'Docker Hub', manufacturer: 'Docker Hub', model: 'zdid2/dimotic-ha' },
+        { id: 'p4', name: 'Volet', area_id: 'salle' }
+      ],
+      'config/entity_registry/list': [
+        { entity_id: 'sensor.galaxy_batterie', device_id: 'p1', platform: 'mobile_app' },
+        { entity_id: 'sensor.noisy2_version', device_id: 'p2', platform: 'mqtt' },
+        { entity_id: 'sensor.hub_version', device_id: 'p3', platform: 'mqtt' },
+        { entity_id: 'cover.salon_salle', device_id: 'p4', platform: 'mqtt' }
+      ],
+      'get_states': [{ entity_id: 'cover.salon_salle', attributes: { attributs_taxonomie: { quoi: 'Volet', lieu_principal: 'Salle', lieu_precis: 'salon' } } }]
+    };
+    const r = (await new HaAuditNomsClient({ callWs: async (m: Record<string, unknown>) => donnees[String(m.type)] ?? [] } as never).auditer('tous')) as { resume: Record<string, number> };
+    expect(r.resume.horsConvention).toBe(0);
+    expect(r.resume.identifiantsDecales).toBe(0);
+    expect(r.resume.appareilsExamines).toBe(1);
+  });
 });
