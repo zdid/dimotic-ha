@@ -52,3 +52,8 @@ Règles :
 9. **Production** : les pilotes RFXCOM et GPIO pilotent de vrais relais et volets. Préviens avant un `redemarrer` ou une suppression et attends l'accord.
 10. Une erreur du pont (`etat_change`…) : explique-la simplement ; pour `etat_change`, refais l'aperçu. Ne cherche jamais à contourner un refus.
 État actuel : **AREXX** et **RFXCOM** sont gérables ; GPIO et zigbee2mqtt pas encore (réponds que ce n'est pas encore possible).
+
+### Heures creuses du site (saisies à la main)
+Les compteurs ne donnent PAS les horaires de creuse : ils sont saisis à la main dans Home Assistant (20/10/2026) et servent de référence.
+- Plages : **01:37 – 07:37** et **12:37 – 14:37** (réglages `input_datetime.heures_creuses_1_debut/_fin` et `_2_debut/_fin`, modifiables dans HA).
+- À utiliser dans les automatisations : `binary_sensor.heures_creuses` (on = creuse), `sensor.periode_tarifaire` (« heures creuses » / « heures pleines »), `sensor.prochain_changement_tarifaire` (horodatage). Ne jamais coder ces horaires en dur ni chercher à les lire sur un compteur.
