@@ -1,0 +1,11 @@
+# Élément : transport MQTT — voir fiche.yaml. À la place du bloc `api:` (un seul transport, contrôlé à l'assemblage).
+substitutions:
+  prefixe_decouverte: homeassist
+  prefixe_sujet: esphome/${device_name}
+
+mqtt:
+  broker: ${broker}
+  discovery: true
+  discovery_prefix: ${prefixe_decouverte}
+  topic_prefix: ${prefixe_sujet}
+  reboot_timeout: 0s     # le relais ne doit pas retomber à cause d'une coupure de MQTT

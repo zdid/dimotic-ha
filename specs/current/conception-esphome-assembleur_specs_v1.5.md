@@ -1,6 +1,6 @@
 # Conception — Assembleur de sources ESPHome et agent `esphome`
 
-*Version 1.4 — 13 Octobre 2026 — **décisions techniques pour la réalisation (§11) et plan de tests par étape et par endroit (§12)**, validés par l'utilisateur ; instance réelle de falbala installée et paramétrée (§6). v1.3 : plusieurs sites, mêmes modules partout, trois rôles, flux à deux messages ; **conception, rien n'est encore codé** (sauf la phase 1 de la bibliothèque d'éléments, voir `fonctionnelles-espdisplay_specs_v1.5.md` §10, et le port 8088 forcé du dev, §6).*
+*Version 1.5 — 20 Octobre 2026 (§3.11 : identité/taxonomie et transport = éléments) — Version 1.4 — 13 Octobre 2026 — **décisions techniques pour la réalisation (§11) et plan de tests par étape et par endroit (§12)**, validés par l'utilisateur ; instance réelle de falbala installée et paramétrée (§6). v1.3 : plusieurs sites, mêmes modules partout, trois rôles, flux à deux messages ; **conception, rien n'est encore codé** (sauf la phase 1 de la bibliothèque d'éléments, voir `fonctionnelles-espdisplay_specs_v1.5.md` §10, et le port 8088 forcé du dev, §6).*
 
 ## 1. Objet
 
@@ -103,6 +103,22 @@ Une carte neuve n'a aucun firmware, donc le **tout premier flash se fait par USB
 - **Vérification d'existence** (WebSocket) : `config_entries/get` (domaine `esphome` : entrées et état `loaded`, `setup_error`…) et `config/device_registry/list` (nom d'affichage, **adresse MAC**, **version du firmware**). Le nom dans HA est le **nom d'affichage** (`friendly_name`, ex. « Plan HAPLAN »), pas le nom réseau (`haplan-display`) : l'assembleur exige un **nom d'affichage unique** par appareil et mémorise la **MAC** une fois l'appareil vu. La version du firmware contient la **date de compilation** (ex. « 2025.11.2 (Oct 6 2026, 20:12:36) ») : après un envoi, un changement de date **confirme que le nouveau firmware tourne**.
 - **Déclaration d'un nouvel appareil** : API REST de HA (`/api/config/config_entries/flow`, jeton administrateur), flux `esphome` : étape `user` (adresse `host`, port 6053 par défaut), puis la **clé** pour un appareil chiffré, puis une étape d'options pour « Autoriser les appels de service » (appareils tactiles). Fait par le **poseur du site**, avec la liaison HA de son instance.
 - **Constat du 13/10/2026** dans le HA de ha2 : 3 entrées ESPHome (Plan HAPLAN, Thermostat Poêle, une entrée « hasat3 » qui contient en fait le satellite hasat5) ; **hasat4 n'existe pas dans HA**.
+
+### 3.11 Identité (taxonomie) et transport : éléments indépendants du matériel (décision du 20/10/2026)
+
+La **taxonomie** d'un appareil (QUOI, lieu précis, lieu, père, grand-père) n'est pas une propriété de la carte : un même matériel peut porter n'importe quelle taxonomie. Elle devient donc un **élément** de la bibliothèque, comme le wifi :
+
+| Élément | Rôle | Paramètres |
+|---|---|---|
+| `identite-taxonomie` | fabrique le `friendly_name` de l'appareil au format `quoi---[lieu précis--]lieu[--père[--grand-père]]` (expression Jinja de substitution, ESPHome ≥ 2025.8) | `quoi`, `lieu`, `lieu_precis`, `pere`, `grand_pere` (les trois derniers facultatifs) |
+| `transport-mqtt` | bloc `mqtt:` avec le préfixe de découverte alternatif `homeassist` que NOMMAGE écoute (il ajoute la taxonomie avant de donner l'entité à HA) ; pas de redémarrage si le broker disparaît | `broker`, `prefixe_decouverte` (défaut `homeassist`), `prefixe_sujet` (défaut `esphome/${device_name}`) |
+
+- **Un seul transport.** L'API native d'ESPHome (`api:`, écrite dans le fichier de l'appareil avec sa clé) et `mqtt:` sont **alternatifs** : l'assembleur refuse un appareil qui a les deux (erreur) ; il avertit s'il n'a ni l'un ni l'autre, s'il a MQTT sans `identite-taxonomie`, ou une identité sans MQTT (NOMMAGE ne voit pas l'API : pas de taxonomie).
+- **Contrôle du nom** (`convention-nom.ts`, mêmes règles que NOMMAGE) : QUOI et lieu obligatoires, grand-père seulement avec un père, aucune partie ne contient `--`, `/`, `#`, `+`, `\\` ou `"`, ni ne commence/finit par un tiret.
+- **Le nom est écrit dans le micrologiciel** : changer la taxonomie d'un appareil impose un nouvel envoi par le réseau (OTA). Décision du 20/10/2026 : on accepte ce reflashage.
+- **Composants ESPHome locaux** : un `external_components` de type `local` est résolu dans `bibliotheque/composants/<id>/`, et ses fichiers sont embarqués dans le paquet sous `components/<id>/`. Premier cas : `magic_switch` (Sonoff Basic R4), repris de Tasmota (GPL v3), crédit conservé.
+- **Matériels ajoutés** : `module-4-relais-esp8266` (relais 1 = GPIO5, ex-Tasmota « Generic » du poêle de Saint Fort) et `sonoff-basic-r4` (ESP32-C3, Magic Switch, non testé sur le matériel). **Appareils** : `poele-thermostat-sam` (flashé le 19-20/10/2026 avec la même configuration) et `essai-cuisine-ete` (brouillon).
+- **Piste non retenue** : recharger la taxonomie sans reflashage (table de surcharge dans NOMMAGE par appareil, ou entité texte persistante dans l'ESP republiant sa découverte) : à reprendre si le besoin revient.
 
 ## 4. Flux de bout en bout (décisions de l'utilisateur du 13/10/2026)
 

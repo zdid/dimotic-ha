@@ -1,0 +1,9 @@
+# Fiche de l'appareil essai-cuisine-ete (un exemplaire physique). Adresse : à renseigner (vide = essai-cuisine-ete.local).
+nom: essai-cuisine-ete
+nom_affichage: "Essai cuisine d'été (Sonoff Basic R4)"
+materiel: sonoff-basic-r4
+esp:
+  adresse: ""
+options:
+  autoriser_appels_service: false
+wifi: [stfort]

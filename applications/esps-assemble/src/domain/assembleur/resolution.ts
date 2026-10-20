@@ -57,11 +57,16 @@ export interface SourcesAppareil {
   elements: { id: string; vars: Record<string, string> }[];
   /** Fichiers annexes (images, polices…) référencés mais introuvables. */
   annexesManquantes: string[];
+  /** Blocs de transport vers HA présents dans les sources (clés `api` et `mqtt` de premier niveau, éléments compris). */
+  transports: { api: boolean; mqtt: boolean };
+  /** Composants ESPHome LOCAUX (`external_components` de type local) embarqués : identifiants rangés sous `components/<id>/`. */
+  composants: string[];
 }
 
 const RE_MATERIEL = /^bibliotheque\/materiels\/([a-z0-9_-]+)\/base\.yaml$/;
 const RE_ELEMENT = /^bibliotheque\/elements\/([a-z0-9_-]+)\/element\.yaml$/;
 const RE_ANNEXE = /\.(png|jpe?g|gif|bmp|ttf|otf|csv|bin)$/i;
+const RE_COMPOSANT = /^[a-z0-9_]+$/;
 
 /** Chemin normalisé POSIX, refusé s'il sort de la racine. */
 function normaliser(base: string, relatif: string): string {
@@ -97,6 +102,21 @@ function annexesDe(noeud: unknown, sortie: Set<string>): void {
   }
 }
 
+/** Identifiants des composants listés par les `external_components` de type local d'un document. */
+function composantsLocauxDe(doc: unknown): string[] {
+  const ids: string[] = [];
+  const liste = doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as Record<string, unknown>).external_components : undefined;
+  if (!Array.isArray(liste)) return ids;
+  for (const entree of liste) {
+    if (!entree || typeof entree !== 'object') continue;
+    const e = entree as { source?: { type?: unknown }; components?: unknown };
+    if (e.source && typeof e.source === 'object' && e.source.type === 'local' && Array.isArray(e.components)) {
+      for (const c of e.components) if (typeof c === 'string') ids.push(c);
+    }
+  }
+  return ids;
+}
+
 /**
  * `racine` : dossier de l'application (contient `appareils/` et `bibliotheque/`). Les annexes sont cherchées dans
  * `bibliotheque/annexes/<chemin>` puis `appareils/<chemin>` ; celles qui sont introuvables sont signalées (pas d'échec).
@@ -108,6 +128,8 @@ export function resoudreAppareil(racine: string, nom: string, generes: Map<strin
   const annexes = new Set<string>();
   const elements: { id: string; vars: Record<string, string> }[] = [];
   let materiel: string | null = null;
+  const transports = { api: false, mqtt: false };
+  const composants = new Set<string>();
 
   const visite = (cheminPaquet: string, absolu: string, pile: string[]): void => {
     if (pile.includes(cheminPaquet)) throw new ResolutionImpossible(`inclusion circulaire : ${[...pile, cheminPaquet].join(' → ')}`);
@@ -118,6 +140,11 @@ export function resoudreAppareil(racine: string, nom: string, generes: Map<strin
     fichiers.set(cheminPaquet, contenu);
     const doc = genere !== undefined ? chargerYamlTexte(genere.toString('utf8'), cheminPaquet) : chargerYaml(absolu);
     annexesDe(doc, annexes);
+    if (doc && typeof doc === 'object' && !Array.isArray(doc)) {
+      if ('api' in doc) transports.api = true;
+      if ('mqtt' in doc) transports.mqtt = true;
+    }
+    for (const c of composantsLocauxDe(doc)) composants.add(c);
     const incs: Inclusion[] = [];
     inclusionsDe(doc, cheminPaquet, incs);
     for (const inc of incs) {
@@ -130,6 +157,16 @@ export function resoudreAppareil(racine: string, nom: string, generes: Map<strin
   };
   visite(`${nom}.yaml`, fichierAppareil, []);
 
+  // Composants ESPHome locaux : `bibliotheque/composants/<id>/*` est embarqué sous `components/<id>/*` (chemin `components`, voir external_components).
+  for (const id of [...composants].sort()) {
+    const dossier = path.join(racine, 'bibliotheque', 'composants', id);
+    if (!RE_COMPOSANT.test(id) || !fs.existsSync(dossier) || !fs.statSync(dossier).isDirectory()) throw new ResolutionImpossible(`composant local « ${id} » introuvable (bibliotheque/composants/${id}/)`);
+    for (const f of fs.readdirSync(dossier).sort()) {
+      const fichier = path.join(dossier, f);
+      if (fs.statSync(fichier).isFile()) fichiers.set(`components/${id}/${f}`, fs.readFileSync(fichier));
+    }
+  }
+
   const annexesManquantes: string[] = [];
   for (const a of annexes) {
     const candidats = [path.join(racine, 'bibliotheque', 'annexes', a), path.join(racine, 'appareils', a)];
@@ -137,5 +174,5 @@ export function resoudreAppareil(racine: string, nom: string, generes: Map<strin
     if (generes.has(a)) fichiers.set(a, generes.get(a) as Buffer); // image de fond générée à l'assemblage
     else if (trouve) fichiers.set(a, fs.readFileSync(trouve)); else annexesManquantes.push(a);
   }
-  return { nom, fichiers, materiel, elements, annexesManquantes: annexesManquantes.sort() };
+  return { nom, fichiers, materiel, elements, annexesManquantes: annexesManquantes.sort(), transports, composants: [...composants].sort() };
 }

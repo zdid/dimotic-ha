@@ -1,0 +1,20 @@
+# Appareil poele-thermostat-sam : module 4 relais du poêle de Saint Fort (relais 1 = demande de chauffe). ESPHome sur MQTT.
+# Identité (taxonomie) et transport sont des ÉLÉMENTS : on change le nom ou le transport sans toucher au matériel.
+substitutions:
+  device_name: poele-thermostat-sam
+
+packages:
+  materiel: !include bibliotheque/materiels/module-4-relais-esp8266/base.yaml
+  wifi: !include generes/wifi.yaml   # généré d'après `wifi:` de la fiche
+  identite: !include
+    file: bibliotheque/elements/identite-taxonomie/element.yaml
+    vars:
+      quoi: "poêle"
+      lieu_precis: "switch thermostat"
+      lieu: "salle"
+      pere: "rez de chaussée"
+      grand_pere: "maison"
+  transport: !include
+    file: bibliotheque/elements/transport-mqtt/element.yaml
+    vars:
+      broker: "192.168.1.51"

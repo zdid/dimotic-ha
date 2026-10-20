@@ -1,0 +1,62 @@
+# Base du matériel « Sonoff Basic R4 » : relais (entité principale), LED d'état, bouton de la carte et Magic Switch (interrupteur mural).
+# Le Magic Switch vient du composant local `magic_switch` (repris de Tasmota, GPL v3), embarqué dans le paquet sous components/.
+esphome:
+  name: ${device_name}
+
+esp32:
+  variant: esp32c3
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [magic_switch]
+
+magic_switch:
+  pin: GPIO5
+  min_pulse: 4000us          # comme Tasmota (MagicSwitchPulse) ; le journal DEBUG affiche la largeur mesurée
+  masking_window: 250ms
+  on_switch:
+    - switch.toggle: relais
+
+output:
+  - platform: gpio
+    pin: GPIO4
+    id: sortie_relais
+  - platform: gpio
+    pin:
+      number: GPIO6
+      inverted: true
+    id: sortie_led
+
+switch:
+  - platform: output
+    output: sortie_relais
+    id: relais
+    name: None                         # entité principale : prend le nom de l'appareil
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - output.turn_on: sortie_led
+    on_turn_off:
+      - output.turn_off: sortie_led
+
+binary_sensor:
+  # Bouton poussoir de la carte.
+  - platform: gpio
+    id: bouton_carte
+    internal: true
+    pin:
+      number: GPIO9
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      - switch.toggle: relais

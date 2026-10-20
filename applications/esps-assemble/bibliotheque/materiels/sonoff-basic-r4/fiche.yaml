@@ -1,0 +1,16 @@
+# Fiche du modèle de matériel — Sonoff Basic R4 (ESP32-C3) avec Magic Switch. Brochage : relais GPIO4, entrée Magic Switch GPIO5
+# (zero-cross du secteur), LED GPIO6 (inversée), bouton poussoir GPIO9. NON TESTÉ sur le matériel (20/10/2026).
+id: sonoff-basic-r4
+nom: "Sonoff Basic R4 (ESP32-C3, Magic Switch)"
+plateforme: esp32
+puce: esp32-c3
+cadre: esp-idf
+carte: esp32-c3-devkitm-1
+flash: 4MB
+memoire:
+  emplacement_ota_octets: 1572864     # À RELEVER à la première compilation (valeur provisoire)
+  ram_interne_octets: 327680
+  psram: false
+audio: false
+broches_prises: [4, 5, 6, 9]
+broches_libres: []

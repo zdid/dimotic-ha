@@ -1,0 +1,9 @@
+# Élément : identité (taxonomie) — voir fiche.yaml. Fabrique friendly_name d'après les paramètres (expression Jinja de substitution,
+# ESPHome >= 2025.8). Les parties facultatives vides n'ajoutent pas de séparateur. Contrôle de la convention : assembleur (verification.ts).
+substitutions:
+  lieu_precis: ""
+  pere: ""
+  grand_pere: ""
+
+esphome:
+  friendly_name: "${ quoi ~ '---' ~ ((lieu_precis ~ '--') if lieu_precis else '') ~ lieu ~ (('--' ~ pere) if pere else '') ~ (('--' ~ grand_pere) if grand_pere else '') }"

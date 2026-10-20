@@ -1,0 +1,20 @@
+id: identite-taxonomie
+nom: "Identité : nom de l'appareil au format de la convention (taxonomie)"
+description: "Fabrique le friendly_name de l'appareil : quoi---[lieu précis--]lieu[--père[--grand-père]]. NOMMAGE le lit dans la découverte MQTT et en tire la taxonomie, la pièce de HA et la forme de l'identifiant. Indépendant du matériel : un même matériel peut porter n'importe quelle taxonomie. Le nom est écrit dans le micrologiciel : changer la taxonomie impose un nouvel envoi (OTA). À utiliser avec transport-mqtt (l'API native ne passe pas par NOMMAGE)."
+parametres:
+  - nom: quoi
+    description: "Ce qu'est l'appareil (ex. poêle, lumière, bouton)."
+  - nom: lieu_precis
+    description: "Emplacement précis dans le lieu (ex. switch thermostat, plafonnier). Absent = le lieu."
+    requis: false
+    defaut: ""
+  - nom: lieu
+    description: "La pièce (ex. salle, cuisine d'été). C'est la pièce de HA."
+  - nom: pere
+    description: "Lieu père (ex. rez de chaussée, étage)."
+    requis: false
+    defaut: ""
+  - nom: grand_pere
+    description: "Lieu grand-père (ex. maison). Exige un père."
+    requis: false
+    defaut: ""

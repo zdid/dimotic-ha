@@ -1,0 +1,18 @@
+# Fiche du modèle de matériel — module 4 relais à ESP8266 (ex-Tasmota « Generic », brochage D1/D2/D3/D4). Relevé le 20/10/2026 sur le module
+# du poêle de Saint Fort (Tasmota 15.6.0) : relais 1 = GPIO5 (D1), relais 2 = GPIO4 (D2), relais 3 = GPIO0 (D3), relais 4 = GPIO2 (D4).
+# Seul le relais 1 est déclaré par la base ; les autres sont libres (broches_libres) pour un appareil qui en aurait besoin.
+id: module-4-relais-esp8266
+nom: "Module 4 relais à ESP8266 (Generic, D1-D4)"
+plateforme: esp8266
+puce: esp8266
+cadre: arduino
+carte: d1_mini
+flash: 16MB
+port_ota: 8266
+memoire:
+  emplacement_ota_octets: 1044464     # relevé à la compilation (« from 1044464 bytes »)
+  ram_interne_octets: 81920
+  psram: false
+audio: false
+broches_prises: [5]
+broches_libres: [4, 0, 2]

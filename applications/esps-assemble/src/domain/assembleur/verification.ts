@@ -6,6 +6,7 @@
 
 import type { FicheMateriel, FicheElement, FicheAppareil } from './fiches';
 import type { SourcesAppareil } from './resolution';
+import { composerNom, validerNom } from './convention-nom';
 
 export interface Diagnostic {
   erreurs: string[];
@@ -72,6 +73,25 @@ export function verifier(appareil: FicheAppareil, sources: SourcesAppareil, ctx:
   if (appareil.plans.length > 0) {
     if (!m.ecran) erreurs.push(`l'appareil demande des pages de plans : le matériel ${m.id} n'a pas d'écran`);
     if (!presents.has('polices-plans')) erreurs.push(`l'appareil demande des pages de plans : il doit aussi inclure l'élément polices-plans (polices des icônes)`);
+  }
+
+  // Transport vers HA : l'API native d'ESPHome OU MQTT (jamais les deux). Seul MQTT passe par NOMMAGE, donc seul lui donne la taxonomie.
+  if (sources.transports.api && sources.transports.mqtt) erreurs.push(`l'appareil déclare à la fois « api: » et « mqtt: » : un seul transport vers Home Assistant (api = sans taxonomie ; mqtt = classé par NOMMAGE)`);
+  else if (!sources.transports.api && !sources.transports.mqtt) avertissements.push(`aucun transport vers Home Assistant (ni « api: » ni « mqtt: »)`);
+
+  // Identité (nom au format de la convention, élément identite-taxonomie) : contrôle des parties, ou rappel si MQTT sans identité.
+  const identite = sources.elements.find((e) => e.id === 'identite-taxonomie');
+  if (identite) {
+    const v = identite.vars;
+    const erreursNom = validerNom({ quoi: v.quoi ?? '', lieuPrecis: v.lieu_precis, lieu: v.lieu ?? '', pere: v.pere, grandPere: v.grand_pere });
+    for (const e of erreursNom) erreurs.push(`élément identite-taxonomie : ${e}`);
+    if (erreursNom.length === 0) {
+      const nom = composerNom({ quoi: v.quoi, lieuPrecis: v.lieu_precis, lieu: v.lieu, pere: v.pere, grandPere: v.grand_pere });
+      if (nom.length > 90) avertissements.push(`le nom « ${nom} » fait ${nom.length} caractères : long pour un nom d'appareil`);
+    }
+    if (sources.transports.api && !sources.transports.mqtt) avertissements.push(`l'élément identite-taxonomie nomme l'appareil, mais sans MQTT la taxonomie n'est pas calculée (NOMMAGE ne voit pas l'API native)`);
+  } else if (sources.transports.mqtt) {
+    avertissements.push(`MQTT sans élément identite-taxonomie : si le nom de l'appareil ne suit pas la convention quoi---lieu, NOMMAGE ne le classera pas`);
   }
 
   if (sources.annexesManquantes.length > 0) avertissements.push(`fichiers annexes introuvables (non embarqués) : ${sources.annexesManquantes.join(', ')}`);

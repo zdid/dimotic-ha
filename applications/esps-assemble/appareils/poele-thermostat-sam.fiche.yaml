@@ -1,0 +1,9 @@
+# Fiche de l'appareil poele-thermostat-sam (un exemplaire physique). Adresse fixe 192.168.1.4 (réservation de la box, ex-Tasmota).
+nom: poele-thermostat-sam
+nom_affichage: "Thermostat du poêle (module relais)"
+materiel: module-4-relais-esp8266
+esp:
+  adresse: "192.168.1.4"
+options:
+  autoriser_appels_service: false
+wifi: [stfort]

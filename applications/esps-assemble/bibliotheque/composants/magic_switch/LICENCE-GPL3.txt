@@ -1,0 +1,5 @@
+Ce composant est dérivé de Tasmota (https://github.com/arendst/Tasmota,
+tasmota/tasmota_xdrv_driver/xdrv_91_magic_switch.ino, Copyright (C) 2021 Barbudor) et est distribué sous les termes de la
+GNU General Public License, version 3 ou (à votre choix) toute version ultérieure.
+Texte complet : https://www.gnu.org/licenses/gpl-3.0.html
+Ce programme est distribué dans l'espoir qu'il sera utile, mais SANS AUCUNE GARANTIE.

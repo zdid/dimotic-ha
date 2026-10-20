@@ -1,0 +1,19 @@
+# Appareil essai-cuisine-ete : Sonoff Basic R4 « Essai » de la cuisine d'été (Magic Switch). ESPHome sur MQTT. BROUILLON non testé.
+substitutions:
+  device_name: essai-cuisine-ete
+
+packages:
+  materiel: !include bibliotheque/materiels/sonoff-basic-r4/base.yaml
+  wifi: !include generes/wifi.yaml   # généré d'après `wifi:` de la fiche
+  identite: !include
+    file: bibliotheque/elements/identite-taxonomie/element.yaml
+    vars:
+      quoi: "lumière"
+      lieu_precis: "essai"
+      lieu: "cuisine d'été"
+      pere: "rez de chaussée"
+      grand_pere: "maison"
+  transport: !include
+    file: bibliotheque/elements/transport-mqtt/element.yaml
+    vars:
+      broker: "192.168.1.51"

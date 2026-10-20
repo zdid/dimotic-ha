@@ -1,0 +1,26 @@
+# Base du matériel « module 4 relais à ESP8266 » : relais 1 (GPIO5) = entité principale de l'appareil (prend son nom).
+# Le nom technique vient de `device_name` (substitution de l'appareil). Transport (api/mqtt), wifi et identité : éléments.
+esphome:
+  name: ${device_name}
+
+esp8266:
+  board: d1_mini
+
+logger:
+  level: INFO
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+output:
+  - platform: gpio
+    pin: GPIO5
+    id: sortie_relais_1
+
+switch:
+  - platform: output
+    output: sortie_relais_1
+    id: relais_1
+    name: None                         # entité principale : prend le nom de l'appareil (convention nommage)
+    restore_mode: RESTORE_DEFAULT_OFF  # après une coupure de courant : éteint ; l'automatisme redonne l'ordre
