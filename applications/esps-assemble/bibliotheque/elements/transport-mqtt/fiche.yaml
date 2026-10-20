@@ -1,6 +1,6 @@
 id: transport-mqtt
 nom: "Transport vers HA : MQTT (découverte lue par NOMMAGE)"
-description: "Bloc mqtt: avec le préfixe de découverte alternatif (homeassist) que NOMMAGE écoute : il ajoute la taxonomie avant de donner l'entité à HA. Alternative à api: (jamais les deux, contrôlé à l'assemblage). Pas de redémarrage automatique si le broker disparaît."
+description: "Bloc mqtt: avec le préfixe de découverte alternatif (homeassist) que NOMMAGE écoute : il ajoute la taxonomie avant de donner l'entité à HA. Alternative à api: (jamais les deux, contrôlé à l'assemblage). Identifiant unique d'entité basé sur l'adresse MAC (discovery_unique_id_generator: mac). Pas de redémarrage automatique si le broker disparaît."
 parametres:
   - nom: broker
     description: "Adresse du broker MQTT du site (ex. 192.168.1.51 pour Saint Fort)."

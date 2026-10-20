@@ -8,4 +8,7 @@ mqtt:
   discovery: true
   discovery_prefix: ${prefixe_decouverte}
   topic_prefix: ${prefixe_sujet}
+  # unique_id = adresse MAC + type + hash du NOM DE L'ENTITÉ : unique par appareil. Sans cela (« ESP<type><nom> »), deux appareils dont
+  # l'entité principale s'appelle « Switch » auraient le même unique_id et HA les confondrait (constaté au banc d'essai).
+  discovery_unique_id_generator: mac
   reboot_timeout: 0s     # le relais ne doit pas retomber à cause d'une coupure de MQTT
