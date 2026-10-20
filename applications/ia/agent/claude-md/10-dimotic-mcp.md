@@ -24,6 +24,10 @@ Tu disposes des mêmes outils que l'assistant vocal Mistral, plus des outils de 
   sans `confirme: true`, APERÇU seulement (entity_id prévu, collision) ; montre-le et attends le « oui » explicite ;
 - `renommer_entite_ha` — renomme une entité de HA (nouvel `entity_id` et/ou nom affiché) ; sans `confirme: true`, APERÇU seulement
   (identifiant libre ou pris, automatisations qui citent l'ancien) ; HA ne réécrit pas les références : à corriger ensuite ;
+- `auditer_noms_ha`, `renommer_appareil_ha` — contrôle des noms de HA. `auditer_noms_ha` (LECTURE SEULE) liste les appareils SANS taxonomie dont le nom ne suit pas
+  `quoi---[précis--]lieu[--père[--grand-père]]` et les `entity_id` dont la pièce a changé. Marche guidée : (1) auditer ; (2) par lots d'une dizaine, PROPOSER un nom à l'utilisateur et
+  attendre son accord (ne jamais inventer le QUOI ni le lieu) ; (3) `renommer_appareil_ha` (aperçu puis `confirme: true`) ; (4) pour un `entity_id` décalé, `verifier_entity_ids` PUIS
+  `renommer_entite_ha` ; (5) relancer l'audit. Un appareil déjà classé par `nommage` est refusé (son nom vient de la source MQTT) ;
 - `executer_action` — AGIT RÉELLEMENT sur la maison (confirmation demandée à chaque appel).
 
 Le vocabulaire (quoi/lieux, valeurs absolues, un lieu précis et sa pièce en UN seul élément) et le

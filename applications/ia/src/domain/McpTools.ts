@@ -18,6 +18,8 @@ import type { HaEntiteRenamer } from './HaEntiteRenamer';
 import type { HaAideClient } from './HaAideClient';
 import type { HaTableauClient } from './HaTableauClient';
 import type { HaPieceClient } from './HaPieceClient';
+import type { HaAuditNomsClient } from './HaAuditNomsClient';
+import type { HaAppareilRenamer } from './HaAppareilRenamer';
 import type { HaEtiquetteClient } from './HaEtiquetteClient';
 import type { HaReferencesClient } from './HaReferencesClient';
 
@@ -197,6 +199,34 @@ export const HA_PIECE_TOOLS: McpToolDef[] = [
   }
 ];
 
+/** Audit des noms de HA (lecture seule). */
+export const HA_AUDIT_TOOLS: McpToolDef[] = [
+  {
+    name: 'auditer_noms_ha',
+    description: 'LECTURE SEULE. Audite les noms de Home Assistant : (1) `horsConvention` = appareils dont le nom ne suit pas la convention quoi---[précis--]lieu[--père[--grand-père]] (donc sans taxonomie ni pièce déduite du nom), avec leur pièce actuelle, leurs plateformes et une suggestion de nom À AFFINER avec l\'utilisateur ; (2) `identifiantsDecales` = entités dont l\'entity_id commence par le nom d\'une pièce qui n\'est plus leur pièce (appareil déplacé), avec l\'identifiant attendu aujourd\'hui et s\'il est déjà pris. Ne modifie rien : pour corriger un identifiant, verifier_entity_ids (références) PUIS renommer_entite_ha avec confirme.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        portee: { type: 'string', enum: ['appareils', 'identifiants', 'tous'], description: 'Constat demandé (défaut : tous)' },
+        limite: { type: 'integer', description: 'Lignes par liste (défaut 40, 200 au plus)' }
+      }
+    }
+  },
+  {
+    name: 'renommer_appareil_ha',
+    description: 'RENOMME un APPAREIL de Home Assistant (name_by_user) avec un nom au format quoi---[précis--]lieu[--père[--grand-père]] (format contrôlé ; refusé pour un appareil déjà classé par NOMMAGE). device_id vient de auditer_noms_ha. Sans confirme:true, aperçu seulement et ne modifie RIEN ; la commande pour annuler est donnée. Les entity_id existants ne changent pas. Toujours faire valider le nom par l\'utilisateur avant confirme.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        device_id: { type: 'string', description: 'Identifiant de l\'appareil (auditer_noms_ha)' },
+        nom: { type: 'string', description: 'Nouveau nom, ex. « climatiseur---chambre d\'ami--étage--maison ». Chaîne vide interdite' },
+        confirme: CONFIRM_PROP
+      },
+      required: ['device_id', 'nom']
+    }
+  }
+];
+
 /** Étiquettes de HA : rangement des automatisations/scripts dans le tableau « Automatisations ». */
 export const HA_ETIQUETTE_TOOLS: McpToolDef[] = [
   {
@@ -352,6 +382,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   ...HA_SCRIPT_TOOLS,
   ...HA_PIECE_TOOLS,
   ...HA_ETIQUETTE_TOOLS,
+  ...HA_AUDIT_TOOLS,
   ...HA_REFERENCES_TOOLS,
   ...PILOTES_TOOLS
 ];
@@ -427,6 +458,10 @@ export interface McpToolboxDeps {
   pieces: HaPieceClient;
   /** Étiquettes de HA. */
   etiquettes: HaEtiquetteClient;
+  /** Audit des noms (lecture seule). */
+  audit: HaAuditNomsClient;
+  /** Renommage d'appareil. */
+  appareils: HaAppareilRenamer;
   /** Vérification des références d'entités (lecture seule). */
   references: HaReferencesClient;
   /** Gestion des pilotes via le cœur (PilotesClient). */
@@ -445,6 +480,10 @@ export class McpToolbox {
       case 'deposer_automatisation': return JSON.stringify(await this.deps.automations.deposit(String(args.id ?? ''), args.definition, args.confirme === true), null, 2);
       case 'supprimer_automatisation': return JSON.stringify(await this.deps.automations.remove(String(args.id ?? ''), args.confirme === true), null, 2);
       case 'verifier_entity_ids': return JSON.stringify(await this.deps.references.verifier(Array.isArray(args.portee) ? args.portee.map(String) : undefined), null, 2);
+      case 'auditer_noms_ha': return JSON.stringify(await this.deps.audit.auditer(
+        args.portee === 'appareils' || args.portee === 'identifiants' ? args.portee : 'tous',
+        typeof args.limite === 'number' ? args.limite : 40), null, 2);
+      case 'renommer_appareil_ha': return JSON.stringify(await this.deps.appareils.renommer(String(args.device_id ?? ''), String(args.nom ?? ''), args.confirme === true), null, 2);
       case 'lire_etiquettes_ha': return JSON.stringify(await this.deps.etiquettes.lire(), null, 2);
       case 'etiqueter_ha': return JSON.stringify(await this.deps.etiquettes.etiqueter(
         Array.isArray(args.entites) ? args.entites.map(String) : [],
