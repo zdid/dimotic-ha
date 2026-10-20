@@ -10,8 +10,8 @@
 #   maj-dimotic.sh verifier X.Y.Z               la version existe-t-elle sur le hub pour cette architecture ?
 #   maj-dimotic.sh mettre-a-jour X.Y.Z [--oui]  sans --oui : aperçu seulement ; avec --oui : exécute
 #   maj-dimotic.sh revenir [--oui]              remet la version précédente
-#   maj-dimotic.sh --ecouter                    écoute MQTT — mode du conteneur : ordres signés (…/commande/+) et
-#                                               bouton « Installer » de HA (…/installer, payload INSTALL)
+#   maj-dimotic.sh --ecouter                    écoute MQTT — mode du conteneur : bouton « Installer » de HA
+#                                               (…/installer, payload INSTALL)
 #
 # Réglages (variables d'environnement) : MAJ_DIR (/docker/dimotic-ha), MAJ_SERVICE (app), MAJ_CONTAINER (dimotic-ha),
 # MAJ_REPO (zdid2/dimotic-ha), MAJ_HEALTH_TIMEOUT (300 s), MAJ_DOCKER, MAJ_CURL (pour les essais).
@@ -71,7 +71,6 @@ cfg() {  # fichier clé-yq
 }
 machine_id() { if [ -n "${MAJ_MACHINE_ID:-}" ]; then printf '%s' "$MAJ_MACHINE_ID"; else cfg machine_config.yaml '.core.machineId'; fi; }
 site() { s="$(cfg machine_config.yaml '.core.site')"; [ -n "$s" ] && printf '%s' "$s" || printf '%s' "$(machine_id)"; }
-secret_maj() { if [ -n "${MAJ_SECRET:-}" ]; then printf '%s' "$MAJ_SECRET"; else cfg secrets_config.yaml '.core.maj.secret'; fi; }
 
 # Même découpage que le cœur (segmentSite : minuscules, [a-z0-9_-]).
 segment() { printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9_-]/_/g'; }
@@ -194,47 +193,8 @@ cmd_revenir() {
 }
 
 # --- écoute MQTT ---------------------------------------------------------------------------------------------------
-signature_attendue() {  # JSON-sans-signature
-  printf '%s' "$1" | jq -S -c 'del(.signature)' | tr -d '\n' | openssl dgst -sha256 -hmac "$(secret_maj)" | sed 's/^.*= //'
-}
-
-repondre() {  # id json
-  publier "$(racine_topics)/reponse/$1" "$2" 0
-}
-
-traiter_commande() {  # charge JSON
-  charge="$1"
-  id="$(printf '%s' "$charge" | jq -r '.id // ""')"
-  [ -n "$id" ] || return 0
-  secret="$(secret_maj)"
-  if [ -z "$secret" ]; then repondre "$id" '{"ok":false,"erreur":"aucun secret de mise à jour défini sur cette machine"}'; return 0; fi
-  [ "$(printf '%s' "$charge" | jq -r '.machine // ""')" = "$(machine_id)" ] || { repondre "$id" '{"ok":false,"erreur":"autre machine"}'; return 0; }
-  recu="$(printf '%s' "$charge" | jq -r '.signature // ""')"
-  [ "$recu" = "$(signature_attendue "$charge")" ] || { log "Ordre $id refusé : signature fausse"; repondre "$id" '{"ok":false,"erreur":"signature invalide"}'; return 0; }
-  ts="$(printf '%s' "$charge" | jq -r '.ts // 0')"; maintenant="$(date +%s)"
-  ecart=$(( maintenant - ts )); [ "$ecart" -lt 0 ] && ecart=$(( -ecart ))
-  [ "$ecart" -le 60 ] || { log "Ordre $id refusé : trop ancien"; repondre "$id" '{"ok":false,"erreur":"ordre trop ancien"}'; return 0; }
-  vus="$DIR/.maj-ids-vus"
-  grep -qx "$id" "$vus" 2>/dev/null && { repondre "$id" '{"ok":false,"erreur":"ordre déjà reçu"}'; return 0; }
-  printf '%s\n' "$id" >> "$vus"; tail -n 200 "$vus" > "$vus.tmp" 2>/dev/null && mv "$vus.tmp" "$vus"
-
-  ordre="$(printf '%s' "$charge" | jq -r '.ordre // ""')"
-  version="$(printf '%s' "$charge" | jq -r '.parametres.version // ""')"
-  confirme="$(printf '%s' "$charge" | jq -r '.confirme // false')"
-  log "Ordre $id : $ordre $version"
-  case "$ordre" in
-    etat) res="$(cmd_etat)"; repondre "$id" "$(jq -cn --argjson r "$res" '{ok:true, resultat:$r}')" ;;
-    verifier) res="$(cmd_verifier "$version")"; repondre "$id" "$(jq -cn --argjson r "${res:-null}" '{ok:true, resultat:$r}')" ;;
-    mettre_a_jour)
-      if [ "$confirme" = true ]; then arg="--oui"; else arg=""; fi
-      res="$(cmd_mettre_a_jour "$version" $arg 2>/dev/null)"; code=$?
-      repondre "$id" "$(jq -cn --argjson r "${res:-null}" --argjson c "$code" '{ok:($c==0), code:$c, resultat:$r}')" ;;
-    *) repondre "$id" '{"ok":false,"erreur":"ordre inconnu"}' ;;
-  esac
-}
-
 # Demande d'installation venant du bouton « Installer » de HA (payload INSTALL) : n'installe QUE la dernière version
-# officielle du hub, si elle est plus récente que l'installée — aucun paramètre, donc rien à signer.
+# officielle du hub, si elle est plus récente que l'installée — aucun paramètre.
 traiter_installation_ha() {
   [ "${MAJ_INSTALL_HA:-1}" = 1 ] || { log "Demande de HA ignorée (MAJ_INSTALL_HA=0)"; return 0; }
   derniere="$(derniere_version_hub)"
@@ -249,18 +209,17 @@ traiter_installation_ha() {
 }
 
 ecouter() {
-  command -v mosquitto_sub >/dev/null && command -v jq >/dev/null && command -v openssl >/dev/null && command -v yq >/dev/null \
-    || { log "ERREUR : mosquitto, jq, openssl et yq sont nécessaires"; exit 1; }
+  command -v mosquitto_sub >/dev/null && command -v jq >/dev/null && command -v yq >/dev/null \
+    || { log "ERREUR : mosquitto, jq et yq sont nécessaires"; exit 1; }
   while :; do
     [ -n "$(machine_id)" ] || { log "machine_config.yaml sans machineId : nouvel essai dans 30 s"; sleep 30; continue; }
-    log "Écoute de $(racine_topics) (ordres signés : secret $( [ -n "$(secret_maj)" ] && echo défini || echo ABSENT ) ; bouton HA : $( [ "${MAJ_INSTALL_HA:-1}" = 1 ] && echo actif || echo inactif ))"
+    log "Écoute de $(racine_topics) (bouton HA : $( [ "${MAJ_INSTALL_HA:-1}" = 1 ] && echo actif || echo inactif ))"
     publier_etat libre
     # shellcheck disable=SC2046
-    mosquitto_sub $(mqtt_args) -q 1 -t "$(racine_topics)/commande/+" -t "$(racine_topics)/installer" -F '%t %p' 2>/dev/null | while IFS= read -r ligne; do
+    mosquitto_sub $(mqtt_args) -q 1 -t "$(racine_topics)/installer" -F '%t %p' 2>/dev/null | while IFS= read -r ligne; do
       sujet="${ligne%% *}"; charge="${ligne#* }"
       case "$sujet" in
         */installer) [ "$charge" = INSTALL ] && traiter_installation_ha ;;
-        */commande/*) traiter_commande "$charge" ;;
       esac
     done
     log "Connexion MQTT perdue : nouvel essai dans 10 s"; sleep 10

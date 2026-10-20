@@ -66,13 +66,11 @@ const coreSchema = z.object({
   // des applications (AppGossipService), en plus des republications sur événement.
   appGossipIntervalSeconds: z.number().int().min(30).default(300),
   // ⭐ 15/10/2026 (conception-gestion-pilotes_specs v1.1 §4, §11) — canal MQTT « gestion des pilotes » : le cœur reçoit les
-  // requêtes de l'agent IA et les transmet aux applications pilotes. Sans `secret`, seuls `lister`/`decouverts` sont permis ;
-  // avec un secret partagé du site, toute requête doit porter une signature HMAC (variable d'environnement
-  // DIMOTIC_PILOTES_SECRET prioritaire). Site vide = le canal est isolé sous l'identité de la machine.
+  // requêtes de l'agent IA et les transmet aux applications pilotes (sans signature depuis le 20/10/2026 : l'ancien réglage
+  // `secret` est ignoré). Site vide = le canal est isolé sous l'identité de la machine.
   pilotes: z
     .object({
-      actif: z.boolean().default(true),
-      secret: z.string().default('')
+      actif: z.boolean().default(true)
     })
     .default({})
 });

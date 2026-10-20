@@ -50,5 +50,5 @@ Règles :
 7. **Renommer une entité HA** (hors pilote) : outil MCP **`renommer_entite_ha`** (`entity_id`, `nouvel_entity_id` et/ou `nom`) ; sans `confirme: true` c'est un aperçu (identifiant libre ou pris, automatisations qui le citent) ; attends le « oui » explicite. Le domaine ne change pas ; HA ne réécrit pas les références.
 8. **Supprimer** retire aussi l'entité de HA : annonce-le. Un device encore utilisé par un récepteur est refusé : propose de le remplacer ou de modifier le récepteur.
 9. **Production** : les pilotes RFXCOM et GPIO pilotent de vrais relais et volets. Préviens avant un `redemarrer` ou une suppression et attends l'accord.
-10. Une erreur du pont (`etat_change`, `signature_requise`…) : explique-la simplement ; pour `etat_change`, refais l'aperçu. Ne cherche jamais à contourner un refus.
+10. Une erreur du pont (`etat_change`…) : explique-la simplement ; pour `etat_change`, refais l'aperçu. Ne cherche jamais à contourner un refus.
 État actuel : **AREXX** et **RFXCOM** sont gérables ; GPIO et zigbee2mqtt pas encore (réponds que ce n'est pas encore possible).

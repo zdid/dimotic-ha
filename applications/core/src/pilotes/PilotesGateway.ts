@@ -3,15 +3,14 @@
  *
  * - publie en MQTT (retenu) la présence des ponts annoncés par les applications, et « hors ligne » quand leur process
  *   s'arrête ; un testament signale que la MACHINE est partie (les ponts de cette machine sont alors injoignables) ;
- * - reçoit les requêtes `dimotic/<site>/pilotes/<pont>/requete/<id>`, les contrôle (forme, durée de validité, signature)
+ * - reçoit les requêtes `dimotic/<site>/pilotes/<pont>/requete/<id>`, les contrôle (forme, durée de validité)
  *   puis les transmet à l'application par l'EventBus local (pont IPC) ;
  * - publie la réponse sur `…/reponse/<id>` (jamais retenue).
  *
- * Aucune requête n'est jamais publiée ni relayée en « retenu ». Sans secret configuré, seuls les ordres de lecture
- * (lister, decouverts) sont acceptés ; avec un secret, toutes les requêtes doivent porter une signature valide.
+ * Aucune requête n'est jamais publiée ni relayée en « retenu ». Les requêtes ne sont PAS signées (retiré le 20/10/2026) : toute
+ * machine qui peut publier sur le broker du site peut les émettre ; les ordres modifiants gardent leur aperçu + jeton (§5.2).
  */
 
-import { timingSafeEqual } from 'node:crypto';
 import type { IEventBus } from '../application/IEventBus';
 import type { Logger } from '../infrastructure/logger/index';
 import type { MqttMessage } from '../infrastructure/transport/MqttTransport';
@@ -20,9 +19,7 @@ import {
   PILOTE_DUREE_VALIDITE_REQUETE_MS,
   PILOTE_ID_REGEX,
   estOrdreConnu,
-  estOrdreModifiant,
   segmentSite,
-  signerRequete,
   sujetsPilotes,
   type PiloteAgentPontsEvenement,
   type PiloteAgentRequeteEvenement,
@@ -48,8 +45,6 @@ export interface PilotesTransport {
 export interface PilotesGatewayOptions {
   site: string;
   machineId: string;
-  /** Secret partagé du site (HMAC). Vide = lecture seule. */
-  secret?: string;
   /** Délai max d'une réponse d'application avant « delai_depasse » (défaut 60 s). */
   delaiReponseMs?: number;
   /** Attente avant de déclarer « hors ligne » les ponts retenus de cette machine non ré-annoncés (défaut 15 s). */
@@ -122,7 +117,7 @@ export class PilotesGateway {
       for (const [pont, connu] of this.ponts) this.publierPresence(pont, connu);
     });
     this.transport.connect();
-    this.logger.info('PilotesGateway', `Canal pilotes démarré (site « ${segmentSite(this.options.site)} », machine ${this.options.machineId}, ${this.options.secret ? 'signature exigée' : 'lecture seule (aucun secret configuré)'})`);
+    this.logger.info('PilotesGateway', `Canal pilotes démarré (site « ${segmentSite(this.options.site)} », machine ${this.options.machineId}, requêtes non signées)`);
   }
 
   stop(): void {
@@ -291,15 +286,6 @@ export class PilotesGateway {
       }
     }
 
-    const secret = this.options.secret ?? '';
-    if (secret) {
-      if (!requete.signature || !this.signatureValide(secret, requete)) {
-        return this.repondreErreur(ref, 'signature_invalide', 'Signature absente ou invalide');
-      }
-    } else if (estOrdreModifiant(requete.ordre)) {
-      return this.repondreErreur(ref, 'signature_requise', "Aucun secret configuré sur ce site : seuls lister et decouverts sont permis");
-    }
-
     if (connu.presence.etat !== 'en_ligne') {
       return this.repondreErreur(ref, 'pont_hors_ligne', `Le pont ${pontTopic} est hors ligne`);
     }
@@ -313,23 +299,11 @@ export class PilotesGateway {
     timer.unref?.();
     this.attentes.set(cle, timer);
 
-    this.eventBus.emitGeneric(PILOTES_EVENTS.REQUETE, { appId: connu.appId, requete: { ...requete, signature: undefined } });
-  }
-
-  private signatureValide(secret: string, requete: PiloteRequete): boolean {
-    const attendue = Buffer.from(signerRequete(secret, requete), 'hex');
-    let recue: Buffer;
-    try {
-      recue = Buffer.from(requete.signature ?? '', 'hex');
-    } catch {
-      return false;
-    }
-    return recue.length === attendue.length && timingSafeEqual(recue, attendue);
+    this.eventBus.emitGeneric(PILOTES_EVENTS.REQUETE, { appId: connu.appId, requete });
   }
 
   // ---------------------------------------------------------------------------
   // Côté « agent » : une application (ia) demande au cœur d'envoyer une requête au nom de l'agent.
-  // Le secret du site reste dans le cœur : l'application ne signe rien.
   // ---------------------------------------------------------------------------
 
   private noterMachine(machine: string, message: MqttMessage): void {
@@ -391,8 +365,6 @@ export class PilotesGateway {
       emetteur: 'agent-ia',
       date: new Date(this.maintenant()).toISOString()
     };
-    const secret = this.options.secret ?? '';
-    if (secret) requete.signature = signerRequete(secret, requete);
 
     const cle = `${data.pont}/${id}`;
     const timer = setTimeout(() => {

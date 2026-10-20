@@ -94,8 +94,8 @@ services:
   # Agent de mise à jour (conception-mise-a-jour-dimotic_specs v1.1) — OPTIONNEL, profil `maj` :
   #   docker compose --profile maj up -d          (ou COMPOSE_PROFILES=maj dans .env)
   # Seul conteneur à recevoir le socket Docker de l'hôte (équivaut à root sur la machine) : c'est un petit
-  # conteneur à usage unique, qui n'exécute que maj-dimotic.sh. Il écoute des ordres MQTT SIGNÉS
-  # (core.maj.secret, posé par docker/definir-secret-maj.sh) et ne sait changer QUE le tag `X.Y.Z` de dimotic-ha,
+  # conteneur à usage unique, qui n'exécute que maj-dimotic.sh. Il écoute le bouton « Installer » de HA
+  # (MQTT, sans signature) et ne sait changer QUE le tag `X.Y.Z` de dimotic-ha (la dernière version officielle),
   # vérifié sur le Docker Hub. Le dossier du projet est monté au MÊME chemin que sur l'hôte (DIMOTIC_DIR) pour que
   # `docker compose` y retrouve ./data et ./logs. Sans le profil `maj`, ce service n'existe pas.
   # ---------------------------------------------------------------------------------------------

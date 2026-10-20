@@ -669,7 +669,7 @@ export class AppService {
   private startPilotesGateway(
     machineId: string,
     site: string,
-    reglages: { actif?: boolean; secret?: string } | undefined,
+    reglages: { actif?: boolean } | undefined,
     mqttConfig: { host: string; port: number; username?: string; password?: string; keepalive?: number; reconnect_delay?: number }
   ): void {
     if (reglages?.actif === false) {
@@ -697,8 +697,7 @@ export class AppService {
     );
     this.pilotesGateway = new PilotesGateway(transport, this.eventBus, this.logger, {
       site: siteEffectif,
-      machineId,
-      secret: process.env.DIMOTIC_PILOTES_SECRET || reglages?.secret || ''
+      machineId
     });
     this.processSupervisor.onChildExit((info) => this.pilotesGateway?.surArretApplication(info.appId));
     this.pilotesGateway.start();

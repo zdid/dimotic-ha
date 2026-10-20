@@ -40,8 +40,7 @@ const YAML_DUMP_OPTIONS = { indent: 2, sortKeys: false, lineWidth: -1 };
  */
 export const CORE_DECLARATION: LayerDeclaration = {
   machine: ['core.machineId', 'core.site', 'core.pilotes.actif', 'web', 'logging', 'disabledApps', 'knownApps', 'diffusion'],
-  // core.pilotes.secret (15/10/2026) : secret HMAC du canal « gestion des pilotes » du site — jamais diffusé entre machines.
-  secrets: ['ha.ws.token', 'ha.mqtt.password', 'core.pilotes.secret']
+  secrets: ['ha.ws.token', 'ha.mqtt.password']
 };
 
 /**

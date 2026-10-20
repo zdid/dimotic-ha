@@ -8,7 +8,7 @@
  *   `pilotes:reponse`           app → cœur : la réponse, publiée en MQTT par le cœur
  */
 
-import { createHash, createHmac } from 'node:crypto';
+import { createHash } from 'node:crypto';
 
 export const PILOTES_EVENTS = {
   PRESENCE: 'pilotes:presence',
@@ -33,7 +33,7 @@ export const PILOTES_EVENTS = {
   HA_RENOMMER_RESULTAT: 'pilotes:ha:renommer:resultat'
 } as const;
 
-/** Requête d'une application « agent » (ia) : le cœur ajoute id, date, signature. `ref` retrouve la réponse. */
+/** Requête d'une application « agent » (ia) : le cœur ajoute id et date. `ref` retrouve la réponse. */
 export interface PiloteAgentRequeteEvenement {
   ref: string;
   pont: string;
@@ -58,10 +58,10 @@ export interface PiloteAgentPontsEvenement {
   ponts: PontSite[];
 }
 
-/** Ordres qui ne modifient rien : permis sans signature. */
+/** Ordres qui ne modifient rien : sans effet sur l'état. */
 export const PILOTES_ORDRES_LECTURE = ['lister', 'decouverts'] as const;
 
-/** Ordres qui modifient : aperçu d'abord, jeton, signature obligatoire (§5.2, §5.3, §11). */
+/** Ordres qui modifient : aperçu d'abord, jeton (§5.2, §5.3, §11). */
 export const PILOTES_ORDRES_MODIFIANTS = [
   'adopter',
   'creer',
@@ -120,8 +120,6 @@ export interface PiloteRequete {
   emetteur?: string;
   /** Horodatage ISO de l'émetteur (les requêtes de plus de 2 minutes sont refusées). */
   date?: string;
-  /** HMAC-SHA256 (hex) de `messageASigner()` avec le secret partagé du site. */
-  signature?: string;
 }
 
 export interface PiloteErreur {
@@ -184,22 +182,6 @@ export function canonique(valeur: unknown): string {
   const objet = valeur as Record<string, unknown>;
   const cles = Object.keys(objet).filter((c) => objet[c] !== undefined).sort();
   return `{${cles.map((c) => `${JSON.stringify(c)}:${canonique(objet[c])}`).join(',')}}`;
-}
-
-export function messageASigner(requete: Pick<PiloteRequete, 'id' | 'pont' | 'ordre' | 'parametres' | 'apercu' | 'jeton' | 'date'>): string {
-  return [
-    requete.id,
-    requete.pont,
-    requete.ordre,
-    canonique(requete.parametres ?? {}),
-    requete.apercu ? '1' : '0',
-    requete.jeton ?? '',
-    requete.date ?? ''
-  ].join('|');
-}
-
-export function signerRequete(secret: string, requete: Parameters<typeof messageASigner>[0]): string {
-  return createHmac('sha256', secret).update(messageASigner(requete)).digest('hex');
 }
 
 /** Empreinte de ce qui va être fait sur l'état actuel : change dès que l'état change. */

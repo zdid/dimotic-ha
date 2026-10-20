@@ -1,8 +1,8 @@
 /**
  * PilotesClient — outils MCP de gestion des pilotes (conception-gestion-pilotes_specs v1.5 §12).
  *
- * `ia` ne parle pas MQTT et ne détient PAS le secret du site : il demande au cœur (événements `pilotes:agent:*`) de signer
- * et publier la requête, puis attend la réponse du pont. Règle : tout ordre modifiant passe d'abord par un APERÇU ; le
+ * `ia` ne parle pas MQTT : il demande au cœur (événements `pilotes:agent:*`) de publier la requête (non signée) et attend la réponse
+ * du pont. Règle : tout ordre modifiant passe d'abord par un APERÇU ; le
  * client garde le jeton de l'aperçu (valable 10 min, pour exactement le même pont/ordre/paramètres) et refuse d'appliquer
  * sans aperçu préalable, même si l'agent oublie de le faire.
  */

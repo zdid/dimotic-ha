@@ -6,7 +6,7 @@ import { EventBus } from '../../application/EventBus';
 import type { MqttMessage } from '../../infrastructure/transport/MqttTransport';
 import { PilotePont, type PiloteGestionnaire } from '../PilotePont';
 import { PilotesGateway, type PilotesTransport } from '../PilotesGateway';
-import { jetonApercu, signerRequete, sujetsPilotes, type PiloteReponse, type PiloteRequete } from '../types';
+import { jetonApercu, sujetsPilotes, type PiloteReponse, type PiloteRequete } from '../types';
 
 const logger = { debug() {}, info() {}, warn() {}, error() {} } as never;
 const SITE = 'noisy';
@@ -61,15 +61,14 @@ describe('canal pilotes', () => {
   let gateway: PilotesGateway;
   let pont: PilotePont;
   let gestionnaire: ReturnType<typeof creerGestionnaire>;
-  const SECRET = 'secret-de-test';
   let maintenant = Date.parse('2026-10-15T20:00:00Z');
 
-  function demarrer(secret: string | undefined, delaiReponseMs = 60_000): void {
+  function demarrer(delaiReponseMs = 60_000): void {
     bus = new EventBus();
     transport = new FauxTransport();
     gestionnaire = creerGestionnaire();
     // l'événement REQUETE traverse « l'IPC » : ici le même bus, la présence/réponse aussi
-    gateway = new PilotesGateway(transport, bus, logger, { site: SITE, machineId: MACHINE, secret, delaiReponseMs, delaiHeritageMs: 50, maintenant: () => maintenant });
+    gateway = new PilotesGateway(transport, bus, logger, { site: SITE, machineId: MACHINE, delaiReponseMs, delaiHeritageMs: 50, maintenant: () => maintenant });
     gateway.start();
     pont = new PilotePont(bus, logger, {
       appId: 'testcycle', pont: 'test_bridge_x', type: 'test', capacites: ['lister', 'decouverts', 'supprimer'], gestionnaire
@@ -77,10 +76,8 @@ describe('canal pilotes', () => {
     pont.start();
   }
 
-  function requete(partiel: Partial<PiloteRequete> & { ordre: string }, secret = SECRET): PiloteRequete {
-    const r: PiloteRequete = { id: 'r1', pont: 'test_bridge_x', date: new Date(maintenant).toISOString(), ...partiel };
-    if (secret) r.signature = signerRequete(secret, r);
-    return r;
+  function requete(partiel: Partial<PiloteRequete> & { ordre: string }): PiloteRequete {
+    return { id: 'r1', pont: 'test_bridge_x', date: new Date(maintenant).toISOString(), ...partiel };
   }
 
   function envoyer(r: PiloteRequete): void {
@@ -94,7 +91,7 @@ describe('canal pilotes', () => {
   afterEach(() => { vi.useRealTimers(); });
 
   describe('présence', () => {
-    beforeEach(() => demarrer(SECRET));
+    beforeEach(() => demarrer());
 
     it('publie la présence retenue du pont avec machine, application et date', () => {
       const p = transport.publies.find((x) => x.topic === SUJETS.presence('test_bridge_x'));
@@ -134,7 +131,7 @@ describe('canal pilotes', () => {
   });
 
   describe('requêtes de lecture', () => {
-    beforeEach(() => demarrer(SECRET));
+    beforeEach(() => demarrer());
 
     it('lister : transmis à l\'application, réponse publiée non retenue', async () => {
       envoyer(requete({ ordre: 'lister' }));
@@ -176,37 +173,8 @@ describe('canal pilotes', () => {
   });
 
   describe('sécurité', () => {
-    it('avec secret : signature absente ou fausse → refus signature_invalide', async () => {
-      demarrer(SECRET);
-      envoyer(requete({ ordre: 'lister' }, ''));
-      await laisser();
-      expect(reponse()?.erreur?.code).toBe('signature_invalide');
-      envoyer(requete({ id: 'r2', ordre: 'lister' }, 'mauvais-secret'));
-      await laisser();
-      expect(reponse('r2')?.erreur?.code).toBe('signature_invalide');
-    });
-
-    it('avec secret : une requête modifiée après signature est refusée', async () => {
-      demarrer(SECRET);
-      const r = requete({ ordre: 'lister', parametres: { a: 1 } });
-      r.parametres = { a: 2 };
-      envoyer(r);
-      await laisser();
-      expect(reponse()?.erreur?.code).toBe('signature_invalide');
-    });
-
-    it('sans secret : lister permis, ordre modifiant refusé signature_requise', async () => {
-      demarrer(undefined);
-      envoyer(requete({ ordre: 'lister' }, ''));
-      await laisser();
-      expect(reponse()?.ok).toBe(true);
-      envoyer(requete({ id: 'r2', ordre: 'supprimer', apercu: true }, ''));
-      await laisser();
-      expect(reponse('r2')?.erreur?.code).toBe('signature_requise');
-    });
-
     it('requête trop ancienne → requete_expiree', async () => {
-      demarrer(SECRET);
+      demarrer();
       envoyer(requete({ ordre: 'lister', date: new Date(maintenant - 10 * 60_000).toISOString() }));
       await laisser();
       expect(reponse()?.erreur?.code).toBe('requete_expiree');
@@ -214,7 +182,7 @@ describe('canal pilotes', () => {
   });
 
   describe('ordres modifiants : aperçu puis jeton', () => {
-    beforeEach(() => demarrer(SECRET));
+    beforeEach(() => demarrer());
 
     it('aperçu : renvoie apercu + jeton et ne modifie rien', async () => {
       envoyer(requete({ ordre: 'supprimer', parametres: { nom: 'a' }, apercu: true }));
@@ -264,7 +232,7 @@ describe('canal pilotes', () => {
 
   describe('délai de réponse', () => {
     it('application muette → delai_depasse', async () => {
-      demarrer(SECRET, 30);
+      demarrer(30);
       gestionnaire.lire = () => new Promise(() => {}); // ne répond jamais
       envoyer(requete({ ordre: 'lister' }));
       await new Promise((r) => setTimeout(r, 60));
@@ -279,15 +247,14 @@ describe('canal pilotes', () => {
       if (p) transport.recevoir(topic, p.payload);
     }
 
-    it('signe la requête avec le secret du cœur, la publie non retenue, et renvoie la réponse du pont', async () => {
-      demarrer(SECRET);
+    it('publie la requête de l\'agent non retenue, et renvoie la réponse du pont', async () => {
+      demarrer();
       const recues: Array<{ ref: string; reponse: PiloteReponse }> = [];
       bus.onGeneric('pilotes:agent:reponse', (d) => recues.push(d as never));
       bus.emitGeneric('pilotes:agent:requete', { ref: 'abc', pont: 'test_bridge_x', ordre: 'lister', parametres: {} });
       const pub = transport.publies.find((x) => x.topic.includes('/test_bridge_x/requete/'))!;
       expect(pub.retain).toBe(false);
       const envoyee = JSON.parse(pub.payload) as PiloteRequete;
-      expect(envoyee.signature).toBe(signerRequete(SECRET, envoyee));
       transport.recevoir(pub.topic, pub.payload); // le broker la rend au cœur, qui la traite
       await laisser();
       boucle(SUJETS.reponse('test_bridge_x', envoyee.id));
@@ -297,7 +264,7 @@ describe('canal pilotes', () => {
     });
 
     it('un ordre inconnu est refusé sans rien publier', () => {
-      demarrer(SECRET);
+      demarrer();
       const recues: Array<{ reponse: PiloteReponse }> = [];
       bus.onGeneric('pilotes:agent:reponse', (d) => recues.push(d as never));
       const avant = transport.publies.length;
@@ -307,7 +274,7 @@ describe('canal pilotes', () => {
     });
 
     it('liste les ponts du site, dont ceux d\'une autre machine, avec leur joignabilité', () => {
-      demarrer(SECRET);
+      demarrer();
       const autre = { pont: 'arexx_bridge_noisy', machine: 'noisy_999', appId: 'arexx', type: 'arexx', capacites: ['lister'], etat: 'en_ligne', date: 'x' };
       transport.recevoir(SUJETS.presence('arexx_bridge_noisy'), autre, true);
       transport.recevoir(SUJETS.machine('noisy_999'), { machine: 'noisy_999', etat: 'hors_ligne' }, true);

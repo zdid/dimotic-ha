@@ -72,27 +72,10 @@ rmdir "$T/dir/.maj.lock"
 echo "== revenir"
 raz; "$SCRIPT" mettre-a-jour 3.9.6 --oui >/dev/null 2>&1; "$SCRIPT" revenir --oui >/dev/null 2>&1; verifie ".env revenu en 3.9.5" "$(tag)" "3.9.5"
 
-echo "== ordres signés"
-export MAJ_MACHINE_ID=ha2_test MAJ_SECRET=secret-fictif-essai
+export MAJ_MACHINE_ID=ha2_test
 MAJ_SOURCE_ONLY=1 . "$SCRIPT"
-rep=""; repondre() { rep="$2"; }
-ordre() {  # id machine ts confirme [signature-forcée]
-  base="$(jq -cn --arg id "$1" --arg m "$2" --argjson ts "$3" --argjson c "$4" '{id:$id, machine:$m, ordre:"mettre_a_jour", parametres:{version:"3.9.6"}, ts:$ts, confirme:$c}')"
-  sig="${5:-$(printf '%s' "$base" | jq -S -c . | tr -d '\n' | openssl dgst -sha256 -hmac "$MAJ_SECRET" | sed 's/^.*= //')}"
-  printf '%s' "$base" | jq -c --arg s "$sig" '. + {signature:$s}'
-}
-raz; traiter_commande "$(ordre a1 ha2_test "$(date +%s)" true)" >/dev/null 2>&1; verifie "ordre signé et récent exécuté" "$(tag)" "3.9.6"
-raz; traiter_commande "$(ordre a2 ha2_test "$(date +%s)" true xx)" >/dev/null 2>&1; verifie "mauvaise signature refusée" "$(echo "$rep" | jq -r .erreur)" "signature invalide"
-verifie "  .env intact" "$(tag)" "3.9.5"
-raz; traiter_commande "$(ordre a3 ha2_test "$(( $(date +%s) - 300 ))" true)" >/dev/null 2>&1; verifie "ordre trop ancien refusé" "$(echo "$rep" | jq -r .erreur)" "ordre trop ancien"
-raz; traiter_commande "$(ordre a4 autre_machine "$(date +%s)" true)" >/dev/null 2>&1; verifie "autre machine refusée" "$(echo "$rep" | jq -r .erreur)" "autre machine"
-raz; o="$(ordre a5 ha2_test "$(date +%s)" false)"; traiter_commande "$o" >/dev/null 2>&1; traiter_commande "$o" >/dev/null 2>&1; verifie "rejeu refusé" "$(echo "$rep" | jq -r .erreur)" "ordre déjà reçu"
-verifie "  sans confirme : aperçu, .env intact" "$(tag)" "3.9.5"
-MAJ_SECRET="" ; unset MAJ_SECRET; traiter_commande "$(ordre a6 ha2_test "$(date +%s)" true x)" >/dev/null 2>&1
-verifie "sans secret : lecture seule" "$(echo "$rep" | jq -r .erreur | cut -c1-17)" "aucun secret de m"
 
 echo "== verrou libéré après chaque mise à jour (l'agent d'écoute ne se termine jamais)"
-unset MAJ_SECRET
 raz; cmd_mettre_a_jour 3.9.6 --oui >/dev/null 2>&1; verifie "première mise à jour réussie" "$(tag)" "3.9.6"
 verifie "  verrou libéré sans quitter le processus" "$([ -d "$T/dir/.maj.lock" ] && echo non || echo oui)" "oui"
 cmd_mettre_a_jour 3.9.7 --oui >/dev/null 2>&1; verifie "deuxième mise à jour dans le même processus" "$(tag)" "3.9.7"
@@ -100,7 +83,6 @@ raz; MAJ_FAUX_PULL=ko cmd_mettre_a_jour 3.9.6 --oui >/dev/null 2>&1; verifie "  
 raz; MAJ_FAUX_SANTE=unhealthy cmd_mettre_a_jour 3.9.6 --oui >/dev/null 2>&1; verifie "  après un retour arrière aussi" "$([ -d "$T/dir/.maj.lock" ] && echo non || echo oui)" "oui"
 
 echo "== bouton Installer de HA"
-unset MAJ_SECRET
 raz; traiter_installation_ha >/dev/null 2>&1; verifie "installe la dernière version du hub (3.10.0)" "$(tag)" "3.10.0"
 raz; echo "DIMOTIC_TAG=3.10.0" > "$T/dir/.env"; : > "$T/appels"; traiter_installation_ha >/dev/null 2>&1; verifie "déjà à jour : rien" "$(grep -c pull "$T/appels")" "0"
 raz; echo "DIMOTIC_TAG=4.0.0" > "$T/dir/.env"; traiter_installation_ha >/dev/null 2>&1; verifie "installée plus récente que le hub : jamais de rétrogradation" "$(tag)" "4.0.0"
