@@ -94,20 +94,20 @@ text_sensor:
     entity_id: climate.salle_a_manger_poele
     internal: true
     on_value:
-      - lvgl.label.update:
-          id: lbl_poele_toggle
-          text: !lambda |-
-            return (x == "heat") ? std::string("ARRETER") : std::string("CHAUFFER");
+      - lvgl.widget.update:
+          id: sw_poele
+          state:
+            checked: !lambda 'return x == "heat";'
 
   - platform: homeassistant
     id: ha_evoo7_state
     entity_id: climate.infra_evoo7_control_thermostat
     internal: true
     on_value:
-      - lvgl.label.update:
-          id: lbl_evoo7_toggle
-          text: !lambda |-
-            return (x == "heat") ? std::string("ARRETER") : std::string("CHAUFFER");
+      - lvgl.widget.update:
+          id: sw_evoo7
+          state:
+            checked: !lambda 'return x == "heat";'
 lvgl:
   bg_color: 0x101418
   pages:
@@ -217,28 +217,26 @@ lvgl:
                   data_template:
                     temperature: !lambda 'return str_sprintf("%.1f", id(poele_target_c));'
 
-        - button:
-            id: btn_poele_toggle
-            x: 128
-            y: 66
-            width: 104
-            height: 34
-            bg_color: 0x2A3540
-            widgets:
-              - label:
-                  id: lbl_poele_toggle
-                  text: "..."
-                  text_font: font_label
-                  text_color: 0xFFFFFF
-            on_click:
+        - switch:
+            id: sw_poele
+            x: 148
+            y: 68
+            width: 64
+            height: 30
+            bg_color: 0x5A6670        # position gauche + gris = ARRÊTÉ
+            indicator:
+              bg_color: 0x2E7D32      # position droite + vert = EN MARCHE
+              checked:
+                bg_color: 0x2E7D32
+            knob:
+              bg_color: 0xFFFFFF
+            on_value:
               - homeassistant.service:
                   service: climate.set_hvac_mode
                   data:
                     entity_id: climate.salle_a_manger_poele
                   data_template:
-                    hvac_mode: !lambda |-
-                      return (id(ha_poele_state).state == "heat") ? std::string("off") : std::string("heat");
-
+                    hvac_mode: !lambda 'return x ? std::string("heat") : std::string("off");'
         # ---- EVOO7 (pompe à chaleur) --------------------------------------------------------
         # ⭐ 31/08/2026 : y décalé de 112→128 (+16px, ~une ligne) sur retour utilisateur — la
         # section précédente (Poêle) collait trop à celle-ci. Toutes les positions de la section
@@ -337,30 +335,26 @@ lvgl:
                   data_template:
                     temperature: !lambda 'return str_sprintf("%.1f", id(evoo7_target_c));'
 
-        # ⚠️ Premier test réel d'écriture du MODE EVOO7 (voir en-tête de fichier) — l'écriture de
-        # la consigne (boutons +/- ci-dessus) est déjà vérifiée, celle du mode ne l'est pas.
-        - button:
-            id: btn_evoo7_toggle
-            x: 128
-            y: 188
-            width: 104
-            height: 34
-            bg_color: 0x2A3540
-            widgets:
-              - label:
-                  id: lbl_evoo7_toggle
-                  text: "..."
-                  text_font: font_label
-                  text_color: 0xFFFFFF
-            on_click:
+        - switch:
+            id: sw_evoo7
+            x: 148
+            y: 190
+            width: 64
+            height: 30
+            bg_color: 0x5A6670        # position gauche + gris = ARRÊTÉ
+            indicator:
+              bg_color: 0x2E7D32      # position droite + vert = EN MARCHE
+              checked:
+                bg_color: 0x2E7D32
+            knob:
+              bg_color: 0xFFFFFF
+            on_value:
               - homeassistant.service:
                   service: climate.set_hvac_mode
                   data:
                     entity_id: climate.infra_evoo7_control_thermostat
                   data_template:
-                    hvac_mode: !lambda |-
-                      return (id(ha_evoo7_state).state == "heat") ? std::string("off") : std::string("heat");
-
+                    hvac_mode: !lambda 'return x ? std::string("heat") : std::string("off");'
         # ---- Humidité (salle) -----------------------------------------------------------------
         - label:
             x: 8
