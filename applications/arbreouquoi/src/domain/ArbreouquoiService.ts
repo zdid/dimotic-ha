@@ -4,6 +4,7 @@ import type { IAppConfigProvider } from '../../../core/dist/infrastructure/confi
 import type { HaStructuredEntity } from '../../../core/dist/ha/types/ha-entity';
 import type { HaArea, HaDevice, HaQuoiDefinition } from '../../../core/dist/ha/types/ha-structure';
 import type { HaBridgeClient } from '../../../core/dist/application/HaBridgeClient';
+import { HaTaxonomieClient } from '../../../core/dist/application/HaTaxonomieClient';
 import { arbreouquoiConfigSchema, type ArbreouquoiConfig } from './config-schema';
 import type {
   OuNode,
@@ -42,6 +43,7 @@ export class ArbreouquoiService {
      *  séparé. isAvailable() reflète ha.ws_enable=false côté core, même état normal qu'avant. */
     private haBridgeClient: HaBridgeClient
   ) {
+    this.taxonomie = new HaTaxonomieClient(haBridgeClient);
     this.setupEventListeners();
   }
 
@@ -54,19 +56,33 @@ export class ArbreouquoiService {
     return arbreouquoiConfigSchema.parse(this.configService.getAppConfig());
   }
 
-  /**
-   * Accès au bridge avec message d'erreur clair s'il n'est pas disponible (ha.ws_enable=false côté
-   * core) plutôt qu'un échec cryptique plus loin — les appelants sont déjà dans un try/catch qui
-   * convertit l'exception en événement ARBREOUQUOI_SOCKET_EVENTS.ERROR côté client. Le
-   * sanitizing device/area (cycle HaStructuredEntity.device.entities, cf. historique) est
-   * désormais fait une fois pour toutes côté core (HaQueryBridge) avant de traverser l'IPC — plus
-   * besoin de le refaire ici.
-   */
-  private requireBridge(): HaBridgeClient {
-    if (!this.haBridgeClient.isAvailable()) {
-      throw new Error('Référentiel HA indisponible (pas encore synchronisé, ou ha.ws_enable=false)');
+  /** Lecture directe dans Home Assistant (intégration dimotic_taxonomie, via le relais du cœur). */
+  private readonly taxonomie: HaTaxonomieClient;
+  /** Dernière lecture : les constructions d'arbre restent synchrones et travaillent sur cet instantané, relu avant
+   *  chaque émission (page ouverte, rafraîchissement, changement d'état limité à 1 / 5 s, reconstruction du référentiel). */
+  private snapshot: { entities: HaStructuredEntity[]; catalog: HaQuoiDefinition[] } | null = null;
+
+  private async loadSnapshot(): Promise<void> {
+    const [entities, catalog] = await Promise.all([this.taxonomie.getAllEntities(), this.taxonomie.getQuoiCatalog()]);
+    this.snapshot = { entities, catalog };
+  }
+
+  /** Instantané courant ; erreur claire s'il n'a jamais pu être lu (HA ou intégration indisponible). */
+  private data(): { entities: HaStructuredEntity[]; catalog: HaQuoiDefinition[] } {
+    if (!this.snapshot) throw new Error('Taxonomie Home Assistant pas encore lue (HA ou intégration dimotic_taxonomie indisponible)');
+    return this.snapshot;
+  }
+
+  /** Relit HA puis exécute `emettre` ; en cas d'échec, signale l'erreur à la page (jamais de repli silencieux). */
+  private async refreshThen(emettre: () => void): Promise<void> {
+    try {
+      await this.loadSnapshot();
+    } catch (error) {
+      this.logger.error('ArbreouquoiService', `Lecture de HA impossible : ${error instanceof Error ? error.message : error}`);
+      this.eventBus.emit(ARBREOUQUOI_SOCKET_EVENTS.ERROR, { message: String(error instanceof Error ? error.message : error) });
+      return;
     }
-    return this.haBridgeClient;
+    emettre();
   }
 
   // ⭐ OBLIGATOIRE : Méthode start() asynchrone
@@ -83,9 +99,7 @@ export class ArbreouquoiService {
       // normal (WS désactivé), pas une erreur : on le signale proprement plutôt que de planter.
       await this.haBridgeClient.start();
       this.registerPersistentEvents();
-      if (this.haBridgeClient.isAvailable()) {
-        this.initializeWithHa();
-      } else {
+      if (!(await this.initializeWithHa())) {
         // ⭐ 24/09/2026 — HA pas encore synchronisé (état normal au démarrage : le core ne répond plus
         // « 0 entité » avant son premier ha:ready) ou désactivé : l'initialisation complète se fera
         // au premier ha:ready (voir setupEventListeners). Avant, start() s'arrêtait ici et seuls
@@ -107,10 +121,17 @@ export class ArbreouquoiService {
    *  sinon au premier ha:ready (une seule fois). */
   private haInitialized = false;
 
-  private initializeWithHa(): void {
+  /** Vrai si HA a répondu (initialisation faite), faux sinon (HA pas prêt : on réessaiera au premier ha:ready). */
+  private async initializeWithHa(): Promise<boolean> {
+    try {
+      await this.loadSnapshot();
+    } catch (error) {
+      this.logger.warn('ArbreouquoiService', `Lecture de HA impossible pour l'instant : ${error instanceof Error ? error.message : error}`);
+      return false;
+    }
     this.haInitialized = true;
     const config = this.getConfig();
-    const entityCount = this.haBridgeClient.getAllEntities().length;
+    const entityCount = this.data().entities.length;
     this.logger.info('ArbreouquoiService', `Référentiel HA initialisé avec ${entityCount} entités`);
     if (config.refresh.autoRefreshEnabled) {
       this.startAutoRefresh(config.refresh.autoRefreshInterval);
@@ -119,6 +140,7 @@ export class ArbreouquoiService {
     this.emitCatalog();
     this.emitStats();
     this.emitStatus('ready', `Service démarré avec ${entityCount} entités HA, mode: ${config.display.viewMode}`);
+    return true;
   }
 
   // OPTIONNEL : Méthode stop() pour un arrêt propre
@@ -145,12 +167,13 @@ export class ArbreouquoiService {
     // un cache pas encore rechargé (arbre à 0 entité, puis « indisponible »). Même patron que HaplanService.
     this.eventBus.on('ha:ready', () => {
       this.haBridgeClient.refresh()
-        .then(() => {
+        .then(async () => {
           this.logger.info('ArbreouquoiService', 'Référentiel HA reconstruit');
           if (!this.haInitialized) {
-            if (this.haBridgeClient.isAvailable()) this.initializeWithHa();
+            await this.initializeWithHa();
             return;
           }
+          await this.loadSnapshot();
           const config = this.getConfig();
           if (config.refresh.refreshOnHaUpdate) {
             this.emitTree();
@@ -169,13 +192,13 @@ export class ArbreouquoiService {
       this.scheduleStateRefresh();
     });
 
-    this.eventBus.on(ARBREOUQUOI_SOCKET_EVENTS.TREE_GET, () => this.emitTree());
-    this.eventBus.on(ARBREOUQUOI_SOCKET_EVENTS.CATALOG_GET, () => this.emitCatalog());
-    this.eventBus.on(ARBREOUQUOI_SOCKET_EVENTS.REFRESH, () => {
+    this.eventBus.on(ARBREOUQUOI_SOCKET_EVENTS.TREE_GET, () => void this.refreshThen(() => this.emitTree()));
+    this.eventBus.on(ARBREOUQUOI_SOCKET_EVENTS.CATALOG_GET, () => void this.refreshThen(() => this.emitCatalog()));
+    this.eventBus.on(ARBREOUQUOI_SOCKET_EVENTS.REFRESH, () => void this.refreshThen(() => {
       this.emitTree();
       this.emitCatalog();
       this.emitStats();
-    });
+    }));
 
     // ⭐ 24/09/2026 — recherche et filtre « entités actives » appliqués CÔTÉ PAGE sur l'arbre complet
     // (FILTER_SET/SEARCH n'ont plus de traitement serveur) : la recherche était ignorée ici (arbre
@@ -183,7 +206,7 @@ export class ArbreouquoiService {
     // désormais ses propres filtres, sans état partagé côté serveur.
 
     this.eventBus.on(ARBREOUQUOI_SOCKET_EVENTS.ENTITY_GET, (data: unknown) => {
-      this.emitEntityDetails(data as string);
+      void (this.snapshot ? Promise.resolve() : this.loadSnapshot().catch(() => undefined)).then(() => this.emitEntityDetails(data as string));
     });
 
     this.eventBus.on(ARBREOUQUOI_SOCKET_EVENTS.CONFIG_SAVE, (data: unknown) => {
@@ -259,19 +282,21 @@ export class ArbreouquoiService {
     this.stateRefreshTimer = setTimeout(() => {
       this.stateRefreshTimer = null;
       this.lastStateRefreshAt = Date.now();
-      this.emitTree();
+      void this.refreshThen(() => this.emitTree());
     }, wait);
   }
 
   private startAutoRefresh(intervalMs: number): void {
     if (this.refreshInterval) clearInterval(this.refreshInterval);
     this.refreshInterval = setInterval(() => {
-      try {
-        this.emitTree();
-        this.emitStats();
-      } catch (error) {
-        this.logger.error('ArbreouquoiService', `Rafraîchissement auto: ${error}`);
-      }
+      void this.refreshThen(() => {
+        try {
+          this.emitTree();
+          this.emitStats();
+        } catch (error) {
+          this.logger.error('ArbreouquoiService', `Rafraîchissement auto: ${error}`);
+        }
+      });
     }, intervalMs);
   }
 
@@ -307,7 +332,7 @@ export class ArbreouquoiService {
 
   private emitStats(): void {
     try {
-      const allEntities = this.requireBridge().getAllEntities();
+      const allEntities = this.data().entities;
       const ouPaths = new Set<string>();
       for (const entity of allEntities) {
         const path = this.extractOuSegments(entity).map(s => s.id).join('/');
@@ -338,8 +363,7 @@ export class ArbreouquoiService {
    * lieu reste à sa place (un même lieu à des profondeurs différentes est normal, affiché tel quel).
    */
   private buildOuFirstTree(): OuFirstTree {
-    const allEntities = this.requireBridge().getAllEntities();
-    const catalog = this.requireBridge().getQuoiCatalog();
+    const { entities: allEntities, catalog } = this.data();
 
     const rootOuNodes: OuNode[] = [];
     const ouNodeMap = new Map<string, OuNode>();
@@ -389,8 +413,7 @@ export class ArbreouquoiService {
    * sous-arbre.
    */
   private buildQuoiFirstTree(): QuoiFirstTree {
-    const allEntities = this.requireBridge().getAllEntities();
-    const catalog = this.requireBridge().getQuoiCatalog();
+    const { entities: allEntities, catalog } = this.data();
 
     const quoiGroups: QuiGroupWithOu[] = [];
     const quoiMap = new Map<string, { group: QuiGroupWithOu; nodes: Map<string, OuNode> }>();
@@ -514,8 +537,7 @@ export class ArbreouquoiService {
   }
 
   private buildQuoiCatalog(): QuoiCatalogWithCounts[] {
-    const catalog = this.requireBridge().getQuoiCatalog();
-    const allEntities = this.requireBridge().getAllEntities();
+    const { entities: allEntities, catalog } = this.data();
     return catalog.map(quoiDef => {
       const entities = allEntities.filter(e => e.quoi_ids.includes(quoiDef.quoi_id));
       const paths = new Set<string>();
@@ -529,14 +551,14 @@ export class ArbreouquoiService {
 
   private emitEntityDetails(entityId: string): void {
     try {
-      const entity = this.requireBridge().getEntity(entityId);
+      const entity = this.data().entities.find((e) => e.entity_id === entityId);
       if (!entity) {
         this.eventBus.emit(ARBREOUQUOI_SOCKET_EVENTS.ERROR, { message: `Entité non trouvée: ${entityId}` });
         return;
       }
       const ouSegments = this.extractOuSegments(entity);
       const myPath = ouSegments.map(s => s.id).join('/');
-      const related = this.requireBridge().getAllEntities()
+      const related = this.data().entities
                 .filter(e => e.entity_id !== entityId)
         .filter(e => {
           const ePath = this.extractOuSegments(e).map(s => s.id).join('/');
@@ -572,7 +594,7 @@ export class ArbreouquoiService {
  * Factory appelée par standalone.ts (⭐ 24/08/2026, app en process séparé — voir
  * fonctionnelles-supervisor_specs) — reçoit un `HaBridgeClient` (façade générique vers le
  * référentiel HA détenu par `core`) plutôt que `HaStructureRegistry` en direct, jamais transportable
- * tel quel hors du process de `core`. `requireBridge()` gère l'indisponibilité (ha.ws_enable=false).
+ * tel quel hors du process de `core`. la lecture directe dans HA (HaTaxonomieClient) gère l'indisponibilité.
  */
 export function createArbreouquoiService(
   eventBus: IEventBus,

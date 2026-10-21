@@ -6,7 +6,8 @@
 
 import * as fs from 'node:fs';
 import { effectivePath, watchLayered, type LayeredFile } from './LayeredFiles';
-import type { Logger, HaBridgeClient } from '../../../core/dist/exports';
+import type { Logger } from '../../../core/dist/exports';
+import type { HaLecture } from './HaLectureDirecte';
 import type { OllamaMessage } from './types';
 
 export class RulesProvider {
@@ -17,7 +18,7 @@ export class RulesProvider {
     // Deux niveaux (LayeredFiles.ts) : version personnalisée si elle existe, sinon copie de l'embarquée.
     private readonly file: LayeredFile,
     private readonly logger: Logger,
-    private readonly registry: HaBridgeClient,
+    private readonly registry: HaLecture,
     // Callback plutôt qu'une valeur figée : lu à CHAQUE appel de buildCatalogText(), reflète donc
     // toujours la config `ia` courante — y compris après un rechargement à chaud
     // (IaService.excludedQuoiIds, surveillance de data/ia/config.yaml) sans que RulesProvider

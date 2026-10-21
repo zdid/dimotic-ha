@@ -7,7 +7,7 @@
  *      tester_phrase              simulation d'une phrase dans le pipeline d'ia, sans rien exécuter
  */
 
-import type { HaBridgeClient } from '../../../core/dist/exports';
+import type { HaLecture } from './HaLectureDirecte';
 import type { McpToolDef } from './McpHttpServer';
 import { IA_TOOLS } from './tools';
 import type { ToolExecutor } from './ToolExecutor';
@@ -438,7 +438,7 @@ function trimValue(value: unknown): unknown {
 
 export interface McpToolboxDeps {
   toolExecutor: ToolExecutor;
-  registry: HaBridgeClient;
+  registry: HaLecture;
   excludedQuoiIds: () => string[];
   /** Simulation d'une phrase (IaService.simulatePhrase). */
   simulate: (phrase: string, useMistral: boolean) => Promise<unknown>;
@@ -619,6 +619,7 @@ export class McpToolbox {
     const registry = this.deps.registry;
     if (!registry.isAvailable()) return { error: 'référentiel HA indisponible' };
     const limit = Math.min(Math.max(Number(args.limite) || 20, 1), MAX_DETAILS);
+    if (typeof args.entity_id === 'string' && args.entity_id) await registry.fresh(); // état courant, pas celui de l'instantané
 
     const entities = typeof args.entity_id === 'string' && args.entity_id
       ? [registry.getEntity(args.entity_id)].filter((e) => e !== undefined)

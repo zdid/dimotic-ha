@@ -12,6 +12,7 @@
  */
 
 import type { HaBridgeClient } from '../../../core/dist/exports';
+import { HaTaxonomieClient } from '../../../core/dist/exports';
 import type { ConditionSpec } from './types';
 import type { SunTimesProvider } from './sun-times';
 
@@ -81,8 +82,8 @@ export async function evaluateConditionLocally(
   }
 
   // Sans quoi structuré, rien d'évaluable en code.
-  if (!spec.quoi || !registry.isAvailable()) return { detail: 'texte libre' };
-  const entities = await registry.getEntitiesByQuoiAndLieux(slugify(spec.quoi), spec.lieux ?? []);
+  if (!spec.quoi) return { detail: 'texte libre' };
+  const entities = await new HaTaxonomieClient(registry).getEntitiesByQuoiAndLieux(slugify(spec.quoi), spec.lieux ?? []);
   if (entities.length === 0) return { detail: `aucune entité pour « ${spec.quoi} » ${(spec.lieux ?? []).join(', ')}` };
 
   // --- Comparaison numérique -----------------------------------------------------------------

@@ -16,6 +16,7 @@
  */
 
 import type { HaBridgeClient } from '../../../core/dist/exports';
+import { HaTaxonomieClient } from '../../../core/dist/exports';
 import type { ResolvedServiceCall } from './types';
 
 // Verbes sans valeur → services génériques HA (routent eux-mêmes vers le domaine réel de
@@ -60,7 +61,7 @@ function slugify(text: string): string {
     .replace(/_+/g, '_');
 }
 
-/** Résout les entity_id ciblés par (quoi, lieux) via HaStructureRegistry.getEntitiesByQuoiAndLieux
+/** Résout les entity_id ciblés par (quoi, lieux) via la recherche de l'intégration dimotic_taxonomie (HaTaxonomieClient.getEntitiesByQuoiAndLieux)
  *  — recherche de lieu indépendante du niveau taxonomique (lieu_precis/lieu/lieu_pere/
  *  lieu_grand_pere), voir le graphe de lieux dans HaStructureRegistry (demande utilisateur
  *  10/08/2026, généralise le repli lieu_precis initial : "salon" comme "toilettes de l'étage"
@@ -71,7 +72,8 @@ export async function resolveEntityIds(
   lieux: string[] = []
 ): Promise<string[]> {
   const quoiId = slugify(quoi);
-  const entities = await registry.getEntitiesByQuoiAndLieux(quoiId, lieux);
+  // Recherche faite directement dans Home Assistant (intégration dimotic_taxonomie, via le relais du cœur).
+  const entities = await new HaTaxonomieClient(registry).getEntitiesByQuoiAndLieux(quoiId, lieux);
   return entities.map((e) => e.entity_id);
 }
 

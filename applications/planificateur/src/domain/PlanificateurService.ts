@@ -165,7 +165,7 @@ export class PlanificateurService implements IPlanificateurService {
       this.handler.scheduleActivePlanifications();
       // Reprise des minuteries state_change en attente au moment de l'arrêt — AVEC un référentiel
       // chargé (avant : relancées au démarrage, référentiel vide → action ignorée).
-      this.stateWatcher?.start(this.handler.listPlanifications());
+      await this.stateWatcher?.start(this.handler.listPlanifications());
     };
     if (this.haBridgeClient.isAvailable()) {
       void open();

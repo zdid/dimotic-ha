@@ -11,6 +11,7 @@
  * (specs §4) évite qu'un proxy intermédiaire bufferise une seconde fois par-dessus.
  */
 
+import { HaLectureDirecte, type HaLecture } from './HaLectureDirecte';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -165,12 +166,17 @@ export class IaService implements IIaService {
   private resolveHaReady!: () => void;
   private readonly haReadyPromise = new Promise<void>((resolve) => { this.resolveHaReady = resolve; });
 
+  /** Lecture de la taxonomie dans HA + relais `callWs`/`callRest` du cœur (voir HaLectureDirecte). */
+  private readonly haBridgeClient: HaLecture;
+
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
     private readonly configProvider: IAppConfigProvider<IaConfig>,
-    private readonly haBridgeClient: HaBridgeClient
+    bridge: HaBridgeClient
   ) {
+    // Lecture directe dans Home Assistant (intégration dimotic_taxonomie) ; le cœur reste le relais qui porte le jeton.
+    this.haBridgeClient = new HaLectureDirecte(bridge, this.logger);
     this.config = iaConfigSchema.parse(configProvider.getAppConfig());
     this.mistralClient = new MistralClient(() => this.config, this.logger);
     this.prepareDataFiles();

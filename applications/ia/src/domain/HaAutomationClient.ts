@@ -17,7 +17,8 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { IEventBus, HaBridgeClient } from '../../../core/dist/exports';
+import type { IEventBus } from '../../../core/dist/exports';
+import type { HaLecture } from './HaLectureDirecte';
 
 /** Événement de réponse du core — à déclarer dans `bridgedEvents` (index.ts). */
 export const HA_REST_REPLY_EVENT = 'ia:ha:rest:result';
@@ -42,7 +43,7 @@ export class HaAutomationClient {
   private readonly backupDir: string;
   private readonly nom: string;
 
-  constructor(private readonly eventBus: IEventBus, private readonly registry: HaBridgeClient, dataDir: string, private readonly genre: GenreConfig = 'automation') {
+  constructor(private readonly eventBus: IEventBus, private readonly registry: HaLecture, dataDir: string, private readonly genre: GenreConfig = 'automation') {
     this.backupDir = path.join(dataDir, genre === 'script' ? 'scripts-backups' : 'automations-backups');
     this.nom = genre === 'script' ? 'script' : 'automatisation';
     this.eventBus.onGeneric<RestResult>(HA_REST_REPLY_EVENT, (r) => {

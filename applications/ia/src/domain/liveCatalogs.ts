@@ -4,10 +4,10 @@
  * qui le partageait, a été supprimée le 24/09/2026).
  */
 
-import type { HaBridgeClient } from '../../../core/dist/exports';
+import type { HaLecture } from './HaLectureDirecte';
 import type { LiveCatalogs } from './interpreter/index';
 
-export function buildLiveCatalogs(haBridgeClient: HaBridgeClient, macros: string[], excludedQuoiIds: string[]): LiveCatalogs {
+export function buildLiveCatalogs(haBridgeClient: HaLecture, macros: string[], excludedQuoiIds: string[]): LiveCatalogs {
   return {
     lieux: haBridgeClient.getLieuCatalog(excludedQuoiIds),
     lieuxComposes: buildLieuxComposes(haBridgeClient),
@@ -25,7 +25,7 @@ export function buildLiveCatalogs(haBridgeClient: HaBridgeClient, macros: string
  *  cibler ensemble via ce lieu est le comportement attendu, pas une ambiguïté. Clé du résultat =
  *  label affichage du quoi (même valeur que `flat.quoi` dans buildActionParams), pas son id/slug —
  *  évite toute re-slugification ici. */
-function buildQuoiUniqueLieu(haBridgeClient: HaBridgeClient): Record<string, string> {
+function buildQuoiUniqueLieu(haBridgeClient: HaLecture): Record<string, string> {
   const lieuxParQuoiId = new Map<string, Set<string>>();
   for (const entity of haBridgeClient.getAllEntities()) {
     const taxonomy = entity.attributes?.attributs_taxonomie as Record<string, unknown> | undefined;
@@ -46,7 +46,7 @@ function buildQuoiUniqueLieu(haBridgeClient: HaBridgeClient): Record<string, str
 
 /** Dérive les paires (lieu_precis, lieu_principal) réellement observées, pour les candidats
  *  composés de l'interpréteur (§16.5) — `getLieuCatalog()` seul les a déjà aplaties. */
-function buildLieuxComposes(haBridgeClient: HaBridgeClient): Array<{ lieuPrecis: string; lieu: string }> {
+function buildLieuxComposes(haBridgeClient: HaLecture): Array<{ lieuPrecis: string; lieu: string }> {
   const pairs: Array<{ lieuPrecis: string; lieu: string }> = [];
   const seen = new Set<string>();
   for (const entity of haBridgeClient.getAllEntities()) {

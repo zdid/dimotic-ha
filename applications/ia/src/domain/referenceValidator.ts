@@ -15,7 +15,7 @@
  * en silence.
  */
 
-import type { HaBridgeClient } from '../../../core/dist/exports';
+import type { HaLecture } from './HaLectureDirecte';
 
 function slugify(text: string): string {
   return text
@@ -36,14 +36,14 @@ export interface ReferenceProblem {
  *  parcourt comme un objet en JS) à la recherche de couples {quoi, lieux} et de déclencheurs
  *  state_change, et vérifie chacun contre le référentiel HA réel. Registre absent (ia sans accès
  *  HA en lecture) → aucune vérification possible, retourne [] plutôt que de bloquer à tort. */
-export async function validateReferences(data: unknown, registry: HaBridgeClient | undefined): Promise<ReferenceProblem[]> {
+export async function validateReferences(data: unknown, registry: HaLecture | undefined): Promise<ReferenceProblem[]> {
   if (!registry || !registry.isAvailable()) return [];
   const problems: ReferenceProblem[] = [];
   await walk(data, '', registry, problems);
   return problems;
 }
 
-async function walk(node: unknown, path: string, registry: HaBridgeClient, problems: ReferenceProblem[]): Promise<void> {
+async function walk(node: unknown, path: string, registry: HaLecture, problems: ReferenceProblem[]): Promise<void> {
   if (!node || typeof node !== 'object') return;
   const obj = node as Record<string, unknown>;
 

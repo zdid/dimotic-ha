@@ -7,7 +7,8 @@
  *    fonctionnelles-planificateur_specs §6/§7/§8).
  */
 
-import type { HaBridgeClient, Logger, IEventBus } from '../../../core/dist/exports';
+import type { Logger, IEventBus } from '../../../core/dist/exports';
+import type { HaLecture } from './HaLectureDirecte';
 import { CorrelatedRequester } from '../../../core/dist/exports';
 import type { MistralToolCall, ExecuterActionParams, CorrelatedReponse } from './types';
 
@@ -25,7 +26,7 @@ function slugify(text: string): string {
 // indépendant du niveau taxonomique — voir applications/planificateur/src/domain/resolution.ts
 // pour la même logique côté exécution) : évite de dupliquer ici un matching area-seule qui ne
 // couvrait ni lieu_precis ni lieu_pere.
-async function resolveEntities(registry: HaBridgeClient, quoi?: string, lieux?: string[]): Promise<Array<{ entity_id: string; state?: string; name?: string }>> {
+async function resolveEntities(registry: HaLecture, quoi?: string, lieux?: string[]): Promise<Array<{ entity_id: string; state?: string; name?: string }>> {
   const quoiId = quoi ? slugify(quoi) : undefined;
   const entities = await registry.getEntitiesByQuoiAndLieux(quoiId, lieux ?? []);
   return entities.map((e) => ({ entity_id: e.entity_id, state: e.state, name: e.friendly_name }));
@@ -37,7 +38,7 @@ export class ToolExecutor {
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
-    private readonly registry: HaBridgeClient,
+    private readonly registry: HaLecture,
     private readonly toolExecuteTimeoutMs: number
   ) {
     this.toolExecuteRequester = new CorrelatedRequester<ExecuterActionParams, CorrelatedReponse>(

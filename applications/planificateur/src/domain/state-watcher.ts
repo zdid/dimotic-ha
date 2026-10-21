@@ -21,6 +21,7 @@
  */
 
 import type { Logger, HaBridgeClient, HaRawEntity } from '../../../core/dist/exports';
+import { HaTaxonomieClient } from '../../../core/dist/exports';
 import type { PlanificationDefinition } from './types';
 
 export type StateFireCallback = (plan: PlanificationDefinition, entityId: string, signal: AbortSignal) => Promise<void>;
@@ -45,10 +46,16 @@ export class StateWatcher {
   /** À appeler une fois au démarrage : s'abonne aux changements d'état HA et redéclenche à neuf
    *  toute entrée `pending` trouvée dans les planifications actives (reprise après coupure — voir
    *  limitation de précision documentée en tête de fichier). */
-  start(plans: PlanificationDefinition[]): void {
+  async start(plans: PlanificationDefinition[]): Promise<void> {
     this.setPlans(plans);
-    for (const entity of this.haBridgeClient.getAllEntities()) {
-      if (entity.state !== undefined) this.lastStates.set(entity.entity_id, String(entity.state));
+    // Amorçage lu directement dans Home Assistant (intégration dimotic_taxonomie) AVANT de s'abonner : sinon le premier
+    // événement de chaque entité serait pris pour un passage d'état. Échec : journalisé, on continue sans amorçage.
+    try {
+      for (const entity of await new HaTaxonomieClient(this.haBridgeClient).getAllEntities()) {
+        if (entity.state !== undefined) this.lastStates.set(entity.entity_id, String(entity.state));
+      }
+    } catch (error) {
+      this.logger.warn('StateWatcher', `Amorçage des états impossible (HA ou intégration dimotic_taxonomie) : ${error instanceof Error ? error.message : error}`);
     }
     this.haBridgeClient.onStateChanged((entity) => this.handleStateChanged(entity));
 
