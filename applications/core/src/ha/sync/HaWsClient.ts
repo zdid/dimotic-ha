@@ -180,7 +180,7 @@ export class HaWsClient {
     entities: HaRawEntity[];
     areas: Array<{ area_id: string; name: string; picture?: string }>;
     devices: Array<{ device_id: string; name: string; area_id?: string }>;
-    entityRegistry: Array<{ entity_id: string; domain: string; device_class?: string; area_id?: string; device_id?: string; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null; platform?: string }>;
+    entityRegistry: Array<{ entity_id: string; domain: string; device_class?: string; original_device_class?: string; area_id?: string; device_id?: string; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null; platform?: string }>;
   }> {
     if (!this.isAuthenticated || !this.connection) {
       throw new Error('Cannot load registry: not authenticated. Call connect() first.');
@@ -196,7 +196,7 @@ export class HaWsClient {
       getStates(conn) as unknown as Promise<HaRawEntity[]>,
       conn.sendMessagePromise<{ areas: Array<{ area_id: string; name: string; picture?: string }> }>({ type: 'config/area_registry/list' }),
       conn.sendMessagePromise<Array<{ id: string; name: string; area_id?: string }>>({ type: 'config/device_registry/list' }),
-      conn.sendMessagePromise<Array<{ entity_id: string; domain: string; device_class?: string; area_id?: string; device_id?: string; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null; platform?: string }>>({ type: 'config/entity_registry/list' }),
+      conn.sendMessagePromise<Array<{ entity_id: string; domain: string; device_class?: string; original_device_class?: string; area_id?: string; device_id?: string; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null; platform?: string }>>({ type: 'config/entity_registry/list' }),
     ]);
 
     // config/area_registry/list retourne soit { areas: [...] } (anciennes versions HA) soit

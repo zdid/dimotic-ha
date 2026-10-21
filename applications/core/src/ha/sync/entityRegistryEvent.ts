@@ -10,6 +10,7 @@ export function metaDepuisEvenementRegistre(message: HaEntityRegistryUpdatedMess
     ...(d.old_entity_id && d.old_entity_id !== d.entity_id ? { old_entity_id: d.old_entity_id } : {}),
     domain: d.entity?.domain || '',
     device_class: d.entity?.device_class,
+    original_device_class: (d.entity as { original_device_class?: string } | undefined)?.original_device_class,
     area_id: d.entity?.area_id,
     entity_category: d.entity?.entity_category,
     hidden_by: d.entity?.hidden_by,

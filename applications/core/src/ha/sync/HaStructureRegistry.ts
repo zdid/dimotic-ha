@@ -227,6 +227,21 @@ export class HaStructureRegistry {
   }
 
   /**
+   * ⭐ 21/10/2026 — Classe effective d'une entité : celle que l'UTILISATEUR a imposée dans le registre des entités (`device_class`),
+   * sinon celle de l'INTÉGRATION (`original_device_class`), sinon l'attribut `device_class` de l'état. Avant cette date seule la
+   * première était lue — vide en pratique (sur ha2 : 0 entité sur 879, contre 363 avec une classe dans leur état) — de sorte que la
+   * table des classes du classifieur (puissance, tension, température…) ne jouait jamais. Voir
+   * `conception-integration-taxonomie-ha` §13 et `techniques-socle` §8.3.
+   */
+  static classeEffective(
+    registryEntry?: { device_class?: string | null; original_device_class?: string | null },
+    attributes?: Record<string, unknown>
+  ): string | undefined {
+    const deAttribut = attributes && typeof attributes.device_class === 'string' ? attributes.device_class : undefined;
+    return registryEntry?.device_class || registryEntry?.original_device_class || deAttribut || undefined;
+  }
+
+  /**
    * Crée une entité structurée à partir des données brutes.
    */
   private createStructuredEntity(
@@ -236,7 +251,7 @@ export class HaStructureRegistry {
   ): HaStructuredEntity {
     // Extraire le domaine de l'entity_id si non disponible dans le registry
     const domain = registryEntry?.domain || rawEntity.entity_id.split('.')[0];
-    const deviceClass = registryEntry?.device_class;
+    const deviceClass = HaStructureRegistry.classeEffective(registryEntry, rawEntity.attributes);
     const entityAreaId = registryEntry?.area_id;
     const deviceId = registryEntry?.device_id;
 
@@ -356,7 +371,7 @@ export class HaStructureRegistry {
     // Mettre à jour le device_class et domain si fournis
     if (registryEntry) {
       updatedEntity.domain = registryEntry.domain as any;
-      updatedEntity.device_class = registryEntry.device_class as any;
+      updatedEntity.device_class = HaStructureRegistry.classeEffective(registryEntry, rawEntity.attributes) as any;
       updatedEntity.device_id = registryEntry.device_id;
       updatedEntity.area_id = registryEntry.area_id || device?.area_id;
       // Métadonnées du registre : seulement si fournies (l'événement entity_registry_updated n'en porte pas toujours).
@@ -364,6 +379,10 @@ export class HaStructureRegistry {
       if (registryEntry.hidden_by !== undefined) updatedEntity.hidden_by = registryEntry.hidden_by;
       if (registryEntry.disabled_by !== undefined) updatedEntity.disabled_by = registryEntry.disabled_by;
       if (registryEntry.platform !== undefined) updatedEntity.platform = registryEntry.platform;
+    }
+    // Sans entrée de registre (simple changement d'état) : une classe apparue dans l'état est prise en compte si l'entité n'en a pas.
+    if (!registryEntry && !updatedEntity.device_class) {
+      updatedEntity.device_class = HaStructureRegistry.classeEffective(undefined, rawEntity.attributes) as any;
     }
 
     // Reclasser l'entité (les quoi_ids peuvent changer)
