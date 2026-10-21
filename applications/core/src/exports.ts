@@ -121,6 +121,8 @@ export { AppService } from './application/AppService';
 export { HaQueryBridge } from './application/HaQueryBridge';
 export type { HaBridgeMethod } from './application/HaQueryBridge';
 export { HaBridgeClient } from './application/HaBridgeClient';
+export { HaTaxonomieClient, versEntiteDuCoeur } from './application/HaTaxonomieClient';
+export type { EntiteTaxonomie, HaTaxonomieTransport } from './application/HaTaxonomieClient';
 
 // ApplicationManager - Gestion dynamique des modules
 export { ApplicationManager } from './application/ApplicationManager';

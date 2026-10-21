@@ -14,6 +14,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import type { IEventBus, Logger, IAppConfigProvider, EssentialEntityData, HaBridgeClient } from '../../../core/dist/exports';
+import { HaTaxonomieClient } from '../../../core/dist/exports';
 import { computeBridgeInstance, PilotePont } from '../../../core/dist/exports';
 import { PiloteTest } from './PiloteTest';
 import {
@@ -48,6 +49,8 @@ export class TestCycleService implements ITestCycleService {
   private haState: string | null = null;
   private haError: string | null = null;
   private lastPublishAt: string | null = null;
+  /** Lecture de l'entité directement dans Home Assistant (intégration dimotic_taxonomie), via le relais du cœur. */
+  private readonly taxonomie?: HaTaxonomieClient;
 
   constructor(
     private readonly eventBus: IEventBus,
@@ -55,6 +58,7 @@ export class TestCycleService implements ITestCycleService {
     private readonly configProvider: IAppConfigProvider<TestcycleConfig>,
     private readonly haBridgeClient?: HaBridgeClient
   ) {
+    this.taxonomie = haBridgeClient ? new HaTaxonomieClient(haBridgeClient) : undefined;
     this.config = this.loadConfig();
     this.bridgeInstance = computeBridgeInstance(MODULE_NAME, process.env.DIMOTIC_MACHINE_ID);
     this.donneesPath = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', MODULE_NAME, 'donnees.yaml');
@@ -169,7 +173,7 @@ export class TestCycleService implements ITestCycleService {
 
   /** Une période : lecture de l'entité HA, publication MQTT (si active), statut. */
   private async tick(): Promise<void> {
-    this.readHaEntity();
+    await this.readHaEntity();
     if (this.donnees.publicationActive) {
       this.compteur++;
       this.publishState();
@@ -177,19 +181,19 @@ export class TestCycleService implements ITestCycleService {
     this.emitStatus();
   }
 
-  private readHaEntity(): void {
-    if (!this.haBridgeClient) {
+  private async readHaEntity(): Promise<void> {
+    if (!this.taxonomie) {
       this.haError = 'HaBridgeClient absent';
       return;
     }
-    if (!this.haBridgeClient.isAvailable()) {
+    try {
+      const entity = await this.taxonomie.getEntity(this.config.haEntity);
+      this.haState = entity ? String(entity.state) : null;
+      this.haError = entity ? null : `Entité ${this.config.haEntity} introuvable`;
+    } catch (error) {
       this.haState = null;
-      this.haError = 'Référentiel HA indisponible côté core';
-      return;
+      this.haError = error instanceof Error ? error.message : String(error);
     }
-    const entity = this.haBridgeClient.getEntity(this.config.haEntity);
-    this.haState = entity ? String(entity.state) : null;
-    this.haError = entity ? null : `Entité ${this.config.haEntity} introuvable`;
   }
 
   private device() {

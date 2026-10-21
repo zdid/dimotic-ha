@@ -13,6 +13,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import type { IEventBus, Logger, IAppConfigProvider, HaBridgeClient } from '../../../core/dist/exports';
+import { HaTaxonomieClient } from '../../../core/dist/exports';
 import { computeBridgeInstance } from '../../../core/dist/exports';
 import {
   tasmotaConfigSchema,
@@ -184,12 +185,19 @@ export class TasmotaService implements ITasmotaService {
   private networkFound: NetworkTasmota[] = [];
   private networkScanning = false;
 
+  /** Catalogues « quoi » / lieux lus dans Home Assistant (intégration dimotic_taxonomie, via le relais du cœur). */
+  private readonly taxonomie?: HaTaxonomieClient;
+  /** Dernier catalogue lu : `emitState` est appelé à chaque changement, il ne doit jamais attendre HA. */
+  private catalogsCache: { quoi: string[]; lieux: string[] } = { quoi: [], lieux: [] };
+  private catalogsAt = 0;
+
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
     private readonly configProvider: IAppConfigProvider<TasmotaConfig>,
     private readonly haBridge?: HaBridgeClient
   ) {
+    this.taxonomie = haBridge ? new HaTaxonomieClient(haBridge) : undefined;
     this.config = this.loadConfig();
     this.bridgeInstance = computeBridgeInstance(MODULE_NAME, process.env.DIMOTIC_MACHINE_ID);
     this.dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', MODULE_NAME);
@@ -370,7 +378,7 @@ export class TasmotaService implements ITasmotaService {
     this.setupListeners();
     this.eventBus.emitGeneric('integration:bridge:register', { moduleName: MODULE_NAME, bridgeInstance: this.bridgeInstance });
     if (this.haBridge) {
-      this.haBridge.start().then(() => this.scheduleEmit()).catch((error) => this.logger.warn('TasmotaService', `Référentiel HA indisponible : ${error}`));
+      this.haBridge.start().then(() => this.refreshCatalogs(true)).catch((error) => this.logger.warn('TasmotaService', `Référentiel HA indisponible : ${error}`));
     }
     void this.refreshProvisionCheck();
     this.thermoTimer = setInterval(() => this.checkRulesMute(), 60_000);
@@ -440,7 +448,7 @@ export class TasmotaService implements ITasmotaService {
         Promise.resolve(handler(data)).catch((error) => this.log(`Erreur : ${error instanceof Error ? error.message : error}`, 'error'));
       });
     };
-    on(TASMOTA_CLIENT_EVENTS.GET_STATE, () => this.emitState());
+    on(TASMOTA_CLIENT_EVENTS.GET_STATE, () => { void this.refreshCatalogs(); this.emitState(); });
     // ⭐ 29/09/2026 (techniques-diffusion-data_specs §2bis) — fichier de data/tasmota/ reçu d'une autre
     // machine (diffusion du core) : relu ici, sans redémarrer l'application.
     this.eventBus.onGeneric<{ app: string; path: string; origin: string }>('core:data:file:changed', (e) => {
@@ -1798,19 +1806,29 @@ export class TasmotaService implements ITasmotaService {
   }
 
   private catalogs(): { quoi: string[]; lieux: string[] } {
-    if (!this.haBridge?.isAvailable()) return { quoi: [], lieux: [] };
-    const quoi = new Set<string>();
-    for (const entity of this.haBridge.getAllEntities()) {
-      const t = entity.attributes?.attributs_taxonomie as { quoi?: string; virtuel?: boolean } | undefined;
-      if (t?.quoi && !t.virtuel) quoi.add(t.quoi);
-    }
-    let lieux: string[] = [];
+    return this.catalogsCache;
+  }
+
+  /** Relit les catalogues dans HA (au plus une fois par minute sauf `force`) et réémet l'état s'ils ont changé. */
+  private async refreshCatalogs(force = false): Promise<void> {
+    if (!this.taxonomie) return;
+    if (!force && Date.now() - this.catalogsAt < 60_000) return;
+    this.catalogsAt = Date.now();
     try {
-      lieux = this.haBridge.getLieuCatalog();
-    } catch {
-      lieux = [];
+      const quoi = new Set<string>();
+      for (const entity of await this.taxonomie.getAllEntities()) {
+        const t = entity.attributes?.attributs_taxonomie as { quoi?: string; virtuel?: boolean } | undefined;
+        if (t?.quoi && !t.virtuel) quoi.add(t.quoi);
+      }
+      const lieux = await this.taxonomie.getLieuCatalog();
+      const next = { quoi: [...quoi].sort((a, b) => a.localeCompare(b, 'fr')), lieux };
+      if (JSON.stringify(next) !== JSON.stringify(this.catalogsCache)) {
+        this.catalogsCache = next;
+        this.scheduleEmit();
+      }
+    } catch (error) {
+      this.logger.warn('TasmotaService', `Catalogues quoi/lieux indisponibles : ${error instanceof Error ? error.message : error}`);
     }
-    return { quoi: [...quoi].sort((a, b) => a.localeCompare(b, 'fr')), lieux };
   }
 
   private emitState(): void {

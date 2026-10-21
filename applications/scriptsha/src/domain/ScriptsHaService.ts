@@ -17,6 +17,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as yaml from 'js-yaml';
 import type { IEventBus, Logger, IAppConfigProvider, HaBridgeClient } from '../../../core/dist/exports';
+import { HaTaxonomieClient } from '../../../core/dist/exports';
 import { scriptsConfigSchema, DEFAULT_SCRIPTS_CONFIG, type ScriptEntry, type ScriptsConfigFile, type ProvisioningConfig } from './storage-schema';
 import { ConfigFileManager } from './yaml/ConfigFileManager';
 import { SCRIPTSHA_SOCKET_EVENTS, SCRIPTSHA_CLIENT_EVENTS } from './socket-events';
@@ -479,12 +480,16 @@ export class ScriptsHaService implements IScriptsHaService {
    *  d'une nouvelle entité survenant en même temps). */
   private reconcilingProvisioning = false;
 
+  /** Lecture des entités directement dans Home Assistant (intégration dimotic_taxonomie), via le relais du cœur. */
+  private readonly taxonomie: HaTaxonomieClient;
+
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
     private readonly configProvider: IAppConfigProvider<ScriptshaConfig>,
     private readonly haBridgeClient: HaBridgeClient
   ) {
+    this.taxonomie = new HaTaxonomieClient(haBridgeClient);
     // Chargée mais non utilisée activement au-delà de enabled — voir config-schema.ts.
     this.configProvider.getAppConfig();
 
@@ -542,7 +547,7 @@ export class ScriptsHaService implements IScriptsHaService {
     this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.SCRIPT_UNDEPLOY, (data: unknown) => this.handleUndeploy((data as { id: string }).id));
     this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.SCRIPT_DELETE, (data: unknown) => this.handleDeleteRecord((data as { id: string }).id));
     this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.SCRIPT_GET_CONTENT, (data: unknown) => this.handleGetContent((data as { id: string }).id));
-    this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.IMPORT_CANDIDATES_GET, () => this.handleImportCandidatesGet());
+    this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.IMPORT_CANDIDATES_GET, () => void this.handleImportCandidatesGet());
     this.eventBus.on(SCRIPTSHA_CLIENT_EVENTS.IMPORT_APPLY, (data: unknown) => void this.handleImportApply((data as { candidates: ImportCandidate[] }).candidates));
 
     // Événements internes core↔enfant (pas des événements Socket.io) — voir SCRIPTSHA_APP.bridgedEvents.
@@ -1110,14 +1115,18 @@ export class ScriptsHaService implements IScriptsHaService {
   // machine, visible sur toutes.
   // ==========================================================================
 
-  /** Liste les entités automation.* et script.* du référentiel HA (déjà en cache côté
-   *  HaBridgeClient, aucun aller-retour réseau) non encore connues de scriptsha (comparaison par
-   *  id, pas par entity_id — voir HaRestBridge, qui adresse par id de config, pas par entity_id HA). */
-  private handleImportCandidatesGet(): void {
+  /** Liste les entités automation.* et script.* de HA (intégration dimotic_taxonomie, via le relais du cœur) non encore
+   *  connues de scriptsha (comparaison par id, pas par entity_id — voir HaRestBridge, qui adresse par id de config,
+   *  pas par entity_id HA). Si HA ne répond pas : liste vide et erreur journalisée. */
+  private async handleImportCandidatesGet(): Promise<void> {
     const known = new Set(this.scripts.map((s) => s.id));
-    const candidates: ImportCandidate[] = this.haBridgeClient
-      .getAllEntities()
-      .filter((e) => e.domain === 'automation' || e.domain === 'script')
+    let entites: Awaited<ReturnType<HaTaxonomieClient['getAllEntities']>> = [];
+    try {
+      entites = [...(await this.taxonomie.getAllEntities('automation')), ...(await this.taxonomie.getAllEntities('script'))];
+    } catch (error) {
+      this.logger.error('ScriptsHaService', `Import: lecture des entités HA impossible — ${error instanceof Error ? error.message : error}`);
+    }
+    const candidates: ImportCandidate[] = entites
       .map((e) => ({
         id: String(e.attributes.id ?? ''),
         domain: e.domain as 'automation' | 'script',
