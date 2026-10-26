@@ -28,6 +28,9 @@ export const BACKUP_CRON_LOG_REMOTE_PATH = `${BACKUP_DIR}/cron.log`;
  *  26/10/2026 : voir `heure` / `DEFAULT_BACKUP_TIME` dans config-schema.ts. */
 export const BACKUP_RETENTION_DAYS = 10;
 export const BACKUP_RETENTION_WEEKS = 10;
+/** ⭐ 26/10/2026, demande explicite — dossiers jamais sauvegardés : Whisper et Piper (assistant vocal de HA) ne contiennent
+ *  que des modèles retéléchargés au démarrage, gros et sans configuration propre à la machine. Chemins absolus. */
+export const BACKUP_EXCLUDED_DIRS = ['/docker/whisper', '/docker/piper'];
 /** `date +%u` : 1=lundi … 7=dimanche. */
 export const BACKUP_WEEKLY_DOW = 7;
 
@@ -168,6 +171,11 @@ export function renderBackupScript(params: BackupScriptParams): string {
     '',
     'OVERALL_FAIL=0',
     '',
+    `EXCLUDED=(${BACKUP_EXCLUDED_DIRS.map((d) => d.replace(/^\//, '')).join(' ')})`,
+    'TAR_EXCLUDES=(--anchored)',
+    'for X in "${EXCLUDED[@]}"; do TAR_EXCLUDES+=("--exclude=$X"); done',
+    'is_excluded() { local X; for X in "${EXCLUDED[@]}"; do [ "$1" = "$X" ] && return 0; done; return 1; }',
+    '',
     'for entry in "docker:/docker" "dimotic-ha-addons:/dimotic-ha-addons"; do',
     '  NAME="${entry%%:*}"',
     '  DIR="${entry#*:}"',
@@ -187,6 +195,7 @@ export function renderBackupScript(params: BackupScriptParams): string {
     // télécharger l'archive, pour l'afficher par case et vérifier l'espace libre sur la cible.
     // Premier champ inchangé (nom de l'élément), les manifestes plus anciens restent lisibles.
     '  find "$DIR" -mindepth 1 -maxdepth 1 -printf \'%f\\n\' | sort | while IFS= read -r ENTRY; do',
+    '    if is_excluded "${DIR#/}/$ENTRY"; then log "${DIR}/${ENTRY} : exclu de la sauvegarde" >&2; continue; fi',
     '    printf \'%s\\t%s\\n\' "$ENTRY" "$(du -sb "$DIR/$ENTRY" 2>/dev/null | cut -f1)"',
     '  done > "$TMP_MANIFEST"',
     '',
@@ -198,7 +207,7 @@ export function renderBackupScript(params: BackupScriptParams): string {
     // fichier de log conservé dit lesquels). Seul un code ≥ 2 (erreur fatale) arrête ce parent.
     '  TAR_LOG="$BACKUP_DIR/tar-${NAME}-$(date +%Y-%m-%d_%H%M%S).log"',
     '  mkdir -p "$BACKUP_DIR"',
-    '  tar -czf "$TMP_TAR" -C / "${DIR#/}" 2>"$TAR_LOG"',
+    '  tar "${TAR_EXCLUDES[@]}" -czf "$TMP_TAR" -C / "${DIR#/}" 2>"$TAR_LOG"',
     '  TAR_EXIT=$?',
     '  log "tar ${NAME} : code ${TAR_EXIT}, archive $(stat -c %s "$TMP_TAR" 2>/dev/null || echo "?") octets, $(wc -l < "$TMP_MANIFEST") éléments au manifeste, en $(( $(date +%s) - T_TAR )) s"',
     '  if [ "$TAR_EXIT" -eq 0 ]; then',

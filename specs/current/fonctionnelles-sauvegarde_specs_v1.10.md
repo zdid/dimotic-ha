@@ -1,6 +1,8 @@
 # Spécifications Fonctionnelles - Sauvegarde/Restauration (SAUVEGARDE)
 
-**Version 1.9 — 26/10/2026 — Claude**
+**Version 1.10 — 26/10/2026 — Claude**
+
+⭐ **v1.10 (26/10/2026)** — **Whisper et Piper exclus de la sauvegarde** (§4bis) : `/docker/whisper` et `/docker/piper` (assistant vocal de HA, modèles retéléchargés) ne sont plus archivés ni listés au manifeste ; le journal le signale. Pris en compte au prochain « Pousser » (ou à la prochaine carte préparée par Outils).
 
 ⭐ **v1.9 (26/10/2026)** — **heure de sauvegarde réglable par machine** (§5) : champ « Heure de la sauvegarde quotidienne (HH:MM) » sur chaque ligne de *Machines couvertes*, 3h05 par défaut, pris en compte au prochain « Pousser ». But : éviter que toutes les machines envoient en même temps sur Nextcloud. **Adresse Nextcloud sans schéma** complétée en `https://` à la lecture de la config : saisie sans `https://` (cas de noisy et noisy2), curl partait en http, Nextcloud répondait 308, non suivi, et tous les envois échouaient.
 
@@ -259,6 +261,13 @@ l'utilisateur (répétée à plusieurs reprises pendant la conception) : pas la 
 de ce qui est "important" avant de sauvegarder. Des exclusions ponctuelles restent possibles répertoire
 par répertoire si un besoin réel apparaît (ex. un très gros fichier sans valeur) — à traiter au cas par
 cas, jamais comme un audit préalable bloquant la mise en œuvre.
+
+**Exclusions en place (⭐ v1.10, 26/10/2026, demande explicite)** : `/docker/whisper` et `/docker/piper` — services de l'assistant
+vocal de HA (posés par le script carte SD d'Outils), qui ne contiennent que des modèles volumineux retéléchargés au démarrage, sans
+configuration propre à la machine. Liste `BACKUP_EXCLUDED_DIRS` (`BackupScript.ts`, chemins absolus) : `tar --anchored --exclude=…`
+(seul le dossier de premier niveau est visé — un sous-dossier `whisper` ailleurs, ex. `homeassistant/config/whisper`, reste
+sauvegardé) ; l'élément est retiré du manifeste et le journal (`cron.log`) écrit « … : exclu de la sauvegarde ». À la restauration,
+ces services sont donc absents de l'archive : leur compose est à reposer (Outils) ou à recréer.
 
 Le cas du mot de passe d'application Nextcloud lui-même (secret le plus évident à ne pas laisser fuiter
 dans une sauvegarde) est déjà réglé **structurellement**, pas par une exclusion à maintenir : voir §3bis
