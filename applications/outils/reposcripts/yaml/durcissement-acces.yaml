@@ -1,0 +1,10 @@
+id: durcissement-acces
+title: "Durcir l'accès d'une machine (SSH + fail2ban)"
+description: >-
+  À passer APRÈS l'installation d'une machine (la carte Outils laisse root se connecter par mot de passe pour
+  l'installation) : SSH par mot de passe refusé sauf pour l'utilisateur choisi, root par clé seulement, clés toujours
+  acceptées, fail2ban (5 essais en 10 min puis 12 h, réseau local jamais banni). Sauvegarde de la configuration avant
+  toute modification, contrôle par sshd avant rechargement et remise en place automatique en cas d'erreur ; les
+  sessions ouvertes ne sont pas coupées. À lancer avec sudo sur la machine (ou par « Exécution par SSH »).
+filename: durcissement-acces.sh
+requiresSudo: true

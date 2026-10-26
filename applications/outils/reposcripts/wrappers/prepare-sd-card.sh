@@ -45,19 +45,19 @@
 # @outils:hint DISTRO = trixie-lite = version actuelle (cloud-init) ; bookworm-lite = version précédente (« Legacy »), pour rester identique aux machines déjà installées.
 # @outils:select SSH_DURCISSEMENT = oui, non
 # @outils:default SSH_DURCISSEMENT = oui
-# @outils:hint SSH_DURCISSEMENT = oui = root par clé seulement et mot de passe refusé SAUF pour l'utilisateur ci-dessous (qui le garde, comme stfort) ; non = ancien comportement (root ET mots de passe acceptés).
+# @outils:hint SSH_DURCISSEMENT = oui = mot de passe refusé SAUF pour l'utilisateur ci-dessous et root (root reçoit le même mot de passe que l'utilisateur ; clés acceptées aussi) ; non = ancien comportement (mots de passe acceptés pour tous).
 # @outils:default FAIL2BAN_IGNOREIP = 192.168.0.0/16
 # @outils:hint FAIL2BAN_IGNOREIP = Adresses jamais bannies par fail2ban, séparées par des espaces (127.0.0.1 et ::1 toujours incluses). Ajoutez vos adresses publiques ; réseau local par défaut. Vide = aucune en plus.
 # @outils:checklist PERSONAL_SSH_KEY = ~/.ssh/id_rsa.pub
 # @outils:hint PERSONAL_SSH_KEY = Coché = votre clé SSH personnelle est aussi autorisée (root et utilisateur), en plus de la clé dimotic-ha.
-# @outils:checklist PACKAGES = nano, htop, tmux
+# @outils:checklist PACKAGES = nano, htop, tmux, screen
 # @outils:hint PACKAGES = Docker, Node.js, mosquitto-clients, build-essential et curl sont TOUJOURS installés (voir en-tête) — inutile de les ajouter.
 # @outils:checklist APPS = teleinfo
 # @outils:hint APPS = Agent pré-installé dans l'image (seule 'teleinfo' est câblée) — désactive aussi la console série (UART réservé à l'app).
 # @outils:checklist SERVICES = homeassistant, zigbee2mqtt, mosquitto, dimotic-maj, portainer-agent, whisper, piper
 # @outils:hint SERVICES = Services Docker posés dans /docker/<service>/ avec leur compose, NON démarrés (tout démarre ensuite à la main ou par la restauration). dimotic-ha est toujours posé. Whisper (reconnaissance vocale) et Piper (synthèse vocale) servent à l'assistant vocal de Home Assistant. Caddy est posé automatiquement dès qu'un domaine DuckDNS est rempli plus bas.
-# @outils:checklist INTEGRATIONS_HA = hacs, dimotic_taxonomie, dimotic_plans
-# @outils:hint INTEGRATIONS_HA = Posées dans /docker/homeassistant/config/custom_components/ (dernière version publiée, téléchargée sur GitHub) — exige « homeassistant » coché ci-dessus. Elles s'ajoutent ensuite dans Home Assistant (Paramètres > Appareils et services).
+# @outils:checklist INTEGRATIONS_HA = hacs, dimotic_taxonomie, dimotic_plans, screen_console
+# @outils:hint INTEGRATIONS_HA = Posées dans /docker/homeassistant/config/custom_components/ (dernière version publiée, téléchargée sur GitHub) — exige « homeassistant » coché ci-dessus. Elles s'ajoutent ensuite dans Home Assistant (Paramètres > Appareils et services). screen_console (console « screen » dans HA) : cochez aussi le paquet « screen » ; la clé SSH et le script de contrôle se posent après, en suivant l'assistant de l'intégration (README du dépôt dimotic-ha-screen-console).
 # @outils:checklist COMPTES = didier, claude
 # @outils:hint COMPTES = Comptes créés dans l'image, connexion par clé uniquement : didier (sudo, docker, vos clés personnelles) et claude (sudo sans mot de passe, groupe docker, clé ci-dessous). Un compte identique à l'utilisateur principal de cette carte est simplement ignoré.
 # @outils:default CLAUDE_SSH_KEY = ~/.ssh/ha2-claude/id_ed25519.pub
@@ -76,25 +76,9 @@
 # @outils:hint SAUVEGARDE_MACHINE = Seulement si « sauvegarde-nextcloud » est coché : nom de la machine sur Nextcloud (vide = nom d'hôte, ex. noisy2).
 # @outils:hint NEXTCLOUD_MOT_DE_PASSE = Seulement si « sauvegarde-nextcloud » est coché : mot de passe d'APPLICATION Nextcloud de cette machine (un par machine). Écrit sur la carte dans /dimotic-secrets/nextcloud-backup, lisible par root seulement, masqué à l'affichage.
 # @outils:hint DUCKDNS_TOKEN = Jeton de votre compte DuckDNS (le même pour tous les domaines) — laisser vide pour ne pas installer DuckDNS ni Caddy. Il est écrit sur la carte dans le script de mise à jour (lisible par root seulement).
-# @outils:select DUCKDNS_DOMAINE_1 = aucun, dimoticnoisy, dimotic-noisy-ha, dimotic-stfort-ha, dimoticloud, autre
-# @outils:default DUCKDNS_DOMAINE_1 = aucun
-# @outils:hint DUCKDNS_DOMAINE_1 = Adresse externe n°1 (sous-domaine DuckDNS) : liste de noisy et de stfort, ou « autre » puis le nom ci-dessous.
-# @outils:hint DUCKDNS_DOMAINE_1_AUTRE = Seulement si « autre » : sous-domaine DuckDNS sans .duckdns.org.
-# @outils:select DUCKDNS_MACHINE_1 = noisy2 (192.168.1.201), ha2 (192.168.1.51), stfort (192.168.1.53), nextcloud (192.168.1.13), autre
-# @outils:default DUCKDNS_MACHINE_1 = noisy2 (192.168.1.201)
-# @outils:hint DUCKDNS_MACHINE_1 = Machine du réseau local vers laquelle Caddy dirige cette adresse.
-# @outils:hint DUCKDNS_MACHINE_1_AUTRE = Seulement si « autre » : adresse IP ou nom de la machine.
-# @outils:default DUCKDNS_PORT_1 = 8123
-# @outils:hint DUCKDNS_PORT_1 = Port de la machine (8123 = Home Assistant, 8087 = dimotic-ha, 8081 = Nextcloud).
-# @outils:select DUCKDNS_DOMAINE_2 = aucun, dimoticnoisy, dimotic-noisy-ha, dimotic-stfort-ha, dimoticloud, autre
-# @outils:default DUCKDNS_DOMAINE_2 = aucun
-# @outils:hint DUCKDNS_DOMAINE_2 = Adresse externe n°2 (facultative).
-# @outils:hint DUCKDNS_DOMAINE_2_AUTRE = Seulement si « autre » : sous-domaine DuckDNS sans .duckdns.org.
-# @outils:select DUCKDNS_MACHINE_2 = noisy2 (192.168.1.201), ha2 (192.168.1.51), stfort (192.168.1.53), nextcloud (192.168.1.13), autre
-# @outils:default DUCKDNS_MACHINE_2 = noisy2 (192.168.1.201)
-# @outils:hint DUCKDNS_MACHINE_2_AUTRE = Seulement si « autre » : adresse IP ou nom de la machine.
-# @outils:default DUCKDNS_PORT_2 = 8123
-# @outils:hint DUCKDNS_PORT_2 = Port de la machine pour l'adresse n°2.
+# @outils:checklist DUCKDNS_ADRESSES = dimotic-noisy-ha → 192.168.1.201:8123, dimoticnoisy → 192.168.1.62:8081, dimotic-stfort-ha → 192.168.1.51:8123, dimoticloud → 192.168.1.13:11000
+# @outils:hint DUCKDNS_ADRESSES = Adresses externes connues, avec la machine:port vers laquelle Caddy les dirige (relevées le 26/10/2026 sur les Caddy de noisy et de Saint Fort) : cochez celles que CETTE carte doit porter. Exige le jeton ci-dessus.
+# @outils:hint DUCKDNS_AUTRES = Autres adresses, séparées par des espaces : « nom » (cette machine, port 8123), « nom:port » (cette machine), ou « nom=machine:port ». Nom sans .duckdns.org. Machine vide = cette carte elle-même.
 # @outils:hint WIFI_SSID = Laisser vide si le Pi est relié par câble Ethernet.
 # @outils:default WIFI_COUNTRY = FR
 # @outils:hint WIFI_COUNTRY = Code pays radio (FR) — sans lui le WiFi peut rester bloqué.
@@ -139,7 +123,24 @@ SSH_USER="__USER__"
 SSH_PASSWORD="__PASSWORD__"
 PERSONAL_SSH_KEY="__PERSONAL_SSH_KEY__"
 # ⭐ 18/09/2026, bug réel — "~" résolu ICI (avant sudo, $HOME = l'utilisateur réel).
-[ -n "$PERSONAL_SSH_KEY" ] && PERSONAL_SSH_KEY="${PERSONAL_SSH_KEY/#\~/$HOME}"
+# ⭐ 26/10/2026, bug réel — lancé par « Exécution par SSH » en root, $HOME = /root : la clé
+# ~/.ssh/ha2-claude/id_ed25519.pub de didier était cherchée dans /root. Si le fichier n'est pas dans
+# $HOME, on le cherche dans les dossiers de /home et on prend celui qui l'a, s'il est seul à l'avoir.
+resoudre_tilde() {
+  local chemin="$1" reste trouves=() h
+  case "$chemin" in "~"|"~/"*) ;; *) printf '%s' "$chemin"; return ;; esac
+  reste="${chemin#\~}"
+  if [ -e "$HOME$reste" ]; then printf '%s' "$HOME$reste"; return; fi
+  for h in /home/*; do [ -e "$h$reste" ] && trouves+=("$h$reste"); done
+  if [ ${#trouves[@]} -eq 1 ]; then
+    echo "Note : « $chemin » absent de $HOME, pris dans ${trouves[0]}." >&2
+    printf '%s' "${trouves[0]}"
+  else
+    [ ${#trouves[@]} -gt 1 ] && echo "Note : « $chemin » absent de $HOME et présent chez plusieurs utilisateurs (${trouves[*]}) : donnez le chemin complet." >&2
+    printf '%s' "$HOME$reste"
+  fi
+}
+[ -n "$PERSONAL_SSH_KEY" ] && PERSONAL_SSH_KEY="$(resoudre_tilde "$PERSONAL_SSH_KEY")"
 PACKAGES="__PACKAGES__"
 APPS="__APPS__"
 WIFI_SSID="__WIFI_SSID__"
@@ -153,21 +154,16 @@ SERVICES="__SERVICES__"
 INTEGRATIONS_HA="__INTEGRATIONS_HA__"
 COMPTES="__COMPTES__"
 CLAUDE_SSH_KEY="__CLAUDE_SSH_KEY__"
-[ -n "$CLAUDE_SSH_KEY" ] && CLAUDE_SSH_KEY="${CLAUDE_SSH_KEY/#\~/$HOME}"
+[ -n "$CLAUDE_SSH_KEY" ] && CLAUDE_SSH_KEY="$(resoudre_tilde "$CLAUDE_SSH_KEY")"
 OPTIONS_SYSTEME="__OPTIONS_SYSTEME__"
 NEXTCLOUD_URL="__NEXTCLOUD_URL__"; NEXTCLOUD_USER="__NEXTCLOUD_USER__"; NEXTCLOUD_DOSSIER="__NEXTCLOUD_DOSSIER__"
 SAUVEGARDE_SITE="__SAUVEGARDE_SITE__"; SAUVEGARDE_MACHINE="__SAUVEGARDE_MACHINE__"; NEXTCLOUD_MOT_DE_PASSE="__NEXTCLOUD_MOT_DE_PASSE__"
 DUCKDNS_TOKEN="__DUCKDNS_TOKEN__"
-DUCKDNS_DOMAINE_1="__DUCKDNS_DOMAINE_1__"; DUCKDNS_DOMAINE_1_AUTRE="__DUCKDNS_DOMAINE_1_AUTRE__"
-DUCKDNS_MACHINE_1="__DUCKDNS_MACHINE_1__"; DUCKDNS_MACHINE_1_AUTRE="__DUCKDNS_MACHINE_1_AUTRE__"; DUCKDNS_PORT_1="__DUCKDNS_PORT_1__"
-DUCKDNS_DOMAINE_2="__DUCKDNS_DOMAINE_2__"; DUCKDNS_DOMAINE_2_AUTRE="__DUCKDNS_DOMAINE_2_AUTRE__"
-DUCKDNS_MACHINE_2="__DUCKDNS_MACHINE_2__"; DUCKDNS_MACHINE_2_AUTRE="__DUCKDNS_MACHINE_2_AUTRE__"; DUCKDNS_PORT_2="__DUCKDNS_PORT_2__"
-
-# Domaine : « aucun » = ligne ignorée ; « autre » = la saisie libre. Machine : « nom (adresse) » -> adresse ; « autre » = la saisie libre.
-duckdns_domaine() { case "$1" in ""|aucun) echo "" ;; autre) echo "$2" ;; *) echo "$1" ;; esac; }
-duckdns_hote() { case "$1" in autre) echo "$2" ;; *"("*")"*) echo "$1" | sed -n 's/.*(\(.*\)).*/\1/p' ;; *) echo "$1" ;; esac; }
+DUCKDNS_ADRESSES="__DUCKDNS_ADRESSES__"; DUCKDNS_AUTRES="__DUCKDNS_AUTRES__"
+# shellcheck source=../scripts/sd-extras.sh
+source "$(dirname "$ENGINE_JS")/sd-extras.sh"   # extras_duckdns_entrees : cases cochées + saisie libre -> « nom=hôte:port »
 # "~" résolu ICI (avant sudo, $HOME = l'utilisateur réel), comme pour la clé SSH.
-[ -n "$IMAGE_ORANGEPI" ] && IMAGE_ORANGEPI="${IMAGE_ORANGEPI/#\~/$HOME}"
+[ -n "$IMAGE_ORANGEPI" ] && IMAGE_ORANGEPI="$(resoudre_tilde "$IMAGE_ORANGEPI")"
 
 # --- Orange Pi : image fournie à la main + outils supplémentaires sur CETTE machine ---
 case "$PI_MODEL" in
@@ -216,14 +212,12 @@ q() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
     echo "  password: $(q "$NEXTCLOUD_MOT_DE_PASSE")"
   fi
   if [ -n "$DUCKDNS_TOKEN" ]; then
-    D1="$(duckdns_domaine "$DUCKDNS_DOMAINE_1" "$DUCKDNS_DOMAINE_1_AUTRE")"; H1="$(duckdns_hote "$DUCKDNS_MACHINE_1" "$DUCKDNS_MACHINE_1_AUTRE")"
-    D2="$(duckdns_domaine "$DUCKDNS_DOMAINE_2" "$DUCKDNS_DOMAINE_2_AUTRE")"; H2="$(duckdns_hote "$DUCKDNS_MACHINE_2" "$DUCKDNS_MACHINE_2_AUTRE")"
-    if [ -z "$D1$D2" ]; then echo "ERREUR : un jeton DuckDNS est donné mais aucun domaine n'est choisi." >&2; exit 1; fi
+    DUCKDNS_ENTREES="$(extras_duckdns_entrees "$DUCKDNS_ADRESSES" "$DUCKDNS_AUTRES")" || exit 1
+    if [ -z "$DUCKDNS_ENTREES" ]; then echo "ERREUR : un jeton DuckDNS est donné mais aucune adresse n'est cochée ni saisie." >&2; exit 1; fi
     echo "duckdns:"
     echo "  token: $(q "$DUCKDNS_TOKEN")"
     echo "  domains:"
-    if [ -n "$D1" ]; then echo "    - { name: $(q "$D1"), target: $(q "$H1:$DUCKDNS_PORT_1") }"; fi
-    if [ -n "$D2" ]; then echo "    - { name: $(q "$D2"), target: $(q "$H2:$DUCKDNS_PORT_2") }"; fi
+    while IFS= read -r E; do echo "    - { name: $(q "${E%%=*}"), target: $(q "${E#*=}") }"; done <<< "$DUCKDNS_ENTREES"
   fi
   echo "sshHardening: $(q "${SSH_DURCISSEMENT:-oui}")"
   echo "fail2banIgnoreIp: $(q "$FAIL2BAN_IGNOREIP")"

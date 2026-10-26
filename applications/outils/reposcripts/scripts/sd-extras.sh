@@ -10,7 +10,7 @@
 EXTRAS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXTRAS_MODELES="${EXTRAS_MODELES:-$EXTRAS_DIR/modeles}"
 EXTRAS_SERVICES_CONNUS="homeassistant zigbee2mqtt mosquitto portainer-agent whisper piper dimotic-maj caddy"
-EXTRAS_INTEGRATIONS_CONNUES="hacs dimotic_taxonomie dimotic_plans"
+EXTRAS_INTEGRATIONS_CONNUES="hacs dimotic_taxonomie dimotic_plans screen_console"
 EXTRAS_OPTIONS_CONNUES="rotation-journaux-docker fuseau-paris sauvegarde-nextcloud wireguard claude-code"
 
 extras_contient() { # $1 = liste "a,b,c", $2 = élément
@@ -119,10 +119,11 @@ extras_pose_integrations() { # $1 = intégrations ; EXTRAS_ZIP_DIR (essais) : do
         extras_extraire_zip "$tmp/hacs.zip" "" "$dest" || { rm -rf "$tmp"; return 1; }
         echo "  Intégration hacs : posée (dernière version)."
         ;;
-      dimotic_taxonomie|dimotic_plans)
+      dimotic_taxonomie|dimotic_plans|screen_console)
         local repo="dimotic-ha-${i#dimotic_}"
         [ "$i" = dimotic_taxonomie ] && repo=dimotic-ha-taxonomie
         [ "$i" = dimotic_plans ] && repo=dimotic-ha-plans
+        [ "$i" = screen_console ] && repo=dimotic-ha-screen-console
         if [ -n "${EXTRAS_ZIP_DIR:-}" ]; then
           tag="essai"; cp "$EXTRAS_ZIP_DIR/$repo.zip" "$tmp/$i.zip"
         else
@@ -235,6 +236,33 @@ extras_machine_sauvegarde() {
 
 # --------------------------------------------------------------------------
 # Par machine : DuckDNS + Caddy
+# --------------------------------------------------------------------------
+# ⭐ 26/10/2026 (Outils v1.13) — saisie simplifiée : $1 = cases cochées « nom → hôte:port » séparées par des virgules,
+# $2 = saisie libre « nom », « nom:port » ou « nom=hôte:port » (espaces ou virgules). Machine vide = cette carte
+# (localhost : Caddy est en network_mode host), port vide = 8123. Sortie : une ligne « nom=hôte:port » par adresse.
+extras_duckdns_entrees() {
+  local item nom reste hote port
+  local -a items=() libres=()
+  IFS=',' read -ra items <<< "$1"
+  for item in "${items[@]}"; do
+    item="$(echo "$item" | sed 's/^ *//; s/ *$//')"; [ -n "$item" ] || continue
+    nom="${item%%→*}"; reste="${item#*→}"
+    printf '%s=%s\n' "$(echo "$nom" | tr -d ' ')" "$(echo "$reste" | tr -d ' ')"
+  done
+  read -ra libres <<< "${2//,/ }"
+  for item in "${libres[@]}"; do
+    if [[ "$item" == *=* ]]; then nom="${item%%=*}"; reste="${item#*=}"
+    elif [[ "$item" == *:* ]]; then nom="${item%%:*}"; reste=":${item#*:}"
+    else nom="$item"; reste=""; fi
+    hote="${reste%%:*}"; port=""; [[ "$reste" == *:* ]] && port="${reste#*:}"
+    nom="${nom%.duckdns.org}"
+    [[ "$nom" =~ ^[a-z0-9-]+$ ]] || { echo "ERREUR : DuckDNS : nom invalide « $nom » (minuscules, chiffres, tirets, sans .duckdns.org)" >&2; return 1; }
+    [[ -z "$port" || "$port" =~ ^[0-9]+$ ]] || { echo "ERREUR : DuckDNS : port invalide « $port » pour $nom" >&2; return 1; }
+    printf '%s=%s:%s\n' "$nom" "${hote:-localhost}" "${port:-8123}"
+  done
+}
+
+# Par machine : DuckDNS + Caddy (pose)
 # --------------------------------------------------------------------------
 # $1 = jeton DuckDNS ; $2... = "domaine=hôte:port" (domaine sans .duckdns.org). Le jeton est un secret : il n'est écrit
 # que dans les scripts de mise à jour (mode 700), jamais affiché.

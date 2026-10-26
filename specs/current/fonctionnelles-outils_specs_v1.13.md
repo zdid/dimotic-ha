@@ -1,9 +1,19 @@
 # Spécifications Fonctionnelles — Application OUTILS
 
-**Version :** 1.12
+**Version :** 1.13
 **Date :** 26 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/outils`
 
+> **v1.13 (26/10/2026)** — nouveau script intégré **« Gérer les images de cartes SD/clés USB »** (`images-sd`, §7.5) : menu sur les
+> images déjà créées par le script carte SD — **1) écrire** une image de machine sur une carte sans rien reconstruire, **2) supprimer** une
+> image (machine, base, échec, officielle), **3) monter** une image sous `/mnt/image-<nom>` (lecture seule par défaut).
+> Script carte SD (§7.2) : intégration **`screen_console`** ajoutée aux intégrations HA, paquet **`screen`** à la liste des paquets.
+> **Saisie DuckDNS + Caddy simplifiée** : 10 champs remplacés par des cases à cocher des adresses connues (cible déjà remplie) et une saisie libre `nom`, `nom:port` ou `nom=machine:port` (machine vide = la carte elle-même).
+> **Chemins en `~`** (clé personnelle, clé du compte claude, image Orange Pi) : s'ils sont absents de `$HOME` (cas d'un lancement par « Exécution par SSH » en root, `$HOME = /root`), ils sont cherchés dans `/home/*` et pris chez le seul utilisateur qui les a ; plusieurs : note et chemin complet à donner.
+> **`/docker/dimotic-ha/data` et `logs` donnés à l'uid 1000** dans l'image de base (utilisateur `node` du conteneur) : créés en root, ils bloquaient le démarrage du cœur (`EACCES … mkdir '/app/data/core'`, constaté sur noisy3).
+> **root par mot de passe** (demande explicite) : avec `SSH_DURCISSEMENT=oui`, `PermitRootLogin yes` et bloc `Match User <utilisateur>,root` ; root reçoit le **même mot de passe** que l'utilisateur (haché : `chpasswd` de cloud-init en trixie, `/etc/shadow` de l'image en bookworm et Orange Pi) ; mot de passe toujours refusé pour les autres comptes, contrôlé dans l'image (`sshd -T` pour l'utilisateur, root et un autre compte).
+> Nouveau script intégré **« Durcir l'accès d'une machine (SSH + fail2ban) »** (`durcissement-acces`, §7.6).
+>
 > **v1.12 (26/10/2026)** — script « Carte SD / clé USB » (§7.2) : **cases à cocher** pour préparer une machine complète sans rien
 > démarrer — services Docker (`SERVICES` : homeassistant, zigbee2mqtt, mosquitto, dimotic-maj, portainer-agent, **whisper**, **piper**),
 > intégrations Home Assistant (`INTEGRATIONS_HA` : hacs, dimotic_taxonomie, dimotic_plans), comptes (`COMPTES` : didier, claude),
@@ -356,13 +366,13 @@ Champs ajoutés au formulaire (listes à cocher, sauf mention) et champs du prof
 | Champ | Profil | Effet |
 |---|---|---|
 | `SERVICES` | `services` | `/docker/<service>/` avec son `compose.yaml` (modèles `scripts/modeles/`, tirés des machines réelles) : `homeassistant`, `zigbee2mqtt` (dongle `/dev/ttyUSB0`, variable `ZIGBEE_DEVICE`), `mosquitto` (+ `config/mosquitto.conf`), `portainer-agent`, `whisper` (`rhasspy/wyoming-whisper`, `small-int8`, français, port 10300) et `piper` (`rhasspy/wyoming-piper`, voix `fr_FR-siwis-medium`, port 10200) ; `dimotic-maj` active le profil `maj` du compose de dimotic-ha (`COMPOSE_PROFILES=maj` dans `/docker/dimotic-ha/.env`). Les dossiers `config/`, `data/` sont créés. |
-| `INTEGRATIONS_HA` | `integrationsHa` | Dans `/docker/homeassistant/config/custom_components/` : `hacs` (dernière release `hacs/integration`), `dimotic_taxonomie` et `dimotic_plans` (dernière release GitHub de `zdid/dimotic-ha-taxonomie` et `zdid/dimotic-ha-plans`). Exige `homeassistant` coché. L'ajout dans HA (Paramètres > Appareils et services) reste à faire. |
+| `INTEGRATIONS_HA` | `integrationsHa` | Dans `/docker/homeassistant/config/custom_components/` : `hacs` (dernière release `hacs/integration`), `dimotic_taxonomie`, `dimotic_plans` et **`screen_console`** (⭐ v1.13, dépôt `dimotic-ha-screen-console` : console `screen` dans HA ; paquet `screen` à cocher aussi dans `PACKAGES`, clé SSH et script de contrôle `screen-console-gate` posés ensuite en suivant l'assistant de l'intégration) (dernière release GitHub de `zdid/dimotic-ha-taxonomie` et `zdid/dimotic-ha-plans`). Exige `homeassistant` coché. L'ajout dans HA (Paramètres > Appareils et services) reste à faire. |
 | `COMPTES` | `accounts` | `didier` (sudo, docker, clés personnelles) et `claude` (sudo sans mot de passe, docker, clé publique `CLAUDE_SSH_KEY` / `claudeSshKey`), **connexion par clé seulement** ; le compte identique à l'utilisateur principal du profil est ignoré. |
 | `OPTIONS_SYSTEME` | `options` | `rotation-journaux-docker` (`/etc/docker/daemon.json`, 10 Mo × 5), `fuseau-paris`, `sauvegarde-nextcloud` (paquets `cron` `tar` ; **script, mot de passe d'application et horaire posés par machine** — voir la ligne suivante), `wireguard` (paquet `wireguard-tools`, `/etc/wireguard/` vide — configuration à poser), `claude-code` (**Claude Code installé** pour tous les comptes par `npm install -g @anthropic-ai/claude-code` dans l'image de base ; système **64 bits** seulement, refusé sinon ; la connexion au compte Anthropic reste manuelle). |
 | `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_DOSSIER`, `SAUVEGARDE_SITE` (liste noisy/stfort), `SAUVEGARDE_MACHINE` (vide = nom d'hôte), `NEXTCLOUD_MOT_DE_PASSE` | `sauvegarde` | **Obligatoires si `sauvegarde-nextcloud` est coché.** Le script `/dimotic-backup/nextcloud-backup.sh` est rendu par le **vrai générateur** de l'application Sauvegarde (`BackupScript.js` embarqué dans l'archive, `sauvegarde-rendu/rendre.js`, `shellQuote` fourni par un shim) : c'est celui que « Pousser » déposerait. Le script **ne contient pas** le mot de passe : il le lit dans `/dimotic-secrets/nextcloud-backup` (600, dossier 700), écrit à partir de `NEXTCLOUD_MOT_DE_PASSE` (champ sensible, masqué à l'affichage, passé par l'environnement). Le cron (`5 3 * * *`, journal `/dimotic-backup/cron.log`) est dans le **crontab de root**, comme « Pousser », donc un « Pousser » ultérieur le retrouve sans doublon. |
 | `DUCKDNS_TOKEN` (texte) | `duckdns.token` | Jeton du compte DuckDNS ; vide = ni DuckDNS ni Caddy. Écrit dans le script de mise à jour (mode 700), **masqué** à l'affichage du profil. |
-| `DUCKDNS_DOMAINE_1/2` (liste) + `_AUTRE` (texte) | `duckdns.domains[].name` | **Deux adresses externes au plus**, choisies dans la liste des domaines de noisy et de stfort (`dimoticnoisy`, `dimotic-noisy-ha`, `dimotic-stfort-ha`, `dimoticloud`) ou « autre » avec saisie libre ; `aucun` ignore la ligne. |
-| `DUCKDNS_MACHINE_1/2` (liste) + `_AUTRE` (texte) et `DUCKDNS_PORT_1/2` | `duckdns.domains[].target` | Machine du réseau local visée par Caddy (noisy2 .201, ha2 .51, stfort .53, nextcloud .13, ou autre) et son port (8123 par défaut). |
+| `DUCKDNS_ADRESSES` (cases à cocher) | `duckdns.domains[]` | ⭐ v1.13 — **adresses connues, cible déjà remplie** (relevées le 26/10/2026 sur les Caddy de noisy et de Saint Fort) : `dimotic-noisy-ha → 192.168.1.201:8123`, `dimoticnoisy → 192.168.1.62:8081`, `dimotic-stfort-ha → 192.168.1.51:8123`, `dimoticloud → 192.168.1.13:11000`. |
+| `DUCKDNS_AUTRES` (texte) | `duckdns.domains[]` | ⭐ v1.13 — autres adresses séparées par des espaces : `nom` (cette carte, port 8123), `nom:port` (cette carte) ou `nom=machine:port` ; **machine vide = la carte elle-même** (`localhost`, Caddy étant en `network_mode: host`), port vide = 8123 ; `.duckdns.org` accepté et retiré. Conversion par `extras_duckdns_entrees` (`sd-extras.sh`). Plus de limite à deux adresses ; une même adresse deux fois est refusée. (Avant v1.13 : `DUCKDNS_DOMAINE_1/2`, `_AUTRE`, `DUCKDNS_MACHINE_1/2`, `_AUTRE`, `DUCKDNS_PORT_1/2`, soit 10 champs.) |
 
 DuckDNS : un script de mise à jour et un cron (toutes les 5 minutes) par domaine (`/dimotic-ha-addons/duckdns/<domaine>.sh|.cron`,
 lien dans `/etc/cron.d/`, comme le script « Accès externe »), `/docker/caddy/Caddyfile` (un bloc `reverse_proxy` par domaine) et
@@ -430,6 +440,57 @@ jetons saisis) est **supprimée dès la fin**, succès ou échec ; un jeton cont
 charge (valeurs insérées telles quelles dans le script). Éprouvé en simulation (`screen`/`claude`/`useradd` simulés) : création du
 compte, fichiers et droits, JSON valides, refus d'un compte sudo, validations locales. **Non vérifié** : exécution réelle sur
 une machine et lancement effectif de Claude Code.
+
+### 7.5 « Gérer les images de cartes SD/clés USB » (⭐ v1.13)
+
+`reposcripts/wrappers/images-sd.sh` (+ `yaml/images-sd.yaml`), archive auto-extractible lancée avec `sudo` depuis un vrai
+terminal, **sans aucune question au départ** : un menu en boucle, qui affiche à chaque fois la **liste de toutes les images** puis les trois actions. Il travaille sur le **même dossier** que le script carte SD
+(§7.2) — l'archive s'extrait dans le dossier fixe `~/.cache/dimotic-ha-outils` (utilisateur réel, même sous `sudo`), images dans
+`data/.sd-card-image-cache/`. Il n'est donc utile que sur la machine qui a préparé les images.
+
+Types d'images listés (type, chemin relatif, taille, date) : **machine** (`prepared/<machine>.img`), **échec** (`*.echec`,
+`*.partial`), **base** (`base/*.img`), **officielle** (`*.img`, `*.img.xz` à la racine, `orangepi/`).
+
+1. **Écrire une image de machine sur une carte** — seules les images *machine* sont proposées (une image de base n'a pas
+   d'identité). Même choix de périphérique que §7.2 (amovibles ou USB de taille non nulle, trop petit signalé et refusé,
+   `r` pour relister, Entrée pour revenir), avec en plus les **points de montage** de chaque disque (« ⚠️ EN SERVICE, monté
+   sur … ») ; confirmation en retapant le nom exact du périphérique ; partitions démontées puis `dd` (bs=4M, `conv=fsync`),
+   `sync`, `partprobe`.
+2. **Supprimer une image** — tous types ; confirmation en retapant le nom du fichier ; refus si l'image est attachée à un
+   périphérique loop ; une image *machine* emporte son `.profile.json`. Le message rappelle la conséquence (base reconstruite
+   dans qemu, image officielle retéléchargée, image de machine recréée en quelques secondes).
+3. **Monter une image** — tous types sauf compressés (`.xz`, `.7z`) ; **lecture seule par défaut** (`losetup -r`, `mount -o ro`),
+   lecture-écriture sur demande ; chaque partition reconnue par `blkid` montée sous `/mnt/image-<nom>/` (`boot` pour vfat,
+   `racine` pour ext*/btrfs/f2fs) ; Entrée démonte tout et détache le loop ; démontage aussi sur Ctrl+C ou sortie. Refus si
+   `/mnt/image-<nom>` existe déjà.
+
+**Vérifié** (sans root, faux dossier d'images) : listes, suppression (avec `.profile.json`), liste des périphériques et refus du
+montage sans droits. **Non vérifié** : écriture réelle sur une carte et montage réel (root nécessaire).
+
+### 7.6 « Durcir l'accès d'une machine (SSH + fail2ban) » (⭐ v1.13)
+
+`reposcripts/wrappers/durcissement-acces.sh` (+ `yaml/durcissement-acces.yaml`), script seul lancé avec `sudo` sur une machine
+**déjà installée** (ou par « Exécution par SSH »), **à passer après l'installation** : la carte (§7.2) laisse root se connecter
+par mot de passe pour faciliter l'installation, ce script le **supprime** (demande explicite, 26/10/2026).
+
+Champs : `UTILISATEUR` (`didier` par défaut : seul compte qui garde le mot de passe SSH ; doit exister et avoir un mot de passe,
+sinon arrêt), `FAIL2BAN_IGNOREIP` (`192.168.0.0/16` par défaut). **root : par clé seulement**, sans option
+(`PermitRootLogin prohibit-password`, root hors du bloc Match) ; son mot de passe n'est pas modifié (utile en console) ;
+avertissement si `/root/.ssh/authorized_keys` ne contient aucune clé.
+
+Déroulé : vérifications ; **sauvegarde** de `/etc/ssh`, `/etc/fail2ban` et `/etc/shadow` dans `/root/durcissement-acces-<date>/` ;
+drop-in `sshd_config.d/01-dimotic-durcissement.conf` (`PermitRootLogin prohibit-password`, `PasswordAuthentication no`,
+`KbdInteractiveAuthentication no` — préfixe `01-` pour passer avant les drop-ins de la carte ou un `50-cloud-init.conf`, sshd
+gardant la première valeur lue ; ligne `Include` ajoutée si absente) ; bloc `Match User <utilisateur>` **entre repères** en fin de
+`sshd_config` (remplacé à chaque passage) ; **contrôles avant rechargement** (`sshd -t`, `sshd -T` : mot de passe oui pour
+l'utilisateur, non pour root et pour un autre compte ; `PermitRootLogin`) — en cas d'échec, **configuration d'origine remise en
+place** et rien n'est rechargé ; fail2ban installé si absent (`fail2ban`, `python3-systemd`, `nftables`), `jail.local` identique
+aux cartes + `jail.d/zz-ignoreip.local`, `fail2ban-client -t` ; rechargement de SSH (`systemctl reload`, sessions ouvertes
+conservées), fail2ban activé et redémarré ; bilan (comptes avec mot de passe, clés de root, ports ouverts).
+
+**Vérifié** dans un conteneur Debian bookworm jetable (vrai `sshd`, `50-cloud-init.conf` à `yes` présent : root et un autre compte
+refusés, l'utilisateur accepté, second passage sans doublon), et **sur noisy3** (26/10/2026, version précédente avec root par mot
+de passe : script complet réussi, méthodes réellement proposées par le serveur vérifiées par de nouvelles connexions).
 
 ### 7.3 (retiré en v1.4)
 
@@ -499,6 +560,7 @@ l'historique git (commit d'avant le 29/09/2026).
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.13 | 26/10/2026 | Claude | Nouveaux scripts intégrés **« Gérer les images de cartes SD/clés USB »** (§7.5 : écrire, supprimer, monter) et **« Durcir l'accès d'une machine (SSH + fail2ban) »** (§7.6) ; carte SD : `screen_console`, saisie DuckDNS simplifiée, root par mot de passe à l'installation (même que l'utilisateur ; retiré ensuite par §7.6), `data/`/`logs/` de dimotic-ha à l'uid 1000, chemins `~` cherchés dans `/home`. v1.12 archivée. |
 | 1.12 | 26/10/2026 | Claude | Script « Carte SD » : **cases à cocher** (services Docker dont Whisper/Piper, intégrations HA, comptes didier/claude, options système, **DuckDNS + Caddy** avec 2 adresses externes), tout posé et non démarré (§7.2). v1.11 archivée. |
 | 1.10 | 08/10/2026 | Claude | Script « Agent Claude Code » : section « Site » (`site.md`) ajoutée au `CLAUDE.md` rendu, variable `{{HA_TOKEN_FILE}}` (`~/.ha_token` si déjà en place) (§7.4). |
 | 1.11 | 12/10/2026 | Claude | Script « Agent Claude Code » : souris de Claude Code désactivée (`CLAUDE_CODE_DISABLE_MOUSE=1` dans `~/.bashrc` du compte dédié et dans la commande de lancement du screen). Champ `DIMOTIC_DATA_DIR` : ACL lecture/écriture sur les données de dimotic-ha, secrets refusés ; modèle `CLAUDE.md` 1.2.3. |

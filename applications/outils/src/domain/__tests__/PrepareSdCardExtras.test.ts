@@ -34,17 +34,12 @@ describe('wrapper prepare-sd-card.sh — champs de l\'assistant', () => {
     expect(h.options).toEqual(['rotation-journaux-docker', 'fuseau-paris', 'sauvegarde-nextcloud', 'wireguard', 'claude-code']);
   });
 
-  it('DuckDNS : listes déroulantes des domaines (noisy, stfort) et des machines, avec « autre »', () => {
-    for (const i of [1, 2]) {
-      const d = hints[`DUCKDNS_DOMAINE_${i}`] as { type: string; options: string[] };
-      expect(d.type).toBe('select');
-      expect(d.options).toEqual(expect.arrayContaining(['aucun', 'dimoticnoisy', 'dimotic-noisy-ha', 'dimotic-stfort-ha', 'autre']));
-      const m = hints[`DUCKDNS_MACHINE_${i}`] as { type: string; options: string[] };
-      expect(m.type).toBe('select');
-      expect(m.options).toContain('autre');
-      expect(variables).toEqual(expect.arrayContaining([`DUCKDNS_DOMAINE_${i}_AUTRE`, `DUCKDNS_MACHINE_${i}_AUTRE`, `DUCKDNS_PORT_${i}`]));
-    }
-    expect(variables).toContain('DUCKDNS_TOKEN');
+  it('DuckDNS : adresses connues à cocher (cible déjà remplie) + une saisie libre', () => {
+    const d = hints.DUCKDNS_ADRESSES as { type: string; options: string[] };
+    expect(d.type).toBe('checklist');
+    expect(d.options).toEqual(['dimotic-noisy-ha → 192.168.1.201:8123', 'dimoticnoisy → 192.168.1.62:8081', 'dimotic-stfort-ha → 192.168.1.51:8123', 'dimoticloud → 192.168.1.13:11000']);
+    expect(variables).toEqual(expect.arrayContaining(['DUCKDNS_TOKEN', 'DUCKDNS_ADRESSES', 'DUCKDNS_AUTRES']));
+    expect(variables.some((v: string) => /DUCKDNS_(DOMAINE|MACHINE|PORT)_/.test(v))).toBe(false);
   });
 
   it('l\'archive embarque sd-extras.sh et les modèles', () => {
@@ -69,6 +64,28 @@ function bash(rootfs: string, corps: string, env: Record<string, string> = {}) {
   return spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...process.env, ...env } });
 }
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'extras-'));
+
+describe('sd-extras.sh — saisie DuckDNS', () => {
+  it('cases cochées + saisie libre -> nom=hôte:port, machine vide = cette carte, port vide = 8123', () => {
+    const r = bash(tmp(), `extras_duckdns_entrees "dimotic-noisy-ha → 192.168.1.201:8123,dimoticloud → 192.168.1.13:11000" "essai essai2:8087, essai3=192.168.1.9:80 essai4.duckdns.org=:8081"`);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim().split('\n')).toEqual([
+      'dimotic-noisy-ha=192.168.1.201:8123', 'dimoticloud=192.168.1.13:11000',
+      'essai=localhost:8123', 'essai2=localhost:8087', 'essai3=192.168.1.9:80', 'essai4=localhost:8081'
+    ]);
+  });
+
+  it('refuse un nom ou un port invalide', () => {
+    expect(bash(tmp(), 'extras_duckdns_entrees "" "Mauvais_Nom"').status).not.toBe(0);
+    expect(bash(tmp(), 'extras_duckdns_entrees "" "essai:abc"').status).not.toBe(0);
+  });
+
+  it('rien coché ni saisi -> aucune ligne', () => {
+    const r = bash(tmp(), 'extras_duckdns_entrees "" ""');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe('');
+  });
+});
 
 describe('sd-extras.sh — services', () => {
   it('pose chaque service dans /docker/<service>/ avec son compose, sans rien démarrer', () => {
@@ -115,18 +132,21 @@ describe('sd-extras.sh — intégrations Home Assistant', () => {
     make('hacs.zip', { '__init__.py': '# hacs', 'manifest.json': '{}' });
     make('dimotic-ha-taxonomie.zip', { 'dimotic-ha-taxonomie-essai/custom_components/dimotic_taxonomie/manifest.json': '{"version":"x"}' });
     make('dimotic-ha-plans.zip', { 'dimotic-ha-plans-essai/custom_components/dimotic_plans/manifest.json': '{"version":"y"}', 'dimotic-ha-plans-essai/README.md': 'non copié' });
+    make('dimotic-ha-screen-console.zip', { 'dimotic-ha-screen-console-essai/custom_components/screen_console/manifest.json': '{"version":"z"}', 'dimotic-ha-screen-console-essai/host/screen-console-gate': 'non copié' });
   }
 
   it('pose HACS et les deux intégrations dimotic dans custom_components', () => {
     const root = tmp(); const z = tmp(); zips(z);
     fs.mkdirSync(path.join(root, 'docker/homeassistant'), { recursive: true });
-    const r = bash(root, 'extras_pose_integrations "hacs,dimotic_taxonomie,dimotic_plans"', { EXTRAS_ZIP_DIR: z });
+    const r = bash(root, 'extras_pose_integrations "hacs,dimotic_taxonomie,dimotic_plans,screen_console"', { EXTRAS_ZIP_DIR: z });
     expect(r.status, r.stderr).toBe(0);
     const cc = path.join(root, 'docker/homeassistant/config/custom_components');
     expect(fs.existsSync(path.join(cc, 'hacs/__init__.py'))).toBe(true);
     expect(fs.existsSync(path.join(cc, 'dimotic_taxonomie/manifest.json'))).toBe(true);
     expect(fs.existsSync(path.join(cc, 'dimotic_plans/manifest.json'))).toBe(true);
     expect(fs.existsSync(path.join(cc, 'dimotic_plans/README.md'))).toBe(false);
+    expect(fs.existsSync(path.join(cc, 'screen_console/manifest.json'))).toBe(true);
+    expect(fs.existsSync(path.join(cc, 'screen_console/screen-console-gate'))).toBe(false);
   });
 
   it('exige le service homeassistant', () => {
@@ -292,12 +312,12 @@ describe('flash-sd-card.js — profil', () => {
     expect(p.duckdns.domains).toEqual([{ name: 'dimoticnoisy', target: '192.168.1.62:8081' }]);
   });
 
-  it('refuse une valeur inconnue, des intégrations sans Home Assistant, plus de 2 domaines et un compte claude sans clé', () => {
+  it('refuse une valeur inconnue, des intégrations sans Home Assistant, une même adresse DuckDNS deux fois et un compte claude sans clé', () => {
     sortie(); vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(() => loadProfile(profil('services: [truc]'))).toThrow('exit 1');
     expect(() => loadProfile(profil('integrationsHa: [hacs]'))).toThrow('exit 1');
     expect(() => loadProfile(profil('accounts: [claude]'))).toThrow('exit 1');
-    const trois = 'duckdns:\n  token: t\n  domains:\n    - { name: a, target: "h:1" }\n    - { name: b, target: "h:2" }\n    - { name: c, target: "h:3" }';
+    const trois = 'duckdns:\n  token: t\n  domains:\n    - { name: a, target: "h:1" }\n    - { name: a, target: "h:2" }';
     expect(() => loadProfile(profil(trois))).toThrow('exit 1');
     expect(() => loadProfile(profil('duckdns:\n  token: t\n  domains:\n    - { name: "Mal Nommé", target: "h:1" }'))).toThrow('exit 1');
   });

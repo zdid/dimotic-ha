@@ -58,7 +58,7 @@ const RENDU_SAUVEGARDE_DIR = path.join(__dirname, 'sauvegarde-rendu');
 const MODELES_DIR = path.join(__dirname, 'modeles');
 /** Valeurs reconnues des cases à cocher (v1.12) — à tenir synchronisées avec sd-extras.sh. */
 const SERVICES_CONNUS = ['homeassistant', 'zigbee2mqtt', 'mosquitto', 'portainer-agent', 'whisper', 'piper', 'dimotic-maj', 'caddy'];
-const INTEGRATIONS_CONNUES = ['hacs', 'dimotic_taxonomie', 'dimotic_plans'];
+const INTEGRATIONS_CONNUES = ['hacs', 'dimotic_taxonomie', 'dimotic_plans', 'screen_console'];
 const OPTIONS_CONNUES = ['rotation-journaux-docker', 'fuseau-paris', 'sauvegarde-nextcloud', 'wireguard', 'claude-code'];
 const COMPTES_CONNUS = ['didier', 'claude'];
 /** Place ajoutée à l'image de base avant les installations (image officielle : ~370 Mo libres). */
@@ -228,14 +228,14 @@ function loadProfile(profilePath) {
   } else {
     profile.sauvegarde = null;
   }
-  // DuckDNS + Caddy : un jeton (compte DuckDNS) et jusqu'à 2 domaines {domaine, cible: hôte:port}.
+  // DuckDNS + Caddy : un jeton (compte DuckDNS) et des domaines {domaine, cible: hôte:port} (plus de limite à 2 depuis v1.13).
   profile.duckdns = profile.duckdns || null;
   if (profile.duckdns) {
     const domaines = (profile.duckdns.domains || []).filter((d) => d && d.name);
     if (!domaines.length) profile.duckdns = null;
     else {
       if (!profile.duckdns.token) fail('duckdns : jeton manquant.');
-      if (domaines.length > 2) fail('duckdns : 2 domaines au plus.');
+      if (new Set(domaines.map((d) => d.name)).size !== domaines.length) fail('duckdns : une même adresse est donnée deux fois.');
       for (const d of domaines) {
         if (!/^[a-z0-9-]+$/.test(String(d.name))) fail(`duckdns : nom de domaine invalide « ${d.name} » (sans .duckdns.org).`);
         if (!/^[A-Za-z0-9._-]+:\d+$/.test(String(d.target))) fail(`duckdns : cible invalide « ${d.target} » (attendu hôte:port).`);
@@ -581,8 +581,10 @@ function cloudInitFiles(profile, personalKeys) {
     writeFiles.push({
       path: '/etc/ssh/sshd_config',
       append: true,
-      content: `\n# Durcissement (Outils dimotic-ha) : l'utilisateur ${profile.user} garde le mot de passe.\nMatch User ${profile.user}\n    PasswordAuthentication yes\n`
+      content: `\n# Durcissement (Outils dimotic-ha) : l'utilisateur ${profile.user} et root gardent le mot de passe.\nMatch User ${profile.user},root\n    PasswordAuthentication yes\n`
     });
+    // ⭐ 26/10/2026, demande explicite — root reçoit le même mot de passe que l'utilisateur (haché).
+    userData.chpasswd = { expire: false, users: [{ name: 'root', password: user.passwd, type: 'hash' }] };
   } else {
     userData.ssh_pwauth = true;
   }
@@ -667,7 +669,7 @@ async function buildMachineImage(entry, profile, basePath) {
         args.push('--wifi-ssid', profile.wifi.ssid, '--wifi-country', profile.wifi.country);
         if (profile.wifi.password) args.push('--wifi-pass', String(profile.wifi.password));
       }
-      const r = spawnSync('bash', args, { stdio: 'inherit' });
+      const r = spawnSync('bash', args, { stdio: 'inherit', env: { ...process.env, PASSWORD_HASH: hashPassword(profile.password) } });
       if (r.status !== 0) keepFailedImage(partial, '', 'Personnalisation de la machine', r.status);
     }
 

@@ -317,6 +317,9 @@ run_base() {
 
   echo "/docker/dimotic-ha/ (compose.yaml, NON démarré)..."
   mkdir -p "$ROOTFS/docker/dimotic-ha/data" "$ROOTFS/docker/dimotic-ha/logs"
+  # ⭐ 26/10/2026, bug réel (noisy3) — le conteneur tourne avec l'utilisateur `node` (uid 1000) : en root, data/ et logs/
+  # étaient inscriptibles par root seul et le cœur bouclait sur « EACCES: permission denied, mkdir '/app/data/core' ».
+  chown 1000:1000 "$ROOTFS/docker/dimotic-ha/data" "$ROOTFS/docker/dimotic-ha/logs"
   cp "$compose" "$ROOTFS/docker/dimotic-ha/compose.yaml"
 
   if [ -n "$SERVICES$INTEGRATIONS$OPTIONS" ]; then
@@ -350,8 +353,10 @@ run_base() {
   chmod 700 "$ROOTFS/root/.ssh"; chmod 600 "$ROOTFS/root/.ssh/authorized_keys"; chown -R 0:0 "$ROOTFS/root/.ssh"
 
   if [ "$SSH_HARDENING" = "yes" ]; then
-    echo "Durcissement SSH : root par clé seulement, pas de mot de passe (l'utilisateur du profil le garde, ajouté par machine)..."
-    printf '%s\n' '# Durcissement (Outils dimotic-ha) : root par clé uniquement.' 'PermitRootLogin prohibit-password' \
+    # ⭐ 26/10/2026, demande explicite : root se connecte AUSSI par mot de passe (celui de l'utilisateur du profil, posé par machine) ;
+    # le mot de passe reste refusé pour tous les autres comptes (bloc Match User <utilisateur>,root en fin de sshd_config).
+    echo "Durcissement SSH : mot de passe refusé sauf pour root et l'utilisateur du profil (ajoutés par machine)..."
+    printf '%s\n' '# Durcissement (Outils dimotic-ha) : root autorisé (clé, et mot de passe via le bloc Match en fin de sshd_config).' 'PermitRootLogin yes' \
       > "$ROOTFS/etc/ssh/sshd_config.d/permit-root-login.conf"
     printf '%s\n' '# Durcissement (Outils dimotic-ha) : pas de mot de passe — sauf le bloc Match User en fin de sshd_config (par machine).' \
       'PasswordAuthentication no' 'KbdInteractiveAuthentication no' > "$ROOTFS/etc/ssh/sshd_config.d/50-durcissement.conf"
@@ -379,9 +384,9 @@ EOF
   local sshd_eff
   sshd_eff="$(in_chroot "/usr/sbin/sshd -T -C user=root,host=essai,addr=127.0.0.1")"
   if [ "$SSH_HARDENING" = "yes" ]; then
-    echo "$sshd_eff" | grep -Eq '^permitrootlogin (without-password|prohibit-password)' || { echo "ERREUR : PermitRootLogin n'est pas « prohibit-password » dans l'image" >&2; exit 1; }
-    echo "$sshd_eff" | grep -q '^passwordauthentication no' || { echo "ERREUR : le mot de passe SSH n'est pas refusé dans l'image" >&2; exit 1; }
-    echo "  SSH : root par clé uniquement, mot de passe refusé — OK."
+    grep -q '^permitrootlogin yes' <<<"$sshd_eff" || { echo "ERREUR : PermitRootLogin n'est pas « yes » dans l'image" >&2; exit 1; }
+    grep -q '^passwordauthentication no' <<<"$sshd_eff" || { echo "ERREUR : le mot de passe SSH n'est pas refusé par défaut dans l'image" >&2; exit 1; }
+    echo "  SSH : root autorisé, mot de passe refusé par défaut (ouvert par machine pour root et l'utilisateur) — OK."
   fi
   in_chroot "fail2ban-client -t" >/dev/null 2>&1 && echo "  fail2ban : configuration valide — OK." \
     || { echo "ERREUR : fail2ban-client -t refuse la configuration dans l'image" >&2; exit 1; }
@@ -456,11 +461,18 @@ UNIT
 
 apply_machine_ssh_f2b() {
   if [ "$SSH_HARDENING" = "yes" ] && [ -n "$USER_ARG" ]; then
-    if ! grep -q "^Match User $USER_ARG\$" "$ROOTFS/etc/ssh/sshd_config"; then
-      printf '\n# Durcissement (Outils dimotic-ha) : l utilisateur %s garde le mot de passe.\nMatch User %s\n    PasswordAuthentication yes\n' \
+    if ! grep -q "^Match User $USER_ARG,root\$" "$ROOTFS/etc/ssh/sshd_config"; then
+      printf '\n# Durcissement (Outils dimotic-ha) : l utilisateur %s et root gardent le mot de passe.\nMatch User %s,root\n    PasswordAuthentication yes\n' \
         "$USER_ARG" "$USER_ARG" >> "$ROOTFS/etc/ssh/sshd_config"
     fi
-    echo "SSH : mot de passe refusé sauf pour $USER_ARG."
+    echo "SSH : mot de passe refusé sauf pour $USER_ARG et root."
+  fi
+  # ⭐ 26/10/2026 — root reçoit le mot de passe de l'utilisateur du profil (haché, PASSWORD_HASH) : écrit directement dans /etc/shadow
+  # de l'image (pas besoin du chroot ; sur bookworm l'utilisateur lui-même n'est créé qu'au premier démarrage par userconf.txt).
+  if [ -n "${PASSWORD_HASH:-}" ]; then
+    awk -F: -v OFS=: -v h="$PASSWORD_HASH" '$1 == "root" { $2 = h } { print }' "$ROOTFS/etc/shadow" > "$ROOTFS/etc/shadow.dimotic" \
+      && cat "$ROOTFS/etc/shadow.dimotic" > "$ROOTFS/etc/shadow" && rm -f "$ROOTFS/etc/shadow.dimotic"
+    echo "root : même mot de passe que $USER_ARG."
   fi
   if [ -n "$F2B_IGNOREIP" ]; then
     mkdir -p "$ROOTFS/etc/fail2ban/jail.d"
@@ -553,7 +565,7 @@ run_opi_machine() {
   printf '%s:%s\n' "$USER_ARG" "$PASSWORD_HASH" | in_chroot "chpasswd -e"
   echo "Utilisateur « $USER_ARG » créé (groupes sudo, docker, dialout…), « orangepi » par défaut retiré."
 
-  # Mot de passe root verrouillé (l'accès root reste possible par clé) : le mot de passe par défaut d'Orange Pi est public.
+  # Mot de passe root par défaut d'Orange Pi (public) verrouillé ici ; apply_machine_ssh_f2b lui donne ensuite celui de l'utilisateur.
   in_chroot "passwd -l root >/dev/null 2>&1 || true"
 
   # Assistant de premier lancement Orange Pi (crée un utilisateur à la première connexion en console) : désactivé, l'utilisateur
@@ -604,9 +616,13 @@ run_opi_machine() {
     sshd_root="$(in_chroot "/usr/sbin/sshd -T -C user=root,host=essai,addr=127.0.0.1")"
     grep -q '^passwordauthentication yes' <<<"$sshd_user" \
       || { echo "ERREUR : le mot de passe SSH n'est pas autorisé pour $USER_ARG dans l'image" >&2; exit 1; }
-    grep -q '^passwordauthentication no' <<<"$sshd_root" \
-      || { echo "ERREUR : le mot de passe SSH n'est pas refusé pour root dans l'image" >&2; exit 1; }
-    echo "  SSH : mot de passe autorisé pour $USER_ARG seulement — OK."
+    grep -q '^passwordauthentication yes' <<<"$sshd_root" \
+      || { echo "ERREUR : le mot de passe SSH n'est pas autorisé pour root dans l'image" >&2; exit 1; }
+    local sshd_autre
+    sshd_autre="$(in_chroot "/usr/sbin/sshd -T -C user=personne,host=essai,addr=127.0.0.1")"
+    grep -q '^passwordauthentication no' <<<"$sshd_autre" \
+      || { echo "ERREUR : le mot de passe SSH n'est pas refusé pour les autres comptes dans l'image" >&2; exit 1; }
+    echo "  SSH : mot de passe autorisé pour $USER_ARG et root seulement — OK."
   fi
   # Clés d'hôte SSH : GARDÉES (générées plus haut, propres à CETTE copie de l'image, la base n'en a pas). Avant le 24/10/2026 elles étaient
   # supprimées « pour être recréées par orangepi-firstrun » : or ce script désactive justement cet assistant (.not_logged_in_yet supprimé), les

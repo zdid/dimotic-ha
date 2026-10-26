@@ -1,0 +1,10 @@
+id: images-sd
+title: "Gérer les images de cartes SD/clés USB"
+description: >-
+  Menu sur les images déjà créées par « Préparer et écrire une carte SD/clé USB » (même dossier,
+  ~/.cache/dimotic-ha-outils) : 1) écrire une image de machine sur une carte, sans rien reconstruire ;
+  2) supprimer une image (machine, base, échec ou image officielle téléchargée), avec confirmation ;
+  3) monter une image (lecture seule par défaut) sous /mnt/image-<nom>, démontée en appuyant sur Entrée.
+  À lancer avec sudo depuis un vrai terminal, sur la machine qui a préparé les images.
+filename: images-sd.sh
+requiresSudo: true
