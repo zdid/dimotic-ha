@@ -7,7 +7,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import { elementPlan, genererPage, slug, type PositionPlan, type TexteLibre } from './generation';
+import { elementPlan, genererPage, slug, type Fond, type PositionPlan, type TexteLibre } from './generation';
 import { ajusterImage, dimensionsPng } from './image';
 import type { Ancrage, Dimensions } from './coordonnees';
 
@@ -56,13 +56,13 @@ export interface FichiersPlans {
   resume: { plan: string; page: string; placees: number; hors: number }[];
 }
 
-export async function genererFichiersPlans(ids: string[], source: SourcePlans, ecran: Dimensions, tailleTexte?: number): Promise<FichiersPlans> {
+export async function genererFichiersPlans(ids: string[], source: SourcePlans, ecran: Dimensions, tailleTexte?: number, fond?: Fond, reglages = false, thermometres: Record<string, string> = {}): Promise<FichiersPlans> {
   const fichiers = new Map<string, Buffer>();
   const resume: FichiersPlans['resume'] = [];
   const pages = new Set<string>();
   for (const id of ids) {
     const p = await source.lire(id);
-    const page = genererPage({ id, image: dimensionsPng(p.image), positions: p.positions, textes: p.textes }, ecran, p.ancrage, tailleTexte);
+    const page = genererPage({ id, image: dimensionsPng(p.image), positions: p.positions, textes: p.textes }, ecran, p.ancrage, tailleTexte, fond, reglages, thermometres);
     if (pages.has(page.page)) throw new Error(`deux plans donnent la même page « ${page.page} » (identifiants trop proches)`);
     pages.add(page.page);
     const entete = `# Élément GÉNÉRÉ à l'assemblage — page du plan « ${id} » (${ecran.largeur}x${ecran.hauteur}). Ne pas modifier : regénéré à chaque assemblage.`;

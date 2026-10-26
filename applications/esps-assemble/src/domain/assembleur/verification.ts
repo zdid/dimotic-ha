@@ -73,6 +73,7 @@ export function verifier(appareil: FicheAppareil, sources: SourcesAppareil, ctx:
   if (appareil.plans.length > 0) {
     if (!m.ecran) erreurs.push(`l'appareil demande des pages de plans : le matériel ${m.id} n'a pas d'écran`);
     if (!presents.has('polices-plans')) erreurs.push(`l'appareil demande des pages de plans : il doit aussi inclure l'élément polices-plans (polices des icônes)`);
+    if (appareil.reglagesPlans && !presents.has('polices-reglages')) erreurs.push(`l'appareil demande des boîtes de réglage sur les plans (reglages_plans) : il doit aussi inclure l'élément polices-reglages (polices des boîtes)`);
   }
 
   // Transport vers HA : l'API native d'ESPHome OU MQTT (jamais les deux). Seul MQTT passe par NOMMAGE, donc seul lui donne la taxonomie.

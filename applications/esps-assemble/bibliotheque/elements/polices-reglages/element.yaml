@@ -1,0 +1,17 @@
+# Élément : polices des boîtes de réglage ouvertes depuis les pages de plans (font_reglage_titre, font_reglage_texte, font_reglage_valeur).
+# Glyphes : ASCII imprimable et caractères français (les noms d'appareils viennent de Home Assistant : accents et ponctuation possibles).
+# À inclure avec l'élément polices-plans quand la fiche de l'appareil active `reglages_plans: oui`.
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_reglage_titre
+    size: 24
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~àâäéèêëîïôöùûüçÀÂÄÉÈÊËÎÏÔÖÙÛÜÇœŒ°·×’«»–…"
+  - file: "gfonts://Roboto"
+    id: font_reglage_texte
+    size: 20
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~àâäéèêëîïôöùûüçÀÂÄÉÈÊËÎÏÔÖÙÛÜÇœŒ°·×’«»–…"
+  - file: "gfonts://Roboto"
+    id: font_reglage_valeur
+    size: 44
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~àâäéèêëîïôöùûüçÀÂÄÉÈÊËÎÏÔÖÙÛÜÇœŒ°·×’«»–…"

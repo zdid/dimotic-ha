@@ -56,11 +56,10 @@ packages:
   materiel: !include bibliotheque/materiels/sunton-8048s070c/base.yaml
   wifi: !include generes/wifi.yaml   # généré d'après `wifi:` de la fiche (réseaux des sites + point d'accès de secours)
   polices_plans: !include bibliotheque/elements/polices-plans/element.yaml
+  polices_reglages: !include bibliotheque/elements/polices-reglages/element.yaml   # polices des boîtes de réglage des plans (fiche : reglages_plans)
   tailles_plans: !include generes/tailles-plans.yaml   # généré d'après `tailles_plans` de la fiche (icônes, valeurs de capteurs)
   polices_climatisation: !include bibliotheque/elements/polices-climatisation/element.yaml
-  page_original: !include generes/page-plan-maison.yaml
-  page_rez_de_chaussee: !include generes/page-plan-rez_de_chauss_e.yaml
-  page_premier: !include generes/page-plan-premier.yaml
+  pages_plans: !include generes/pages-plans.yaml   # généré à l'assemblage : une page par plan choisi (fiche `plans:` ou sélection du bouton « Générer »), dans l'ordre
   page_energie_direct: !include bibliotheque/elements/page-energie-direct/element.yaml
   page_ballons_chauffe: !include bibliotheque/elements/page-ballons-chauffe/element.yaml
   page_thermostats: !include bibliotheque/elements/page-thermostats/element.yaml
@@ -68,6 +67,8 @@ packages:
     file: bibliotheque/elements/page-climatisation/element.yaml
     vars:
       clim_id: "salle"
+      clim_thermometre: "sensor.salle_temperature"
+      clim_avec_thermometre: "1"
       clim_entite: "climate.153931629788358_climate"
       clim_rang: "Climatisation 1/3"
       clim_titre: "Salle"
@@ -78,6 +79,8 @@ packages:
     file: bibliotheque/elements/page-climatisation/element.yaml
     vars:
       clim_id: "bureau"
+      clim_thermometre: "sensor.sans_thermometre_bureau"
+      clim_avec_thermometre: "0"
       clim_entite: "climate.bureau_climatiseur"
       clim_rang: "Climatisation 2/3"
       clim_titre: "Bureau"
@@ -88,6 +91,8 @@ packages:
     file: bibliotheque/elements/page-climatisation/element.yaml
     vars:
       clim_id: "ami"
+      clim_thermometre: "sensor.sans_thermometre_ami"
+      clim_avec_thermometre: "0"
       clim_entite: "climate.chambre_d_ami_climatiseur"
       clim_rang: "Climatisation 3/3"
       clim_titre: "Chambre d'ami"

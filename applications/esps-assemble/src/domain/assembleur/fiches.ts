@@ -84,6 +84,15 @@ export const ficheAppareilSchema = z.object({
    */
   plans: z.array(z.string().min(1)).default([]),
   /**
+   * Thermomètre de la pièce de chaque climatiseur (liste de `{ climat, thermometre }`) : un climatiseur au plafond mesure l'air chaud du haut ; la
+   * température affichée sur les plans est celle du thermomètre (celle du climatiseur, suivie d'une « * », s'il est indisponible).
+   */
+  thermometresClim: z.array(z.object({ climat: z.string().min(1), thermometre: z.string().min(1) })).default([]),
+  /** Boîtes de réglage des pages de plans : un appui sur un thermostat ou un volet ouvre une boîte (consigne, ouvrir / fermer…) ; le thermostat affiche aussi « actuelle/consigne ». Exige l'élément `polices-reglages`. */
+  reglagesPlans: z.boolean().default(false),
+  /** Fond des objets des pages de plans : `transparent` (défaut) ou `noir` (boîte noire ajustée derrière chaque icône, valeur et texte). */
+  fondPlans: z.enum(['transparent', 'noir']).default('transparent'),
+  /**
    * Tailles (px) des pages de plans générées : `texte` = tous les textes libres (absente : petit/moyen/grand du plan, 14/20/28),
    * `valeur` = valeurs des capteurs, `icone` = icônes (20 par défaut). Écrites à l'assemblage dans `generes/tailles-plans.yaml`.
    */

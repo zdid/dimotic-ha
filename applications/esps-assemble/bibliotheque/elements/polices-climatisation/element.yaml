@@ -4,12 +4,12 @@ font:
   - file: "gfonts://Roboto"
     id: font_clim_title
     size: 24
-    glyphs: " '+-./0123456789ABCDFMPSTVabcdefghilmnoprstu°àéê"
+    glyphs: " '*+-./0123456789ABCDFMPSTVabcdefghilmnoprstu°àéê"
   - file: "gfonts://Roboto"
     id: font_clim_text
     size: 20
-    glyphs: " '+-./0123456789ABCDFMPSTVabcdefghilmnoprstu°àéê"
+    glyphs: " '*+-./0123456789ABCDFMPSTVabcdefghilmnoprstu°àéê"
   - file: "gfonts://Roboto"
     id: font_clim_value
     size: 44
-    glyphs: " '+-./0123456789ABCDFMPSTVabcdefghilmnoprstu°àéê"
+    glyphs: " '*+-./0123456789ABCDFMPSTVabcdefghilmnoprstu°àéê"

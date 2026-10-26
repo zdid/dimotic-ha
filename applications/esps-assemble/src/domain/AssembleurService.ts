@@ -15,7 +15,7 @@ import { assembleurConfigSchema, type AssembleurConfig } from './config-schema';
 import { ASSEMBLEUR_CLIENT_EVENTS, ASSEMBLEUR_SOCKET_EVENTS } from './socket-events';
 import { Bibliotheque } from './assembleur/fiches';
 import { assemblerPaquet } from './assembleur/paquet';
-import { genererFichiersPlans, PlanIntrouvable, type SourcePlans } from './plans/generer-fichiers';
+import { cheminPagePlan, genererFichiersPlans, PlanIntrouvable, type SourcePlans } from './plans/generer-fichiers';
 import { SourcePlansHa, type ClientHa } from './plans/source-ha';
 
 /** Transport MQTT minimal (MqttTransport du cœur en production, faux en test). */
@@ -59,11 +59,28 @@ export type ResultatDemande = { ok: true; revision: number; action: string; sha2
 
 /** Chemin, dans le paquet, du fichier généré des tailles d'icônes et de valeurs (à inclure après l'élément `polices-plans`). */
 const CHEMIN_TAILLES_PLANS = 'generes/tailles-plans.yaml';
+/** Fichier généré qui inclut, dans l'ordre, les pages de plans choisies (l'appareil l'inclut une seule fois : plus de page écrite en dur). */
+export const CHEMIN_PAGES_PLANS = 'generes/pages-plans.yaml';
 
-/** Fichiers `generes/…` factices : vérification de la fiche sans générer les pages de plans (qui demandent HA). */
-class GeneresFactices extends Map<string, Buffer> {
-  override get(cle: string): Buffer | undefined { return cle.startsWith('generes/') ? Buffer.from('{}\n') : super.get(cle); }
-  override has(cle: string): boolean { return cle.startsWith('generes/') || super.has(cle); }
+/** Contenu de `generes/pages-plans.yaml` : une inclusion par plan choisi, dans l'ordre (chemins relatifs au dossier `generes/`, comme ESPHome). */
+export function contenuPagesPlans(ids: string[]): string {
+  const lignes = ids.map((id, i) => `  page_plan_${i + 1}: !include ${cheminPagePlan(id).replace(/^generes\//, '')}`);
+  return `# GÉNÉRÉ à l'assemblage : pages de plans choisies, dans l'ordre d'affichage. Ne pas modifier.\npackages:\n${lignes.join('\n')}\n`;
+}
+
+/**
+ * Fichiers `generes/…` factices (vides) d'un appareil à pages de plans : vérification de la fiche sans générer les pages (qui demandent HA).
+ * De vrais fichiers, pas une Map à surcharges : `assemblerPaquet` copie la Map quand l'appareil a un wifi, ce qui perdait les surcharges
+ * (l'appareil était alors affiché « refusé : fichier inclus introuvable » alors que sa génération réussissait).
+ */
+export function generesFactices(plans: string[]): Map<string, Buffer> {
+  const m = new Map<string, Buffer>();
+  if (plans.length === 0) return m;
+  const vide = Buffer.from('{}\n');
+  m.set(CHEMIN_TAILLES_PLANS, vide);
+  m.set(CHEMIN_PAGES_PLANS, vide);
+  for (const id of plans) m.set(cheminPagePlan(id), vide);
+  return m;
 }
 
 export class AssembleurService implements IAssembleurService {
@@ -90,7 +107,7 @@ export class AssembleurService implements IAssembleurService {
   ) {
     this.config = this.charger();
     this.eventBus.on(ASSEMBLEUR_CLIENT_EVENTS.GET_APPAREILS, () => this.emettreAppareils());
-    this.eventBus.on(ASSEMBLEUR_CLIENT_EVENTS.ASSEMBLER, (d: unknown) => void this.demander(d as { appareil: string; action?: string }));
+    this.eventBus.on(ASSEMBLEUR_CLIENT_EVENTS.ASSEMBLER, (d: unknown) => void this.demander(d as { appareil: string; action?: string; plans?: string[] }));
     this.eventBus.on(ASSEMBLEUR_CLIENT_EVENTS.ANNULER, (d: unknown) => this.annuler((d as { appareil: string }).appareil));
     this.eventBus.onGeneric<{ moduleId: string; success: boolean }>('app:module:config:saved', (e) => {
       if (e?.moduleId !== 'esps-assemble' || !e.success) return;
@@ -155,7 +172,7 @@ export class AssembleurService implements IAssembleurService {
       if (!texte) return;
       try {
         const d = JSON.parse(texte);
-        void this.demander({ appareil: String(d.appareil ?? ''), action: d.action });
+        void this.demander({ appareil: String(d.appareil ?? ''), action: d.action, plans: Array.isArray(d.plans) ? d.plans.map(String) : undefined });
       } catch (e) {
         this.logger.warn('AssembleurService', `Demande « Générer » illisible : ${(e as Error).message}`);
       }
@@ -180,7 +197,7 @@ export class AssembleurService implements IAssembleurService {
   private publierListe(): void {
     if (!this.transport) return;
     const biblio = new Bibliotheque(this.racineApp);
-    const liste = biblio.appareils().map((n) => { try { const f = biblio.appareil(n); return { nom: n, nomAffichage: f.nomAffichage, pagesDePlans: f.plans.length > 0 }; } catch { return null; } }).filter(Boolean);
+    const liste = biblio.appareils().map((n) => { try { const f = biblio.appareil(n); return { nom: n, nomAffichage: f.nomAffichage, pagesDePlans: f.plans.length > 0, plans: f.plans }; } catch { return null; } }).filter(Boolean);
     this.transport.publish(this.sujet.appareils(), JSON.stringify({ v: 1, site: this.config.site, at: this.maintenant().toISOString(), appareils: liste }), 1, true);
   }
 
@@ -216,7 +233,7 @@ export class AssembleurService implements IAssembleurService {
   }
 
   /** Assemble l'appareil et publie la demande. `action` : `firmware` (défaut) ou `amorce` (première carte, flash USB). */
-  async demander(demande: { appareil: string; action?: string }): Promise<ResultatDemande> {
+  async demander(demande: { appareil: string; action?: string; plans?: string[] }): Promise<ResultatDemande> {
     const appareil = String(demande?.appareil ?? '');
     const action = demande?.action === 'amorce' ? 'amorce' : 'firmware';
     const fin = (r: ResultatDemande): ResultatDemande => { this.eventBus.emit(ASSEMBLEUR_SOCKET_EVENTS.RESULTAT, { appareil, action, ...r }); this.emettreAppareils(); return r; };
@@ -229,15 +246,21 @@ export class AssembleurService implements IAssembleurService {
     try {
       const biblio = new Bibliotheque(this.racineApp);
       const fiche = biblio.appareil(appareil);
-      if (fiche.plans.length > 0) {
+      // Plans à envoyer : la sélection du bouton « Générer » (liste cochée dans HA), sinon ceux de la fiche. Un appareil sans plan n'en reçoit pas.
+      const choisis = fiche.plans.length === 0 ? [] : (Array.isArray(demande?.plans) ? [...new Set(demande.plans.map((p) => String(p).trim()).filter(Boolean))] : fiche.plans);
+      if (fiche.plans.length > 0 && choisis.length === 0) return fin({ ok: false, erreurs: ['aucun plan choisi : cochez au moins un plan à envoyer sur l\'écran'] });
+      if (choisis.length > 0) {
         const ecran = biblio.materiel(fiche.materiel).ecran;
         if (!ecran) return fin({ ok: false, erreurs: [`l'appareil demande des pages de plans : le matériel ${fiche.materiel} n'a pas d'écran`] });
         const source = this.sourcePlans ?? (this.clientHa ? new SourcePlansHa(this.clientHa) : null);
         if (!source) return fin({ ok: false, erreurs: ['les plans viennent de Home Assistant et la liaison HA du cœur est indisponible'] });
-        if (source instanceof SourcePlansHa) await source.preparer(fiche.plans);
-        const g = await genererFichiersPlans(fiche.plans, source, { largeur: ecran.largeur, hauteur: ecran.hauteur }, fiche.taillesPlans.texte);
+        if (source instanceof SourcePlansHa) await source.preparer(choisis);
+        const g = await genererFichiersPlans(choisis, source, { largeur: ecran.largeur, hauteur: ecran.hauteur }, fiche.taillesPlans.texte,
+          fiche.fondPlans === 'noir' ? { noir: true, tailleIcone: fiche.taillesPlans.icone, tailleValeur: fiche.taillesPlans.valeur } : undefined, fiche.reglagesPlans,
+          Object.fromEntries(fiche.thermometresClim.map((t) => [t.climat, t.thermometre])));
         generes = g.fichiers;
         generes.set(CHEMIN_TAILLES_PLANS, Buffer.from(`# GÉNÉRÉ à l'assemblage d'après la fiche de l'appareil (tailles_plans). Ne pas modifier.\nsubstitutions:\n  taille_icone: "${fiche.taillesPlans.icone}"\n  taille_valeur: "${fiche.taillesPlans.valeur}"\n`));
+        generes.set(CHEMIN_PAGES_PLANS, Buffer.from(contenuPagesPlans(choisis)));
         resumePlans.push(...g.resume);
       }
     } catch (e) {
@@ -285,7 +308,9 @@ export class AssembleurService implements IAssembleurService {
       let nomAffichage = nom, materiel = '?';
       try { const f = biblio.appareil(nom); nomAffichage = f.nomAffichage; materiel = f.materiel; } catch { /* la vérification ci-dessous le dira */ }
       // Les pages de plans sont générées à l'assemblage : pour la simple vérification, des fichiers factices les remplacent.
-      const v = assemblerPaquet(this.racineApp, nom, 0, this.maintenant, new GeneresFactices());
+      let plans: string[] = [];
+      try { plans = biblio.appareil(nom).plans; } catch { /* la vérification ci-dessous le dira */ }
+      const v = assemblerPaquet(this.racineApp, nom, 0, this.maintenant, generesFactices(plans));
       return {
         nom, nomAffichage, materiel,
         etat: v.ok ? 'pret' as const : 'refuse' as const,

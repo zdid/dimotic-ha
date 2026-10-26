@@ -1,0 +1,5 @@
+id: polices-reglages
+nom: "Polices des boîtes de réglage des plans"
+description: "Polices (Roboto, 24 / 20 / 44 px) des boîtes de réglage ouvertes depuis les pages de plans : noms d'appareils (glyphes français complets), températures, positions."
+exigences:
+  plateformes: [esp32]

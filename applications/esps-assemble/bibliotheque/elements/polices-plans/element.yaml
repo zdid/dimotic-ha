@@ -13,4 +13,4 @@ font:
   - file: "gfonts://Roboto"
     id: font_sensor
     size: ${taille_valeur}
-    glyphs: "0123456789.-"
+    glyphs: "0123456789.-/*"

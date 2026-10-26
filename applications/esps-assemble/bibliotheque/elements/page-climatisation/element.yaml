@@ -8,6 +8,8 @@
 #   clim_pas       pas des boutons -/+ en °C (ex. 0.5 ou 1.0)
 #   clim_max       consigne maximale en °C (ex. 30.0)
 #   clim_mode_auto nom du mode automatique de l'appareil (auto ou heat_cool)
+#   clim_thermometre        entité du thermomètre de la pièce (ex. sensor.salle_temperature) ; sans thermomètre : une entité inexistante (sensor.sans_thermometre_<id>)
+#   clim_avec_thermometre   1 si un thermomètre est prévu pour cette clim (la valeur du climatiseur est alors suivie d'une « * » quand le thermomètre est indisponible), sinon 0
 # Exige : écran 800x480, élément polices-climatisation.
 
 text_sensor:
@@ -32,9 +34,28 @@ sensor:
       - lvgl.label.update:
           id: clim_${clim_id}_temp
           text: !lambda |-
-            if (std::isnan(x)) return std::string("--");
+            float r = id(clim_${clim_id}_ref).state;
+            float c = std::isnan(r) ? id(clim_${clim_id}_cur).state : r;
+            if (std::isnan(c)) return std::string("--");
             char buf[16];
-            snprintf(buf, sizeof(buf), "%.1f°C", x);
+            if (${clim_avec_thermometre} && std::isnan(r)) snprintf(buf, sizeof(buf), "%.1f°C*", c);
+            else snprintf(buf, sizeof(buf), "%.1f°C", c);
+            return std::string(buf);
+  # Thermomètre de la pièce : un climatiseur au plafond mesure l'air chaud du haut, la température affichée est celle de la pièce quand il existe.
+  - platform: homeassistant
+    id: clim_${clim_id}_ref
+    entity_id: ${clim_thermometre}
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: clim_${clim_id}_temp
+          text: !lambda |-
+            float r = id(clim_${clim_id}_ref).state;
+            float c = std::isnan(r) ? id(clim_${clim_id}_cur).state : r;
+            if (std::isnan(c)) return std::string("--");
+            char buf[16];
+            if (${clim_avec_thermometre} && std::isnan(r)) snprintf(buf, sizeof(buf), "%.1f°C*", c);
+            else snprintf(buf, sizeof(buf), "%.1f°C", c);
             return std::string(buf);
   - platform: homeassistant
     id: clim_${clim_id}_tgt

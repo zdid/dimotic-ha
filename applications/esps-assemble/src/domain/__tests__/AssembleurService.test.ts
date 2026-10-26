@@ -142,6 +142,59 @@ describe('AssembleurService — pages de plans générées depuis HA', () => {
     }
   });
 
+  describe('sélection des plans envoyés (liste cochée dans HA)', () => {
+    const plan = (f: string) => ({ filename: f, positions: [{ entity_id: 'light.salon', x: 0.5, y: 0.5, quoi: null }], texts: [] });
+    const export2 = { floorplans: { 'Maison à plat': plan('a.png'), 'Rez de chaussée': plan('b.png'), Premier: plan('c.png') },
+      images: { 'a.png': PNG_1X1.toString('base64'), 'b.png': PNG_1X1.toString('base64'), 'c.png': PNG_1X1.toString('base64') } };
+    const paquet = () => { const v = verifierPaquet(lireZip(fs.readFileSync(path.join(donnees, 'machine_partage/paquets/ecran/r1.zip')))); if (!v.ok) throw new Error('paquet refusé'); return v; };
+    const demarrer = async () => {
+      ecrire('appareils/ecran.yaml', 'esphome:\n  name: ecran\npackages:\n  materiel: !include bibliotheque/materiels/carte/base.yaml\n  polices: !include bibliotheque/elements/polices-plans/element.yaml\n  pages_plans: !include generes/pages-plans.yaml\n');
+      ecrire('appareils/ecran.fiche.yaml', 'nom: ecran\nnom_affichage: "Écran"\nmateriel: carte\nplans: ["Maison à plat", "Rez de chaussée", Premier]\n');
+      const appels: any[] = [];
+      const ha = { callWs: async (m: any) => { appels.push(m); return { floorplans: Object.fromEntries((m.plan_ids as string[]).map((id) => [id, (export2.floorplans as any)[id]])), images: export2.images }; } };
+      const s = new AssembleurService(bus, logger, provider({ site: 'stfort' }), () => (transport = new FauxTransport()), app, donnees, 8087, maintenant, ha);
+      await s.start();
+      return { s, appels };
+    };
+
+    it('sans sélection : les plans de la fiche, dans l\'ordre, inclus par le fichier généré', async () => {
+      const { s } = await demarrer();
+      expect((await s.demander({ appareil: 'ecran' })).ok).toBe(true);
+      const v = paquet();
+      const pages = v.fichiers.find((f) => f.chemin === 'generes/pages-plans.yaml')!.contenu.toString();
+      expect(pages.match(/!include (\S+)/g)).toEqual(['!include page-plan-maison_plat.yaml', '!include page-plan-rez_de_chauss_e.yaml', '!include page-plan-premier.yaml']);
+    });
+
+    it('sélection : seuls les plans cochés sont générés, dans l\'ordre demandé', async () => {
+      const { s, appels } = await demarrer();
+      expect((await s.demander({ appareil: 'ecran', plans: ['Premier', 'Maison à plat'] })).ok).toBe(true);
+      expect(appels).toEqual([{ type: 'dimotic_plans/floorplans/export', plan_ids: ['Premier', 'Maison à plat'] }]);
+      const chemins = Object.keys(paquet().manifeste.fichiers);
+      expect(chemins).toEqual(expect.arrayContaining(['generes/page-plan-premier.yaml', 'generes/page-plan-maison_plat.yaml']));
+      expect(chemins).not.toContain('generes/page-plan-rez_de_chauss_e.yaml');
+      const pages = paquet().fichiers.find((f) => f.chemin === 'generes/pages-plans.yaml')!.contenu.toString();
+      expect(pages.match(/!include (\S+)/g)).toEqual(['!include page-plan-premier.yaml', '!include page-plan-maison_plat.yaml']);
+    });
+
+    it('aucun plan coché : refusé avec un message clair, rien n\'est publié', async () => {
+      const { s } = await demarrer();
+      const r = await s.demander({ appareil: 'ecran', plans: [] });
+      expect(r).toMatchObject({ ok: false });
+      expect((r as { erreurs: string[] }).erreurs[0]).toMatch(/aucun plan choisi/);
+      expect(fs.existsSync(path.join(donnees, 'machine_partage/paquets/ecran/r1.zip'))).toBe(false);
+    });
+
+    it('la demande « Générer » de HA transmet la sélection ; la liste publiée donne les plans de chaque fiche', async () => {
+      const { s } = await demarrer();
+      transport.recevoir('dimotic/esps-assemble/stfort/generer', JSON.stringify({ appareil: 'ecran', action: 'firmware', plans: ['Rez de chaussée'] }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(Object.keys(paquet().manifeste.fichiers)).toContain('generes/page-plan-rez_de_chauss_e.yaml');
+      const liste = JSON.parse(transport.derniere('dimotic/esps-assemble/stfort/appareils')!.payload);
+      expect(liste.appareils[0].plans).toEqual(['Maison à plat', 'Rez de chaussée', 'Premier']);
+      void s;
+    });
+  });
+
   it('récupère l\'export de HA une fois, génère page et image, les met dans le paquet que l\'usine accepte', async () => {
     const appels: any[] = [];
     const ha = { callWs: async (m: any) => { appels.push(m); return exportHa; } };
@@ -189,5 +242,21 @@ describe('AssembleurService — pages de plans générées depuis HA', () => {
     const s = service(); await s.start();
     const l = JSON.parse(transport.derniere('dimotic/esps-assemble/stfort/appareils')!.payload);
     expect(l.appareils.find((a: any) => a.nom === 'ecran').pagesDePlans).toBe(true);
+  });
+});
+
+describe('AssembleurService — liste des appareils réels de la bibliothèque', () => {
+  it('haplan-display et haplan-test (wifi + pages de plans + boîtes de réglage) sont « prêts », pas « refusés »', async () => {
+    const racine = path.join(__dirname, '..', '..', '..');
+    const dossier = fs.mkdtempSync(path.join(os.tmpdir(), 'assembleur-reel-'));
+    const t = new FauxTransport();
+    const s = new AssembleurService(bus, logger, provider({ site: 'stfort' }), () => t, racine, dossier, 8087, maintenant);
+    await s.start();
+    const lignes = s.lignes();
+    for (const nom of ['haplan-display', 'haplan-test']) {
+      const l = lignes.find((x) => x.nom === nom)!;
+      expect(l.erreurs).toEqual([]);
+      expect(l.etat).toBe('pret');
+    }
   });
 });
