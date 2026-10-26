@@ -1,6 +1,6 @@
 # Conception — Gestion de l'énergie : batteries et ballons d'eau chaude (ECS)
 
-*Version 1.1 — 20 octobre 2026 — **règle des ballons appliquée sur ha2** (§5.6, §6) ; **nuit corrigée** (§5.3) : plus de verrou de la batterie, plancher de 20 % comme pour la batterie. *Version 1.0 — 20 octobre 2026 — première rédaction, issue de la discussion du 20/10/2026 avec l'utilisateur. Ce document décrit les **contraintes de chaque site**, les **règles** retenues pour les batteries et pour les ballons, des **exemples chiffrés**, et ce qui est **réalisé** ou **à faire**.*
+*Version 1.3 — 22 octobre 2026 — **deux paliers de puissance du petit ballon documentés** (§5.2bis, observés sur 9 jours : ~2 050 W puis ~820 W selon la chaleur de l'eau, pas selon la durée). *Version 1.2 — 22 octobre 2026 — **forçage de 16 h supprimé** (§5.6) ; **deux ballons de nuit en parallèle avec 5 minutes de décalage** (§5.3) ; **second ballon en journée** quand le solaire le permet (§5.7) ; **puissance par ballon** : gros 1 800 W, petit 2 050 W (§5.2). *Version 1.1 — 20 octobre 2026 — **règle des ballons appliquée sur ha2** (§5.6, §6) ; **nuit corrigée** (§5.3) : plus de verrou de la batterie, plancher de 20 % comme pour la batterie. *Version 1.0 — 20 octobre 2026 — première rédaction, issue de la discussion du 20/10/2026 avec l'utilisateur. Ce document décrit les **contraintes de chaque site**, les **règles** retenues pour les batteries et pour les ballons, des **exemples chiffrés**, et ce qui est **réalisé** ou **à faire**.*
 
 ## 1. Objet
 
@@ -88,20 +88,37 @@ La puissance des ballons en marche est **ajoutée** pour que le ballon ne se cou
 
 ### 5.2 Seuil de surplus
 
-> seuil = (1 − tarif creux / tarif du moment) × puissance d'un ballon
+> seuil = (1 − tarif creux / tarif du moment) × puissance **du ballon concerné**
 
-| Période | Seuil (ballon de 2000 W) |
-|---|---|
-| Heures pleines | (1 − 0,1589 / 0,2142) × 2000 = **516 W** |
-| Heures creuses | (1 − 0,1589 / 0,1589) × 2000 = **0 W** |
+Puissances (22/10/2026) : **gros ballon 1 800 W**, **petit ballon 2 050 W** (`input_number.puissance_gros_ballon`, `input_number.puissance_petit_ballon`). Le seuil du **premier** ballon (celui que l'excédent démarre) est `sensor.seuil_injection_ballons` ; celui du **second** est `sensor.seuil_injection_second_ballon`.
+
+| Période | Gros ballon (1 800 W) | Petit ballon (2 050 W) |
+|---|---|---|
+| Heures pleines | (1 − 0,1589 / 0,2142) × 1800 = **465 W** | (1 − 0,1589 / 0,2142) × 2050 = **529 W** |
+| Heures creuses | **0 W** | **0 W** |
+
+*(Les exemples du §5.4 gardent l'ancienne valeur de 2 000 W, qui donnait 516 W.)*
+
+### 5.2bis Deux paliers de puissance (observé le 22/10/2026)
+
+Les moyennes sur 5 minutes de `sensor.petit_ballon_…_power` (9 jours) montrent que le **petit ballon a deux paliers** : environ **2 050 W** puis environ **820 W** (2 050 − 820 = 1 230 W : deux résistances, dont la plus grosse se coupe par thermostat quand l'eau est assez chaude). Le passage dépend de la **chaleur déjà stockée**, pas du temps :
+
+| Cycle du petit ballon | Palier haut (~2 050 W) | Palier bas (~820 W) |
+|---|---|---|
+| départ à froid (14/10, 16/10, 19/10, 21/10) | 95, 90, 55, 50 min (3,3 à 1,7 kWh) | 75, 85, 35, 40 min |
+| ballon déjà chauffé peu avant (15/10) | 10 min | 40 min |
+| ballon déjà chaud (18/10) | aucun | 95 min dès le départ |
+
+Le **gros ballon** reste à 1 700–1 800 W, sans second palier. Conséquences : les règles qui lisent la **puissance mesurée** (coupure sur manque de surplus, arrêt du second seul, fin sous 30 W pendant 30 min) s'adaptent d'elles-mêmes ; le seuil de **départ** utilise la puissance **haute** (2 050 W), prudente mais trop exigeante quand le ballon est déjà chaud (212 W suffiraient avec 820 W). Réglage informatif : `input_number.puissance_petit_ballon_palier_bas` (820 W, non utilisé par les règles).
 
 ### 5.3 Règle selon la période
 
 | Période | Départ du ballon | Batterie |
 |---|---|---|
 | **Heures pleines** | batterie > 65 % ET surplus ≥ 516 W. Une fois en marche : continue tant que la batterie reste > 55 % ; à 55 % arrêt immédiat ; il faut **remonter au-dessus de 65 %** pour repartir ; si le surplus passe sous 516 W pendant 7 minutes, arrêt | peut compléter le surplus (jusqu'à 55 %) |
+| **Heures pleines, second ballon** | le premier tourne depuis au moins 5 min, **surplus restant ≥ seuil du second ballon pendant 3 min**, batterie > 65 %, pas « un seul ballon » (§5.7) | idem |
 | **Heures creuses avec soleil** (midi à noisy) | batterie > 65 % ET surplus > 0 W : le soleil charge la batterie d'abord, le ballon prend le reste | le complément vient du réseau, au tarif creux ; la batterie ne doit pas se vider dans le ballon (**à réaliser sur noisy2**, voir §4.4) |
-| **Heures creuses de nuit** | dès qu'un ballon n'est pas terminé, sans condition de batterie (chauffe depuis le réseau) | plancher de nuit (20 %, §4) : elle peut alimenter la maison et le ballon jusqu'à 20 %, jamais en dessous ; pas de verrou, car la consommation d'EDF reste la même quelle que soit la vitesse de décharge |
+| **Heures creuses de nuit** | dès qu'un ballon n'est pas terminé, sans condition de batterie (chauffe depuis le réseau) ; **les deux ballons chauffent en parallèle** : le premier au début de la plage, le second **5 minutes plus tard** (évite la pointe de démarrage) | plancher de nuit (20 %, §4) : elle peut alimenter la maison et le ballon jusqu'à 20 %, jamais en dessous ; pas de verrou, car la consommation d'EDF reste la même quelle que soit la vitesse de décharge |
 
 « Avec soleil » : production solaire supérieure à environ 300 W.
 
@@ -131,9 +148,21 @@ L'indicateur `input_boolean.excedent_solaire` est piloté par `excedent_solaire_
 
 Après un arrêt, le départ n'est possible que si la batterie est **repassée au-dessus de 65 %** (la condition de départ l'exige). `sensor.seuil_injection_ballons` vaut 516 W en heures pleines et 0 W en heures creuses (tarifs et puissance du ballon dans `input_number`). `chauffe_ballons_ecs_solaire` réagit à l'indicateur sans changement (premier ballon, second, forçages de 16 h et de nuit inchangés).
 
-### 5.6 Forçage de fin de journée
+### 5.6 Forçage de fin de journée — supprimé (22/10/2026)
 
-Aujourd'hui : le premier ballon est forcé à **16 h** (en heures pleines), le second au début de la creuse de nuit. Il serait plus économique de forcer le premier au **début de la prochaine plage creuse** : à décider.
+Le forçage du premier ballon **à 16 h**, en heures pleines, est **supprimé** : il chauffait au tarif plein (0,2142 €/kWh) alors que la plage creuse coûte 26 % de moins. À la place : au **début des heures creuses de nuit**, le **premier** ballon démarre s'il n'est pas terminé et, **5 minutes plus tard**, le second (§5.3). Quand un ballon finit (consommation < 30 W pendant 30 min, ou 3 h d'allumage), il se coupe et se marque « terminé » sans attendre l'autre. La coupure sur perte d'excédent n'agit plus qu'en **heures pleines** (elle ne coupe donc pas les ballons forcés en creuse). Conséquence : un jour sans soleil, l'eau chaude de la soirée n'est pas assurée avant la plage creuse (environ 21 h 20) ; elle se lance à la main si besoin.
+
+### 5.7 Second ballon en journée (22/10/2026)
+
+`sensor.surplus_restant_ballons` = charge de la batterie + injection − soutirage, **sans** ajouter la puissance des ballons (contrairement à `sensor.surplus_disponible_ballons`) : ce qui reste quand les ballons tournent.
+
+| Événement | Condition | Action |
+|---|---|---|
+| Démarrage du second | excédent solaire allumé, heures pleines, premier ballon allumé depuis ≥ **5 min**, surplus restant ≥ `sensor.seuil_injection_second_ballon` pendant **3 min**, batterie > 65 %, second pas terminé et éteint, pas « un seul ballon » | allumer le second |
+| Arrêt du seul second | excédent allumé, heures pleines, second allumé, **surplus restant + puissance du second < seuil du second × 0,5** pendant **5 min** | éteindre le second (le premier continue ; le seuil bas évite un va-et-vient juste après le démarrage) |
+| Coupure générale | l'excédent solaire disparaît en heures pleines (surplus insuffisant 7 min, ou batterie à 55 %) | éteindre les deux (§5.5) |
+
+Valeurs de départ (5 min, 3 min, 5 min, facteur 0,5) : **à régler** en observant une journée de soleil.
 
 ## 6. Réalisé / à faire
 
@@ -144,10 +173,13 @@ Aujourd'hui : le premier ballon est forcé à **16 h** (en heures pleines), le s
 | Capteurs et réglages : tarifs, puissance du ballon, seuils haut/bas, `sensor.seuil_injection_ballons`, `sensor.surplus_disponible_ballons`, `sensor.puissance_chaine_1/2` | ha2 | **créés** |
 | Heures creuses saisies à la main + capteurs `heures_creuses`, `periode_tarifaire`, `prochain_changement_tarifaire` | noisy2 | **réalisés** |
 | Règles de batterie et de ballons (dont verrou de décharge en creuse avec soleil) | noisy2 | **à faire** (commandes de la Marstek : §4.4) |
-| Forçage de fin de journée déplacé vers la creuse | ha2 / noisy2 | **à décider** |
+| Forçage de 16 h supprimé ; deux ballons en parallèle en creuse de nuit (décalage 5 min) ; second ballon en journée ; puissances par ballon (1 800 / 2 050 W) ; capteurs `surplus_restant_ballons`, `seuil_injection_second_ballon` ; automatisation `chauffe_ballons_ecs_solaire` (sauvegarde : `backups/ballons-2026-10-22/`) | ha2 | **réalisé le 22/10/2026**, à observer en conditions réelles |
+| Forçage de fin de journée, deux ballons en creuse, second en journée | noisy2 | **à faire** |
 
 ## 7. Points ouverts
 
+00. **Seuil de départ selon l'état du ballon** : l'affiner (820 W si le ballon est probablement déjà chaud, par exemple « terminé aujourd'hui » ou palier bas récent) ; une **sonde de température dans l'eau** serait la vraie solution (chauffer jusqu'à une température cible).
+0. **Valeurs du second ballon en journée** (5 min, 3 min, 5 min, facteur 0,5) et **puissance réelle** des ballons : à confirmer par une journée de soleil ; `input_number.puissance_ballon_ecs` (2 000 W) n'est plus utilisé.
 1. La limite haute de la fenêtre du matin (10 h) et l'ordre du plancher du matin (10 %) dépendent du niveau de fin de décharge matériel : tant qu'il reste à 15 %, le plancher du matin est en pratique de 15 %.
 2. Le blocage par l'interrupteur de la Marstek n'a pas été essayé en réel.
 3. La production solaire minimale pour parler de « creuse avec soleil » (300 W) est à valider.
