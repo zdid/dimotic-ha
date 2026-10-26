@@ -24,7 +24,13 @@ export const sauvegardeNextcloudSchema = z.object({
   // `user` et risquant l'incohérence entre les deux). Le chemin WebDAV complet
   // (`/remote.php/dav/files/<user>`) est reconstruit par NextcloudWebDavClient à partir de
   // `serverUrl` + `user`, jamais saisi à la main.
-  serverUrl: z.string().default(''),
+  // ⭐ 26/10/2026 — adresse saisie sans schéma (ex. `monsite.duckdns.org`, cas de noisy2) : curl
+  // part en http, Nextcloud répond 308 vers https, non suivi par le script -> tous les envois en
+  // échec. On complète donc en https:// dès la lecture de la config.
+  serverUrl: z.string().default('').transform((v) => {
+    const t = v.trim();
+    return t && !/^[a-z][a-z0-9+.-]*:\/\//i.test(t) ? `https://${t}` : t;
+  }),
   user: z.string().default(''),
   // Sous-dossier sous la racine du compte, préfixe avant <site>/<machine>/<répertoire> (§4) — même
   // convention sur toutes les machines de ce compte Nextcloud (déjà en production : stfort/ha2,
@@ -65,11 +71,28 @@ export const sauvegardeNextcloudSchema = z.object({
  * Paramètres Techniques, à côté de chaque machine. Ne dit rien du CONTENU du secret (jamais lu ici,
  * jamais comparé) — juste "la dernière poussée tentée pour cette machine a réussi".
  */
+/** ⭐ 26/10/2026 — heure de la sauvegarde quotidienne, réglable par machine (demande explicite :
+ *  « pour éviter que toutes les sauvegardes arrivent en même temps sur Nextcloud »). 3h05 reste
+ *  la valeur par défaut, celle de toutes les machines poussées avant cette version. */
+export const DEFAULT_BACKUP_TIME = '03:05';
+const BACKUP_TIME_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+
+/** Découpe une heure « HH:MM » déjà validée par le schéma — repli sur 3h05 si elle ne l'est pas. */
+export function parseBackupTime(heure: string | undefined): { hour: number; minute: number } {
+  const m = BACKUP_TIME_RE.exec((heure || '').trim()) || BACKUP_TIME_RE.exec(DEFAULT_BACKUP_TIME)!;
+  return { hour: Number(m[1]), minute: Number(m[2]) };
+}
+
+export const backupTimeSchema = z.string().default(DEFAULT_BACKUP_TIME)
+  .transform((v) => v.trim() || DEFAULT_BACKUP_TIME)
+  .refine((v) => BACKUP_TIME_RE.test(v), { message: 'Heure attendue au format HH:MM (ex. 03:05)' });
+
 const sauvegardeTargetSchema = z.object({
   id: z.string().min(1),
   site: z.string().min(1),
   machine: z.string().min(1),
   host: z.string().min(1),
+  heure: backupTimeSchema,
   secretDeployed: z.boolean().default(false)
 });
 

@@ -98,7 +98,7 @@ export const SAUVEGARDE_UI_METADATA: ModuleUiMetadata = {
       // sauvegardeTargetSchema (le futur script hôte sauvegarde /docker ET /dimotic-ha-addons,
       // saute celle qui n'existe pas). Ce que Nextcloud contient réellement se découvre en
       // listant, pas à pré-déclarer ici.
-      description: "Une ligne par machine à couvrir. « Pousser » dépose le mot de passe Nextcloud ET le script de sauvegarde + son cron quotidien (3h05) sur la machine — la machine devient alors autonome, plus besoin de dimotic-ha pour que ses sauvegardes continuent. La machine de destination d'une restauration se choisit séparément, dans l'assistant de restauration.",
+      description: "Une ligne par machine à couvrir. « Pousser » dépose le mot de passe Nextcloud ET le script de sauvegarde + son cron quotidien sur la machine, à l'heure choisie pour cette machine (3h05 par défaut — décalez les machines de quelques minutes pour qu'elles n'envoient pas toutes en même temps sur Nextcloud) — la machine devient alors autonome, plus besoin de dimotic-ha pour que ses sauvegardes continuent. La machine de destination d'une restauration se choisit séparément, dans l'assistant de restauration.",
       icon: '🗂️',
       // ⭐ 23/09/2026 — bouton « Importer depuis le gossip » retiré (demande explicite, test live) :
       // la source (core.targets/haStackTargets) ne contenait que des cibles de déploiement
@@ -130,7 +130,9 @@ export const SAUVEGARDE_UI_METADATA: ModuleUiMetadata = {
           itemFields: [
             { name: 'site', label: 'Site', type: 'text', required: true, placeholder: 'stfort' },
             { name: 'machine', label: 'Machine', type: 'text', required: true, placeholder: 'ha2' },
-            { name: 'host', label: 'Hôte (pour la poussée du secret et du script de sauvegarde)', type: 'text', required: true, placeholder: '192.168.1.51' }
+            { name: 'host', label: 'Hôte (pour la poussée du secret et du script de sauvegarde)', type: 'text', required: true, placeholder: '192.168.1.51' },
+            // ⭐ 26/10/2026 — heure du cron propre à la machine ; prise en compte au prochain « Pousser ».
+            { name: 'heure', label: 'Heure de la sauvegarde quotidienne (HH:MM)', type: 'text', default: '03:05', placeholder: '03:05', hint: 'Prise en compte au prochain « Pousser ».' }
           ],
           secretPush: {
             action: 'sauvegarde:secret:push',

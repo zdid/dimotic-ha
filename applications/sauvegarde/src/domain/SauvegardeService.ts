@@ -9,7 +9,7 @@
 import type { IEventBus, Logger, IAppConfigProvider } from '../../../core/dist/exports';
 import * as fs from 'node:fs';
 import { runSsh, ensureGlobalSshKey, isRunningInDocker, getPrimaryIPv4Address } from '../../../core/dist/exports';
-import { sauvegardeConfigSchema, sauvegardeNextcloudSchema, SECRET_FILE_PATH, deriveTargetId, type SauvegardeConfig, type SauvegardeTargetConfig } from './config-schema';
+import { sauvegardeConfigSchema, sauvegardeNextcloudSchema, SECRET_FILE_PATH, deriveTargetId, backupTimeSchema, DEFAULT_BACKUP_TIME, type SauvegardeConfig, type SauvegardeTargetConfig } from './config-schema';
 import type { SauvegardeStatus } from './types';
 import { SecretPushService } from './SecretPushService';
 import { ScriptPushService } from './ScriptPushService';
@@ -322,6 +322,7 @@ export class SauvegardeService implements ISauvegardeService {
         site,
         machine,
         host,
+        heure: backupTimeSchema.safeParse(item.heure ?? '').data ?? sameRow?.heure ?? DEFAULT_BACKUP_TIME,
         secretDeployed: sameRow?.secretDeployed ?? false
       };
     }

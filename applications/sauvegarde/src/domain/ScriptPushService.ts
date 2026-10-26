@@ -12,11 +12,9 @@ import {
   BACKUP_DIR,
   BACKUP_SCRIPT_REMOTE_PATH,
   BACKUP_CRON_LOG_REMOTE_PATH,
-  BACKUP_CRON_HOUR,
-  BACKUP_CRON_MINUTE,
   type BackupScriptParams
 } from './BackupScript';
-import type { SauvegardeTargetConfig } from './config-schema';
+import { parseBackupTime, type SauvegardeTargetConfig } from './config-schema';
 
 export class ScriptPushService {
   /**
@@ -43,7 +41,9 @@ export class ScriptPushService {
     // nôtre — ne touche à AUCUNE autre entrée déjà présente dans le crontab de la machine (demande
     // explicite : ne pas interférer avec des automatisations existantes, ex. extinction de lumières
     // vers la même heure).
-    const cronLine = `${BACKUP_CRON_MINUTE} ${BACKUP_CRON_HOUR} * * * ${BACKUP_SCRIPT_REMOTE_PATH} >> ${BACKUP_CRON_LOG_REMOTE_PATH} 2>&1`;
+    // ⭐ 26/10/2026 — heure propre à chaque machine (`target.heure`), pour étaler les envois.
+    const { hour, minute } = parseBackupTime(target.heure);
+    const cronLine = `${minute} ${hour} * * * ${BACKUP_SCRIPT_REMOTE_PATH} >> ${BACKUP_CRON_LOG_REMOTE_PATH} 2>&1`;
     const cronCommand = `(crontab -l 2>/dev/null | grep -vF ${shellQuote(BACKUP_SCRIPT_REMOTE_PATH)} ; echo ${shellQuote(cronLine)}) | crontab -`;
     const cronResult = await runSsh({ host: target.host, sshKeyPath }, cronCommand);
     if (!cronResult.success) {

@@ -23,13 +23,11 @@ export const BACKUP_SCRIPT_REMOTE_PATH = `${BACKUP_DIR}/nextcloud-backup.sh`;
 export const BACKUP_STATUS_REMOTE_PATH = `${BACKUP_DIR}/status.json`;
 export const BACKUP_CRON_LOG_REMOTE_PATH = `${BACKUP_DIR}/cron.log`;
 
-/** ⭐ 18/09/2026, décisions explicites : 10 jours + 10 semaines de rétention glissante, cron
- *  quotidien à 3h05 (fenêtre nocturne, décalé de 3h00 pour ne pas croiser des automatisations
- *  d'extinction de lumières existantes), poussée hebdomadaire le dimanche. */
+/** ⭐ 18/09/2026, décisions explicites : 10 jours + 10 semaines de rétention glissante, poussée
+ *  hebdomadaire le dimanche. L'heure du cron (3h05 par défaut) est réglable par machine depuis le
+ *  26/10/2026 : voir `heure` / `DEFAULT_BACKUP_TIME` dans config-schema.ts. */
 export const BACKUP_RETENTION_DAYS = 10;
 export const BACKUP_RETENTION_WEEKS = 10;
-export const BACKUP_CRON_HOUR = 3;
-export const BACKUP_CRON_MINUTE = 5;
 /** `date +%u` : 1=lundi … 7=dimanche. */
 export const BACKUP_WEEKLY_DOW = 7;
 

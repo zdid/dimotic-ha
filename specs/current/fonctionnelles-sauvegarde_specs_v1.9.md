@@ -1,6 +1,8 @@
 # Spécifications Fonctionnelles - Sauvegarde/Restauration (SAUVEGARDE)
 
-**Version 1.8 — 01/10/2026 — Claude**
+**Version 1.9 — 26/10/2026 — Claude**
+
+⭐ **v1.9 (26/10/2026)** — **heure de sauvegarde réglable par machine** (§5) : champ « Heure de la sauvegarde quotidienne (HH:MM) » sur chaque ligne de *Machines couvertes*, 3h05 par défaut, pris en compte au prochain « Pousser ». But : éviter que toutes les machines envoient en même temps sur Nextcloud. **Adresse Nextcloud sans schéma** complétée en `https://` à la lecture de la config : saisie sans `https://` (cas de noisy et noisy2), curl partait en http, Nextcloud répondait 308, non suivi, et tous les envois échouaient.
 
 ⭐ **v1.8 (01/10/2026)** — le script de sauvegarde est **plus bavard** (§5bis, journal `cron.log`) : chaque ligne est horodatée ; début (site, machine, jour, rétention, destination), par dossier : archivage, code et taille de `tar`, éléments du manifeste, durée, premiers messages de `tar` en cas de code ≠ 0 ; par envoi : code HTTP, taille, durée, et en cas d'échec le code et le message de `curl` ; manifeste refusé ; purge (HTTP 204/404) ; bilan par dossier ; fin avec le résultat et la durée totale. `status.json` et les codes de sortie sont inchangés. Jamais le mot de passe dans la log.
 
@@ -288,10 +290,14 @@ scan du dossier distant.
 **Fréquence — ⭐ tranchée définitivement (18/09/2026)** : journalier tous les jours (pas de condition
 de changement — voir §4quater), hebdomadaire un jour fixe par semaine (dimanche).
 
-**Horaire — ⭐ tranché définitivement (18/09/2026) : 3h05 tous les jours** (`BACKUP_CRON_HOUR`/
-`BACKUP_CRON_MINUTE`, `BackupScript.ts`) — fenêtre nocturne de faible activité comme prévu en
-conception (16/09/2026), décalé de 3h00 pile pour ne pas croiser des automatisations d'extinction de
-lumières existantes chez l'utilisateur à cette heure précise.
+**Horaire — ⭐ réglable par machine depuis le 26/10/2026 (v1.9)** : champ `heure` (« HH:MM ») de
+chaque machine couverte, **3h05 par défaut** (`DEFAULT_BACKUP_TIME`, `config-schema.ts`) — fenêtre
+nocturne de faible activité, décalée de 3h00 pile pour ne pas croiser des automatisations
+d'extinction de lumières existantes. Une heure vide revient à 3h05 ; une heure invalide est refusée
+à l'enregistrement. La ligne de crontab est réécrite au prochain « Pousser » (`ScriptPushService`,
+remplace l'ancienne ligne du script, ne touche à aucune autre). Conseil : décaler les machines de
+quelques minutes pour étaler les envois sur Nextcloud. (Avant la v1.9 : 3h05 fixe, constantes
+`BACKUP_CRON_HOUR`/`BACKUP_CRON_MINUTE`, retirées.)
 
 **Détection de changement — abandonnée pour cette version (⭐ 18/09/2026)** : le mécanisme
 `find -newer`/marqueur envisagé en conception (16/09/2026) n'a pas été retenu dans le script réel —
