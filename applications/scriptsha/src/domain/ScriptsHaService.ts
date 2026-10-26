@@ -489,7 +489,8 @@ export class ScriptsHaService implements IScriptsHaService {
     private readonly configProvider: IAppConfigProvider<ScriptshaConfig>,
     private readonly haBridgeClient: HaBridgeClient
   ) {
-    this.taxonomie = new HaTaxonomieClient(haBridgeClient);
+    // délai de 30 s : la liste des entités dépasse les 5 s par défaut du relais au démarrage
+    this.taxonomie = new HaTaxonomieClient({ callWs: (m) => haBridgeClient.callWs(m, 30_000) });
     // Chargée mais non utilisée activement au-delà de enabled — voir config-schema.ts.
     this.configProvider.getAppConfig();
 

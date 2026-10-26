@@ -197,7 +197,8 @@ export class TasmotaService implements ITasmotaService {
     private readonly configProvider: IAppConfigProvider<TasmotaConfig>,
     private readonly haBridge?: HaBridgeClient
   ) {
-    this.taxonomie = haBridge ? new HaTaxonomieClient(haBridge) : undefined;
+    // délai de 30 s : la liste de toutes les entités dépasse les 5 s par défaut du relais au démarrage
+    this.taxonomie = haBridge ? new HaTaxonomieClient({ callWs: (m) => haBridge.callWs(m, 30_000) }) : undefined;
     this.config = this.loadConfig();
     this.bridgeInstance = computeBridgeInstance(MODULE_NAME, process.env.DIMOTIC_MACHINE_ID);
     this.dataDir = path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', MODULE_NAME);
@@ -1827,7 +1828,8 @@ export class TasmotaService implements ITasmotaService {
         this.scheduleEmit();
       }
     } catch (error) {
-      this.logger.warn('TasmotaService', `Catalogues quoi/lieux indisponibles : ${error instanceof Error ? error.message : error}`);
+      this.logger.warn('TasmotaService', `Catalogues quoi/lieux indisponibles : ${error instanceof Error ? error.message : error} — nouvelle tentative dans 15 s`);
+      setTimeout(() => void this.refreshCatalogs(true), 15_000);
     }
   }
 

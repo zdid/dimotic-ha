@@ -50,13 +50,7 @@ export class StateWatcher {
     this.setPlans(plans);
     // Amorçage lu directement dans Home Assistant (intégration dimotic_taxonomie) AVANT de s'abonner : sinon le premier
     // événement de chaque entité serait pris pour un passage d'état. Échec : journalisé, on continue sans amorçage.
-    try {
-      for (const entity of await new HaTaxonomieClient(this.haBridgeClient).getAllEntities()) {
-        if (entity.state !== undefined) this.lastStates.set(entity.entity_id, String(entity.state));
-      }
-    } catch (error) {
-      this.logger.warn('StateWatcher', `Amorçage des états impossible (HA ou intégration dimotic_taxonomie) : ${error instanceof Error ? error.message : error}`);
-    }
+    await this.seed(true);
     this.haBridgeClient.onStateChanged((entity) => this.handleStateChanged(entity));
 
     for (const plan of plans) {
@@ -65,6 +59,18 @@ export class StateWatcher {
         this.logger.info('StateWatcher', `Reprise après coupure pour "${plan.name}" (${entityId}) — redéclenchement à neuf`);
         this.restart(plan, entityId);
       }
+    }
+  }
+
+  /** Lit les états dans HA ; `retry` : une seconde tentative 15 s plus tard (sans écraser un état arrivé entre-temps). */
+  private async seed(retry: boolean): Promise<void> {
+    try {
+      for (const entity of await new HaTaxonomieClient({ callWs: (m) => this.haBridgeClient.callWs(m, 30_000) }).getAllEntities()) {
+        if (entity.state !== undefined && !this.lastStates.has(entity.entity_id)) this.lastStates.set(entity.entity_id, String(entity.state));
+      }
+    } catch (error) {
+      this.logger.warn('StateWatcher', `Amorçage des états impossible (HA ou intégration dimotic_taxonomie) : ${error instanceof Error ? error.message : error}${retry ? ' — nouvelle tentative dans 15 s' : ''}`);
+      if (retry) setTimeout(() => void this.seed(false), 15_000).unref();
     }
   }
 

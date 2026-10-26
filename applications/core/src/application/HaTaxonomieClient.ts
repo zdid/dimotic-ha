@@ -36,6 +36,8 @@ export interface EntiteTaxonomie {
 }
 
 const P = 'dimotic_taxonomie/';
+/** Délai d'une commande : la liste de toutes les entités (attributs compris) dépasse les 5 s par défaut du relais au démarrage. */
+const DELAI_MS = 30_000;
 
 /** Conversion à la volée d'une entité de l'intégration vers le format du cœur (sans les références circulaires). */
 export function versEntiteDuCoeur(e: EntiteTaxonomie): HaStructuredEntity {
@@ -64,7 +66,7 @@ export class HaTaxonomieClient {
 
   private async appeler<T>(commande: string, args: Record<string, unknown> = {}): Promise<T> {
     try {
-      return (await this.transport.callWs({ type: P + commande, ...args })) as T;
+      return (await this.transport.callWs({ type: P + commande, ...args }, DELAI_MS)) as T;
     } catch (err) {
       const detail = err instanceof Error ? err.message : typeof err === 'string' ? err : JSON.stringify(err);
       throw new Error(`Taxonomie Home Assistant indisponible (${commande}) : ${detail} — l'intégration dimotic_taxonomie est-elle installée et HA joignable ?`);

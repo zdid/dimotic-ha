@@ -57,7 +57,7 @@ describe('HaLectureDirecte', () => {
     const l = new HaLectureDirecte(p);
     const r = await l.getEntitiesByQuoiAndLieux('lumiere', ['salon'], true);
     expect(r.map((e) => e.entity_id)).toEqual(['light.a']);
-    expect((p as unknown as { callWs: ReturnType<typeof vi.fn> }).callWs).toHaveBeenCalledWith({ type: 'dimotic_taxonomie/chercher', quoi: 'lumiere', lieux: ['salon'], inclure_techniques: true });
+    expect((p as unknown as { callWs: ReturnType<typeof vi.fn> }).callWs).toHaveBeenCalledWith({ type: 'dimotic_taxonomie/chercher', quoi: 'lumiere', lieux: ['salon'], inclure_techniques: true }, 30000);
   });
 
   it('pas de repli : HA en panne => la recherche échoue clairement, l\'instantané déjà lu reste servi', async () => {
@@ -80,5 +80,25 @@ describe('HaLectureDirecte', () => {
     expect(callWs.mock.calls.filter(([m]) => m.type === 'dimotic_taxonomie/entites')).toHaveLength(1);
     await l.fresh(); // instantané récent : pas de nouvelle lecture
     expect(callWs.mock.calls.filter(([m]) => m.type === 'dimotic_taxonomie/entites')).toHaveLength(1);
+  });
+
+  it('première lecture échouée : un accès synchrone relance une lecture (au plus toutes les 15 s)', async () => {
+    vi.useFakeTimers();
+    try {
+      const reponses: Record<string, unknown> = { ...REPONSES, 'dimotic_taxonomie/entites': new Error('Timeout') };
+      const p = pont(reponses);
+      const l = new HaLectureDirecte(p);
+      await expect(l.refresh()).rejects.toThrow();
+      const nb = () => (p as unknown as { callWs: ReturnType<typeof vi.fn> }).callWs.mock.calls.filter(([m]) => m.type === 'dimotic_taxonomie/entites').length;
+      expect(nb()).toBe(1);
+      l.getAllEntities();            // moins de 15 s : pas de nouvelle lecture
+      expect(nb()).toBe(1);
+      reponses['dimotic_taxonomie/entites'] = REPONSES['dimotic_taxonomie/entites'];
+      vi.advanceTimersByTime(16_000);
+      l.getAllEntities();            // plus de 15 s : relecture lancée
+      await vi.advanceTimersByTimeAsync(10);
+      expect(nb()).toBe(2);
+      expect(l.isAvailable()).toBe(true);
+    } finally { vi.useRealTimers(); }
   });
 });

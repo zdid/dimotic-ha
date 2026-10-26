@@ -288,11 +288,13 @@ function setupDomListeners(): void {
   });
 
   $('expand-all-btn')?.addEventListener('click', () => {
+    TreeNode.openState.clear();
     state.displayConfig.expandAll = true;
     renderTree();
   });
 
   $('collapse-all-btn')?.addEventListener('click', () => {
+    TreeNode.openState.clear();
     state.displayConfig.expandAll = false;
     renderTree();
   });
@@ -300,6 +302,7 @@ function setupDomListeners(): void {
   // Toggle mode OÙ-first / QUOI-first
   $('toggle-view-mode-btn')?.addEventListener('click', () => {
     const newMode = state.viewMode === 'ou-first' ? 'quoi-first' : 'ou-first';
+    TreeNode.openState.clear();
     state.viewMode = newMode;
     updateViewModeButton();
     socket.emit(ARBREOUQUOI_SOCKET_EVENTS.CONFIG_SAVE, {
@@ -313,7 +316,9 @@ function setupDomListeners(): void {
   const searchInput = $('search-input') as HTMLInputElement | null;
   if (searchInput) searchInput.value = state.filters.search;
   const applySearch = () => {
-    state.filters.search = (searchInput?.value || '').trim().toLowerCase();
+    const recherche = (searchInput?.value || '').trim().toLowerCase();
+    if (recherche !== state.filters.search) TreeNode.openState.clear();
+    state.filters.search = recherche;
     renderTree();
   };
   let searchTimer: ReturnType<typeof setTimeout> | null = null;

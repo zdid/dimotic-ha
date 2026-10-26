@@ -27,15 +27,22 @@ export interface TreeNodeData {
 export class TreeNode extends HTMLElement {
   static entityRenderer: (info: unknown) => string = () => '';
 
+  /** Nœuds ouverts / fermés par l'utilisateur, par chemin complet : l'arbre est reconstruit à chaque envoi du serveur
+   *  (changement d'état dans HA, au plus toutes les 5 s) — sans cette mémoire, tout se repliait tout seul. Remis à zéro
+   *  quand l'utilisateur change de vue, de recherche ou clique « tout déplier / replier ». */
+  static readonly openState = new Map<string, boolean>();
+
   private node: TreeNodeData | null = null;
+  private key = '';
 
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
   }
 
-  setData(node: TreeNodeData): void {
+  setData(node: TreeNodeData, parentKey = ''): void {
     this.node = node;
+    this.key = `${parentKey}/${node.kind}:${node.id}`;
     this.render();
   }
 
@@ -74,8 +81,8 @@ export class TreeNode extends HTMLElement {
 
     this.shadowRoot.innerHTML = `
       <link rel="stylesheet" href="/applications/arbreouquoi/presentation/styles/arbreouquoi.css">
-      <div class="${outerClass}" x-data="{ open: ${node.defaultOpen ? 'true' : 'false'} }">
-        <div class="${headerClass}" ${hasContent ? '@click="open = !open"' : ''}>
+      <div class="${outerClass}" data-key="${this.key.replace(/"/g, '&quot;')}" x-data="{ open: ${(TreeNode.openState.get(this.key) ?? node.defaultOpen) ? 'true' : 'false'} }">
+        <div class="${headerClass}" ${hasContent ? '@click="open = !open; window.__arbreOuvert.set($el.parentElement.dataset.key, open)"' : ''}>
           <span class="toggle-icon" x-text="open ? '▼' : '▶'">▶</span>
           ${nameSpan}
           ${countSpan}
@@ -91,10 +98,11 @@ export class TreeNode extends HTMLElement {
       node.children.forEach(childData => {
         const child = document.createElement('tree-node') as TreeNode; // récursion : même balise
         childrenEl?.appendChild(child);
-        child.setData(childData);
+        child.setData(childData, this.key);
       });
     }
   }
 }
 
+(window as unknown as { __arbreOuvert: Map<string, boolean> }).__arbreOuvert = TreeNode.openState; // lu par les expressions Alpine des nœuds
 customElements.define('tree-node', TreeNode);

@@ -21,15 +21,18 @@ export type HaLecture = Pick<
 > & { fresh(): Promise<void> };
 
 const DUREE_VIE_MS = 30_000;
+const RETENTE_MS = 15_000;
 
 export class HaLectureDirecte implements HaLecture {
   private readonly taxonomie: HaTaxonomieClient;
   private snapshot: { entities: HaStructuredEntity[]; byId: Map<string, HaStructuredEntity>; quoi: HaQuoiDefinition[] } | null = null;
   private loadedAt = 0;
   private loading: Promise<void> | null = null;
+  private lastAttemptAt = 0;
 
   constructor(private readonly bridge: HaBridgeClient, private readonly logger?: Logger) {
-    this.taxonomie = new HaTaxonomieClient(bridge);
+    // délai de 30 s : la liste de toutes les entités dépasse les 5 s par défaut du relais au démarrage
+    this.taxonomie = new HaTaxonomieClient({ callWs: (m) => bridge.callWs(m, 30_000) });
   }
 
   // --- relais vers le cœur (jeton gardé par le cœur) -------------------------------------------------------------
@@ -53,6 +56,7 @@ export class HaLectureDirecte implements HaLecture {
 
   private relire(): Promise<void> {
     if (this.loading) return this.loading;
+    this.lastAttemptAt = Date.now();
     this.loading = (async () => {
       try {
         const [entities, quoi] = await Promise.all([this.taxonomie.getAllEntities(), this.taxonomie.getQuoiCatalog()]);
@@ -66,7 +70,8 @@ export class HaLectureDirecte implements HaLecture {
   }
 
   private current(): NonNullable<HaLectureDirecte['snapshot']> | null {
-    if (this.snapshot && Date.now() - this.loadedAt > DUREE_VIE_MS && !this.loading) {
+    const aucune = !this.snapshot && Date.now() - this.lastAttemptAt > RETENTE_MS; // première lecture échouée : on réessaie
+    if ((aucune || (this.snapshot && Date.now() - this.loadedAt > DUREE_VIE_MS)) && !this.loading) {
       this.relire().catch((e) => this.logger?.warn('HaLectureDirecte', `Relecture de HA impossible : ${e instanceof Error ? e.message : e}`));
     }
     return this.snapshot;

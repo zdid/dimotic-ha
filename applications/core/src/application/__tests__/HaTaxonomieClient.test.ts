@@ -37,28 +37,28 @@ describe('HaTaxonomieClient', () => {
   it('getEntity : commande entite, undefined si absente', async () => {
     const a = client(entite);
     expect((await a.c.getEntity('light.chevets'))?.entity_id).toBe('light.chevets');
-    expect(a.callWs).toHaveBeenCalledWith({ type: 'dimotic_taxonomie/entite', entity_id: 'light.chevets' });
+    expect(a.callWs).toHaveBeenCalledWith({ type: 'dimotic_taxonomie/entite', entity_id: 'light.chevets' }, 30000);
     expect(await client(null).c.getEntity('x.y')).toBeUndefined();
   });
 
   it('getAllEntities : demande aussi les entités techniques', async () => {
     const a = client({ nombre: 1, entites: [entite] });
     expect(await a.c.getAllEntities()).toHaveLength(1);
-    expect(a.callWs).toHaveBeenCalledWith({ type: 'dimotic_taxonomie/entites', inclure_techniques: true });
+    expect(a.callWs).toHaveBeenCalledWith({ type: 'dimotic_taxonomie/entites', inclure_techniques: true }, 30000);
   });
 
   it('getAllEntities(domaine) : transmet le filtre de domaine', async () => {
     const a = client({ nombre: 0, entites: [] });
     await a.c.getAllEntities('automation');
-    expect(a.callWs).toHaveBeenCalledWith({ type: 'dimotic_taxonomie/entites', inclure_techniques: true, domaine: 'automation' });
+    expect(a.callWs).toHaveBeenCalledWith({ type: 'dimotic_taxonomie/entites', inclure_techniques: true, domaine: 'automation' }, 30000);
   });
 
   it('getEntitiesByQuoiAndLieux : commande chercher, quoi omis si absent', async () => {
     const a = client({ entites: [entite] });
     await a.c.getEntitiesByQuoiAndLieux(undefined, ['chambre'], true);
-    expect(a.callWs).toHaveBeenCalledWith({ type: 'dimotic_taxonomie/chercher', lieux: ['chambre'], inclure_techniques: true });
+    expect(a.callWs).toHaveBeenCalledWith({ type: 'dimotic_taxonomie/chercher', lieux: ['chambre'], inclure_techniques: true }, 30000);
     await a.c.getEntitiesByQuoiAndLieux('lumiere', []);
-    expect(a.callWs).toHaveBeenLastCalledWith({ type: 'dimotic_taxonomie/chercher', quoi: 'lumiere', lieux: [], inclure_techniques: false });
+    expect(a.callWs).toHaveBeenLastCalledWith({ type: 'dimotic_taxonomie/chercher', quoi: 'lumiere', lieux: [], inclure_techniques: false }, 30000);
   });
 
   it('catalogues', async () => {
@@ -66,7 +66,7 @@ describe('HaTaxonomieClient', () => {
     expect(await q.c.getQuoiCatalog()).toEqual([{ quoi_id: 'lumiere', label: 'Lumière' }]);
     const l = client(['salon']);
     expect(await l.c.getLieuCatalog(new Set(['x']))).toEqual(['salon']);
-    expect(l.callWs).toHaveBeenCalledWith({ type: 'dimotic_taxonomie/catalogue_lieux', quoi_exclus: ['x'] });
+    expect(l.callWs).toHaveBeenCalledWith({ type: 'dimotic_taxonomie/catalogue_lieux', quoi_exclus: ['x'] }, 30000);
   });
 
   it('pas de repli : l\'échec de HA est dit clairement', async () => {

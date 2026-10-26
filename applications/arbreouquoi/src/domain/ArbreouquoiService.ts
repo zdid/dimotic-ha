@@ -43,7 +43,8 @@ export class ArbreouquoiService {
      *  séparé. isAvailable() reflète ha.ws_enable=false côté core, même état normal qu'avant. */
     private haBridgeClient: HaBridgeClient
   ) {
-    this.taxonomie = new HaTaxonomieClient(haBridgeClient);
+    // délai de 30 s : la liste de toutes les entités dépasse les 5 s par défaut du relais au démarrage
+    this.taxonomie = new HaTaxonomieClient({ callWs: (m) => haBridgeClient.callWs(m, 30_000) });
     this.setupEventListeners();
   }
 
@@ -120,13 +121,17 @@ export class ArbreouquoiService {
   /** Partie de l'initialisation qui dépend du référentiel HA — au démarrage si HA est déjà prêt,
    *  sinon au premier ha:ready (une seule fois). */
   private haInitialized = false;
+  private initRetry: NodeJS.Timeout | null = null;
 
   /** Vrai si HA a répondu (initialisation faite), faux sinon (HA pas prêt : on réessaiera au premier ha:ready). */
   private async initializeWithHa(): Promise<boolean> {
     try {
       await this.loadSnapshot();
     } catch (error) {
-      this.logger.warn('ArbreouquoiService', `Lecture de HA impossible pour l'instant : ${error instanceof Error ? error.message : error}`);
+      this.logger.warn('ArbreouquoiService', `Lecture de HA impossible pour l'instant : ${error instanceof Error ? error.message : error} — nouvelle tentative dans 15 s`);
+      if (!this.initRetry) {
+        this.initRetry = setTimeout(() => { this.initRetry = null; if (!this.haInitialized) void this.initializeWithHa(); }, 15_000);
+      }
       return false;
     }
     this.haInitialized = true;
@@ -147,6 +152,7 @@ export class ArbreouquoiService {
   async stop(): Promise<void> {
     this.logger.info('ArbreouquoiService', 'Arrêt du service...');
     if (this.stateRefreshTimer) clearTimeout(this.stateRefreshTimer);
+    if (this.initRetry) { clearTimeout(this.initRetry); this.initRetry = null; }
 
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
