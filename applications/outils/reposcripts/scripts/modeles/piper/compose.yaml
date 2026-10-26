@@ -1,0 +1,18 @@
+# Synthèse vocale (protocole Wyoming) pour l'assistant vocal de Home Assistant.
+services:
+  piper:
+    image: rhasspy/wyoming-piper:latest
+    container_name: piper
+    restart: unless-stopped
+    command: --voice fr_FR-siwis-medium
+    ports:
+      - '10200:10200'
+    environment:
+      - TZ=Europe/Paris
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    volumes:
+      - ./data:/data

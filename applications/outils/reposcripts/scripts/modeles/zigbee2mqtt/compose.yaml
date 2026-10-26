@@ -1,0 +1,19 @@
+services:
+  zigbee2mqtt:
+    image: koenkk/zigbee2mqtt:latest
+    container_name: zigbee2mqtt
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - TZ=Europe/Paris
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    volumes:
+      - ./data:/app/data
+      - /run/udev:/run/udev:ro
+    # Dongle Zigbee : /dev/ttyUSB0 (Sonoff) ; à adapter si le dongle apparaît ailleurs (ex. ConBee : /dev/ttyACM0).
+    devices:
+      - ${ZIGBEE_DEVICE:-/dev/ttyUSB0}:/dev/ttyUSB0

@@ -1,0 +1,19 @@
+# Reconnaissance vocale (protocole Wyoming) pour l'assistant vocal de Home Assistant.
+# Modèle « small-int8 » : bon compromis sur un Raspberry Pi 4 ; « tiny-int8 » est plus rapide, « base-int8 » plus précis.
+services:
+  whisper:
+    image: rhasspy/wyoming-whisper:latest
+    container_name: whisper
+    restart: unless-stopped
+    command: --model small-int8 --language fr
+    ports:
+      - '10300:10300'
+    environment:
+      - TZ=Europe/Paris
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    volumes:
+      - ./data:/data

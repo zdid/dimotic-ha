@@ -53,10 +53,18 @@ const BASE_DIR = path.join(CACHE_DIR, 'base');
 const PREPARED_DIR = path.join(CACHE_DIR, 'prepared');
 const CATALOG_URL = 'https://downloads.raspberrypi.org/os_list_imagingutility_v3.json';
 const PREPARE_SH = path.join(__dirname, 'prepare-sd-card.sh');
+const EXTRAS_SH = path.join(__dirname, 'sd-extras.sh');
+const RENDU_SAUVEGARDE_DIR = path.join(__dirname, 'sauvegarde-rendu');
+const MODELES_DIR = path.join(__dirname, 'modeles');
+/** Valeurs reconnues des cases à cocher (v1.12) — à tenir synchronisées avec sd-extras.sh. */
+const SERVICES_CONNUS = ['homeassistant', 'zigbee2mqtt', 'mosquitto', 'portainer-agent', 'whisper', 'piper', 'dimotic-maj', 'caddy'];
+const INTEGRATIONS_CONNUES = ['hacs', 'dimotic_taxonomie', 'dimotic_plans'];
+const OPTIONS_CONNUES = ['rotation-journaux-docker', 'fuseau-paris', 'sauvegarde-nextcloud', 'wireguard', 'claude-code'];
+const COMPTES_CONNUS = ['didier', 'claude'];
 /** Place ajoutée à l'image de base avant les installations (image officielle : ~370 Mo libres). */
 const BASE_EXTRA_MB = 2048;
 /** À incrémenter quand ce que contient l'image de base change (invalide le cache). */
-const BASE_RECIPE_VERSION = 2; // 2 : fail2ban + durcissement SSH dans l'image (07/10/2026)
+const BASE_RECIPE_VERSION = 3; // 3 : services, intégrations et options cochés (v1.12, 26/10/2026) ; 2 : fail2ban + durcissement SSH (07/10/2026)
 
 function machineSlug(machine) {
   return String(machine).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'machine';
@@ -185,6 +193,57 @@ function loadProfile(profilePath) {
   profile.personalSshKeys = (profile.personalSshKeys || []).filter(Boolean).map((p) => String(p).replace(/^~/, home));
   profile.packages = (profile.packages || []).filter(Boolean).map(String);
   profile.apps = (profile.apps || []).filter(Boolean).map(String);
+  // ⭐ v1.12 — cases à cocher : services Docker posés (non démarrés), intégrations Home Assistant, options du système, comptes.
+  const liste = (v) => (Array.isArray(v) ? v : []).filter(Boolean).map(String);
+  const verifier = (champ, valeurs, connues) => {
+    for (const v of valeurs) if (!connues.includes(v)) fail(`${champ} : « ${v} » inconnu (connus : ${connues.join(', ')})`);
+  };
+  profile.services = liste(profile.services);
+  profile.integrationsHa = liste(profile.integrationsHa);
+  profile.options = liste(profile.options);
+  profile.accounts = liste(profile.accounts);
+  verifier('services', profile.services, SERVICES_CONNUS);
+  verifier('integrationsHa', profile.integrationsHa, INTEGRATIONS_CONNUES);
+  verifier('options', profile.options, OPTIONS_CONNUES);
+  verifier('accounts', profile.accounts, COMPTES_CONNUS);
+  if (profile.integrationsHa.length && !profile.services.includes('homeassistant')) {
+    fail('integrationsHa : les intégrations demandent le service « homeassistant » (à cocher aussi).');
+  }
+  if (profile.accounts.includes('claude')) {
+    if (!profile.claudeSshKey) fail('accounts : le compte « claude » demande claudeSshKey (clé publique).');
+    profile.claudeSshKey = String(profile.claudeSshKey).replace(/^~/, home);
+    if (!fs.existsSync(profile.claudeSshKey)) fail(`claudeSshKey introuvable : ${profile.claudeSshKey}`);
+  }
+  // Sauvegarde Nextcloud (option « sauvegarde-nextcloud ») : tout est obligatoire — le script, le mot de passe d'application et le cron sont posés dans l'image.
+  profile.sauvegarde = profile.sauvegarde || null;
+  if (profile.options.includes('sauvegarde-nextcloud')) {
+    const sv = profile.sauvegarde;
+    for (const champ of ['site', 'machine', 'url', 'user', 'root', 'password']) {
+      if (!sv || !sv[champ]) fail(`sauvegarde-nextcloud : champ « ${champ} » manquant (site, machine, URL, utilisateur, dossier et mot de passe d'application sont requis).`);
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(String(sv.site)) || !/^[A-Za-z0-9_-]+$/.test(String(sv.machine))) {
+      fail(`sauvegarde-nextcloud : site ou machine invalide (« ${sv.site} » / « ${sv.machine} »).`);
+    }
+    if (!/^https?:\/\//.test(String(sv.url))) fail(`sauvegarde-nextcloud : URL invalide « ${sv.url} ».`);
+  } else {
+    profile.sauvegarde = null;
+  }
+  // DuckDNS + Caddy : un jeton (compte DuckDNS) et jusqu'à 2 domaines {domaine, cible: hôte:port}.
+  profile.duckdns = profile.duckdns || null;
+  if (profile.duckdns) {
+    const domaines = (profile.duckdns.domains || []).filter((d) => d && d.name);
+    if (!domaines.length) profile.duckdns = null;
+    else {
+      if (!profile.duckdns.token) fail('duckdns : jeton manquant.');
+      if (domaines.length > 2) fail('duckdns : 2 domaines au plus.');
+      for (const d of domaines) {
+        if (!/^[a-z0-9-]+$/.test(String(d.name))) fail(`duckdns : nom de domaine invalide « ${d.name} » (sans .duckdns.org).`);
+        if (!/^[A-Za-z0-9._-]+:\d+$/.test(String(d.target))) fail(`duckdns : cible invalide « ${d.target} » (attendu hôte:port).`);
+      }
+      profile.duckdns.domains = domaines.map((d) => ({ name: String(d.name), target: String(d.target) }));
+      if (!profile.services.includes('caddy')) profile.services.push('caddy');
+    }
+  }
   // WiFi optionnel : SSID vide = pas de WiFi (Ethernet). Pays FR par défaut (régulateur radio —
   // sans pays défini, le WiFi peut rester bloqué).
   if (!profile.wifi || !profile.wifi.ssid) delete profile.wifi;
@@ -410,6 +469,12 @@ function baseKey(entry, profile) {
     compose: fileHash(path.join(BUNDLE_ROOT, 'compose.deploy.yaml')),
     sshHardening: profile.sshHardening,
     prepareScript: fileHash(PREPARE_SH),
+    extras: fileHash(EXTRAS_SH),
+    rendu: dirSignature(RENDU_SAUVEGARDE_DIR),
+    modeles: dirSignature(MODELES_DIR),
+    services: [...profile.services].sort(),
+    integrationsHa: [...profile.integrationsHa].sort(),
+    options: [...profile.options].sort(),
     agents: Object.fromEntries(profile.apps.map((a) => [a, dirSignature(APP_AGENT_DIRS[a])]))
   };
   return crypto.createHash('sha256').update(JSON.stringify(desc)).digest('hex').slice(0, 12);
@@ -435,6 +500,9 @@ async function ensureBaseImage(entry, profile, officialImg) {
   const args = [PREPARE_SH, 'base', partial, '--extra-mb', String(BASE_EXTRA_MB)];
   if (profile.packages.length) args.push('--packages', profile.packages.join(','));
   if (profile.apps.length) args.push('--apps', profile.apps.join(','));
+  if (profile.services.length) args.push('--services', profile.services.join(','));
+  if (profile.integrationsHa.length) args.push('--integrations', profile.integrationsHa.join(','));
+  if (profile.options.length) args.push('--options', profile.options.join(','));
   args.push('--ssh-hardening', profile.sshHardening ? 'yes' : 'no');
   if (isOrangePi(profile)) args.push('--layout', 'single');
   const r = spawnSync('bash', args, { stdio: 'inherit' });
@@ -605,14 +673,34 @@ async function buildMachineImage(entry, profile, basePath) {
 
   }
 
+  // ⭐ v1.12 — comptes (didier, claude) et DuckDNS + Caddy : propres à la machine, quel que soit le modèle de Pi.
+  if (profile.accounts.length || profile.duckdns || profile.sauvegarde) {
+    const args = [PREPARE_SH, 'extras-machine', partial, '--user', profile.user];
+    if (isOrangePi(profile)) args.push('--layout', 'single');
+    for (const k of profile.personalSshKeys) args.push('--key', k);
+    if (profile.accounts.length) args.push('--accounts', profile.accounts.join(','));
+    if (profile.claudeSshKey && profile.accounts.includes('claude')) args.push('--claude-key', profile.claudeSshKey);
+    if (profile.duckdns) for (const d of profile.duckdns.domains) args.push('--duckdns', `${d.name}=${d.target}`);
+    if (profile.sauvegarde) {
+      const sv = profile.sauvegarde;
+      args.push('--backup-site', String(sv.site), '--backup-machine', String(sv.machine), '--backup-url', String(sv.url), '--backup-user', String(sv.user), '--backup-root', String(sv.root));
+    }
+    // Le jeton DuckDNS passe par l'environnement (pas par la ligne de commande, visible dans `ps`).
+    const env = { ...process.env };
+    if (profile.duckdns) env.DUCKDNS_TOKEN = String(profile.duckdns.token);
+    if (profile.sauvegarde) env.NEXTCLOUD_PASSWORD = String(profile.sauvegarde.password);
+    const r = spawnSync('bash', args, { stdio: 'inherit', env });
+    if (r.status !== 0) keepFailedImage(partial, isOrangePi(profile) ? 'single' : '', 'Comptes et accès externe de la machine', r.status);
+  }
+
   fs.renameSync(partial, outPath);
   return outPath;
 }
 
 /** Ce qui rend une image de machine réutilisable telle quelle à la relance (même profil, même base). */
 function machineSignature(profile, basePath) {
-  const { machine, piModel, distro, hostname, user, password, personalSshKeys, packages, apps, wifi, sshHardening, fail2banIgnoreIp } = profile;
-  return JSON.stringify({ basePath, machine, piModel, distro, hostname, user, password, personalSshKeys, packages, apps, wifi: wifi || null, sshHardening, fail2banIgnoreIp });
+  const { machine, piModel, distro, hostname, user, password, personalSshKeys, packages, apps, wifi, sshHardening, fail2banIgnoreIp, services, integrationsHa, options, accounts, claudeSshKey, duckdns, sauvegarde } = profile;
+  return JSON.stringify({ basePath, machine, piModel, distro, hostname, user, password, personalSshKeys, packages, apps, wifi: wifi || null, sshHardening, fail2banIgnoreIp, services, integrationsHa, options, accounts, claudeSshKey: claudeSshKey || null, duckdns: duckdns || null, sauvegarde: sauvegarde || null });
 }
 
 // ==========================================================================
@@ -703,4 +791,8 @@ async function main() {
   log(`Terminé — carte prête pour "${profile.machine}", à insérer dans le Pi.${entry.firstBoot === 'cloudinit' ? ' Premier démarrage un peu plus long (cloud-init) ; suivi : /var/log/cloud-init-output.log.' : ''}${entry.firstBoot === 'orangepi' ? ' Orange Pi : le système s\'agrandit seul à la taille de la carte au premier démarrage, et les clés SSH d\'hôte sont recréées.' : ''}`);
 }
 
-main().catch((err) => fail(err.stack || String(err)));
+if (require.main === module) {
+  main().catch((err) => fail(err.stack || String(err)));
+} else {
+  module.exports = { loadProfile, baseKey };   // pour les tests (Outils v1.12)
+}

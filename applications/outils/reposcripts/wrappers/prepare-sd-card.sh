@@ -27,6 +27,10 @@
 #
 # @outils:bundle applications/outils/reposcripts/scripts/flash-sd-card.js => scripts/flash-sd-card.js
 # @outils:bundle applications/outils/reposcripts/scripts/prepare-sd-card.sh => scripts/prepare-sd-card.sh
+# @outils:bundle applications/outils/reposcripts/scripts/sd-extras.sh => scripts/sd-extras.sh
+# @outils:bundle applications/outils/reposcripts/scripts/modeles => scripts/modeles
+# @outils:bundle applications/outils/reposcripts/scripts/sauvegarde-rendu => scripts/sauvegarde-rendu
+# @outils:bundle applications/sauvegarde/dist/domain/BackupScript.js => scripts/sauvegarde-rendu/BackupScript.js
 # @outils:bundle applications/outils/node_modules/js-yaml => node_modules/js-yaml
 # @outils:bundle data/core/machine_ssh/id_ed25519.pub
 # @outils:bundle compose.deploy.yaml
@@ -50,6 +54,47 @@
 # @outils:hint PACKAGES = Docker, Node.js, mosquitto-clients, build-essential et curl sont TOUJOURS installés (voir en-tête) — inutile de les ajouter.
 # @outils:checklist APPS = teleinfo
 # @outils:hint APPS = Agent pré-installé dans l'image (seule 'teleinfo' est câblée) — désactive aussi la console série (UART réservé à l'app).
+# @outils:checklist SERVICES = homeassistant, zigbee2mqtt, mosquitto, dimotic-maj, portainer-agent, whisper, piper
+# @outils:hint SERVICES = Services Docker posés dans /docker/<service>/ avec leur compose, NON démarrés (tout démarre ensuite à la main ou par la restauration). dimotic-ha est toujours posé. Whisper (reconnaissance vocale) et Piper (synthèse vocale) servent à l'assistant vocal de Home Assistant. Caddy est posé automatiquement dès qu'un domaine DuckDNS est rempli plus bas.
+# @outils:checklist INTEGRATIONS_HA = hacs, dimotic_taxonomie, dimotic_plans
+# @outils:hint INTEGRATIONS_HA = Posées dans /docker/homeassistant/config/custom_components/ (dernière version publiée, téléchargée sur GitHub) — exige « homeassistant » coché ci-dessus. Elles s'ajoutent ensuite dans Home Assistant (Paramètres > Appareils et services).
+# @outils:checklist COMPTES = didier, claude
+# @outils:hint COMPTES = Comptes créés dans l'image, connexion par clé uniquement : didier (sudo, docker, vos clés personnelles) et claude (sudo sans mot de passe, groupe docker, clé ci-dessous). Un compte identique à l'utilisateur principal de cette carte est simplement ignoré.
+# @outils:default CLAUDE_SSH_KEY = ~/.ssh/ha2-claude/id_ed25519.pub
+# @outils:hint CLAUDE_SSH_KEY = Clé PUBLIQUE du compte claude (utilisée seulement si « claude » est coché).
+# @outils:checklist OPTIONS_SYSTEME = rotation-journaux-docker, fuseau-paris, sauvegarde-nextcloud, wireguard, claude-code
+# @outils:hint OPTIONS_SYSTEME = rotation-journaux-docker : 10 Mo x 5 par conteneur. fuseau-paris : Europe/Paris. sauvegarde-nextcloud : pose le script de sauvegarde (le même que le bouton « Pousser » de l'application Sauvegarde), le mot de passe d'application dans /dimotic-secrets (lisible par root seulement) et l'horaire de 3 h 05 — remplir les champs NEXTCLOUD_… et SAUVEGARDE_… ci-dessous. wireguard : outils installés, la configuration du tunnel (clés) reste à poser. claude-code : Claude Code installé pour tous les comptes (npm, système 64 bits seulement) ; la connexion à votre compte Anthropic se fait ensuite à la main (commande « claude »).
+# @outils:default NEXTCLOUD_URL = https://dimoticloud.duckdns.org
+# @outils:hint NEXTCLOUD_URL = Seulement si « sauvegarde-nextcloud » est coché : adresse du Nextcloud qui reçoit les sauvegardes.
+# @outils:default NEXTCLOUD_USER = hadimotic
+# @outils:hint NEXTCLOUD_USER = Seulement si « sauvegarde-nextcloud » est coché : utilisateur Nextcloud.
+# @outils:default NEXTCLOUD_DOSSIER = backups-dimotic
+# @outils:hint NEXTCLOUD_DOSSIER = Seulement si « sauvegarde-nextcloud » est coché : dossier racine des sauvegardes sur Nextcloud.
+# @outils:select SAUVEGARDE_SITE = noisy, stfort
+# @outils:default SAUVEGARDE_SITE = noisy
+# @outils:hint SAUVEGARDE_SITE = Seulement si « sauvegarde-nextcloud » est coché : site sous lequel la machine est rangée sur Nextcloud (site/machine).
+# @outils:hint SAUVEGARDE_MACHINE = Seulement si « sauvegarde-nextcloud » est coché : nom de la machine sur Nextcloud (vide = nom d'hôte, ex. noisy2).
+# @outils:hint NEXTCLOUD_MOT_DE_PASSE = Seulement si « sauvegarde-nextcloud » est coché : mot de passe d'APPLICATION Nextcloud de cette machine (un par machine). Écrit sur la carte dans /dimotic-secrets/nextcloud-backup, lisible par root seulement, masqué à l'affichage.
+# @outils:hint DUCKDNS_TOKEN = Jeton de votre compte DuckDNS (le même pour tous les domaines) — laisser vide pour ne pas installer DuckDNS ni Caddy. Il est écrit sur la carte dans le script de mise à jour (lisible par root seulement).
+# @outils:select DUCKDNS_DOMAINE_1 = aucun, dimoticnoisy, dimotic-noisy-ha, dimotic-stfort-ha, dimoticloud, autre
+# @outils:default DUCKDNS_DOMAINE_1 = aucun
+# @outils:hint DUCKDNS_DOMAINE_1 = Adresse externe n°1 (sous-domaine DuckDNS) : liste de noisy et de stfort, ou « autre » puis le nom ci-dessous.
+# @outils:hint DUCKDNS_DOMAINE_1_AUTRE = Seulement si « autre » : sous-domaine DuckDNS sans .duckdns.org.
+# @outils:select DUCKDNS_MACHINE_1 = noisy2 (192.168.1.201), ha2 (192.168.1.51), stfort (192.168.1.53), nextcloud (192.168.1.13), autre
+# @outils:default DUCKDNS_MACHINE_1 = noisy2 (192.168.1.201)
+# @outils:hint DUCKDNS_MACHINE_1 = Machine du réseau local vers laquelle Caddy dirige cette adresse.
+# @outils:hint DUCKDNS_MACHINE_1_AUTRE = Seulement si « autre » : adresse IP ou nom de la machine.
+# @outils:default DUCKDNS_PORT_1 = 8123
+# @outils:hint DUCKDNS_PORT_1 = Port de la machine (8123 = Home Assistant, 8087 = dimotic-ha, 8081 = Nextcloud).
+# @outils:select DUCKDNS_DOMAINE_2 = aucun, dimoticnoisy, dimotic-noisy-ha, dimotic-stfort-ha, dimoticloud, autre
+# @outils:default DUCKDNS_DOMAINE_2 = aucun
+# @outils:hint DUCKDNS_DOMAINE_2 = Adresse externe n°2 (facultative).
+# @outils:hint DUCKDNS_DOMAINE_2_AUTRE = Seulement si « autre » : sous-domaine DuckDNS sans .duckdns.org.
+# @outils:select DUCKDNS_MACHINE_2 = noisy2 (192.168.1.201), ha2 (192.168.1.51), stfort (192.168.1.53), nextcloud (192.168.1.13), autre
+# @outils:default DUCKDNS_MACHINE_2 = noisy2 (192.168.1.201)
+# @outils:hint DUCKDNS_MACHINE_2_AUTRE = Seulement si « autre » : adresse IP ou nom de la machine.
+# @outils:default DUCKDNS_PORT_2 = 8123
+# @outils:hint DUCKDNS_PORT_2 = Port de la machine pour l'adresse n°2.
 # @outils:hint WIFI_SSID = Laisser vide si le Pi est relié par câble Ethernet.
 # @outils:default WIFI_COUNTRY = FR
 # @outils:hint WIFI_COUNTRY = Code pays radio (FR) — sans lui le WiFi peut rester bloqué.
@@ -103,6 +148,24 @@ WIFI_COUNTRY="__WIFI_COUNTRY__"
 SSH_DURCISSEMENT="__SSH_DURCISSEMENT__"
 FAIL2BAN_IGNOREIP="__FAIL2BAN_IGNOREIP__"
 IMAGE_ORANGEPI="__IMAGE_ORANGEPI__"
+# ⭐ v1.12 — cases à cocher et accès externe.
+SERVICES="__SERVICES__"
+INTEGRATIONS_HA="__INTEGRATIONS_HA__"
+COMPTES="__COMPTES__"
+CLAUDE_SSH_KEY="__CLAUDE_SSH_KEY__"
+[ -n "$CLAUDE_SSH_KEY" ] && CLAUDE_SSH_KEY="${CLAUDE_SSH_KEY/#\~/$HOME}"
+OPTIONS_SYSTEME="__OPTIONS_SYSTEME__"
+NEXTCLOUD_URL="__NEXTCLOUD_URL__"; NEXTCLOUD_USER="__NEXTCLOUD_USER__"; NEXTCLOUD_DOSSIER="__NEXTCLOUD_DOSSIER__"
+SAUVEGARDE_SITE="__SAUVEGARDE_SITE__"; SAUVEGARDE_MACHINE="__SAUVEGARDE_MACHINE__"; NEXTCLOUD_MOT_DE_PASSE="__NEXTCLOUD_MOT_DE_PASSE__"
+DUCKDNS_TOKEN="__DUCKDNS_TOKEN__"
+DUCKDNS_DOMAINE_1="__DUCKDNS_DOMAINE_1__"; DUCKDNS_DOMAINE_1_AUTRE="__DUCKDNS_DOMAINE_1_AUTRE__"
+DUCKDNS_MACHINE_1="__DUCKDNS_MACHINE_1__"; DUCKDNS_MACHINE_1_AUTRE="__DUCKDNS_MACHINE_1_AUTRE__"; DUCKDNS_PORT_1="__DUCKDNS_PORT_1__"
+DUCKDNS_DOMAINE_2="__DUCKDNS_DOMAINE_2__"; DUCKDNS_DOMAINE_2_AUTRE="__DUCKDNS_DOMAINE_2_AUTRE__"
+DUCKDNS_MACHINE_2="__DUCKDNS_MACHINE_2__"; DUCKDNS_MACHINE_2_AUTRE="__DUCKDNS_MACHINE_2_AUTRE__"; DUCKDNS_PORT_2="__DUCKDNS_PORT_2__"
+
+# Domaine : « aucun » = ligne ignorée ; « autre » = la saisie libre. Machine : « nom (adresse) » -> adresse ; « autre » = la saisie libre.
+duckdns_domaine() { case "$1" in ""|aucun) echo "" ;; autre) echo "$2" ;; *) echo "$1" ;; esac; }
+duckdns_hote() { case "$1" in autre) echo "$2" ;; *"("*")"*) echo "$1" | sed -n 's/.*(\(.*\)).*/\1/p' ;; *) echo "$1" ;; esac; }
 # "~" résolu ICI (avant sudo, $HOME = l'utilisateur réel), comme pour la clé SSH.
 [ -n "$IMAGE_ORANGEPI" ] && IMAGE_ORANGEPI="${IMAGE_ORANGEPI/#\~/$HOME}"
 
@@ -138,6 +201,30 @@ q() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
   echo "personalSshKeys: [${PERSONAL_SSH_KEY:+$(q "$PERSONAL_SSH_KEY")}]"
   echo "packages: [${PACKAGES}]"
   echo "apps: [${APPS}]"
+  echo "services: [${SERVICES}]"
+  echo "integrationsHa: [${INTEGRATIONS_HA}]"
+  echo "options: [${OPTIONS_SYSTEME}]"
+  echo "accounts: [${COMPTES}]"
+  if [[ ",${COMPTES// /}," == *",claude,"* ]]; then echo "claudeSshKey: $(q "$CLAUDE_SSH_KEY")"; fi
+  if [[ ",${OPTIONS_SYSTEME// /}," == *",sauvegarde-nextcloud,"* ]]; then
+    echo "sauvegarde:"
+    echo "  site: $(q "$SAUVEGARDE_SITE")"
+    echo "  machine: $(q "${SAUVEGARDE_MACHINE:-$HOSTNAME_VALUE}")"
+    echo "  url: $(q "$NEXTCLOUD_URL")"
+    echo "  user: $(q "$NEXTCLOUD_USER")"
+    echo "  root: $(q "$NEXTCLOUD_DOSSIER")"
+    echo "  password: $(q "$NEXTCLOUD_MOT_DE_PASSE")"
+  fi
+  if [ -n "$DUCKDNS_TOKEN" ]; then
+    D1="$(duckdns_domaine "$DUCKDNS_DOMAINE_1" "$DUCKDNS_DOMAINE_1_AUTRE")"; H1="$(duckdns_hote "$DUCKDNS_MACHINE_1" "$DUCKDNS_MACHINE_1_AUTRE")"
+    D2="$(duckdns_domaine "$DUCKDNS_DOMAINE_2" "$DUCKDNS_DOMAINE_2_AUTRE")"; H2="$(duckdns_hote "$DUCKDNS_MACHINE_2" "$DUCKDNS_MACHINE_2_AUTRE")"
+    if [ -z "$D1$D2" ]; then echo "ERREUR : un jeton DuckDNS est donné mais aucun domaine n'est choisi." >&2; exit 1; fi
+    echo "duckdns:"
+    echo "  token: $(q "$DUCKDNS_TOKEN")"
+    echo "  domains:"
+    if [ -n "$D1" ]; then echo "    - { name: $(q "$D1"), target: $(q "$H1:$DUCKDNS_PORT_1") }"; fi
+    if [ -n "$D2" ]; then echo "    - { name: $(q "$D2"), target: $(q "$H2:$DUCKDNS_PORT_2") }"; fi
+  fi
   echo "sshHardening: $(q "${SSH_DURCISSEMENT:-oui}")"
   echo "fail2banIgnoreIp: $(q "$FAIL2BAN_IGNOREIP")"
   if [ -n "$IMAGE_ORANGEPI" ]; then echo "image: $(q "$IMAGE_ORANGEPI")"; fi
@@ -150,7 +237,8 @@ q() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
 } > "$PROFILE_FILE"
 
 echo "--- Profil généré ($PROFILE_FILE), dépôt détecté: $REPO_ROOT ---"
-cat "$PROFILE_FILE"
+# Mots de passe et jeton masqués à l'affichage (le fichier lui-même est supprimé en sortie).
+sed -E 's/^( *(password|token): ).*/\1"***"/' "$PROFILE_FILE"
 echo "---"
 
 sudo node "$ENGINE_JS" "$PROFILE_FILE"

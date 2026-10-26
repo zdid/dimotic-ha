@@ -1,0 +1,15 @@
+services:
+  homeassistant:
+    image: homeassistant/home-assistant:latest
+    container_name: homeassistant
+    restart: unless-stopped
+    network_mode: host
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    volumes:
+      - ./config:/config
+    environment:
+      - TZ=Europe/Paris

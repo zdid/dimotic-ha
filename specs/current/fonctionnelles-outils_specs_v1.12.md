@@ -1,8 +1,15 @@
 # Spécifications Fonctionnelles — Application OUTILS
 
-**Version :** 1.11
-**Date :** 12 Octobre 2026
+**Version :** 1.12
+**Date :** 26 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/outils`
+
+> **v1.12 (26/10/2026)** — script « Carte SD / clé USB » (§7.2) : **cases à cocher** pour préparer une machine complète sans rien
+> démarrer — services Docker (`SERVICES` : homeassistant, zigbee2mqtt, mosquitto, dimotic-maj, portainer-agent, **whisper**, **piper**),
+> intégrations Home Assistant (`INTEGRATIONS_HA` : hacs, dimotic_taxonomie, dimotic_plans), comptes (`COMPTES` : didier, claude),
+> options du système (`OPTIONS_SYSTEME` : rotation des journaux Docker, fuseau Paris, dossier de sauvegarde Nextcloud, WireGuard, **Claude Code**) et
+> **accès externe DuckDNS + Caddy** (jeton, 2 adresses externes à choisir dans la liste de noisy/stfort, machine et port). Nouveau fichier
+> `scripts/sd-extras.sh`, modèles `scripts/modeles/`, nouveau mode `extras-machine` de `prepare-sd-card.sh`. 22 tests.
 
 > **v1.11 (12/10/2026)** — script « Agent Claude Code » (§7.4) : **Claude Code sans suivi de la souris** dans le compte dédié — `export CLAUDE_CODE_DISABLE_MOUSE=1` ajouté (idempotent) à `~/.bashrc` du compte, et `env CLAUDE_CODE_DISABLE_MOUSE=1` dans la commande de lancement du screen. Raison : dans un terminal web (console HA, SCREEN2HTTP) les clics laissaient la fin d'une séquence (`60;46m`) dans la saisie ; un Claude Code relancé à la main dans le screen n'avait pas la variable. Ne concerne que les nouvelles installations (mode « installer »).
 > **v1.11 (suite, 12/10/2026)** — même script : nouveau champ facultatif **`DIMOTIC_DATA_DIR`** (défaut `/docker/dimotic-ha/data`, vide = aucun accès) : le compte dédié reçoit la **lecture/écriture des données de dimotic-ha par ACL** (`setfacl -R -m u:<compte>:rwX`, puis `-R -d` pour les futurs fichiers ; paquet `acl` installé au besoin), PUIS un **refus explicite** (`u:<compte>:---`, y compris par défaut pour les dossiers) sur les secrets : `secrets_*`, `.mcp_token`, `id_ed25519`/`id_rsa`, `sauvegarde/config.yaml`, `core/machine_ssh/`, `outils/saved-values/`. L'ordre est impératif (le refus passe en dernier). Un refus nommé l'emporte sur des droits « autres » en 644 (cas réel constaté sur ha2 : quatre `secrets_config.yaml` lisibles par tous). Le modèle du `CLAUDE.md` passe en 1.2.3 (site ha2 : données de dimotic-ha modifiables, secrets exclus, code jamais). Pour une installation existante : poser les ACL à la main puis lancer le mode « mettre_a_jour_claude_md ».
@@ -336,6 +343,40 @@ e2fsprogs file openssl`).
 Rien n'est installé au premier démarrage : il ne fait que la configuration propre à la machine
 (pas besoin d'Internet pour démarrer ; WiFi requis seulement pour être joignable).
 
+#### Cases à cocher : services, intégrations, comptes, options, DuckDNS + Caddy (⭐ v1.12)
+
+But (demande utilisateur, 26/10/2026) : préparer en une fois la carte d'une machine de remplacement (ex. le Pi4 4 Go qui
+remplace noisy2) avec tout ce qui doit s'y trouver. **Décision : tout est posé, rien n'est démarré** (aucun conteneur dans
+l'image) — la machine reçoit ensuite sa configuration par la restauration (application Sauvegarde) ou à la main, et deux machines
+ne portent jamais la même identité par accident. Aucune image Docker n'est préchargée (HA seule fait plus de 2 Go) : elles
+sont téléchargées au premier démarrage des services.
+
+Champs ajoutés au formulaire (listes à cocher, sauf mention) et champs du profil correspondants :
+
+| Champ | Profil | Effet |
+|---|---|---|
+| `SERVICES` | `services` | `/docker/<service>/` avec son `compose.yaml` (modèles `scripts/modeles/`, tirés des machines réelles) : `homeassistant`, `zigbee2mqtt` (dongle `/dev/ttyUSB0`, variable `ZIGBEE_DEVICE`), `mosquitto` (+ `config/mosquitto.conf`), `portainer-agent`, `whisper` (`rhasspy/wyoming-whisper`, `small-int8`, français, port 10300) et `piper` (`rhasspy/wyoming-piper`, voix `fr_FR-siwis-medium`, port 10200) ; `dimotic-maj` active le profil `maj` du compose de dimotic-ha (`COMPOSE_PROFILES=maj` dans `/docker/dimotic-ha/.env`). Les dossiers `config/`, `data/` sont créés. |
+| `INTEGRATIONS_HA` | `integrationsHa` | Dans `/docker/homeassistant/config/custom_components/` : `hacs` (dernière release `hacs/integration`), `dimotic_taxonomie` et `dimotic_plans` (dernière release GitHub de `zdid/dimotic-ha-taxonomie` et `zdid/dimotic-ha-plans`). Exige `homeassistant` coché. L'ajout dans HA (Paramètres > Appareils et services) reste à faire. |
+| `COMPTES` | `accounts` | `didier` (sudo, docker, clés personnelles) et `claude` (sudo sans mot de passe, docker, clé publique `CLAUDE_SSH_KEY` / `claudeSshKey`), **connexion par clé seulement** ; le compte identique à l'utilisateur principal du profil est ignoré. |
+| `OPTIONS_SYSTEME` | `options` | `rotation-journaux-docker` (`/etc/docker/daemon.json`, 10 Mo × 5), `fuseau-paris`, `sauvegarde-nextcloud` (paquets `cron` `tar` ; **script, mot de passe d'application et horaire posés par machine** — voir la ligne suivante), `wireguard` (paquet `wireguard-tools`, `/etc/wireguard/` vide — configuration à poser), `claude-code` (**Claude Code installé** pour tous les comptes par `npm install -g @anthropic-ai/claude-code` dans l'image de base ; système **64 bits** seulement, refusé sinon ; la connexion au compte Anthropic reste manuelle). |
+| `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_DOSSIER`, `SAUVEGARDE_SITE` (liste noisy/stfort), `SAUVEGARDE_MACHINE` (vide = nom d'hôte), `NEXTCLOUD_MOT_DE_PASSE` | `sauvegarde` | **Obligatoires si `sauvegarde-nextcloud` est coché.** Le script `/dimotic-backup/nextcloud-backup.sh` est rendu par le **vrai générateur** de l'application Sauvegarde (`BackupScript.js` embarqué dans l'archive, `sauvegarde-rendu/rendre.js`, `shellQuote` fourni par un shim) : c'est celui que « Pousser » déposerait. Le script **ne contient pas** le mot de passe : il le lit dans `/dimotic-secrets/nextcloud-backup` (600, dossier 700), écrit à partir de `NEXTCLOUD_MOT_DE_PASSE` (champ sensible, masqué à l'affichage, passé par l'environnement). Le cron (`5 3 * * *`, journal `/dimotic-backup/cron.log`) est dans le **crontab de root**, comme « Pousser », donc un « Pousser » ultérieur le retrouve sans doublon. |
+| `DUCKDNS_TOKEN` (texte) | `duckdns.token` | Jeton du compte DuckDNS ; vide = ni DuckDNS ni Caddy. Écrit dans le script de mise à jour (mode 700), **masqué** à l'affichage du profil. |
+| `DUCKDNS_DOMAINE_1/2` (liste) + `_AUTRE` (texte) | `duckdns.domains[].name` | **Deux adresses externes au plus**, choisies dans la liste des domaines de noisy et de stfort (`dimoticnoisy`, `dimotic-noisy-ha`, `dimotic-stfort-ha`, `dimoticloud`) ou « autre » avec saisie libre ; `aucun` ignore la ligne. |
+| `DUCKDNS_MACHINE_1/2` (liste) + `_AUTRE` (texte) et `DUCKDNS_PORT_1/2` | `duckdns.domains[].target` | Machine du réseau local visée par Caddy (noisy2 .201, ha2 .51, stfort .53, nextcloud .13, ou autre) et son port (8123 par défaut). |
+
+DuckDNS : un script de mise à jour et un cron (toutes les 5 minutes) par domaine (`/dimotic-ha-addons/duckdns/<domaine>.sh|.cron`,
+lien dans `/etc/cron.d/`, comme le script « Accès externe »), `/docker/caddy/Caddyfile` (un bloc `reverse_proxy` par domaine) et
+`compose.yaml` de Caddy ; **Caddy est ajouté automatiquement** aux services dès qu'un domaine est rempli.
+
+Mise en œuvre : `prepare-sd-card.sh base` reçoit `--services`, `--integrations`, `--options` (dans l'**image de base**, donc dans
+sa clé de cache : `BASE_RECIPE_VERSION` 3 + empreinte de `sd-extras.sh` et de `modeles/`) ; le nouveau mode **`extras-machine`**
+(comptes et DuckDNS, propres à la machine, quel que soit le modèle de Pi) tourne après la personnalisation de la machine, le jeton
+DuckDNS passant par l'environnement et jamais par la ligne de commande. Le moteur (`flash-sd-card.js`) valide les valeurs (liste
+fermée, 2 domaines au plus, nom `[a-z0-9-]+`, cible `hôte:port`, intégrations sans `homeassistant` refusées, `claude` sans clé
+refusé). **Tests** : `PrepareSdCardExtras.test.ts` (22) — champs du formulaire, pose des services/intégrations/options sur une racine
+factice, DuckDNS (jeton jamais affiché, droits 700), comptes, archive piégée refusée, profil du moteur. **Pas encore éprouvé** : une
+construction réelle de l'image de base avec ces options (qemu) et le démarrage d'une carte ainsi préparée.
+
 ### 7.4 « Agent Claude Code — déploiement sur Home Assistant (SSH) » (⭐ v1.7)
 
 Spec de conception : `conception-claude-code-automatisations` (échelle d'autorisations §5, lecture seule §6). Le script se
@@ -458,6 +499,7 @@ l'historique git (commit d'avant le 29/09/2026).
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.12 | 26/10/2026 | Claude | Script « Carte SD » : **cases à cocher** (services Docker dont Whisper/Piper, intégrations HA, comptes didier/claude, options système, **DuckDNS + Caddy** avec 2 adresses externes), tout posé et non démarré (§7.2). v1.11 archivée. |
 | 1.10 | 08/10/2026 | Claude | Script « Agent Claude Code » : section « Site » (`site.md`) ajoutée au `CLAUDE.md` rendu, variable `{{HA_TOKEN_FILE}}` (`~/.ha_token` si déjà en place) (§7.4). |
 | 1.11 | 12/10/2026 | Claude | Script « Agent Claude Code » : souris de Claude Code désactivée (`CLAUDE_CODE_DISABLE_MOUSE=1` dans `~/.bashrc` du compte dédié et dans la commande de lancement du screen). Champ `DIMOTIC_DATA_DIR` : ACL lecture/écriture sur les données de dimotic-ha, secrets refusés ; modèle `CLAUDE.md` 1.2.3. |
 | 1.9 | 08/10/2026 | Claude | **Modèle versionné du `CLAUDE.md`** (§7.4) : `applications/ia/agent/claude-md/`, embarqué par `@outils:bundle`, rendu sur la machine ; nouveau mode `mettre_a_jour_claude_md` (réécrit seulement le `CLAUDE.md`, sans ressaisir de jeton) ; `agent.conf` mémorise les choix sans secret. v1.8 archivée. |

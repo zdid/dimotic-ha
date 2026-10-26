@@ -61,6 +61,8 @@ usage() {
   echo "  $0 shell <image.img> [--layout rpi|single]   (terminal interactif dans l'image, via qemu)" >&2
   echo "  $0 base ... --layout single   (images Orange Pi : racine = partition 1, pas de bootfs séparé)" >&2
   echo "  $0 opi-machine <image.img> [--hostname H] [--user U] [--key k.pub]... [--wifi-ssid S --wifi-pass P] [--ssh-hardening yes|no] [--fail2ban-ignoreip \"ip ip\"]  (PASSWORD_HASH en environnement)" >&2
+  echo "  $0 base ... [--services a,b] [--integrations a,b] [--options a,b]   (cases à cocher v1.12 : voir sd-extras.sh)" >&2
+  echo "  $0 extras-machine <image.img> [--layout rpi|single] [--user U] [--key k.pub]... [--accounts didier,claude] [--claude-key k.pub] [--duckdns domaine=hôte:port]... [--backup-site S --backup-machine M --backup-url U --backup-user X --backup-root R]  (secrets en variables : DUCKDNS_TOKEN, NEXTCLOUD_PASSWORD)" >&2
   echo "  $0 legacy-machine <image.img> [--hostname H] [--user U] [--key k.pub]... [--wifi-ssid S --wifi-pass P --wifi-country FR] [--ssh-hardening yes|no] [--fail2ban-ignoreip \"ip ip\"]" >&2
   exit 1
 }
@@ -74,6 +76,13 @@ shift 2
 PERSONAL_KEYS=()
 PACKAGES=""
 APPS=""
+SERVICES=""        # cases à cocher (v1.12) : services Docker posés, non démarrés
+INTEGRATIONS=""    # intégrations Home Assistant (custom_components)
+OPTIONS=""         # options du système
+ACCOUNTS=""        # comptes à créer (didier, claude) — mode extras-machine
+CLAUDE_KEY=""      # clé publique du compte claude
+BACKUP_SITE=""; BACKUP_MACHINE=""; BACKUP_URL=""; BACKUP_USER=""; BACKUP_ROOT=""   # sauvegarde Nextcloud ; mot de passe : variable NEXTCLOUD_PASSWORD
+DUCKDNS_ENTRIES=() # "domaine=hôte:port" ; le jeton passe par l'environnement (DUCKDNS_TOKEN), jamais par la ligne de commande
 EXTRA_MB=2048
 HOSTNAME_ARG=""
 USER_ARG=""
@@ -87,6 +96,17 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --packages) PACKAGES="$2"; shift 2 ;;
     --apps) APPS="$2"; shift 2 ;;
+    --services) SERVICES="$2"; shift 2 ;;
+    --integrations) INTEGRATIONS="$2"; shift 2 ;;
+    --options) OPTIONS="$2"; shift 2 ;;
+    --accounts) ACCOUNTS="$2"; shift 2 ;;
+    --claude-key) CLAUDE_KEY="$2"; shift 2 ;;
+    --duckdns) DUCKDNS_ENTRIES+=("$2"); shift 2 ;;
+    --backup-site) BACKUP_SITE="$2"; shift 2 ;;
+    --backup-machine) BACKUP_MACHINE="$2"; shift 2 ;;
+    --backup-url) BACKUP_URL="$2"; shift 2 ;;
+    --backup-user) BACKUP_USER="$2"; shift 2 ;;
+    --backup-root) BACKUP_ROOT="$2"; shift 2 ;;
     --extra-mb) EXTRA_MB="$2"; shift 2 ;;
     --hostname) HOSTNAME_ARG="$2"; shift 2 ;;
     --user) USER_ARG="$2"; shift 2 ;;
@@ -112,6 +132,10 @@ if [ -f "$SCRIPT_DIR/../data/core/machine_ssh/id_ed25519.pub" ] || [ -f "$SCRIPT
 else
   BUNDLE_ROOT="$SCRIPT_DIR/../../../.."
 fi
+
+# shellcheck source=sd-extras.sh
+source "$SCRIPT_DIR/sd-extras.sh"
+EXTRAS_CLAUDE_KEY="$CLAUDE_KEY"
 
 # --- Table app -> (device-agent local, répertoire distant, besoin de l'UART en exclusivité).
 # Seul `teleinfo` est câblé (seule app vérifiée avec ce patron : agent copié + npm install
@@ -227,6 +251,12 @@ run_base() {
     done
   fi
 
+  extras_valider "--services" "$SERVICES" "$EXTRAS_SERVICES_CONNUS" || exit 1
+  extras_valider "--integrations" "$INTEGRATIONS" "$EXTRAS_INTEGRATIONS_CONNUES" || exit 1
+  extras_valider "--options" "$OPTIONS" "$EXTRAS_OPTIONS_CONNUES" || exit 1
+  local extra_pkg
+  for extra_pkg in $(extras_paquets "$OPTIONS"); do add_package_if_missing "$extra_pkg"; done
+
   # Systématiques (voir en-tête) — build-essential pour la compilation native de serialport.
   add_package_if_missing build-essential
   add_package_if_missing nodejs
@@ -288,6 +318,14 @@ run_base() {
   echo "/docker/dimotic-ha/ (compose.yaml, NON démarré)..."
   mkdir -p "$ROOTFS/docker/dimotic-ha/data" "$ROOTFS/docker/dimotic-ha/logs"
   cp "$compose" "$ROOTFS/docker/dimotic-ha/compose.yaml"
+
+  if [ -n "$SERVICES$INTEGRATIONS$OPTIONS" ]; then
+    echo "Services, intégrations et options cochés (rien n'est démarré)..."
+    export ROOTFS
+    extras_pose_services "$SERVICES" || exit 1
+    extras_pose_integrations "$INTEGRATIONS" || exit 1
+    extras_pose_options "$OPTIONS" || exit 1
+  fi
 
   for app in "${apps_arr[@]}"; do
     local local_dir remote_dir
@@ -558,13 +596,25 @@ run_opi_machine() {
   # Contrôle dans l'image : sshd valide, effet réel sur l'utilisateur du profil et sur root.
   in_chroot "mkdir -p /run/sshd; ssh-keygen -A >/dev/null 2>&1; /usr/sbin/sshd -t" || { echo "ERREUR : sshd_config invalide dans l'image" >&2; exit 1; }
   if [ "$SSH_HARDENING" = "yes" ]; then
-    in_chroot "/usr/sbin/sshd -T -C user=$USER_ARG,host=essai,addr=127.0.0.1" | grep -q '^passwordauthentication yes' \
+    # La réponse de sshd est d'abord CAPTURÉE, puis lue par grep sur une chaîne : « commande | grep -q » faisait échouer le contrôle à tort
+    # (grep -q s'arrête au premier résultat, la commande de l'image reçoit SIGPIPE et `set -o pipefail` déclare tout le tuyau en échec ;
+    # constaté le 24/10/2026 sur l'Orange Pi, émulation qemu : la configuration était pourtant correcte).
+    local sshd_user sshd_root
+    sshd_user="$(in_chroot "/usr/sbin/sshd -T -C user=$USER_ARG,host=essai,addr=127.0.0.1")"
+    sshd_root="$(in_chroot "/usr/sbin/sshd -T -C user=root,host=essai,addr=127.0.0.1")"
+    grep -q '^passwordauthentication yes' <<<"$sshd_user" \
       || { echo "ERREUR : le mot de passe SSH n'est pas autorisé pour $USER_ARG dans l'image" >&2; exit 1; }
-    in_chroot "/usr/sbin/sshd -T -C user=root,host=essai,addr=127.0.0.1" | grep -q '^passwordauthentication no' \
+    grep -q '^passwordauthentication no' <<<"$sshd_root" \
       || { echo "ERREUR : le mot de passe SSH n'est pas refusé pour root dans l'image" >&2; exit 1; }
     echo "  SSH : mot de passe autorisé pour $USER_ARG seulement — OK."
   fi
-  rm -f "$ROOTFS"/etc/ssh/ssh_host_*      # recréées au premier démarrage par orangepi-firstrun
+  # Clés d'hôte SSH : GARDÉES (générées plus haut, propres à CETTE copie de l'image, la base n'en a pas). Avant le 24/10/2026 elles étaient
+  # supprimées « pour être recréées par orangepi-firstrun » : or ce script désactive justement cet assistant (.not_logged_in_yet supprimé), les
+  # clés n'étaient jamais recréées et le service SSH échouait au démarrage (« Failed to start OpenBSD Secure Shell server »).
+  # Garde-fou en plus : le service génère les clés manquantes avant de se lancer.
+  mkdir -p "$ROOTFS/etc/systemd/system/ssh.service.d"
+  printf '[Service]\nExecStartPre=\nExecStartPre=-/usr/bin/ssh-keygen -A\nExecStartPre=/usr/sbin/sshd -t\n' > "$ROOTFS/etc/systemd/system/ssh.service.d/10-cles-hote.conf"
+  ls "$ROOTFS"/etc/ssh/ssh_host_*_key >/dev/null 2>&1 || { echo "ERREUR : aucune clé d'hôte SSH dans l'image" >&2; exit 1; }
   teardown_chroot
   sync
   echo "Personnalisation machine (Orange Pi) terminée."
@@ -573,6 +623,25 @@ run_opi_machine() {
 # ==========================================================================
 # Mode shell : terminal interactif dans une image (consultation après un échec)
 # ==========================================================================
+
+# ==========================================================================
+# Mode extras-machine (⭐ v1.12) : comptes et DuckDNS + Caddy propres à la machine, quel que soit le modèle
+# ==========================================================================
+run_extras_machine() {
+  attach_and_mount
+  setup_chroot
+  export ROOTFS
+  extras_machine_comptes "$ACCOUNTS" "$USER_ARG" || exit 1
+  if [ -n "$BACKUP_SITE" ]; then
+    extras_machine_sauvegarde "$BACKUP_SITE" "$BACKUP_MACHINE" "$BACKUP_URL" "$BACKUP_USER" "$BACKUP_ROOT" || exit 1
+  fi
+  if [ ${#DUCKDNS_ENTRIES[@]} -gt 0 ]; then
+    extras_machine_duckdns "${DUCKDNS_TOKEN:-}" "${DUCKDNS_ENTRIES[@]}" || exit 1
+  fi
+  teardown_chroot
+  sync
+  echo "Comptes et accès externe terminés."
+}
 
 run_shell() {
   [ -t 0 ] || { echo "Le mode shell exige un vrai terminal (en SSH : ssh -t ...)" >&2; exit 1; }
@@ -595,5 +664,6 @@ case "$MODE" in
   shell) run_shell ;;
   legacy-machine) run_legacy_machine ;;
   opi-machine) run_opi_machine ;;
+  extras-machine) run_extras_machine ;;
   *) usage ;;
 esac

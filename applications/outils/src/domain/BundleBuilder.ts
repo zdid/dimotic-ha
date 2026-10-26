@@ -27,6 +27,28 @@ function repoRoot(): string {
   return process.env.PROJECT_ROOT || process.cwd();
 }
 
+/** Dossier de l'application Outils qui s'exécute : interne (applications/outils) ou EXTERNE (data/applications/outils). */
+function appRoot(): string {
+  return path.join(__dirname, '..', '..');
+}
+
+const PREFIXE_APP = 'applications/outils/';
+
+/**
+ * Source d'un chemin déclaré par `@outils:bundle`. Pour les fichiers de l'application Outils elle-même (`applications/outils/…`, par exemple
+ * les scripts de `reposcripts/`), on prend d'abord celui de l'application EN COURS D'EXÉCUTION : une application externe masque l'interne
+ * (racine externe `data/applications/`), donc ses scripts doivent être ceux qu'on embarque, pas ceux de l'image Docker (⭐ 24/10/2026 : un
+ * correctif de prepare-sd-card.sh posé par la racine externe n'était pas embarqué). Sinon, racine du projet comme avant.
+ */
+export function resolveBundleSource(relSrc: string): string {
+  const norm = relSrc.split(path.sep).join('/');
+  if (norm.startsWith(PREFIXE_APP)) {
+    const dansApp = path.join(appRoot(), norm.slice(PREFIXE_APP.length));
+    if (fs.existsSync(dansApp)) return dansApp;
+  }
+  return path.join(repoRoot(), relSrc);
+}
+
 export function downloadsDir(): string {
   return path.join(repoRoot(), 'data', 'outils', 'tmp', 'downloads');
 }
@@ -45,7 +67,7 @@ function stageFiles(content: string, runName: string, bundlePaths: BundlePath[])
   fs.writeFileSync(path.join(stagingDir, runName), content, { mode: 0o755 });
 
   for (const { src: relSrc, dest: relDest } of bundlePaths) {
-    const src = path.join(root, relSrc);
+    const src = resolveBundleSource(relSrc);
     if (!fs.existsSync(src)) {
       fs.rmSync(stagingDir, { recursive: true, force: true });
       throw new Error(`Chemin déclaré par @outils:bundle introuvable: ${relSrc} (racine résolue: ${root})`);
