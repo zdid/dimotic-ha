@@ -62,7 +62,7 @@ usage() {
   echo "  $0 base ... --layout single   (images Orange Pi : racine = partition 1, pas de bootfs séparé)" >&2
   echo "  $0 opi-machine <image.img> [--hostname H] [--user U] [--key k.pub]... [--wifi-ssid S --wifi-pass P] [--ssh-hardening yes|no] [--fail2ban-ignoreip \"ip ip\"]  (PASSWORD_HASH en environnement)" >&2
   echo "  $0 base ... [--services a,b] [--integrations a,b] [--options a,b]   (cases à cocher v1.12 : voir sd-extras.sh)" >&2
-  echo "  $0 extras-machine <image.img> [--layout rpi|single] [--user U] [--key k.pub]... [--accounts didier,claude] [--claude-key k.pub] [--duckdns domaine=hôte:port]... [--backup-site S --backup-machine M --backup-url U --backup-user X --backup-root R]  (secrets en variables : DUCKDNS_TOKEN, NEXTCLOUD_PASSWORD)" >&2
+  echo "  $0 extras-machine <image.img> [--layout rpi|single] [--user U] [--key k.pub]... [--accounts didier,claude] [--claude-key k.pub] [--ia] [--duckdns domaine=hôte:port]... [--backup-site S --backup-machine M --backup-url U --backup-user X --backup-root R]  (secrets en variables : DUCKDNS_TOKEN, NEXTCLOUD_PASSWORD)" >&2
   echo "  $0 legacy-machine <image.img> [--hostname H] [--user U] [--key k.pub]... [--wifi-ssid S --wifi-pass P --wifi-country FR] [--ssh-hardening yes|no] [--fail2ban-ignoreip \"ip ip\"]" >&2
   exit 1
 }
@@ -80,6 +80,7 @@ SERVICES=""        # cases à cocher (v1.12) : services Docker posés, non déma
 INTEGRATIONS=""    # intégrations Home Assistant (custom_components)
 OPTIONS=""         # options du système
 ACCOUNTS=""        # comptes à créer (didier, claude) — mode extras-machine
+IA=0               # ⭐ v1.14 — installateur de l'IA + minuteur de premier démarrage — mode extras-machine
 CLAUDE_KEY=""      # clé publique du compte claude
 BACKUP_SITE=""; BACKUP_MACHINE=""; BACKUP_URL=""; BACKUP_USER=""; BACKUP_ROOT=""   # sauvegarde Nextcloud ; mot de passe : variable NEXTCLOUD_PASSWORD
 DUCKDNS_ENTRIES=() # "domaine=hôte:port" ; le jeton passe par l'environnement (DUCKDNS_TOKEN), jamais par la ligne de commande
@@ -100,6 +101,7 @@ while [ $# -gt 0 ]; do
     --integrations) INTEGRATIONS="$2"; shift 2 ;;
     --options) OPTIONS="$2"; shift 2 ;;
     --accounts) ACCOUNTS="$2"; shift 2 ;;
+    --ia) IA=1; shift ;;
     --claude-key) CLAUDE_KEY="$2"; shift 2 ;;
     --duckdns) DUCKDNS_ENTRIES+=("$2"); shift 2 ;;
     --backup-site) BACKUP_SITE="$2"; shift 2 ;;
@@ -654,6 +656,7 @@ run_extras_machine() {
   if [ ${#DUCKDNS_ENTRIES[@]} -gt 0 ]; then
     extras_machine_duckdns "${DUCKDNS_TOKEN:-}" "${DUCKDNS_ENTRIES[@]}" || exit 1
   fi
+  if [ "$IA" = 1 ]; then extras_machine_ia || exit 1; fi
   teardown_chroot
   sync
   echo "Comptes et accès externe terminés."

@@ -1,9 +1,17 @@
 # Spécifications Fonctionnelles — Application OUTILS
 
-**Version :** 1.13
-**Date :** 26 Octobre 2026
+**Version :** 1.14
+**Date :** 28 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/outils`
 
+> **v1.14 (28/10/2026)** — **« Installer l'IA sur une machine Home Assistant »** (`installer-ia`, §7.4) **remplace** « Agent Claude Code —
+> déploiement sur Home Assistant (SSH) » (`agent-ha-deploy`, retiré). Exigence (MEMO_mise-en-place-ia-screen_2026-10-28) : l'IA marche du premier coup,
+> sans SSH ; seule étape manuelle, la connexion au compte Claude. Le script se lance SUR la machine, lit tout sur place (site, Home Assistant, MCP),
+> active le MCP de `ia` sur l'IP réseau (jeton généré), pré-répond aux premières questions de Claude Code, installe une session permanente
+> (screen « claude » + Remote Control « <site> automatisation HA ») et prépare le panneau « IA » (screen_console) sans assistant. Décisions du 28/10 :
+> **plus d'accès direct à Home Assistant par jeton** (MCP seul ; section `30-ha-direct` du modèle retirée, modèle v1.3.0), compte `claude` **avec**
+> sudo sans mot de passe et docker. Script carte SD (§7.2) : l'option `claude-code` pose en plus l'installateur et un **minuteur de premier démarrage**.
+>
 > **v1.13 (26/10/2026)** — nouveau script intégré **« Gérer les images de cartes SD/clés USB »** (`images-sd`, §7.5) : menu sur les
 > images déjà créées par le script carte SD — **1) écrire** une image de machine sur une carte sans rien reconstruire, **2) supprimer** une
 > image (machine, base, échec, officielle), **3) monter** une image sous `/mnt/image-<nom>` (lecture seule par défaut).
@@ -368,7 +376,7 @@ Champs ajoutés au formulaire (listes à cocher, sauf mention) et champs du prof
 | `SERVICES` | `services` | `/docker/<service>/` avec son `compose.yaml` (modèles `scripts/modeles/`, tirés des machines réelles) : `homeassistant`, `zigbee2mqtt` (dongle `/dev/ttyUSB0`, variable `ZIGBEE_DEVICE`), `mosquitto` (+ `config/mosquitto.conf`), `portainer-agent`, `whisper` (`rhasspy/wyoming-whisper`, `small-int8`, français, port 10300) et `piper` (`rhasspy/wyoming-piper`, voix `fr_FR-siwis-medium`, port 10200) ; `dimotic-maj` active le profil `maj` du compose de dimotic-ha (`COMPOSE_PROFILES=maj` dans `/docker/dimotic-ha/.env`). Les dossiers `config/`, `data/` sont créés. |
 | `INTEGRATIONS_HA` | `integrationsHa` | Dans `/docker/homeassistant/config/custom_components/` : `hacs` (dernière release `hacs/integration`), `dimotic_taxonomie`, `dimotic_plans` et **`screen_console`** (⭐ v1.13, dépôt `dimotic-ha-screen-console` : console `screen` dans HA ; paquet `screen` à cocher aussi dans `PACKAGES`, clé SSH et script de contrôle `screen-console-gate` posés ensuite en suivant l'assistant de l'intégration) (dernière release GitHub de `zdid/dimotic-ha-taxonomie` et `zdid/dimotic-ha-plans`). Exige `homeassistant` coché. L'ajout dans HA (Paramètres > Appareils et services) reste à faire. |
 | `COMPTES` | `accounts` | `didier` (sudo, docker, clés personnelles) et `claude` (sudo sans mot de passe, docker, clé publique `CLAUDE_SSH_KEY` / `claudeSshKey`), **connexion par clé seulement** ; le compte identique à l'utilisateur principal du profil est ignoré. |
-| `OPTIONS_SYSTEME` | `options` | `rotation-journaux-docker` (`/etc/docker/daemon.json`, 10 Mo × 5), `fuseau-paris`, `sauvegarde-nextcloud` (paquets `cron` `tar` ; **script, mot de passe d'application et horaire posés par machine** — voir la ligne suivante), `wireguard` (paquet `wireguard-tools`, `/etc/wireguard/` vide — configuration à poser), `claude-code` (**Claude Code installé** pour tous les comptes par `npm install -g @anthropic-ai/claude-code` dans l'image de base ; système **64 bits** seulement, refusé sinon ; la connexion au compte Anthropic reste manuelle). |
+| `OPTIONS_SYSTEME` | `options` | `rotation-journaux-docker` (`/etc/docker/daemon.json`, 10 Mo × 5), `fuseau-paris`, `sauvegarde-nextcloud` (paquets `cron` `tar` ; **script, mot de passe d'application et horaire posés par machine** — voir la ligne suivante), `wireguard` (paquet `wireguard-tools`, `/etc/wireguard/` vide — configuration à poser), `claude-code` (**Claude Code installé** pour tous les comptes par `npm install -g @anthropic-ai/claude-code` dans l'image de base ; système **64 bits** seulement, refusé sinon ; ⭐ v1.14 : **installateur de l'IA posé par machine** — `/dimotic-ha-addons/agent-ha/installer-ia.sh` (valeurs par défaut du formulaire) + modèle `claude-md/`, service `dimotic-installer-ia` lancé par un **minuteur** 3 min après le démarrage puis toutes les 5 min en mode `--auto` : « pas encore prêt » (code 75) tant que dimotic-ha (restauration) ou Home Assistant manquent, minuteur retiré une fois tout en place — voir §7.4 ; la connexion au compte Claude reste manuelle). |
 | `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, `NEXTCLOUD_DOSSIER`, `SAUVEGARDE_SITE` (liste noisy/stfort), `SAUVEGARDE_MACHINE` (vide = nom d'hôte), `NEXTCLOUD_MOT_DE_PASSE` | `sauvegarde` | **Obligatoires si `sauvegarde-nextcloud` est coché.** Le script `/dimotic-backup/nextcloud-backup.sh` est rendu par le **vrai générateur** de l'application Sauvegarde (`BackupScript.js` embarqué dans l'archive, `sauvegarde-rendu/rendre.js`, `shellQuote` fourni par un shim) : c'est celui que « Pousser » déposerait. Le script **ne contient pas** le mot de passe : il le lit dans `/dimotic-secrets/nextcloud-backup` (600, dossier 700), écrit à partir de `NEXTCLOUD_MOT_DE_PASSE` (champ sensible, masqué à l'affichage, passé par l'environnement). Le cron (`5 3 * * *`, journal `/dimotic-backup/cron.log`) est dans le **crontab de root**, comme « Pousser », donc un « Pousser » ultérieur le retrouve sans doublon. |
 | `DUCKDNS_TOKEN` (texte) | `duckdns.token` | Jeton du compte DuckDNS ; vide = ni DuckDNS ni Caddy. Écrit dans le script de mise à jour (mode 700), **masqué** à l'affichage du profil. |
 | `DUCKDNS_ADRESSES` (cases à cocher) | `duckdns.domains[]` | ⭐ v1.13 — **adresses connues, cible déjà remplie** (relevées le 26/10/2026 sur les Caddy de noisy et de Saint Fort) : `dimotic-noisy-ha → 192.168.1.201:8123`, `dimoticnoisy → 192.168.1.62:8081`, `dimotic-stfort-ha → 192.168.1.51:8123`, `dimoticloud → 192.168.1.13:11000`. |
@@ -387,59 +395,54 @@ refusé). **Tests** : `PrepareSdCardExtras.test.ts` (22) — champs du formulair
 factice, DuckDNS (jeton jamais affiché, droits 700), comptes, archive piégée refusée, profil du moteur. **Pas encore éprouvé** : une
 construction réelle de l'image de base avec ces options (qemu) et le démarrage d'une carte ainsi préparée.
 
-### 7.4 « Agent Claude Code — déploiement sur Home Assistant (SSH) » (⭐ v1.7)
+### 7.4 « Installer l'IA sur une machine Home Assistant (Claude Code) » (⭐ v1.14, remplace « Agent Claude Code » de la v1.7)
 
-Spec de conception : `conception-claude-code-automatisations` (échelle d'autorisations §5, lecture seule §6). Le script se
-dépose par `scp` sur la machine visée, s'y exécute par `ssh`, puis lance `claude remote-control` dans un `screen` détaché.
+Script `installer-ia` (`reposcripts/wrappers/installer-ia.sh`), **lancé sur la machine** qui porte Home Assistant et dimotic-ha
+(`sudo`, ou « Exécution par SSH ») ; modèle du `CLAUDE.md` embarqué (`@outils:bundle applications/ia/agent/claude-md`).
+Exigence de l'utilisateur : ouvrir le panneau « IA » de Home Assistant et y trouver Claude Code branché sur le MCP de dimotic-ha,
+**sans commande SSH ni manipulation sur la machine** ; seule étape manuelle admise : la **connexion au compte Claude par le web**.
 
-| Champ | Rôle |
-|---|---|
-| `TARGET_HOST` / `TARGET_USER` | machine visée et compte de connexion SSH (défaut `root`) |
-| `CLAUDE_USER` | compte Linux **dédié** qui exécute Claude Code (défaut `claude`) : créé s'il n'existe pas, **refusé s'il est dans `sudo`/`wheel`/`root`** ; vide = compte de connexion (déconseillé) |
-| `MCP_TOKEN` / `MCP_URL` | jeton et adresse du serveur MCP de dimotic-ha de **cette** machine (`fonctionnelles-ia` §19 ; défaut `http://127.0.0.1:8765/mcp`) ; vide = pas de liaison |
-| `HA_URL` / `HA_TOKEN` | **facultatifs** — accès direct à l'API Home Assistant pour **contrôler des résultats** pendant la mise au point (décision du 08/10/2026 : conservé). Compte HA dédié non-administrateur recommandé ; le jeton donne un accès complet au compte qui l'a créé |
-| `HA_CONFIG_DIR` | facultatif, chemin absolu — lecture autorisée de `automations.yaml`, `scripts.yaml`, `scenes.yaml`, `configuration.yaml` ; `secrets.yaml` et `.storage` interdits ; aucune écriture |
-| `SESSION_NAME`, `PERMISSION_MODE` | nom du `screen` ; `manual` (défaut) ou `acceptEdits` |
-| `MODE` (⭐ v1.9) | `installer` (défaut) : tout. `mettre_a_jour_claude_md` : réécrit **seulement** le `CLAUDE.md` d'une installation existante — ni le compte, ni les jetons, ni la session ne sont touchés ; aucun jeton à ressaisir |
+| Champ | Défaut | Rôle |
+|---|---|---|
+| `MODE` | `installer` | `installer` : tout, relançable sans dommage. `mettre_a_jour_claude_md` : réécrit seulement le `CLAUDE.md` puis relance la session |
+| `CLAUDE_USER` | `claude` | compte qui exécute Claude Code ; créé s'il manque, **sudo sans mot de passe et groupe docker** (décision du 28/10/2026) |
+| `DIMOTIC_DIR` | `/docker/dimotic-ha` | dimotic-ha (compose + `data/`) |
+| `HA_CONFIG_DIR` | `/docker/homeassistant/config` | configuration de Home Assistant (lecture de 4 fichiers autorisée, `secrets.yaml` et `.storage` interdits, aucune écriture) |
+| `FICHE_SITE` | `automatique` | fiche `sites/<nom>.md` ajoutée en `site.md` (jamais écrasée si présente) ; automatique : `ha2` pour le site `stfort`, `noisy2` pour `noisy` |
+| `NOM_SESSION` | vide | nom de la session dans le Remote Control ; vide = **« <site> automatisation HA »** (site lu dans `data/core/machine_config.yaml`) |
+| `ADRESSE_MACHINE` | vide | IP réseau de la machine pour le MCP ; vide = adresse de la route par défaut ; **jamais 127.0.0.1** |
+| `PERMISSION_MODE` | `default` | `default` ou `acceptEdits` |
 
-Au moins l'un de `MCP_TOKEN` / `HA_TOKEN` est obligatoire ; `HA_URL` l'est avec `HA_TOKEN`.
+**Lu sur la machine, rien à saisir** : site (`core.site`), adresse de Home Assistant (`ha.ws.host`/`port` de `data/core/config.yaml`),
+jeton de dimotic-ha (`ha.ws.token` des secrets du cœur, pour créer l'entrée de l'intégration), réglages MCP de `ia`.
 
-**Modèle du `CLAUDE.md`** (⭐ v1.9) : source unique `applications/ia/agent/claude-md/` (sections `00-role`, `10-dimotic-mcp`,
-`20-ha-config`, `30-ha-direct`, `90-securite`, fichier `VERSION`, `LISEZ-MOI.md`), déclarée par `@outils:bundle` — le script téléchargé est
-donc une archive auto-extractible qui embarque le modèle ; lancé depuis un clone du dépôt, il le trouve à côté. Il dépose le modèle
-sur la machine (`/dimotic-ha-addons/agent-ha/claude-md/`, remplacé à chaque exécution, aucun secret) et y rend le `CLAUDE.md`. Variables
-de rendu : `{{TARGET_HOST}}`, `{{HA_URL}}`, `{{HA_CONFIG_DIR}}`, `{{HA_TOKEN_FILE}}` (⭐ v1.10 : `./ha_token` si le script l'a installé, sinon `~/.ha_token` quand c'est le fichier déjà en place sur la machine). Sections incluses selon les choix : `10` si le MCP est relié, `20` si un
-dossier de configuration est donné, `30` si un jeton Home Assistant est donné. La première ligne du fichier rendu porte la version
-(`<!-- agent-claude-md vX.Y.Z — généré le … -->`). Les choix d'installation sans secret sont mémorisés dans `agent.conf` (600), relus par
-le mode `mettre_a_jour_claude_md`. Un `CLAUDE.md` modifié est **pris en compte au prochain démarrage de la session** Claude Code.
+**Étapes** (chacune vérifie l'existant) :
+1. paquets `screen`, `acl`, `python3`, `curl`, `openssh-client` ; compte `claude` ; données de dimotic-ha en lecture/écriture par ACL, **secrets refusés**
+   (`secrets_*`, `sauvegarde/config.yaml`, `core/machine_ssh/`, `outils/saved-values/`) ;
+2. Claude Code : cherché dans le compte puis globalement ; sinon **installeur natif** dans le compte ;
+3. **MCP de `ia`** (`fonctionnelles-ia` §19) : `mcpEnabled: true`, `mcpHost` = IP de la machine, jeton `mcpToken` généré s'il manque (fichiers
+   sauvegardés avant), redémarrage de dimotic-ha si quelque chose a changé ; contrôle par une requête `initialize` ;
+4. dossier de travail **`/dimotic-ha-addons/agent-ha`** (700, au compte) : `CLAUDE.md` (modèle v1.3.0 + `site.md`), `.mcp.json` (serveur `dimotic`,
+   `http://<IP>:8765/mcp`, jeton), `.claude/settings.json` (`enabledMcpjsonServers: ["dimotic"]`, `ask` = `executer_action`, règles de lecture de HA),
+   `lancer-claude.sh` ;
+5. **premières questions pré-répondues** dans `~/.claude.json` du compte (service arrêté avant, copie de sauvegarde) : accueil terminé, thème,
+   **confiance du dossier** et **approbation du serveur `dimotic`** pour ce dossier ;
+6. **service `claude-screen`** : `screen -DmS claude lancer-claude.sh` → `claude --remote-control "<nom>" --permission-mode …`
+   (`CLAUDE_CODE_DISABLE_MOUSE=1`), **`Restart=always`** : la session revient après un `/exit`, un plantage ou un redémarrage. La même session est
+   dans le panneau « IA » (screen `claude`) et dans le Remote Control (claude.ai/code, application Claude, onglet « Code ») ;
+7. **panneau « IA »** (si l'intégration `screen_console` est dans `custom_components`) : paire de clés créée à l'endroit où l'intégration la lit
+   (`<config>/.storage/screen_console_ed25519`, réutilisée par `ensure_key`), script de contrôle `~claude/bin/screen-console-gate` (`list`/`attach`
+   seulement), ligne `authorized_keys` limitée (`from="127.0.0.1,::1"`, `command=…`, sans redirections), **entrée de l'intégration créée par l'API de
+   HA** (flux `config_entries/flow`, compte `claude`) si elle n'existe pas. Exception à la règle « jamais localhost » : la console se connecte en SSH
+   à la machine elle-même (`LOOPBACK_HOSTS` de l'intégration), adresse qui ne se diffuse pas.
 
-**Section « Site »** (⭐ v1.10) : si `site.md` existe à côté du `CLAUDE.md` sur la machine (copie de `applications/ia/agent/claude-md/sites/<machine>.md` : connaissances propres au site et niveau d'autorisation — `ha2.md`, `dev.md`), il est **ajouté à la fin** du `CLAUDE.md` rendu. Il n'est jamais écrasé par une installation ni par le mode `mettre_a_jour_claude_md`. Modèle `VERSION` 1.2.1 (rôle : niveau 0 par défaut, « sauf indication contraire de la section Site »).
+**Mode `--auto`** (minuteur posé par la carte SD, §7.2) : aucune question ; code **75** (« pas encore prêt ») si dimotic-ha n'est pas configuré,
+`ia` pas initialisée, réseau absent, MCP muet ou intégration pas encore chargée par HA ; une fois tout en place, le minuteur
+`dimotic-installer-ia.timer` est désactivé.
 
-**Où est Claude Code** (⭐ v1.8) : installé normalement **dans le compte dédié** (installeur natif, `~/.local/bin/claude`, ou
-npm utilisateur). Le script le cherche dans cet ordre : PATH de connexion du compte → emplacements usuels du compte
-(`~/.local/bin`, `~/.claude/local`, `~/.npm-global/bin`) → PATH global ; à défaut, installation globale par npm si présent,
-sinon arrêt avec un message demandant de l'installer sous le compte. Le chemin trouvé est affiché et utilisé tel quel pour lancer
-le `screen`, dans un shell de connexion du compte.
-
-**Ce que la machine reçoit** (`/dimotic-ha-addons/agent-ha/`, propriété du compte dédié, mode 700) :
-- `.mcp.json` (600) : serveur MCP « dimotic », en-tête `Authorization: Bearer …` ;
-- `.claude/settings.json` (600) : `allow` = lecture des quatre fichiers de configuration ; `ask` =
-  `mcp__dimotic__executer_action` (confirmation à chaque appel) ; `deny` = lecture de `secrets.yaml` et `.storage/**`,
-  **écriture** dans le dossier de configuration. Ces règles sont une barrière « au mieux » : la barrière réelle est le
-  compte dédié et les droits de fichiers ;
-- `ha_token` (600), seulement si `HA_TOKEN` est renseigné ;
-- `CLAUDE.md` : rôle (niveau 0 : lit et propose, n'écrit pas dans Home Assistant), outils de dimotic-ha, accès direct
-  (lecture, avec confirmation avant toute modification), sécurité.
-
-**Première mise en œuvre** (une fois, en SSH puis `su - <compte> -c 'screen -r <session>'`) : connexion Claude.ai, confiance
-du dossier, **approbation du serveur MCP du projet**, activation du Remote Control ; détacher par `Ctrl-A D`. Ensuite
-la session se retrouve dans l'application Claude Code (onglet « Code ») du même compte Claude.ai.
-
-**Limites** : la session s'arrête si la machine redémarre (relancer le script) ; la copie du script déposée (elle contient les
-jetons saisis) est **supprimée dès la fin**, succès ou échec ; un jeton contenant un guillemet ou un `$` n'est pas pris en
-charge (valeurs insérées telles quelles dans le script). Éprouvé en simulation (`screen`/`claude`/`useradd` simulés) : création du
-compte, fichiers et droits, JSON valides, refus d'un compte sudo, validations locales. **Non vérifié** : exécution réelle sur
-une machine et lancement effectif de Claude Code.
+**Test de réception** (fait le 28/10/2026 sur opi4pro, site stfort, machine déjà en service) : code 0 ; session « claude » ouverte dans le
+compte déjà connecté, **aucune question** affichée, `/rc active` (Remote Control « stfort automatisation HA »), `claude mcp list` : `dimotic`
+**connecté**. **Non éprouvé** : machine neuve (création du compte, installeur natif, entrée de l'intégration par l'API), mode `--auto` depuis une carte.
 
 ### 7.5 « Gérer les images de cartes SD/clés USB » (⭐ v1.13)
 

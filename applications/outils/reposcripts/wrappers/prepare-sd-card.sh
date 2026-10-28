@@ -28,6 +28,8 @@
 # @outils:bundle applications/outils/reposcripts/scripts/flash-sd-card.js => scripts/flash-sd-card.js
 # @outils:bundle applications/outils/reposcripts/scripts/prepare-sd-card.sh => scripts/prepare-sd-card.sh
 # @outils:bundle applications/outils/reposcripts/scripts/sd-extras.sh => scripts/sd-extras.sh
+# @outils:bundle applications/outils/reposcripts/wrappers/installer-ia.sh => scripts/ia/installer-ia.sh
+# @outils:bundle applications/ia/agent/claude-md => scripts/ia/claude-md
 # @outils:bundle applications/outils/reposcripts/scripts/modeles => scripts/modeles
 # @outils:bundle applications/outils/reposcripts/scripts/sauvegarde-rendu => scripts/sauvegarde-rendu
 # @outils:bundle applications/sauvegarde/dist/domain/BackupScript.js => scripts/sauvegarde-rendu/BackupScript.js

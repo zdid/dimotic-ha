@@ -1,0 +1,11 @@
+id: installer-ia
+title: "Installer l'IA sur une machine Home Assistant (Claude Code)"
+description: >-
+  À lancer SUR la machine qui porte Home Assistant et dimotic-ha (sudo, ou « Exécution par SSH ») : compte claude,
+  Claude Code, serveur MCP de dimotic-ha activé sur l'IP de la machine (jeton généré s'il manque), CLAUDE.md du site,
+  premières questions de Claude Code répondues d'avance, session permanente (screen « claude » + Remote Control
+  « <site> automatisation HA », relancée après un arrêt) et panneau « IA » de Home Assistant (screen_console) prêt
+  sans assistant. Tout est lu sur la machine ; relançable sans dommage. Seule étape manuelle : la connexion au compte
+  Claude au premier lancement. Remplace « Agent Claude Code — déploiement sur Home Assistant ».
+filename: installer-ia.sh
+requiresSudo: true

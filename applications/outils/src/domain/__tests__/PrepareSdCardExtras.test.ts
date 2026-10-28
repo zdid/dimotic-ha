@@ -236,6 +236,31 @@ describe('sd-extras.sh — Claude Code', () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain('64 bits');
   });
+
+  // ⭐ v1.14 — installateur de l'IA posé par machine, lancé par un minuteur au démarrage.
+  it('pose installer-ia.sh (valeurs par défaut, plus aucun __VAR__), le modèle du CLAUDE.md et le minuteur activé', () => {
+    const root = tmp();
+    const r = bash(root, 'extras_machine_ia');
+    expect(r.status, r.stderr).toBe(0);
+    const dir = path.join(root, 'dimotic-ha-addons', 'agent-ha');
+    const sh = fs.readFileSync(path.join(dir, 'installer-ia.sh'), 'utf8');
+    expect(sh).toContain('CLAUDE_USER="claude"');
+    expect(sh).toContain('ADRESSE_MACHINE=""');
+    expect(sh).not.toMatch(/^[A-Z_]+="__[A-Z_]+__"$/m);
+    expect(fs.statSync(path.join(dir, 'installer-ia.sh')).mode & 0o777).toBe(0o700);
+    expect(fs.existsSync(path.join(dir, 'claude-md', 'VERSION'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'claude-md', '30-ha-direct.md'))).toBe(false);
+    const service = fs.readFileSync(path.join(root, 'etc/systemd/system/dimotic-installer-ia.service'), 'utf8');
+    expect(service).toContain('ExecStart=/dimotic-ha-addons/agent-ha/installer-ia.sh --auto');
+    expect(service).toContain('SuccessExitStatus=75');
+    expect(fs.readlinkSync(path.join(root, 'etc/systemd/system/timers.target.wants/dimotic-installer-ia.timer')))
+      .toBe('/etc/systemd/system/dimotic-installer-ia.timer');
+  });
+
+  it('l\'archive de la carte embarque l\'installateur de l\'IA et son modèle', () => {
+    const chemins = detectBundlePaths(WRAPPER).map((b) => b.dest);
+    expect(chemins).toEqual(expect.arrayContaining(['scripts/ia/installer-ia.sh', 'scripts/ia/claude-md']));
+  });
 });
 
 describe('sd-extras.sh — par machine : comptes, DuckDNS et Caddy', () => {

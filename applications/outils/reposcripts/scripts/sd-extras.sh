@@ -210,6 +210,72 @@ extras_machine_comptes() {
 }
 
 # --------------------------------------------------------------------------
+# Par machine : installateur de l'IA (option claude-code, ⭐ v1.14)
+# --------------------------------------------------------------------------
+# Pose /dimotic-ha-addons/agent-ha/installer-ia.sh (valeurs par défaut du formulaire Outils) et son modèle de CLAUDE.md,
+# plus un minuteur systemd qui le lance en mode --auto 3 minutes après le démarrage puis toutes les 5 minutes : il sort en
+# « pas encore prêt » tant que dimotic-ha (arrêté ou pas encore restauré) ou Home Assistant ne sont pas en place, puis ne
+# touche plus à rien sauf changement (adresse de la machine, configuration). Rien n'est fait dans l'image elle-même.
+extras_ia_sources() { # affiche « <installer-ia.sh> <claude-md/> » (archive Outils, ou clone du dépôt)
+  if [ -f "$EXTRAS_DIR/ia/installer-ia.sh" ] && [ -f "$EXTRAS_DIR/ia/claude-md/VERSION" ]; then
+    echo "$EXTRAS_DIR/ia/installer-ia.sh $EXTRAS_DIR/ia/claude-md"; return 0
+  fi
+  if [ -f "$EXTRAS_DIR/../wrappers/installer-ia.sh" ] && [ -f "$EXTRAS_DIR/../../../ia/agent/claude-md/VERSION" ]; then
+    echo "$EXTRAS_DIR/../wrappers/installer-ia.sh $EXTRAS_DIR/../../../ia/agent/claude-md"; return 0
+  fi
+  return 1
+}
+
+# Remplace chaque « VAR="__VAR__" » du script par la valeur « @outils:default VAR = … » (vide sans valeur par défaut).
+extras_rendre_installer_ia() { # $1 = source, $2 = destination
+  local ligne var val
+  cp "$1" "$2"
+  while IFS= read -r ligne; do
+    var="$(sed -n 's/^\([A-Z_][A-Z0-9_]*\)="__\1__"$/\1/p' <<< "$ligne")"
+    [ -n "$var" ] || continue
+    val="$(sed -n "s/^# @outils:default $var = //p" "$1" | head -1)"
+    val="$(printf '%s' "$val" | sed -e 's/[\\|&]/\\&/g')"
+    sed -i "s|^$var=\"__${var}__\"\$|$var=\"$val\"|" "$2"
+  done < "$1"
+  ! grep -qE '^[A-Z_][A-Z0-9_]*="__[A-Z0-9_]+__"$' "$2"
+}
+
+extras_machine_ia() {
+  local src ia_sh ia_tpl cible="/dimotic-ha-addons/agent-ha"
+  src="$(extras_ia_sources)" || { echo "ERREUR : installateur de l'IA introuvable (installer-ia.sh + claude-md/) — régénérez le script depuis Outils." >&2; return 1; }
+  read -r ia_sh ia_tpl <<< "$src"
+  mkdir -p "$ROOTFS$cible" "$ROOTFS/etc/systemd/system/timers.target.wants"
+  extras_rendre_installer_ia "$ia_sh" "$ROOTFS$cible/installer-ia.sh" || { echo "ERREUR : rendu de installer-ia.sh incomplet." >&2; return 1; }
+  chmod 700 "$ROOTFS$cible/installer-ia.sh"
+  rm -rf "$ROOTFS$cible/claude-md"; cp -r "$ia_tpl" "$ROOTFS$cible/claude-md"
+  cat > "$ROOTFS/etc/systemd/system/dimotic-installer-ia.service" <<FIN_SERVICE
+# Posé par la préparation de carte Outils (option claude-code).
+[Unit]
+Description=Installation de l'IA (Claude Code) dès que dimotic-ha et Home Assistant sont prêts
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$cible/installer-ia.sh --auto
+SuccessExitStatus=75
+FIN_SERVICE
+  cat > "$ROOTFS/etc/systemd/system/dimotic-installer-ia.timer" <<'FIN_TIMER'
+[Unit]
+Description=Installation de l'IA, puis suivi (adresse de la machine, configuration) sans relancer une session inchangée
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
+FIN_TIMER
+  ln -sf /etc/systemd/system/dimotic-installer-ia.timer "$ROOTFS/etc/systemd/system/timers.target.wants/dimotic-installer-ia.timer"
+  echo "  IA : installateur posé ($cible/installer-ia.sh), lancé toutes les 5 minutes : s'installe dès que dimotic-ha tourne (jamais démarré par lui) et que Home Assistant est prêt."
+}
+
+# --------------------------------------------------------------------------
 # Par machine : sauvegarde Nextcloud (script rendu par le générateur de l'application Sauvegarde, mot de passe d'application, cron 3 h 05)
 # --------------------------------------------------------------------------
 # $1 = site, $2 = machine, $3 = URL Nextcloud, $4 = utilisateur, $5 = dossier racine ; mot de passe d'application : variable

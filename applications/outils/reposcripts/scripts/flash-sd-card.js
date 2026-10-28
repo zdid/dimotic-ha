@@ -676,13 +676,16 @@ async function buildMachineImage(entry, profile, basePath) {
   }
 
   // ⭐ v1.12 — comptes (didier, claude) et DuckDNS + Caddy : propres à la machine, quel que soit le modèle de Pi.
-  if (profile.accounts.length || profile.duckdns || profile.sauvegarde) {
+  // ⭐ v1.14 — option claude-code : installateur de l'IA (installer-ia.sh) + minuteur de premier démarrage.
+  const ia = profile.options.includes('claude-code');
+  if (profile.accounts.length || profile.duckdns || profile.sauvegarde || ia) {
     const args = [PREPARE_SH, 'extras-machine', partial, '--user', profile.user];
     if (isOrangePi(profile)) args.push('--layout', 'single');
     for (const k of profile.personalSshKeys) args.push('--key', k);
     if (profile.accounts.length) args.push('--accounts', profile.accounts.join(','));
     if (profile.claudeSshKey && profile.accounts.includes('claude')) args.push('--claude-key', profile.claudeSshKey);
     if (profile.duckdns) for (const d of profile.duckdns.domains) args.push('--duckdns', `${d.name}=${d.target}`);
+    if (ia) args.push('--ia');
     if (profile.sauvegarde) {
       const sv = profile.sauvegarde;
       args.push('--backup-site', String(sv.site), '--backup-machine', String(sv.machine), '--backup-url', String(sv.url), '--backup-user', String(sv.user), '--backup-root', String(sv.root));
