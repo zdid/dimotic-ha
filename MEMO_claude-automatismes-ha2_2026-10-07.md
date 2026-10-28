@@ -132,4 +132,4 @@ Règles SSH : une clé dédiée pour ce Claude (à fournir par l'utilisateur, pa
 - État de `docker ps`, version HA, liste d'automatisations/scripts existants (ne rien dupliquer).
 - Ports réels (HA 8123, dimotic-ha ; z2m = 8085) et méthode d'accès à l'API HA (jeton longue durée à demander, ne pas le stocker en clair dans un dépôt).
 - Où sont les étiquettes/Areas déjà définies.
-- ha2 est un **Raspberry Pi 4 (2 Go de RAM)** : mémoire limitée, éviter les tâches lourdes (pas de build, pas d'ESPHome compile ; ces opérations se font sur une autre machine).
+- ha2 (St Fort) est **opi4pro**, un **Orange Pi 4 Pro (4 Go de RAM)**, Debian 12 arm64 (corrigé le 28/10/2026 ; le mémo disait Raspberry Pi 4 2 Go). Toutes les machines Home Assistant du parc auront **4 Go** (Noisy : machine prévue vers mi-novembre 2026). Rester sobre : éviter les tâches lourdes (pas de build, pas d'ESPHome compile ; ces opérations se font sur une autre machine).
