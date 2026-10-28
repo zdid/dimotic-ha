@@ -52,7 +52,13 @@ seule la connexion web est demandée → `/mcp` montre `dimotic` connecté → r
 
 ## 4. Points à trancher
 
-- **Remote Control** (§7.4 lance `claude remote-control`) ou **panneau `screen_console`** de HA, ou les deux.
+- ~~Remote Control ou panneau `screen_console`~~ → **décidé le 28/10/2026 : les deux.** La même session Claude Code est
+  dans le `screen` (panneau « IA » de HA) **et** joignable par **Remote Control**. Elle doit porter un **nom qui désigne le
+  site**, pour ne pas confondre dans la liste du Remote Control les automatisations de St Fort et de Noisy :
+  **« stfort automatisation HA »**, **« noisy automatisation HA »** (forme `<site> automatisation HA`). Le site est déjà
+  connu de la machine : `core.site` dans `data/core/machine_config.yaml` (`stfort` sur opi4pro) → nom calculé par le
+  provisionnement, sans saisie. Option de nommage de Claude Code à vérifier sur la version installée (nom de session
+  au lancement, ou `/rename` au premier démarrage) ; le nom du `screen` reste court (`claude`).
 - **Jeton HA direct** (§7.4 le garde en option) : l'utilisateur veut passer par le **MCP** ; ne pas copier le jeton de dimotic-ha.
 - Nom des machines : `ha2` dans les docs = **opi4pro** (Orange Pi 4 Pro, Debian 12 arm64, 4 Go), pas un Raspberry Pi 4 2 Go comme
   l'indique `MEMO_claude-automatismes-ha2` §fin.
