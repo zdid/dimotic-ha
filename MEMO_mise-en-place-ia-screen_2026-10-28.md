@@ -59,7 +59,11 @@ seule la connexion web est demandée → `/mcp` montre `dimotic` connecté → r
   connu de la machine : `core.site` dans `data/core/machine_config.yaml` (`stfort` sur opi4pro) → nom calculé par le
   provisionnement, sans saisie. Option de nommage de Claude Code à vérifier sur la version installée (nom de session
   au lancement, ou `/rename` au premier démarrage) ; le nom du `screen` reste court (`claude`).
-- **Jeton HA direct** (§7.4 le garde en option) : l'utilisateur veut passer par le **MCP** ; ne pas copier le jeton de dimotic-ha.
+- ~~Jeton HA direct~~ → **décidé le 28/10/2026 : on l'enlève.** L'IA passe **uniquement par le MCP** de dimotic-ha :
+  retirer `HA_URL` / `HA_TOKEN`, la section `30-ha-direct` du modèle de `CLAUDE.md` et le fichier `ha_token` de §7.4
+  (`MCP_TOKEN` devient obligatoire).
+- **Droits du compte `claude`** → **décidé le 28/10/2026 : on laisse** en l'état (§7.2 : sudo sans mot de passe, docker).
+  Mettre §7.4 en cohérence (il refuse aujourd'hui un compte dans `sudo`).
 - Nom des machines : `ha2` dans les docs = **opi4pro** (Orange Pi 4 Pro, Debian 12 arm64, 4 Go), pas un Raspberry Pi 4 2 Go comme
   l'indique `MEMO_claude-automatismes-ha2` §fin.
 
