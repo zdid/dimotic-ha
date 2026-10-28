@@ -140,6 +140,7 @@ export class IaService implements IIaService {
   // envoie jamais, comportement strictement inchangé pour lui).
   private readonly assistSessions = new Map<string, { messages: OllamaMessage[]; lastUsedAt: number }>();
   private assistSessionsCleanupTimer?: ReturnType<typeof setInterval>;
+  private haReadyRetryTimer?: ReturnType<typeof setTimeout>;
   private ollamaServer?: OllamaHttpServer;
   private mcpServer?: McpHttpServer;
   private readonly recentExchanges: Exchange[] = [];
@@ -313,15 +314,23 @@ export class IaService implements IIaService {
       return;
     }
     this.logger.info('IaService', 'HA pas encore synchronisé — serveur Ollama et traitements différés jusqu\'au premier ha:ready');
-    this.eventBus.onGeneric('ha:ready', () => {
+    // ⭐ 28/10/2026 — après un redémarrage de HA, le ha:ready peut arriver avant que l'intégration dimotic_taxonomie
+    // soit chargée (unknown_command) et ne revient pas : réessai seul (5 s, 10 s, 20 s… plafonné à 60 s) jusqu'au succès.
+    let delai = 5_000;
+    const tenter = (origine: string): void => {
       if (this.haReady) return;
+      if (this.haReadyRetryTimer) { clearTimeout(this.haReadyRetryTimer); this.haReadyRetryTimer = undefined; }
       this.haBridgeClient.refresh()
         .catch((error) => this.logger.warn('IaService', `Rechargement du référentiel HA: ${error}`))
         .finally(() => {
-          if (this.haBridgeClient.isAvailable()) open();
-          else this.logger.warn('IaService', 'ha:ready reçu mais référentiel HA toujours indisponible — attente du suivant');
+          if (this.haReady) return;
+          if (this.haBridgeClient.isAvailable()) { open(); return; }
+          this.logger.warn('IaService', `${origine} : référentiel HA toujours indisponible — nouvel essai dans ${delai / 1000} s`);
+          this.haReadyRetryTimer = setTimeout(() => tenter('Réessai'), delai);
+          delai = Math.min(delai * 2, 60_000);
         });
-    });
+    };
+    this.eventBus.onGeneric('ha:ready', () => { delai = 5_000; tenter('ha:ready reçu'); });
   }
 
   /** Accès MCP pour Claude Code (specs v1.15 §19) : jamais sans jeton, jamais sans activation explicite. */
@@ -495,6 +504,7 @@ export class IaService implements IIaService {
     this.ollamaServer?.stop();
     this.mcpServer?.stop();
     if (this.assistSessionsCleanupTimer) clearInterval(this.assistSessionsCleanupTimer);
+    if (this.haReadyRetryTimer) clearTimeout(this.haReadyRetryTimer);
     this.logger.info('IaService', 'Service ia arrêté');
   }
 

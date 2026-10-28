@@ -1,9 +1,14 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.35
-**Date :** 20 Octobre 2026
+**Version :** 1.36
+**Date :** 28 Octobre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
 
+> **v1.36** : **démarrage du MCP après un redémarrage de HA** (§19.2) — le référentiel de HA est réessayé seul (5 s, 10 s, 20 s… plafonné à 60 s)
+> au lieu d'attendre le `ha:ready` suivant : après le redémarrage de HA du 26/10/2026, le `ha:ready` arrivait avant le chargement de l'intégration
+> `dimotic_taxonomie` (`unknown_command`) et le serveur MCP restait arrêté jusqu'au redémarrage de `ia`. Branchement de Claude Code : script Outils
+> « Installer l'IA » (§19.5).
+>
 > **v1.35** : **`auditer_noms_ha` plus juste** (§19.11nonies) — les téléphones (`mobile_app`) et les appareils de supervision dimotic-ha (« Docker », « Docker Hub ») ne sont plus examinés ; un préfixe d'identifiant égal à un lieu de la taxonomie de l'entité (lieu précis…) n'est plus signalé « décalé » (10 faux positifs sur noisy2).
 >
 > **v1.34** : **contrôle des noms de HA** (§19.11nonies) — outils MCP `auditer_noms_ha` (lecture seule) et `renommer_appareil_ha` (aperçu puis `confirme`, format `quoi---[précis--]lieu[--père[--grand-père]]` contrôlé) ; enchaînement guidé dans les consignes de l'agent.
@@ -1113,7 +1118,9 @@ vocabulaire QUOI/OÙ. Les schémas viennent du même fichier (`tools.ts`) et les
 `McpHttpServer.ts`, dans le process `ia`, démarré en même temps que le serveur Ollama (une fois HA
 prêt, §17). Protocole **MCP, transport HTTP sans état** : `POST /mcp`, une requête JSON-RPC 2.0 → une
 réponse JSON ; méthodes `initialize`, `ping`, `tools/list`, `tools/call` ; notifications acquittées en
-`202`. Pas de session, pas de flux SSE (`GET`/`DELETE` → `405`). Versions de protocole acceptées :
+`202`. Pas de session, pas de flux SSE (`GET`/`DELETE` → `405`). ⭐ v1.36 : si le référentiel de HA n'est pas disponible au `ha:ready`
+(intégration `dimotic_taxonomie` pas encore chargée après un redémarrage de HA), nouvel essai seul après 5 s, 10 s, 20 s… (60 s au plus)
+jusqu'au succès ; le serveur Ollama et le serveur MCP démarrent alors sans intervention. Versions de protocole acceptées :
 `2025-06-18`, `2025-03-26`, `2024-11-05`. Un outil inconnu est refusé (`-32602`) ; une erreur d'exécution
 revient en résultat `isError`.
 
@@ -1141,6 +1148,9 @@ Pris en compte au redémarrage de l'application `ia`. En Docker (réseau hôte),
 ajouter.
 
 ### 19.5 Brancher Claude Code
+
+⭐ v1.36 : sur une machine Home Assistant, le script Outils **« Installer l'IA »** (`fonctionnelles-outils` §7.4) fait tout (MCP activé sur l'IP de la
+machine, jeton, `.mcp.json` pré-approuvé, session permanente). À la main :
 
 ```bash
 claude mcp add --transport http dimotic http://<machine>:8765/mcp \

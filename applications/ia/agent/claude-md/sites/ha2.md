@@ -42,17 +42,15 @@ Sur ha2, en Docker, répertoire `/docker/<service>/` (compose.yaml + config) :
 ### 2bis. Compte, root et accès à HA
 
 - **Compte** : tu tournes sous l'utilisateur `claude` (un par machine du parc). Ce compte n'est pas root.
-- **Root** : tu n'as **pas** d'accès root automatique. Si une action l'exige (édition hors de ton périmètre, redémarrage d'un service, installation d'un paquet), **dis précisément la commande et pourquoi**, puis attends que l'utilisateur l'exécute (`su -` / `sudo`, avec mot de passe). Ne tente jamais de contourner (clé root, `docker` pour monter `/`, etc.).
+- **Root** : le compte a `sudo` sans mot de passe et le groupe `docker` (décision du 28/10/2026), mais c'est un **droit technique, pas une autorisation** : pour toute action qui l'exige (édition hors de ton périmètre, redémarrage d'un service, installation d'un paquet), **dis précisément la commande et pourquoi**, puis attends l'accord explicite de l'utilisateur avant de la lancer.
 - **Droits évolutifs** : les droits de ce compte seront ajustés avec toi selon ce dont tu as besoin. Quand un droit te manque, demande-le en listant la commande exacte et l'usage ; ne détourne pas un autre accès.
-- **Accès à HA** : directement par l'API native de HA, en REST (`http://localhost:8123/api/...`) ou WebSocket (`ws://localhost:8123/api/websocket`), avec un **jeton longue durée dédié** stocké dans **`~/.ha_token`** (`chmod 600`, jamais dans un dépôt, jamais affiché dans une réponse) — ce chemin remplace `./ha_token` cité plus haut. Pas de passage par dimotic-ha : il n'expose pas d'API pour un client tiers et son jeton n'est pas le tien.
-- **Droits du jeton** : vérifié le 10/10/2026, ce jeton a les droits **administrateur** de HA : techniquement il peut écrire (tableaux de bord `lovelace/config/save`, préférences Énergie `energy/save_prefs`, etc.). Ne dis donc jamais « je n'ai qu'un accès en lecture » sans l'avoir testé. La **lecture seule est une règle d'usage**, pas une limite technique : n'écris en direct dans HA que sur demande explicite de l'utilisateur, après avoir **sauvegardé** la configuration lue juste avant (dossier de sauvegardes de ton site), et relis le résultat. Les automatismes passent toujours par les outils MCP ci-dessous.
-- **Outil** : `~/automatismes/tools/ha_ws.py '<json>'` (client WebSocket, lit `~/.ha_token`, pour LIRE par défaut), ex. `ha_ws.py '{"type":"config/area_registry/list"}'`.
+- **Accès à HA : uniquement par le serveur MCP « dimotic »** (décision du 28/10/2026) — lecture (`lister_entites`, `obtenir_etat`, `obtenir_details`, `lire_*`) et écriture encadrée (`deposer_*`, aperçu puis `confirme: true`). Tu n'as **pas** de jeton Home Assistant et tu n'en demandes pas ; n'utilise pas le jeton de dimotic-ha (ses secrets te sont refusés). Si un outil MCP manque pour un besoin, dis-le : il sera ajouté à dimotic-ha.
 - **Dimotic-ha** : données modifiables, secrets exclus, code jamais (voir règle 5). Pour les règles en langage naturel, utiliser le planificateur ou `ia` via leur interface, avec l'utilisateur.
 
 ### Déposer un automatisme dans HA (par les outils MCP de dimotic, jamais par les fichiers ni en direct)
 
 Les fichiers de `/docker/homeassistant/config` appartiennent à root : **tu ne les modifies pas**. Le dépôt passe par le serveur MCP « dimotic »
-(les écritures d'automatismes passent par dimotic-ha, qui sauvegarde et protège contre les boucles ; ton jeton sert à LIRE par défaut, voir « Droits du jeton ») :
+(les écritures d'automatismes passent par dimotic-ha, qui sauvegarde et protège contre les boucles) :
 1. `lire_automatisations_ha` : inventaire de l'existant (évite les doublons) ; `sauvegardes: true` pour retrouver une version antérieure.
 2. `deposer_automatisation(id, definition)` **sans** `confirme` : renvoie un APERÇU (rien n'est modifié) et des avertissements (anti-boucle, mode). Montre-le à l'utilisateur.
 3. Après son accord explicite seulement : même appel avec `confirme: true`. dimotic sauvegarde l'existant, dépose, HA valide le schéma et recharge.
@@ -70,7 +68,7 @@ Conséquences pour les automatismes :
 - **Règle `attributs_taxonomie` (prioritaire)** : pour identifier le QUOI et le lieu d'une entité, l'attribut d'état `attributs_taxonomie` (posé par dimotic-ha) prime sur l'Area HA et sur le nom/entity_id. Seulement s'il est absent, se rabattre sur : Area de l'entité, sinon Area du device, nom du device, entity_id.
   - Contenu : `{quoi, slug_quoi, lieu_precis/slug_precis, lieu_principal/slug_lieu, lieu_pere/slug_pere, lieu_grand_pere/slug_grand_pere}` (clés selon la profondeur du nom). Constaté le 2026-10-07 sur 290/768 états.
   - Pourquoi : le nom du device HA est souvent le lieu précis (« Bureau ») et l'entity_id ne suit pas toujours le QUOI (`event.bouton_bureau_salle_a_manger_action`) ; l'Area peut diverger.
-  - Usage : filtrer `/api/states` sur `attributs_taxonomie.slug_quoi` + `slug_lieu` (template : `states | selectattr('attributes.attributs_taxonomie','defined')`). Si l'Area HA contredit la taxonomie, suivre la taxonomie et signaler l'écart.
+  - Usage : `lister_entites` / `obtenir_details` (MCP) renvoient la taxonomie ; dans un template d'automatisation : `states | selectattr('attributes.attributs_taxonomie','defined')`. Si l'Area HA contredit la taxonomie, suivre la taxonomie et signaler l'écart.
 - **Cibler par Area ou par étiquette** plutôt que lister des entity_id quand c'est possible ; chercher une entité par son QUOI + lieu (taxonomie d'abord, Area ensuite).
 - **Ne jamais renommer à la main** (UI de HA, fichiers) une entité/Area gérée par ce système — sauf avec les outils `renommer_entite_ha`, `renommer_piece_ha` et `affecter_piece_ha` (aperçu puis accord de l'utilisateur) ou par l'ordre `modifier` du pilote : le renommage est recalculé (les entity_id d'un plan peuvent devenir obsolètes — risque déjà constaté).
 - Si une entité n'a pas d'Area : problème de nommage à signaler, pas à contourner par du code.
@@ -164,8 +162,8 @@ Règles :
 ### 9. À vérifier au premier démarrage
 
 - État de `docker ps`, version HA, liste d'automatisations/scripts existants (ne rien dupliquer).
-- Ports réels (HA 8123, dimotic-ha ; z2m = 8085) et méthode d'accès à l'API HA (jeton longue durée à demander, ne pas le stocker en clair dans un dépôt).
+- Ports réels (HA 8123, dimotic-ha ; z2m = 8085) ; `/mcp` : le serveur « dimotic » doit être connecté (sinon, le signaler : c'est ton seul accès à HA).
 - Où sont les étiquettes/Areas déjà définies.
-- ha2 est un **Raspberry Pi 4 (2 Go de RAM)** : mémoire limitée, éviter les tâches lourdes (pas de build, pas d'ESPHome compile ; ces opérations se font sur une autre machine).
+- ha2 est **opi4pro** (Orange Pi 4 Pro, Debian 12 arm64, 4 Go de RAM) : éviter les tâches lourdes (pas de build, pas d'ESPHome compile ; ces opérations se font sur une autre machine).
 
 - **Automatisations créées pour l'utilisateur** : rangées par **étiquette** HA, **sans préfixe dans le nom** (étiquettes existantes : `ballon`, `lumieres`, `association`, `rappels`). Le tableau de bord « Automatisations » (`/liste-automatisations`) a une carte par étiquette ; sans étiquette → « Autres ». **À chaque nouvelle automatisation ou script, propose (ou demande) la catégorie, puis pose-la avec `etiqueter_ha`** ; une nouvelle étiquette = accord de l'utilisateur + une carte à ajouter au tableau.
