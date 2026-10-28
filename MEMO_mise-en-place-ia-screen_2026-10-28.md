@@ -76,3 +76,17 @@ seule la connexion web est demandée → `/mcp` montre `dimotic` connecté → r
 - Pas de MCP branché ; aucun jeton HA dans le compte `claude`.
 - Applications externes dans `/docker/dimotic-ha/data/applications` (plus récentes que l'image 4.1.0) : à retirer après
   déploiement de l'image **4.2.0** (construite le 28/10).
+
+## 6. Suite à reprendre dans une session dimotic-ha (état au 28/10/2026, fin de session projets-DC)
+
+- **Fait** : commits poussés ; tag **`v4.2.0`** sur `39a06d4` (correctif `outils` : tests exclus du `tsconfig`, le build
+  Docker échouait faute de `vitest`) ; image **`zdid2/dimotic-ha:4.2.0`** + `:latest` publiée (amd64, arm64, arm/v7).
+- **Pas fait** : rien n'est déployé ; opi4pro tourne toujours en **4.1.0** (`DIMOTIC_TAG=4.1.0`).
+- **Prochaines étapes**, sur la production avec l'accord de l'utilisateur :
+  1. déployer la 4.2.0 sur opi4pro (`DIMOTIC_TAG=4.2.0` dans `/docker/dimotic-ha/.env`, pull, up -d) ;
+  2. vérifier les applications et le **serveur MCP** de `ia` (127.0.0.1:8765) — le redémarrage doit le relancer (constat 6) ;
+  3. sauvegarder puis retirer les **applications externes** de `/docker/dimotic-ha/data/applications` (`arbreouquoi`,
+     `esps-assemble`, `ia`, `planificateur`, `scriptsha`, `tasmota`, lien `core`) : elles étaient plus récentes que la 4.1.0
+     (builds du 21/10 15:56 et du 22/10), la 4.2.0 les contient désormais ;
+  4. brancher le MCP pour le compte `claude` (`.mcp.json` du projet, jeton `mcpToken`) ;
+  5. traiter le processus cible (§3) et les décisions (§4).
