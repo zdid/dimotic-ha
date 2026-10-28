@@ -81,7 +81,7 @@ seule la connexion web est demandée → `/mcp` montre `dimotic` connecté → r
 
 - **Fait** : commits poussés ; tag **`v4.2.0`** sur `39a06d4` (correctif `outils` : tests exclus du `tsconfig`, le build
   Docker échouait faute de `vitest`) ; image **`zdid2/dimotic-ha:4.2.0`** + `:latest` publiée (amd64, arm64, arm/v7).
-- **Pas fait** : rien n'est déployé ; opi4pro tourne toujours en **4.1.0** (`DIMOTIC_TAG=4.1.0`).
+- **Fait le 28/10 (session dimotic-ha, étapes 1 à 3)** : opi4pro en **4.2.0** (`.env` sauvegardé en `.env.avant-4.2.0-20261028`), conteneur sain, MCP de `ia` relancé seul sur 8765 après chaque redémarrage ; applications externes sauvegardées dans `/root/applications-externes-opi4pro-avant-4.2.0-20261028.tar.gz` puis retirées (et le lien `core`) : les 17 modules se chargent depuis l'image (`/app/applications`).
 - **Prochaines étapes**, sur la production avec l'accord de l'utilisateur :
   1. déployer la 4.2.0 sur opi4pro (`DIMOTIC_TAG=4.2.0` dans `/docker/dimotic-ha/.env`, pull, up -d) ;
   2. vérifier les applications et le **serveur MCP** de `ia` (127.0.0.1:8765) — le redémarrage doit le relancer (constat 6) ;
@@ -90,3 +90,9 @@ seule la connexion web est demandée → `/mcp` montre `dimotic` connecté → r
      (builds du 21/10 15:56 et du 22/10), la 4.2.0 les contient désormais ;
   4. brancher le MCP pour le compte `claude` (`.mcp.json` du projet, jeton `mcpToken`) ;
   5. traiter le processus cible (§3) et les décisions (§4).
+- **Fait le 28/10 (session dimotic-ha, suite)** : étape 4 et processus cible (§3) réalisés par le script Outils **« Installer l'IA »**
+  (`installer-ia`, spec `fonctionnelles-outils` v1.14 §7.4 ; remplace `agent-ha-deploy`) ; correctif `ia` du constat 6 (spec v1.36, **pas encore
+  déployé** : prochaine image ou racine externe) ; carte SD : option `claude-code` = installateur + minuteur de premier démarrage. Essai réel sur
+  opi4pro réussi : session dans `/dimotic-ha-addons/agent-ha`, aucune question, Remote Control « stfort automatisation HA », MCP `dimotic`
+  connecté sur `192.168.1.51:8765` (`mcpHost` passé de 127.0.0.1 à l'IP, décision de l'utilisateur). Ancien dossier `/home/claude/automatismes`
+  laissé en place (plus utilisé).
