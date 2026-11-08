@@ -1,10 +1,11 @@
-## Site noisy (noisy2) — connaissances propres à cette maison
+## Site noisy (noisy3) — connaissances propres à cette maison
 
 Section propre à CE site (fichier `site.md` posé à côté du CLAUDE.md ; modèle versionné : `applications/ia/agent/claude-md/sites/noisy2.md`).
-Tu tournes sur **noisy2** (Raspberry Pi 4, 2 Go de RAM : Home Assistant, zigbee2mqtt, mosquitto, dimotic-ha). Mission : **créer et maintenir des
+Tu tournes sur **noisy3** (Raspberry Pi 4, 4 Go de RAM : Home Assistant, zigbee2mqtt, mosquitto, dimotic-ha), qui a **remplacé noisy2** le 08/11/2026
+(même adresse 192.168.1.201 ; dans dimotic-ha la machine garde l'identifiant `noisy2`). Mission : **créer et maintenir des
 automatismes dans Home Assistant** ; tu utilises le système en place, tu ne le développes pas.
 **Niveau d'autorisation de ce site : niveau 2** : dépôt dans HA par les outils MCP de dimotic, de façon encadrée (aperçu, accord de l'utilisateur,
-sauvegarde). Rédigé le 2026-10-13 ; ce qui n'a pas été revérifié en réel est signalé « à vérifier ».
+sauvegarde). Rédigé le 2026-10-13, mis à jour le 2026-11-08 (noisy3, pilote zigbee2mqtt) ; ce qui n'a pas été revérifié en réel est signalé « à vérifier ».
 
 ### Règles d'or du site
 1. **Lire avant d'écrire**, **sauvegarder avant toute modification** (`cp x x.bak-AAAAMMJJ`), jamais de `.storage/` HA modifié quand HA tourne.
@@ -17,7 +18,7 @@ sauvegarde). Rédigé le 2026-10-13 ; ce qui n'a pas été revérifié en réel 
 ### Machines du site (réseau 192.168.1.0/24, distinct du site Saint Fort)
 | Machine | Rôle |
 |---|---|
-| **noisy2** (ici) | HA (`/docker/homeassistant/config`), zigbee2mqtt, mosquitto, dimotic-ha (`/docker/dimotic-ha/data`) |
+| **noisy3** (ici, ex-noisy2) | HA (`/docker/homeassistant/config`), zigbee2mqtt (clé Sonoff ZBDongle Plus V2), mosquitto, dimotic-ha (`/docker/dimotic-ha/data`) |
 | **noisy** (192.168.1.62) | dimotic-ha (rfxcom, arexx), mosquitto, **mqtt-io** : les 12 relais GPIO (radiateurs, ballons) ; l'ancienne domotique y est **arrêtée** |
 Un pont Mosquitto relie les deux (`homeassistant/#`, `homeassist/#`, `mqttio/#`). WireGuard vers le site Saint Fort (falbala 10.10.10.2) : **hors périmètre**.
 
@@ -36,10 +37,11 @@ Un pont Mosquitto relie les deux (`homeassistant/#`, `homeassist/#`, `mqttio/#`)
 - Écriture dans HA **uniquement par les outils MCP** (aperçu d'abord, `confirme: true` après accord).
 - Pas de root : si une action l'exige, donne la commande exacte et pourquoi, puis attends l'utilisateur.
 
-### Pilotes de noisy (AREXX, RFXCOM, GPIO)
-Les pilotes tournent dans dimotic-ha **sur noisy** (192.168.1.62), joignables par le canal MQTT du site.
+### Pilotes de noisy (AREXX, RFXCOM, zigbee2mqtt, GPIO)
+AREXX, RFXCOM et GPIO tournent dans dimotic-ha **sur noisy** (192.168.1.62) ; le pilote **zigbee2mqtt** tourne dans dimotic-ha **ici** (noisy3).
+Tous sont joignables par le canal MQTT du site.
 
-Tu gères les pilotes avec les outils MCP **`pilotes_ponts`**, **`pilotes_lire`** et **`pilotes_modifier`** (spec `conception-gestion-pilotes_specs_v1.5.md`). Ils passent par le cœur : tu n'as ni SSH ni accès aux fichiers.
+Tu gères les pilotes avec les outils MCP **`pilotes_ponts`**, **`pilotes_lire`** et **`pilotes_modifier`** (spec `conception-gestion-pilotes_specs_v1.11.md`). Ils passent par le cœur : tu n'as ni SSH ni accès aux fichiers.
 Règles :
 1. **Toujours `pilotes_ponts` d'abord.** Plusieurs ponts du même type (ex. deux bases AREXX) → demande **lequel**. Un pont `joignable: false` ne répond pas : dis-le.
 2. Seuls les ordres listés dans les `capacites` du pont existent ; n'en essaie pas d'autres.
@@ -51,7 +53,8 @@ Règles :
 8. **Supprimer** retire aussi l'entité de HA : annonce-le. Un device encore utilisé par un récepteur est refusé : propose de le remplacer ou de modifier le récepteur.
 9. **Production** : les pilotes RFXCOM et GPIO pilotent de vrais relais et volets. Préviens avant un `redemarrer` ou une suppression et attends l'accord.
 10. Une erreur du pont (`etat_change`…) : explique-la simplement ; pour `etat_change`, refais l'aperçu. Ne cherche jamais à contourner un refus.
-État actuel : **AREXX** et **RFXCOM** sont gérables ; GPIO et zigbee2mqtt pas encore (réponds que ce n'est pas encore possible).
+11. **zigbee2mqtt** (pont `z2m_bridge_noisy2`) : ordres `lister`, `decouverts`, `adopter`, `modifier`, `remplacer`, `supprimer`, `appairer` — **pas** d'`effacer`/`ignorer`/`redemarrer` (redémarrer zigbee2mqtt couperait tout le réseau Zigbee : jamais sans l'utilisateur, et pas par toi). Un découvert = appareil en interview ou nommé par son adresse IEEE (sans `---`). **Appairer** : demande combien de temps (120 s par défaut, 254 s au plus) et rappelle que la mise en mode appairage de l'appareil est un geste **physique** de l'utilisateur ; attends la fin de l'interview avant d'adopter. **Renommer** (`adopter`, `modifier`) change les sujets MQTT et les `entity_id` HA de l'appareil : l'aperçu les liste, préviens pour les automatisations et tableaux de bord. **Supprimer** un appareil mort : `force: true` (s'il est encore sous tension il reviendra). Pas de sauvegarde côté dimotic-ha (zigbee2mqtt garde lui-même sa configuration). Le binding, les options d'un appareil et les mises à jour ne sont pas dans le pilote : renvoie l'utilisateur à l'interface de zigbee2mqtt.
+État actuel : **AREXX**, **RFXCOM** et **zigbee2mqtt** sont gérables (zigbee2mqtt : premiers essais réels en cours, novembre 2026 — signale toute réponse étrange) ; GPIO pas encore (réponds que ce n'est pas encore possible).
 
 ### Heures creuses du site (saisies à la main)
 Les compteurs ne donnent PAS les horaires de creuse : ils sont saisis à la main dans Home Assistant (20/10/2026) et servent de référence.
