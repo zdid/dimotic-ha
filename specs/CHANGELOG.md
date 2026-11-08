@@ -1,6 +1,6 @@
 # CHANGELOG - Historique des Spécifications
 
-**Dernière mise à jour :** 28 Octobre 2026
+**Dernière mise à jour :** 8 Novembre 2026
 
 ---
 
@@ -10,6 +10,7 @@
 
 | Date | Version | Fichier | Auteur | Changements |
 |------|---------|---------|--------|-------------|
+| 08/11/2026 | **v1.3** | fonctionnelles-zigbee2mqtt_specs_v1.3.md | Claude | **Premier déploiement réel** sur noisy3 (site noisy) : vrai zigbee2mqtt (Sonoff ZBDongle Plus V2, ember), pont `z2m_bridge_noisy2` présent, ordres passés par l'agent IA du site et confirmés par l'utilisateur ; règle 11 de la fiche du site ; `remplacer` de bout en bout et effet sur l'`entity_id` toujours non vérifiés en détail. v1.2 archivée. |
 | 20/10/2026 | **v1.3** | conception-mise-a-jour-dimotic_specs_v1.3.md | Claude | **Plus d'ordres signés ni de secret** : `core.maj.secret`, `docker/definir-secret-maj.sh` et l'écoute `…/commande/+` retirés ; l'agent ne répond qu'au bouton « Installer » de HA ; déployé sur les 5 machines. v1.2 archivée. |
 | 22/10/2026 | **v1.3** | conception-gestion-energie-batteries-ballons_specs_v1.3.md | Claude | **Deux paliers de puissance du petit ballon documentés** (§5.2bis) : ~2 050 W puis ~820 W selon la chaleur de l'eau (cycles observés sur 9 jours) ; seuil de départ à affiner et sonde de température en points ouverts (§7). v1.2 archivée. |
 | 22/10/2026 | **v1.2** | conception-gestion-energie-batteries-ballons_specs_v1.2.md | Claude | **Forçage de 16 h supprimé** (chauffe en heures pleines) ; **deux ballons en parallèle en creuse de nuit** (second décalé de 5 min) ; **second ballon en journée** si le surplus restant le permet (§5.7) ; **puissance par ballon** (gros 1 800 W, petit 2 050 W), seuils 465 / 529 W ; réalisé sur ha2 le 22/10/2026. v1.1 archivée. |

@@ -1,8 +1,8 @@
 # Spécifications — Pilote zigbee2mqtt
 
-**Version :** 1.2
-**Date :** 16 Octobre 2026
-**Statut :** Réalisé et essayé sur une instance de développement isolée (faux zigbee2mqtt) ; pas encore déployé
+**Version :** 1.3
+**Date :** 8 Novembre 2026
+**Statut :** Réalisé ; **en service sur noisy3** (site noisy) depuis le 08/11/2026, essayé en réel avec un vrai zigbee2mqtt
 **Type :** Application d'intégration (process séparé), arrive **désactivée** (activation à chaud)
 **Dépend de :** `conception-gestion-pilotes_specs` (v1.6, contrat des pilotes), `fonctionnelles-supervisor_specs` (§14ter, canal pilotes), `fonctionnelles-nommage_specs` (taxonomie QUOI---OÙ et relais des découvertes)
 
@@ -60,4 +60,6 @@ Le broker est celui de `ha.mqtt` : zigbee2mqtt doit publier sur le **même** bro
 
 - 15 tests automatisés (`applications/zigbee2mqtt`, `npm test`) : nommage, ordres, refus, ordre supprimer-puis-renommer, échec intermédiaire, plafond d'appairage, transactions des réponses, états 1.x/2.x.
 - **Essai réel** (16/10/2026) sur une instance de développement isolée avec un **faux zigbee2mqtt** (broker privé) : activation à chaud, présence du pont, `decouverts`, `adopter` (aperçu → jeton → renommage reçu par le faux z2m avec `homeassistant_rename` et `transaction`), `lister`, `appairer 999` plafonné à 254 s.
-- **Non vérifié** : avec un vrai zigbee2mqtt et un vrai appareil (interview, `remove`, effet sur les `entity_id` dans HA), le `remplacer` de bout en bout, la réaction des découvertes relayées par `nommage` après un renommage.
+- **Premier déploiement réel** (08/11/2026) sur **noisy3** (Raspberry Pi 4, site noisy, `machineId` `noisy2`) : zigbee2mqtt réel avec une clé Sonoff ZBDongle Plus V2 (`adapter: ember`, port `/dev/serial/by-id/…` mappé sur `/dev/ttyUSB0` dans le compose). Application activée à chaud par l'interface ; pont `z2m_bridge_noisy2` présent (`dimotic/noisy/pilotes/z2m_bridge_noisy2/presence`, capacités `lister`, `decouverts`, `adopter`, `modifier`, `remplacer`, `supprimer`, `appairer`). Ordres passés par l'agent IA du site (Claude Code de noisy3, outils MCP `pilotes_*`) : fonctionnement confirmé par l'utilisateur. Le détail des ordres essayés n'a pas été relevé.
+- **Règle de l'agent** ajoutée à la fiche du site (`applications/ia/agent/claude-md/sites/noisy2.md`, règle 11) : pas d'`effacer`/`ignorer`/`redemarrer` ; `appairer` 120 s par défaut, 254 s au plus, geste physique sur l'appareil ; un renommage change les sujets MQTT et l'`entity_id` ; `supprimer` force le retrait ; liaisons (binding), options et mises à jour par l'interface de zigbee2mqtt.
+- **Toujours non vérifié en détail** : le `remplacer` de bout en bout avec un vrai appareil, l'effet d'un renommage sur l'`entity_id` dans HA et sur les découvertes relayées par `nommage`.
