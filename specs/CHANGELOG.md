@@ -1,6 +1,6 @@
 # CHANGELOG - Historique des Spécifications
 
-**Dernière mise à jour :** 8 Novembre 2026
+**Dernière mise à jour :** 11 Novembre 2026
 
 ---
 
@@ -36,6 +36,7 @@
 | 18/10/2026 | **v7.5** | fonctionnelles-rfxcom_specs_v7.5.md | Claude | **Commandes de groupe Lighting2** (§12bis) : reçues avec `unitCode = 1`, elles prenaient l'identifiant du bouton 1 ; le numéro de bouton est maintenant effacé et non transmis (device de groupe sans numéro, commande `<id>/0`) ; 4 vérifications |
 | 16/10/2026 | **v7.4** | fonctionnelles-rfxcom_specs_v7.4.md | Claude | **§13bis : nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v7.3 archivée. |
 | 16/10/2026 | **v1.2** | fonctionnelles-zigbee2mqtt_specs_v1.2.md | Claude | **Nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v1.1 archivée. |
+| 11/11/2026 | **v1.37** | fonctionnelles-ia_specs_v1.37.md | Claude | **Assistant vocal fiable** (§16.2, §16.12), constaté avec hasat3 sur ha2 : réponse parlée naturelle d'une action (« C'est fait, j'ai allumé : lumière, salon. ») au lieu du message technique de `planificateur` ; interpréteur/cache tentés aussi en cours de conversation quand la dernière réponse ne finit pas par « ? » (HA renvoie l'historique 5 min) ; garde-fou remplaçant une action annoncée par Mistral sans `executer_action` réussi. v1.36 archivée. |
 | 28/10/2026 | **v1.36** | fonctionnelles-ia_specs_v1.36.md | Claude | **Démarrage du MCP après un redémarrage de HA** (§19.2) : référentiel de HA réessayé seul (5 s → 60 s) au lieu d'attendre le `ha:ready` suivant (le MCP restait arrêté depuis le 26/10 sur opi4pro) ; branchement de Claude Code par le script Outils « Installer l'IA » (§19.5). v1.35 archivée. |
 | 20/10/2026 | **v1.35** | fonctionnelles-ia_specs_v1.35.md | Claude | **`auditer_noms_ha` plus juste** (§19.11nonies) : téléphones et appareils de supervision exclus ; préfixe d'identifiant égal à un lieu de la taxonomie non signalé « décalé ». v1.34 archivée. |
 | 20/10/2026 | **v1.34** | fonctionnelles-ia_specs_v1.34.md | Claude | **Contrôle des noms de HA** (§19.11nonies) : outils MCP `auditer_noms_ha` (lecture seule : appareils sans taxonomie hors convention, identifiants décalés) et `renommer_appareil_ha` (aperçu puis `confirme`, format contrôlé) ; enchaînement guidé dans les consignes. v1.33 archivée. |

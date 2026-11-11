@@ -40,6 +40,7 @@ import { HaReferencesClient } from './HaReferencesClient';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
+import { phraseConfirmationAction, echangeLibre, annonceActionSansExecution, REPONSE_ACTION_NON_EXECUTEE } from './reponseVocale';
 import { IA_CLIENT_EVENTS } from './socket-events';
 import { validateReferences, buildCorrectionRequestMessage } from './referenceValidator';
 import {
@@ -84,6 +85,9 @@ type RunChatRoundsResult =
       /** ⭐ 24/09/2026 — succès du DERNIER `executer_action` réellement exécuté (réponse de
        *  planificateur), absent si aucun : une action en échec n'est jamais mise en cache. */
       executerActionOk?: boolean;
+      /** ⭐ 11/11/2026 (specs v1.37 §16.12) — texte final remplacé par le garde-fou (Mistral a annoncé
+       *  une action sans `executer_action` réussi) : l'appelant écrit `finalText`, pas les chunks. */
+      texteRemplace?: boolean;
     }
   | { ok: false; errorMessage: string };
 
@@ -518,7 +522,10 @@ export class IaService implements IIaService {
 
     const messages = this.rulesProvider.inject(this.buildMessages(body));
     const question = extractQuestion(messages);
-    const fresh = isFreshExchange(messages);
+    // ⭐ 11/11/2026 (specs v1.37 §16.2) — « libre » = aucune réponse assistant, OU dernière réponse
+    // sans « ? » : l'historique que renvoie HA (même conversation_id pendant 5 min) ne bloque plus
+    // l'interpréteur après une simple action ; une demande de précision garde la main à Mistral.
+    const fresh = echangeLibre(messages);
 
     // ⭐ 26/08/2026, demande utilisateur — cache (100 dernières phrases) puis interpréteur
     // déterministe (specs §16), tentés AVANT tout appel Mistral, seulement sur un échange FRAIS
@@ -539,7 +546,7 @@ export class IaService implements IIaService {
       return;
     }
 
-    if (result.wasStructured) {
+    if (result.wasStructured || result.texteRemplace) {
       res.write(JSON.stringify({ model: ollamaModel, created_at: new Date().toISOString(), message: { role: 'assistant', content: result.finalText }, done: false }) + '\n');
     } else {
       for (const chunk of result.bufferedChunks) res.write(chunk);
@@ -601,7 +608,10 @@ export class IaService implements IIaService {
     for (const outcome of outcomes) {
       if (outcome.kind === 'action') {
         const reply = await this.toolExecutor.executeDirect(outcome.params);
-        messages.push(reply.message);
+        // ⭐ 11/11/2026 (specs v1.37 §16.12) — réponse PARLÉE naturelle sur succès (le message
+        // technique de planificateur reste dans planificateurReply pour l'UI) ; l'échec garde la
+        // raison exacte.
+        messages.push(reply.success ? phraseConfirmationAction(outcome.params) : reply.message);
         replies.push(reply);
       } else if (outcome.kind === 'structured') {
         const reply = await this.structuredRouter.route(withPhraseOriginale(outcome.data, phraseOriginale));
@@ -802,6 +812,26 @@ export class IaService implements IIaService {
           planificateurReply: reply ? JSON.stringify(reply, null, 2) : undefined,
           verificationRetried,
           executerActionOk
+        };
+      }
+
+      // ⭐ 11/11/2026 (specs v1.37 §16.12) — garde-fou : Mistral annonce une action (phrase de
+      // confirmation ou message technique imités depuis l'historique) sans `executer_action` réussi
+      // dans cet échange → jamais transmis tel quel, l'utilisateur est invité à répéter.
+      if (!runOpts?.dryRun && annonceActionSansExecution(assembled.text, executerActionOk)) {
+        this.logger.warn('IaService', `Round ${round}: action annoncée sans executer_action réussi — réponse remplacée (texte Mistral : ${JSON.stringify(assembled.text.slice(0, 200))})`);
+        return {
+          ok: true,
+          finalText: REPONSE_ACTION_NON_EXECUTEE,
+          promptTokens: totalPromptTokens,
+          completionTokens: totalCompletionTokens,
+          cachedTokens: totalCachedTokens,
+          bufferedChunks: [],
+          wasStructured: false,
+          intermediateJson,
+          verificationRetried,
+          executerActionOk,
+          texteRemplace: true
         };
       }
 
@@ -1066,13 +1096,7 @@ function slugifyInterpreter(text: string): string {
     .replace(/_+/g, '_');
 }
 
-/** ⭐ 26/08/2026, demande utilisateur — une conversation est "fraîche" si aucun tour d'assistant
- *  n'y figure déjà. Une conversation déjà engagée avec Mistral (ex. formulation assistée d'une
- *  planification complexe) ne doit JAMAIS être interceptée par le cache ni l'interpréteur
- *  déterministe — seule Mistral connaît le contexte des tours précédents. */
-function isFreshExchange(messages: OllamaMessage[]): boolean {
-  return !messages.some((m) => m.role === 'assistant');
-}
+// (11/11/2026) `isFreshExchange` remplacée par `echangeLibre` (reponseVocale.ts, specs v1.37 §16.2).
 
 /** ⭐ 26/08/2026 — extrait la décision d'un résultat Mistral réussi et CONCLU (action réellement
  *  exécutée, ou JSON structuré transmis avec succès à planificateur) sous la même forme que
