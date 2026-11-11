@@ -7,13 +7,13 @@
 import type { HaLecture } from './HaLectureDirecte';
 import type { LiveCatalogs } from './interpreter/index';
 
-export function buildLiveCatalogs(haBridgeClient: HaLecture, macros: string[], excludedQuoiIds: string[]): LiveCatalogs {
+export function buildLiveCatalogs(haBridgeClient: HaLecture, macros: string[], excludedQuoiIds: string[], lieuOrigine?: string): LiveCatalogs {
   return {
     lieux: haBridgeClient.getLieuCatalog(excludedQuoiIds),
     lieuxComposes: buildLieuxComposes(haBridgeClient),
     quois: haBridgeClient.getQuoiCatalog().map((q) => q.label),
     macros,
-    lieuOrigine: undefined, // aucune source réelle branchée à ce stade — voir specs §16.6
+    lieuOrigine, // ⭐ 11/11/2026 : lieu du satellite qui parle (specs §16.14), sinon undefined
     quoiUniqueLieu: buildQuoiUniqueLieu(haBridgeClient)
   };
 }

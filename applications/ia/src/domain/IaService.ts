@@ -42,6 +42,7 @@ import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, mak
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
 import { phraseConfirmationAction, echangeLibre, annonceActionSansExecution, REPONSE_ACTION_NON_EXECUTEE } from './reponseVocale';
 import { RadioService, reconnaitreCommandeRadio, DEFAULT_RADIO_CONFIG } from './radio';
+import { lieuDuSatellite } from './satellite';
 import { IA_CLIENT_EVENTS } from './socket-events';
 import { validateReferences, buildCorrectionRequestMessage } from './referenceValidator';
 import {
@@ -530,6 +531,9 @@ export class IaService implements IIaService {
     // sans « ? » : l'historique que renvoie HA (même conversation_id pendant 5 min) ne bloque plus
     // l'interpréteur après une simple action ; une demande de précision garde la main à Mistral.
     const fresh = echangeLibre(messages);
+    // ⭐ 11/11/2026 (specs v1.39 §16.14) — lieu du satellite qui parle (repère du texte d'instructions de HA).
+    const lieuSatellite = lieuDuSatellite(messages, this.config.satellites ?? {});
+    if (lieuSatellite) this.logger.info('IaService', `Satellite : lieu d'origine « ${lieuSatellite} »`);
 
     // ⭐ 26/08/2026, demande utilisateur — cache (100 dernières phrases) puis interpréteur
     // déterministe (specs §16), tentés AVANT tout appel Mistral, seulement sur un échange FRAIS
@@ -537,13 +541,14 @@ export class IaService implements IIaService {
     // avec Mistral — ex. formulation assistée d'une planification complexe — ne doit jamais être
     // interceptée ici, seule Mistral a le contexte des tours précédents.
     // ⭐ 11/11/2026 (specs v1.38 §16.13) — commande radio simple, avant cache et interpréteur.
-    let result = fresh && question ? await this.tryRadio(question) : undefined;
-    if (!result && fresh && question) result = await this.tryCache(question);
-    if (!result && fresh && question) result = await this.tryDeterministicPath(question);
+    let result = fresh && question ? await this.tryRadio(question, lieuSatellite) : undefined;
+    // Le cache ne connaît pas le lieu d'origine : sauté quand un satellite situe la demande.
+    if (!result && fresh && question && !lieuSatellite) result = await this.tryCache(question);
+    if (!result && fresh && question) result = await this.tryDeterministicPath(question, lieuSatellite);
     if (!result) {
       this.metrics.recordMistralCall();
-      result = await this.runChatRounds(messages, mistralModel, body.options || {});
-      if (fresh && question) this.cacheMistralResult(question, result);
+      result = await this.runChatRounds(messages, mistralModel, body.options || {}, { lieuSatellite });
+      if (fresh && question && !lieuSatellite) this.cacheMistralResult(question, result);
     }
 
     if (!result.ok) {
@@ -566,13 +571,15 @@ export class IaService implements IIaService {
 
   /** ⭐ 11/11/2026 (specs v1.38 §16.13) — « mets France Inter », « arrête la radio » : reconnu et
    *  exécuté sans Mistral ; `undefined` si la phrase n'est pas une commande radio simple. */
-  private async tryRadio(question: string): Promise<RunChatRoundsResult | undefined> {
+  private async tryRadio(question: string, lieuSatellite?: string): Promise<RunChatRoundsResult | undefined> {
     const commande = reconnaitreCommandeRadio(question, this.config.radio ?? DEFAULT_RADIO_CONFIG);
     if (!commande) return undefined;
     this.logger.info('IaService', `Radio: "${question}" reconnue sans Mistral (${commande.action}${commande.station ? ` ${commande.station.nom}` : ''}${commande.lieu ? `, ${commande.lieu}` : ''})`);
+    // Lieu : celui de la phrase, sinon celui du satellite qui parle (§16.14), sinon le défaut.
+    const lieu = commande.lieu ?? lieuSatellite;
     const reply = commande.action === 'jouer' && commande.station
-      ? await this.radio.jouer(commande.station, commande.lieu)
-      : await this.radio.arreter(commande.lieu);
+      ? await this.radio.jouer(commande.station, lieu)
+      : await this.radio.arreter(lieu);
     return {
       ok: true,
       finalText: reply.message,
@@ -603,10 +610,10 @@ export class IaService implements IIaService {
    * `runChatRounds`, comportement inchangé). Sur succès, met en cache la décision (même forme que
    * ce que `PhraseCache` rejoue) avant de l'exécuter.
    */
-  private async tryDeterministicPath(question: string): Promise<RunChatRoundsResult | undefined> {
+  private async tryDeterministicPath(question: string, lieuOrigine?: string): Promise<RunChatRoundsResult | undefined> {
     if (!this.haBridgeClient.isAvailable() || Object.keys(this.interpreterGabarits).length === 0) return undefined;
 
-    const live = buildLiveCatalogs(this.haBridgeClient, this.interpreterMacros, this.config.excludedQuoiIds);
+    const live = buildLiveCatalogs(this.haBridgeClient, this.interpreterMacros, this.config.excludedQuoiIds, lieuOrigine);
 
     let outcomes: DeterministicOutcome[] | undefined;
     try {
@@ -619,7 +626,8 @@ export class IaService implements IIaService {
 
     this.metrics.recordInterpreterHit();
     this.logger.info('IaService', `Interpréteur déterministe: "${question}" reconnu sans Mistral (${outcomes.length} énoncé(s))`);
-    if (isCacheable(outcomes)) this.phraseCache.set(question, outcomes);
+    // Jamais mise en cache quand un lieu d'origine (satellite) a pu orienter la décision (§16.14).
+    if (!lieuOrigine && isCacheable(outcomes)) this.phraseCache.set(question, outcomes);
     return this.executeOutcomes(outcomes, question);
   }
 
@@ -721,7 +729,7 @@ export class IaService implements IIaService {
     options: OllamaChatRequestBody['options'],
     // Comparatif Claude/Mistral (handleCompareCommand) — absent (undefined) pour tout appel normal
     // (/api/chat, test manuel), comportement strictement inchangé dans ce cas.
-    runOpts?: { providerOverride?: 'mistral' | 'anthropic'; dryRun?: boolean }
+    runOpts?: { providerOverride?: 'mistral' | 'anthropic'; dryRun?: boolean; lieuSatellite?: string }
   ): Promise<RunChatRoundsResult> {
     let currentMessages = messages;
     const toolCallsUsed: MistralToolCall[] = [];
@@ -765,7 +773,7 @@ export class IaService implements IIaService {
         toolCallsUsed.push(...assembled.toolCalls);
         currentMessages = [...currentMessages, { role: 'assistant', content: assembled.text, tool_calls: assembled.toolCalls }];
         for (const call of assembled.toolCalls) {
-          const toolResult = await this.toolExecutor.execute(call, runOpts?.dryRun);
+          const toolResult = await this.toolExecutor.execute(call, runOpts?.dryRun, { lieuSatellite: runOpts?.lieuSatellite });
           // ⭐ 11/11/2026 — les outils radio agissent aussi : leur succès compte pour le garde-fou (§16.12).
           if (['executer_action', 'jouer_radio', 'arreter_radio'].includes(call.function.name) && !runOpts?.dryRun) {
             try { executerActionOk = JSON.parse(toolResult).success === true; } catch { executerActionOk = false; }

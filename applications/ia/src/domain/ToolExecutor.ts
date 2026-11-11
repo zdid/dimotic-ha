@@ -56,7 +56,7 @@ export class ToolExecutor {
    *  (lister_entites/obtenir_etat) s'exécutent normalement (sans effet de bord, la comparaison
    *  reste fidèle au comportement réel du modèle), seul executer_action est intercepté — jamais
    *  transmis à planificateur, pour ne jamais agir deux fois sur la maison depuis un test. */
-  async execute(call: MistralToolCall, dryRun = false): Promise<string> {
+  async execute(call: MistralToolCall, dryRun = false, contexte?: { lieuSatellite?: string }): Promise<string> {
     const args = typeof call.function.arguments === 'string'
       ? safeParse(call.function.arguments)
       : call.function.arguments;
@@ -77,7 +77,8 @@ export class ToolExecutor {
       case 'jouer_radio':
       case 'arreter_radio': {
         if (!this.radio) return JSON.stringify({ success: false, message: 'radio non disponible' });
-        const lieu = typeof args?.lieu === 'string' && args.lieu.trim() ? args.lieu : undefined;
+        // Lieu : celui de l'appel, sinon celui du satellite qui parle (§16.14), sinon le défaut.
+        const lieu = typeof args?.lieu === 'string' && args.lieu.trim() ? args.lieu : contexte?.lieuSatellite;
         if (dryRun) return JSON.stringify({ success: true, message: '(simulation) commande radio non transmise' });
         const reply = call.function.name === 'jouer_radio'
           ? await this.radio.jouer(String(args?.station ?? ''), lieu)
