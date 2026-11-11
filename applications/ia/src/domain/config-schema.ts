@@ -5,6 +5,7 @@
  */
 
 import { z } from 'zod';
+import { radioSchema, DEFAULT_RADIO_CONFIG } from './radio';
 
 export const modelMapSchema = z.record(z.string()).default({
   mistral: 'mistral-small-latest',
@@ -111,7 +112,11 @@ export const iaConfigSchema = z.object({
   // "liste de chaînes" réellement implémenté côté ConfigForm.ts, seul le type "array" — objets
   // complexes — l'est) : à ajuster directement dans data/ia/config.yaml, rechargé à chaud
   // (IaService surveille ce fichier, même mécanisme que RulesProvider pour regles_mistral.txt).
-  excludedQuoiIds: z.array(z.string()).default(['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge'])
+  excludedQuoiIds: z.array(z.string()).default(['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge']),
+
+  // ⭐ 11/11/2026 (specs v1.38 §16.13) — radios à la voix : stations favorites et table lieu → lecteur.
+  // À ajuster directement dans data/ia/config.yaml (section `radio`), rechargé à chaud.
+  radio: radioSchema.default(DEFAULT_RADIO_CONFIG)
 });
 
 export type IaConfig = z.infer<typeof iaConfigSchema>;
@@ -145,5 +150,6 @@ export const DEFAULT_IA_CONFIG: IaConfig = {
   rulesFile: '',
   commandTimeoutMs: 2000,
   toolExecuteTimeoutMs: 20000,
-  excludedQuoiIds: ['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge']
+  excludedQuoiIds: ['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge'],
+  radio: DEFAULT_RADIO_CONFIG
 };

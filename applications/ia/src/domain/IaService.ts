@@ -41,6 +41,7 @@ import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
 import { phraseConfirmationAction, echangeLibre, annonceActionSansExecution, REPONSE_ACTION_NON_EXECUTEE } from './reponseVocale';
+import { RadioService, reconnaitreCommandeRadio, DEFAULT_RADIO_CONFIG } from './radio';
 import { IA_CLIENT_EVENTS } from './socket-events';
 import { validateReferences, buildCorrectionRequestMessage } from './referenceValidator';
 import {
@@ -134,6 +135,8 @@ export class IaService implements IIaService {
   // construits avec leur valeur au démarrage (mistralClient, toolExecutor...), pas de
   // rechargement à chaud pour eux tant que ça n'a pas été demandé.
   private config: IaConfig;
+  /** ⭐ 11/11/2026 (specs v1.38 §16.13) — radios à la voix. */
+  private radio!: RadioService;
   private readonly mistralClient: MistralClient;
   private readonly rulesProvider: RulesProvider;
   private readonly toolExecutor: ToolExecutor;
@@ -186,7 +189,8 @@ export class IaService implements IIaService {
     this.mistralClient = new MistralClient(() => this.config, this.logger);
     this.prepareDataFiles();
     this.rulesProvider = new RulesProvider(this.rulesFileDef, this.logger, this.haBridgeClient, () => this.config.excludedQuoiIds, () => this.interpreterMacros);
-    this.toolExecutor = new ToolExecutor(this.eventBus, this.logger, this.haBridgeClient, this.config.toolExecuteTimeoutMs);
+    this.radio = new RadioService(this.eventBus, this.logger, () => this.config.radio ?? DEFAULT_RADIO_CONFIG, this.config.toolExecuteTimeoutMs);
+    this.toolExecutor = new ToolExecutor(this.eventBus, this.logger, this.haBridgeClient, this.config.toolExecuteTimeoutMs, this.radio);
     this.structuredRouter = new StructuredRouter(this.eventBus, this.logger, this.config.commandTimeoutMs);
     this.conditionEvaluator = new ConditionEvaluator(
       this.eventBus, this.logger, this.mistralClient, this.toolExecutor,
@@ -532,7 +536,9 @@ export class IaService implements IIaService {
     // (aucun tour d'assistant déjà présent dans la conversation) : une conversation déjà engagée
     // avec Mistral — ex. formulation assistée d'une planification complexe — ne doit jamais être
     // interceptée ici, seule Mistral a le contexte des tours précédents.
-    let result = fresh && question ? await this.tryCache(question) : undefined;
+    // ⭐ 11/11/2026 (specs v1.38 §16.13) — commande radio simple, avant cache et interpréteur.
+    let result = fresh && question ? await this.tryRadio(question) : undefined;
+    if (!result && fresh && question) result = await this.tryCache(question);
     if (!result && fresh && question) result = await this.tryDeterministicPath(question);
     if (!result) {
       this.metrics.recordMistralCall();
@@ -556,6 +562,29 @@ export class IaService implements IIaService {
     res.end();
 
     this.recordExchange(question, result.finalText, result.intermediateJson, result.planificateurReply, result.promptTokens, result.completionTokens, result.cachedTokens);
+  }
+
+  /** ⭐ 11/11/2026 (specs v1.38 §16.13) — « mets France Inter », « arrête la radio » : reconnu et
+   *  exécuté sans Mistral ; `undefined` si la phrase n'est pas une commande radio simple. */
+  private async tryRadio(question: string): Promise<RunChatRoundsResult | undefined> {
+    const commande = reconnaitreCommandeRadio(question, this.config.radio ?? DEFAULT_RADIO_CONFIG);
+    if (!commande) return undefined;
+    this.logger.info('IaService', `Radio: "${question}" reconnue sans Mistral (${commande.action}${commande.station ? ` ${commande.station.nom}` : ''}${commande.lieu ? `, ${commande.lieu}` : ''})`);
+    const reply = commande.action === 'jouer' && commande.station
+      ? await this.radio.jouer(commande.station, commande.lieu)
+      : await this.radio.arreter(commande.lieu);
+    return {
+      ok: true,
+      finalText: reply.message,
+      promptTokens: 0,
+      completionTokens: 0,
+      cachedTokens: 0,
+      bufferedChunks: [],
+      wasStructured: true,
+      intermediateJson: JSON.stringify({ radio: { action: commande.action, station: commande.station?.nom, lieu: commande.lieu } }),
+      planificateurReply: JSON.stringify(reply, null, 2),
+      verificationRetried: false
+    };
   }
 
   /** ⭐ 26/08/2026 — `PhraseCache` : `question` déjà résolue récemment → exécution directe, sans
@@ -737,7 +766,8 @@ export class IaService implements IIaService {
         currentMessages = [...currentMessages, { role: 'assistant', content: assembled.text, tool_calls: assembled.toolCalls }];
         for (const call of assembled.toolCalls) {
           const toolResult = await this.toolExecutor.execute(call, runOpts?.dryRun);
-          if (call.function.name === 'executer_action' && !runOpts?.dryRun) {
+          // ⭐ 11/11/2026 — les outils radio agissent aussi : leur succès compte pour le garde-fou (§16.12).
+          if (['executer_action', 'jouer_radio', 'arreter_radio'].includes(call.function.name) && !runOpts?.dryRun) {
             try { executerActionOk = JSON.parse(toolResult).success === true; } catch { executerActionOk = false; }
           }
           currentMessages = [...currentMessages, { role: 'tool', tool_call_id: call.id, content: toolResult }];
@@ -882,7 +912,8 @@ export class IaService implements IIaService {
     // (specs §16), seulement sur une conversation fraîche (pas de session d'assistance en cours :
     // une clarification déjà engagée reste un dialogue Mistral, jamais interceptée ici — c'est
     // exactement l'assistance Q&R prévue pour formuler une planification complexe).
-    let result = !existing ? await this.tryCache(message) : undefined;
+    let result = !existing ? await this.tryRadio(message) : undefined;
+    if (!result && !existing) result = await this.tryCache(message);
     if (!result && !existing) result = await this.tryDeterministicPath(message);
     if (!result) {
       this.metrics.recordMistralCall();

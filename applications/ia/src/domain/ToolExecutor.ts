@@ -11,6 +11,7 @@ import type { Logger, IEventBus } from '../../../core/dist/exports';
 import type { HaLecture } from './HaLectureDirecte';
 import { CorrelatedRequester } from '../../../core/dist/exports';
 import type { MistralToolCall, ExecuterActionParams, CorrelatedReponse } from './types';
+import type { RadioService } from './radio';
 
 function slugify(text: string): string {
   return text
@@ -39,7 +40,9 @@ export class ToolExecutor {
     private readonly eventBus: IEventBus,
     private readonly logger: Logger,
     private readonly registry: HaLecture,
-    private readonly toolExecuteTimeoutMs: number
+    private readonly toolExecuteTimeoutMs: number,
+    /** ⭐ 11/11/2026 (specs v1.38 §16.13) — outils jouer_radio / arreter_radio. */
+    private readonly radio?: RadioService
   ) {
     this.toolExecuteRequester = new CorrelatedRequester<ExecuterActionParams, CorrelatedReponse>(
       eventBus,
@@ -69,6 +72,17 @@ export class ToolExecutor {
         if (!this.registry.isAvailable()) return JSON.stringify({ error: 'référentiel HA indisponible' });
         const entities = await resolveEntities(this.registry, args?.quoi as string | undefined, args?.lieux as string[] | undefined);
         return JSON.stringify({ entities });
+      }
+
+      case 'jouer_radio':
+      case 'arreter_radio': {
+        if (!this.radio) return JSON.stringify({ success: false, message: 'radio non disponible' });
+        const lieu = typeof args?.lieu === 'string' && args.lieu.trim() ? args.lieu : undefined;
+        if (dryRun) return JSON.stringify({ success: true, message: '(simulation) commande radio non transmise' });
+        const reply = call.function.name === 'jouer_radio'
+          ? await this.radio.jouer(String(args?.station ?? ''), lieu)
+          : await this.radio.arreter(lieu);
+        return JSON.stringify(reply.success ? reply : { ...reply, radios_connues: this.radio.stationsConnues() });
       }
 
       case 'executer_action': {

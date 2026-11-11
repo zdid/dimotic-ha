@@ -40,7 +40,7 @@ interface IaTestReply {
 
 interface PlanificateurAction {
   at: string;
-  source: 'ia:command' | 'ia:tool:execute';
+  source: 'ia:command' | 'ia:tool:execute' | 'ia:media:play';
   request: string;
   reply: string;
   success: boolean;

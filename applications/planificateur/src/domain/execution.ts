@@ -28,6 +28,7 @@ import type {
   DomoticNode,
   ExecutionStep,
   MacroDefinition,
+  MediaPlayParams,
   ResolvedServiceCall
 } from './types';
 import { resolveAction, resolveEntityIds, buildServiceCall, isKnownVerb, inverseVerb } from './resolution';
@@ -249,6 +250,33 @@ export class ExecutionEngine {
     if (error || !resolved) return { success: false, message: `Commande non exécutée — ${error ?? 'non résolue'}` };
     const target = Array.isArray(resolved.entity_id) ? resolved.entity_id.join(', ') : resolved.entity_id;
     return { success: true, message: `${resolved.domain}.${resolved.service} exécuté sur ${target}.` };
+  }
+
+  /** ⭐ 11/11/2026 (specs v1.13 §8bis) — lecteur multimédia : `media_player.play_media` (flux) ou
+   *  `media_player.media_stop`, sur l'entité demandée par `ia` (pas de résolution quoi/lieux : la
+   *  table lieu → lecteur est tenue côté `ia`). Même journal des commandes HA que les actions. */
+  async executeMedia(params: MediaPlayParams): Promise<{ success: boolean; message: string }> {
+    const step = { verbe: params.action, quoi: 'radio', lieux: [] as string[], valeur: params.titre ?? params.media_url };
+    if (!params.entity_id || !params.entity_id.startsWith('media_player.')) {
+      return { success: false, message: `Commande non exécutée — lecteur invalide « ${params.entity_id ?? ''} »` };
+    }
+    if (params.action === 'jouer' && !params.media_url) {
+      return { success: false, message: 'Commande non exécutée — adresse du flux manquante' };
+    }
+    const resolved: ResolvedServiceCall = params.action === 'jouer'
+      ? { domain: 'media_player', service: 'play_media', entity_id: params.entity_id, data: { media_content_id: params.media_url, media_content_type: 'music' } }
+      : { domain: 'media_player', service: 'media_stop', entity_id: params.entity_id };
+    this.logger.info('ExecutionEngine', `Exécution: ${resolved.domain}.${resolved.service} → ${resolved.entity_id}${params.titre ? ` (${params.titre})` : ''}`);
+    let error: string | undefined;
+    try {
+      await this.registry.sendCommand(resolved.domain, resolved.service, { entity_id: params.entity_id }, resolved.data);
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+      this.logger.warn('ExecutionEngine', `Échec commande lecteur: ${error}`);
+    }
+    this.recordHaCommand({ trigger: 'action_immediate', step, outcome: 'resolved', resolved, success: !error, error });
+    if (error) return { success: false, message: `Commande non exécutée — ${error}` };
+    return { success: true, message: `${resolved.domain}.${resolved.service} exécuté sur ${params.entity_id}.` };
   }
 
   /** Séquence plate reçue de `ia` (type `execution` — ex. « allume le salon. attendre 3 heures.

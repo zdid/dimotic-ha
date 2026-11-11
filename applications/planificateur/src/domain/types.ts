@@ -193,6 +193,17 @@ export interface CorrelatedReponse {
 }
 
 /** Paramètres de l'outil executer_action (specs ia §7) — même forme qu'un ActionNode simplifié. */
+/** ⭐ 11/11/2026 (specs planificateur v1.13 §8bis) — commande d'un lecteur multimédia reçue de `ia`
+ *  (radio) : lancer un flux (`jouer`) ou arrêter (`arreter`) sur une entité `media_player` précise. */
+export interface MediaPlayParams {
+  entity_id: string;
+  action: 'jouer' | 'arreter';
+  /** Adresse du flux (obligatoire pour `jouer`). */
+  media_url?: string;
+  /** Nom lisible (journal, message de réponse). */
+  titre?: string;
+}
+
 export interface ExecuterActionParams {
   verbe: string;
   quoi: string;

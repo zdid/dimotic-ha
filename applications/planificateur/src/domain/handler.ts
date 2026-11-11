@@ -13,6 +13,7 @@ import type {
   GestionNode,
   ExecutionPayload,
   ExecuterActionParams,
+  MediaPlayParams,
   CorrelatedReponse
 } from './types';
 import type { ConfigFileManager } from './yaml/ConfigFileManager';
@@ -307,6 +308,18 @@ export class CommandHandler {
       return r.success ? ok(corr, r.message) : err(corr, r.message);
     } catch (error) {
       this.logger.error('CommandHandler', `Erreur d'exécution de l'action immédiate: ${error}`);
+      return err(corr, `Erreur interne: ${error}`);
+    }
+  }
+
+  /** ⭐ 11/11/2026 (specs v1.13 §8bis) — commande d'un lecteur multimédia reçue de `ia` (radio). */
+  async handleMediaPlay(params: MediaPlayParams & { correlation_id: string }): Promise<CorrelatedReponse> {
+    const corr = params.correlation_id;
+    try {
+      const r = await this.executionEngine.executeMedia(params);
+      return r.success ? ok(corr, r.message) : err(corr, r.message);
+    } catch (error) {
+      this.logger.error('CommandHandler', `Erreur commande lecteur: ${error}`);
       return err(corr, `Erreur interne: ${error}`);
     }
   }

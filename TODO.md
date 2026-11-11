@@ -1,5 +1,14 @@
 # Liste des problèmes à résoudre
 
+## 🐛 core — `bridgedEvents` non relus quand une application est rechargée depuis la racine externe (constaté 11/11/2026, ha2) — NON CORRIGÉ
+- `AppService.registerApp` : application en process séparé « déjà câblée » → seul le dossier est mis à jour, `wireSeparateProcessApp` (et donc `bridgedEvents`) n'est pas rejoué. Un nouvel événement déclaré par une version externe n'est ponté qu'après redémarrage du cœur (radio : `ia:media:play` resté sans réponse, contourné par le canal `ia:tool:execute`).
+- Correctif simple : dans la branche « déjà câblée », rejouer `bridgeEvent` pour `appModule.bridgedEvents` (idempotent). Demande une nouvelle image (le cœur ne se déploie pas par la racine externe).
+
+## 🐛 ia — texte technique de Mistral lu à voix haute (constaté 11/11/2026, hasat3) — NON CORRIGÉ
+- « "quoi_introuvable" : aucun "salons" trouvé dans les lieux connus. Vérifie avec **salon** ? » : code interne et gras Markdown transmis tels quels à la synthèse vocale. À nettoyer (codes internes, Markdown) avant de rendre la réponse à HA.
+
+## ✅ ia v1.38 / planificateur v1.13 — radios à la voix (11/11/2026) — FAIT, déployé sur ha2 (racine externe), vérifié par HA ; à valider à la voix sur hasat3 et à publier en image
+
 ## 🐛 ia / planificateur — assistant vocal (hasat3 → ha2) : réponses techniques et succès annoncés sans action (constaté 11/11/2026, ha2) — CORRIGÉ (ia v1.37, commit sur fix/ia-reponses-vocales), déployé sur ha2 par la racine externe, À VALIDER EN RÉEL
 - **Chaîne testée** : hasat3 (« Okay Nabu ») → whisper `small-int8` (Pi 5 .167) → pipeline HA « Home Assistant » → intégration Ollama → ia de ha2 (`192.168.178.51:11434`) → piper. Traces : `assist_pipeline/pipeline_debug` de HA.
 - **Défaut 1 — réponse technique lue à voix haute** : l'interpréteur déterministe renvoie tel quel le message de `ExecutionEngine.executeImmediateAction` (`applications/planificateur/src/domain/execution.ts`) : « homeassistant.turn_on exécuté sur light.salle_salon. ». Attendu : phrase naturelle (« J'ai allumé la lumière du salon »).

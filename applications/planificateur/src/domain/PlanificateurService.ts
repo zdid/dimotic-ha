@@ -24,7 +24,7 @@ import { createSunTimesProvider, type SunTimesSource } from './sun-times';
 import { StateWatcher } from './state-watcher';
 import { ExecutionEngine } from './execution';
 import { CommandHandler } from './handler';
-import type { DomoticNode, ExecuterActionParams, CorrelatedReponse } from './types';
+import type { DomoticNode, ExecuterActionParams, MediaPlayParams, CorrelatedReponse } from './types';
 import { PLANIFICATEUR_CLIENT_EVENTS, PLANIFICATEUR_SOCKET_EVENTS } from './socket-events';
 
 export interface IPlanificateurService {
@@ -35,7 +35,7 @@ export interface IPlanificateurService {
 /** Une entrée du journal des actions reçues de `ia` (ia:command / ia:tool:execute). */
 interface PlanificateurAction {
   at: string;
-  source: 'ia:command' | 'ia:tool:execute';
+  source: 'ia:command' | 'ia:tool:execute' | 'ia:media:play';
   request: string;
   reply: string;
   success: boolean;
@@ -212,7 +212,17 @@ export class PlanificateurService implements IPlanificateurService {
         .catch((e) => this.logger.error('PlanificateurService', `Erreur ia:command: ${e}`));
     });
 
-    this.eventBus.onGeneric<ExecuterActionParams & { correlation_id: string }>('ia:tool:execute', (payload) => {
+    this.eventBus.onGeneric<ExecuterActionParams & { correlation_id: string; media?: MediaPlayParams }>('ia:tool:execute', (payload) => {
+      // ⭐ 11/11/2026 (specs v1.13 §8bis) — commande d'un lecteur (radio) : même canal, champ `media`.
+      if (payload.media) {
+        this.handler.handleMediaPlay({ ...payload.media, correlation_id: payload.correlation_id })
+          .then((reply) => {
+            this.recordAction('ia:media:play', payload, reply);
+            this.eventBus.emitGeneric('ia:tool:execute:reply', reply);
+          })
+          .catch((e) => this.logger.error('PlanificateurService', `Erreur commande lecteur: ${e}`));
+        return;
+      }
       this.handler.handleToolExecute(payload)
         .then((reply) => {
           this.recordAction('ia:tool:execute', payload, reply);
@@ -220,6 +230,7 @@ export class PlanificateurService implements IPlanificateurService {
         })
         .catch((e) => this.logger.error('PlanificateurService', `Erreur ia:tool:execute: ${e}`));
     });
+
   }
 
   /** Journalise une action reçue de `ia`, en mémoire (20 dernières) — demande utilisateur, voir

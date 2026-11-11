@@ -53,5 +53,34 @@ export const IA_TOOLS: MistralToolSchema[] = [
         required: ['verbe', 'quoi', 'lieux']
       }
     }
+  },
+  // ⭐ 11/11/2026 (specs v1.38 §16.13) — radios favorites (liste dans la configuration `radio`).
+  {
+    type: 'function',
+    function: {
+      name: 'jouer_radio',
+      description: "Met une radio favorite sur le lecteur d'un lieu (AGIT RÉELLEMENT). En cas de refus, la réponse donne la liste des radios connues.",
+      parameters: {
+        type: 'object',
+        properties: {
+          station: { type: 'string', description: 'Nom de la radio (ex: "France Inter", "FIP", "RTL")' },
+          lieu: { type: 'string', description: 'Lieu du lecteur (ex: "salon") ; absent = lieu par défaut' }
+        },
+        required: ['station']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'arreter_radio',
+      description: "Arrête la radio ou la musique sur le lecteur d'un lieu (AGIT RÉELLEMENT).",
+      parameters: {
+        type: 'object',
+        properties: {
+          lieu: { type: 'string', description: 'Lieu du lecteur ; absent = lieu par défaut' }
+        }
+      }
+    }
   }
 ];
