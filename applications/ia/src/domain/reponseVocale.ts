@@ -30,6 +30,10 @@ export const DEBUT_CONFIRMATION = "C'est fait";
 
 export const REPONSE_ACTION_NON_EXECUTEE = "Je n'ai pas exécuté la commande. Répète-la, s'il te plaît.";
 
+/** ⭐ 12/11/2026 (specs v1.41 §16.16) — texte reçu suspect (autre langue, vide) : rien n'est envoyé à Mistral.
+ *  Finit par « ? » : HA garde le micro ouvert pour la répétition. */
+export const REPONSE_TEXTE_NON_COMPRIS = "Je n'ai pas compris. Peux-tu répéter ?";
+
 function normaliser(verbe: string): string {
   return verbe.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim().replace(/\s+/g, '_');
 }

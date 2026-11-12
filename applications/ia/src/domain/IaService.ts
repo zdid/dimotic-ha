@@ -40,7 +40,7 @@ import { HaReferencesClient } from './HaReferencesClient';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
-import { phraseConfirmationAction, echangeLibre, annonceActionSansExecution, REPONSE_ACTION_NON_EXECUTEE } from './reponseVocale';
+import { phraseConfirmationAction, echangeLibre, annonceActionSansExecution, REPONSE_ACTION_NON_EXECUTEE, REPONSE_TEXTE_NON_COMPRIS } from './reponseVocale';
 import { RadioService, reconnaitreCommandeRadio, DEFAULT_RADIO_CONFIG } from './radio';
 import { lieuDuSatellite } from './satellite';
 import { IA_CLIENT_EVENTS } from './socket-events';
@@ -58,6 +58,8 @@ import { layeredFile, effectivePath, prepareLayeredFile, watchLayered, type Laye
 import { buildLiveCatalogs } from './liveCatalogs';
 import { PhraseCache } from './PhraseCache';
 import { InterpreterMetrics } from './InterpreterMetrics';
+import { lireSatellite } from './satellite';
+import { nouvelleTrace, questionSuspecte, actionDepuisReponse, aVerifier, verdict, resume, JournalTraces, VERDICTS_ANOMALIE, type TraceVocale } from './traceVocale';
 
 /** Dossier de l'application qui tourne (src/domain ou dist/domain → deux niveaux au-dessus) —
  *  ⭐ 24/09/2026 : modèles intégrés trouvés aussi depuis la racine externe `data/applications/ia`. */
@@ -166,6 +168,9 @@ export class IaService implements IIaService {
   // cache/interpréteur/Mistral — pour les phrases dites (HA, test). ⭐ 24/09/2026 : plus de
   // réinterprétation au déclenchement (DeployResponder supprimé, voir ConditionEvaluator).
   private readonly phraseCache = new PhraseCache();
+  // ⭐ 12/11/2026 (specs v1.40 §16.15) — trace de bout en bout des demandes vocales.
+  private readonly journalTraces = new JournalTraces(path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia', 'traces-vocales'));
+  private purgeTracesTimer?: NodeJS.Timeout;
   private readonly metrics = new InterpreterMetrics();
   // ⭐ 24/09/2026, demande utilisateur (« l'ia comme les autres ne peut pas démarrer sans ha
   // ready ») — tant que le référentiel HA n'est pas chargé : pas de serveur Ollama (HA ne peut pas
@@ -272,6 +277,8 @@ export class IaService implements IIaService {
 
     this.rulesProvider.load();
     this.watchConfigFile();
+    this.purgerTraces();
+    this.purgeTracesTimer = setInterval(() => this.purgerTraces(), 24 * 3600 * 1000);
     this.conditionEvaluator.wire();
     this.setupSocketEventListeners();
 
@@ -355,6 +362,7 @@ export class IaService implements IIaService {
     const tableauxClient = new HaTableauClient(this.haBridgeClient, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia'));
     const toolbox = new McpToolbox({
       toolExecutor: this.toolExecutor,
+      traces: (opts) => this.lireTracesVocales(opts),
       registry: this.haBridgeClient,
       excludedQuoiIds: () => this.config.excludedQuoiIds,
       simulate: (phrase, useMistral) => this.simulatePhrase(phrase, useMistral),
@@ -513,6 +521,7 @@ export class IaService implements IIaService {
     this.ollamaServer?.stop();
     this.mcpServer?.stop();
     if (this.assistSessionsCleanupTimer) clearInterval(this.assistSessionsCleanupTimer);
+    if (this.purgeTracesTimer) clearInterval(this.purgeTracesTimer);
     if (this.haReadyRetryTimer) clearTimeout(this.haReadyRetryTimer);
     this.logger.info('IaService', 'Service ia arrêté');
   }
@@ -534,6 +543,13 @@ export class IaService implements IIaService {
     // ⭐ 11/11/2026 (specs v1.39 §16.14) — lieu du satellite qui parle (repère du texte d'instructions de HA).
     const lieuSatellite = lieuDuSatellite(messages, this.config.satellites ?? {});
     if (lieuSatellite) this.logger.info('IaService', `Satellite : lieu d'origine « ${lieuSatellite} »`);
+    // ⭐ 12/11/2026 (specs v1.40 §16.15) — trace de bout en bout.
+    const debut = Date.now();
+    const trace = this.config.traceVocale?.active !== false ? nouvelleTrace(question ?? '', fresh) : undefined;
+    if (trace) {
+      const repere = lireSatellite(messages);
+      if (repere || lieuSatellite) trace.satellite = { nom: repere?.nom, piece: repere?.piece, lieu: lieuSatellite };
+    }
 
     // ⭐ 26/08/2026, demande utilisateur — cache (100 dernières phrases) puis interpréteur
     // déterministe (specs §16), tentés AVANT tout appel Mistral, seulement sur un échange FRAIS
@@ -541,19 +557,37 @@ export class IaService implements IIaService {
     // avec Mistral — ex. formulation assistée d'une planification complexe — ne doit jamais être
     // interceptée ici, seule Mistral a le contexte des tours précédents.
     // ⭐ 11/11/2026 (specs v1.38 §16.13) — commande radio simple, avant cache et interpréteur.
-    let result = fresh && question ? await this.tryRadio(question, lieuSatellite) : undefined;
+    // ⭐ 12/11/2026 (specs v1.41 §16.16) — texte reçu suspect (reconnaissance vocale dans une autre langue, vide) :
+    // jamais envoyé à Mistral, qui « traduisait » et répondait une phrase ressemblant à une confirmation (cas du
+    // 12/11 15 h 42 : « أدوم لقلون خبايل » → « Allume la lumière de la cuisine. », rien exécuté).
+    let result: RunChatRoundsResult | undefined;
+    if (questionSuspecte(question)) {
+      this.logger.warn('IaService', `Texte reçu suspect (autre langue ou vide) : « ${question.slice(0, 120)} » — non transmis à Mistral`);
+      if (trace) trace.chemin = 'texte_suspect';
+      result = { ok: true, finalText: REPONSE_TEXTE_NON_COMPRIS, promptTokens: 0, completionTokens: 0, cachedTokens: 0, bufferedChunks: [], wasStructured: true, verificationRetried: false };
+    }
+    if (!result && fresh && question) result = await this.tryRadio(question, lieuSatellite, trace);
+    if (result && trace && !trace.chemin) trace.chemin = 'radio';
     // Le cache ne connaît pas le lieu d'origine : sauté quand un satellite situe la demande.
-    if (!result && fresh && question && !lieuSatellite) result = await this.tryCache(question);
-    if (!result && fresh && question) result = await this.tryDeterministicPath(question, lieuSatellite);
+    if (!result && fresh && question && !lieuSatellite) {
+      result = await this.tryCache(question, trace);
+      if (result && trace) trace.chemin = 'cache';
+    }
+    if (!result && fresh && question) {
+      result = await this.tryDeterministicPath(question, lieuSatellite, trace);
+      if (result && trace) trace.chemin = 'interpreteur';
+    }
     if (!result) {
       this.metrics.recordMistralCall();
-      result = await this.runChatRounds(messages, mistralModel, body.options || {}, { lieuSatellite });
+      if (trace) trace.chemin = 'mistral';
+      result = await this.runChatRounds(messages, mistralModel, body.options || {}, { lieuSatellite, trace });
       if (fresh && question && !lieuSatellite) this.cacheMistralResult(question, result);
     }
 
     if (!result.ok) {
       res.write(makeOllamaErrorChunk(ollamaModel, result.errorMessage));
       res.end();
+      if (trace) { trace.erreur = result.errorMessage; trace.dureeMs = Date.now() - debut; this.terminerTrace(trace); }
       return;
     }
 
@@ -567,11 +601,57 @@ export class IaService implements IIaService {
     res.end();
 
     this.recordExchange(question, result.finalText, result.intermediateJson, result.planificateurReply, result.promptTokens, result.completionTokens, result.cachedTokens);
+    if (trace) {
+      trace.dureeMs = Date.now() - debut;
+      trace.reponse = result.finalText;
+      trace.gardeFou = result.texteRemplace === true;
+      trace.jetons = { prompt: result.promptTokens, completion: result.completionTokens, cache: result.cachedTokens };
+      this.terminerTrace(trace);
+    }
+  }
+
+  /** ⭐ 12/11/2026 (specs v1.40 §16.15) — relit l'état des entités visées après le délai, puis verdict, journal et fichier. */
+  private terminerTrace(trace: TraceVocale): void {
+    const verifs = aVerifier(trace);
+    const delai = (this.config.traceVocale?.delaiVerificationS ?? 5) * 1000;
+    const finir = async (): Promise<void> => {
+      for (const v of verifs) {
+        try {
+          const r = await this.haBridgeClient.callRest('GET', `/api/states/${v.entity_id}`, undefined, 5000);
+          v.constate = r.status === 200 ? String((r.body as { state?: unknown })?.state ?? '') : `http ${r.status}`;
+        } catch (error) {
+          v.constate = `lecture impossible : ${error}`;
+        }
+        if (v.attendu.length > 0) v.conforme = v.attendu.includes(v.constate ?? '');
+      }
+      trace.verification = verifs;
+      trace.verdict = verdict(trace);
+      const ligne = `Trace vocale ${resume(trace)}`;
+      if (VERDICTS_ANOMALIE.includes(trace.verdict) || trace.questionSuspecte) this.logger.warn('IaService', ligne);
+      else this.logger.info('IaService', ligne);
+      try { this.journalTraces.ecrire(trace); } catch (error) { this.logger.warn('IaService', `Trace vocale non écrite : ${error}`); }
+    };
+    if (verifs.length === 0) void finir();
+    else setTimeout(() => { void finir(); }, delai);
+  }
+
+  private purgerTraces(): void {
+    try {
+      const n = this.journalTraces.purger(this.config.traceVocale?.joursConserves ?? 90);
+      if (n > 0) this.logger.info('IaService', `Traces vocales : ${n} fichier(s) ancien(s) supprimé(s)`);
+    } catch (error) {
+      this.logger.warn('IaService', `Purge des traces vocales : ${error}`);
+    }
+  }
+
+  /** Lecture des traces (outil MCP `lire_traces_vocales`). */
+  lireTracesVocales(opts: { jour?: string; limite?: number; anomalies?: boolean; texte?: string }): ReturnType<JournalTraces['lire']> {
+    return this.journalTraces.lire(opts);
   }
 
   /** ⭐ 11/11/2026 (specs v1.38 §16.13) — « mets France Inter », « arrête la radio » : reconnu et
    *  exécuté sans Mistral ; `undefined` si la phrase n'est pas une commande radio simple. */
-  private async tryRadio(question: string, lieuSatellite?: string): Promise<RunChatRoundsResult | undefined> {
+  private async tryRadio(question: string, lieuSatellite?: string, trace?: TraceVocale): Promise<RunChatRoundsResult | undefined> {
     const commande = reconnaitreCommandeRadio(question, this.config.radio ?? DEFAULT_RADIO_CONFIG);
     if (!commande) return undefined;
     this.logger.info('IaService', `Radio: "${question}" reconnue sans Mistral (${commande.action}${commande.station ? ` ${commande.station.nom}` : ''}${commande.lieu ? `, ${commande.lieu}` : ''})`);
@@ -580,6 +660,7 @@ export class IaService implements IIaService {
     const reply = commande.action === 'jouer' && commande.station
       ? await this.radio.jouer(commande.station, lieu)
       : await this.radio.arreter(lieu);
+    trace?.actions.push(actionDepuisReponse({ radio: commande.action, station: commande.station?.nom, lieu }, reply));
     return {
       ok: true,
       finalText: reply.message,
@@ -596,12 +677,12 @@ export class IaService implements IIaService {
 
   /** ⭐ 26/08/2026 — `PhraseCache` : `question` déjà résolue récemment → exécution directe, sans
    *  repasser ni par l'interpréteur ni par Mistral. */
-  private async tryCache(question: string): Promise<RunChatRoundsResult | undefined> {
+  private async tryCache(question: string, trace?: TraceVocale): Promise<RunChatRoundsResult | undefined> {
     const outcomes = this.phraseCache.get(question);
     if (!outcomes) return undefined;
     this.metrics.recordCacheHit();
     this.logger.info('IaService', `Cache: "${question}" déjà résolue — exécution directe (${outcomes.length} énoncé(s))`);
-    return this.executeOutcomes(outcomes, question);
+    return this.executeOutcomes(outcomes, question, trace);
   }
 
   /**
@@ -610,7 +691,7 @@ export class IaService implements IIaService {
    * `runChatRounds`, comportement inchangé). Sur succès, met en cache la décision (même forme que
    * ce que `PhraseCache` rejoue) avant de l'exécuter.
    */
-  private async tryDeterministicPath(question: string, lieuOrigine?: string): Promise<RunChatRoundsResult | undefined> {
+  private async tryDeterministicPath(question: string, lieuOrigine?: string, trace?: TraceVocale): Promise<RunChatRoundsResult | undefined> {
     if (!this.haBridgeClient.isAvailable() || Object.keys(this.interpreterGabarits).length === 0) return undefined;
 
     const live = buildLiveCatalogs(this.haBridgeClient, this.interpreterMacros, this.config.excludedQuoiIds, lieuOrigine);
@@ -628,7 +709,7 @@ export class IaService implements IIaService {
     this.logger.info('IaService', `Interpréteur déterministe: "${question}" reconnu sans Mistral (${outcomes.length} énoncé(s))`);
     // Jamais mise en cache quand un lieu d'origine (satellite) a pu orienter la décision (§16.14).
     if (!lieuOrigine && isCacheable(outcomes)) this.phraseCache.set(question, outcomes);
-    return this.executeOutcomes(outcomes, question);
+    return this.executeOutcomes(outcomes, question, trace);
   }
 
   /** Exécute une décision déjà résolue (`ToolExecutor.executeDirect`/`StructuredRouter.route`,
@@ -636,7 +717,7 @@ export class IaService implements IIaService {
    *  vienne d'un match frais de l'interpréteur ou d'une relecture du cache — assemble un résultat
    *  conforme au contrat de `runChatRounds` pour que le reste de `handleChat()`/
    *  `handleTestCommand()` n'ait rien à savoir de ce court-circuit. */
-  private async executeOutcomes(outcomes: DeterministicOutcome[], phraseOriginale: string): Promise<RunChatRoundsResult> {
+  private async executeOutcomes(outcomes: DeterministicOutcome[], phraseOriginale: string, trace?: TraceVocale): Promise<RunChatRoundsResult> {
     const messages: string[] = [];
     // ⭐ 24/09/2026 — réponses de planificateur conservées en objets (même forme JSON que le chemin
     // Mistral) : handleTestCommand lit `success` pour décider si la session d'assistance est
@@ -645,6 +726,7 @@ export class IaService implements IIaService {
     for (const outcome of outcomes) {
       if (outcome.kind === 'action') {
         const reply = await this.toolExecutor.executeDirect(outcome.params);
+        trace?.actions.push(actionDepuisReponse(outcome.params, reply));
         // ⭐ 11/11/2026 (specs v1.37 §16.12) — réponse PARLÉE naturelle sur succès (le message
         // technique de planificateur reste dans planificateurReply pour l'UI) ; l'échec garde la
         // raison exacte.
@@ -652,6 +734,7 @@ export class IaService implements IIaService {
         replies.push(reply);
       } else if (outcome.kind === 'structured') {
         const reply = await this.structuredRouter.route(withPhraseOriginale(outcome.data, phraseOriginale));
+        trace?.actions.push(actionDepuisReponse(outcome.data, reply ?? { success: false, message: 'planificateur ne répond pas' }));
         messages.push(reply ? reply.message : 'Planificateur ne répond pas — commande non transmise.');
         if (reply) replies.push(reply);
       } else if (outcome.kind === 'evenement') {
@@ -675,6 +758,7 @@ export class IaService implements IIaService {
           action: { type: 'action', order: '', verbe: outcome.action.verbe, quoi: outcome.action.quoi, lieux: outcome.action.lieux, valeur: outcome.action.valeur }
         };
         const reply = await this.structuredRouter.route(structured);
+        trace?.actions.push(actionDepuisReponse(structured, reply ?? { success: false, message: 'planificateur ne répond pas' }));
         messages.push(reply ? reply.message : 'Planificateur ne répond pas — commande non transmise.');
         if (reply) replies.push(reply);
       } else {
@@ -682,6 +766,7 @@ export class IaService implements IIaService {
         // jamais un portage du formatage de `donnemoi.js`. Toujours résolu à l'exécution (état
         // vivant), y compris en relecture depuis PhraseCache — seuls quoi/lieux (des noms) y sont
         // cachés, jamais un état.
+        trace?.outils.push({ tour: 0, nom: 'interpreteur:donne', arguments: { quoi: outcome.quoi, lieux: outcome.lieux }, resultat: '' });
         const entities = await this.haBridgeClient.getEntitiesByQuoiAndLieux(
           outcome.quoi ? slugifyInterpreter(outcome.quoi) : undefined,
           outcome.lieux
@@ -729,7 +814,7 @@ export class IaService implements IIaService {
     options: OllamaChatRequestBody['options'],
     // Comparatif Claude/Mistral (handleCompareCommand) — absent (undefined) pour tout appel normal
     // (/api/chat, test manuel), comportement strictement inchangé dans ce cas.
-    runOpts?: { providerOverride?: 'mistral' | 'anthropic'; dryRun?: boolean; lieuSatellite?: string }
+    runOpts?: { providerOverride?: 'mistral' | 'anthropic'; dryRun?: boolean; lieuSatellite?: string; trace?: TraceVocale }
   ): Promise<RunChatRoundsResult> {
     let currentMessages = messages;
     const toolCallsUsed: MistralToolCall[] = [];
@@ -777,6 +862,17 @@ export class IaService implements IIaService {
           // ⭐ 11/11/2026 — les outils radio agissent aussi : leur succès compte pour le garde-fou (§16.12).
           if (['executer_action', 'jouer_radio', 'arreter_radio'].includes(call.function.name) && !runOpts?.dryRun) {
             try { executerActionOk = JSON.parse(toolResult).success === true; } catch { executerActionOk = false; }
+          }
+          // ⭐ 12/11/2026 (specs v1.40 §16.15) — outils et ordres dans la trace.
+          if (runOpts?.trace) {
+            let args: unknown = call.function.arguments;
+            if (typeof args === 'string') { try { args = JSON.parse(args); } catch { /* gardé en texte */ } }
+            runOpts.trace.outils.push({ tour: round, nom: call.function.name, arguments: args, resultat: toolResult.slice(0, 500) });
+            if (['executer_action', 'jouer_radio', 'arreter_radio'].includes(call.function.name) && !runOpts.dryRun) {
+              let r: { success?: unknown; message?: unknown } = {};
+              try { r = JSON.parse(toolResult); } catch { /* résultat illisible : échec */ }
+              runOpts.trace.actions.push(actionDepuisReponse(args, { success: r.success === true, message: String(r.message ?? toolResult.slice(0, 300)) }));
+            }
           }
           currentMessages = [...currentMessages, { role: 'tool', tool_call_id: call.id, content: toolResult }];
         }
@@ -838,6 +934,9 @@ export class IaService implements IIaService {
         // dry-run (comparatif) : jamais transmis à planificateur, voir ToolExecutor.execute pour
         // le même principe côté executer_action.
         const reply = runOpts?.dryRun ? null : await this.structuredRouter.route(structured);
+        if (runOpts?.trace && !runOpts.dryRun) {
+          runOpts.trace.actions.push(actionDepuisReponse(structured, reply ?? { success: false, message: 'planificateur ne répond pas (mode dégradé)' }));
+        }
         return {
           ok: true,
           finalText: reply?.message ?? assembled.text, // null → mode dégradé (specs §9)

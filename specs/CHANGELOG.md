@@ -1,6 +1,6 @@
 # CHANGELOG - Historique des Spécifications
 
-**Dernière mise à jour :** 11 Novembre 2026
+**Dernière mise à jour :** 12 Novembre 2026
 
 ---
 
@@ -36,6 +36,8 @@
 | 18/10/2026 | **v7.5** | fonctionnelles-rfxcom_specs_v7.5.md | Claude | **Commandes de groupe Lighting2** (§12bis) : reçues avec `unitCode = 1`, elles prenaient l'identifiant du bouton 1 ; le numéro de bouton est maintenant effacé et non transmis (device de groupe sans numéro, commande `<id>/0`) ; 4 vérifications |
 | 16/10/2026 | **v7.4** | fonctionnelles-rfxcom_specs_v7.4.md | Claude | **§13bis : nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v7.3 archivée. |
 | 16/10/2026 | **v1.2** | fonctionnelles-zigbee2mqtt_specs_v1.2.md | Claude | **Nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v1.1 archivée. |
+| 12/11/2026 | **v1.41** | fonctionnelles-ia_specs_v1.41.md | Claude | **Texte reçu suspect refusé avant Mistral** (§16.16) : transcription dans une autre langue ou vide → « Je n'ai pas compris. Peux-tu répéter ? », sans appel à Mistral ni exécution (cas du 12/11 15 h 42). v1.40 archivée. |
+| 12/11/2026 | **v1.40** | fonctionnelles-ia_specs_v1.40.md | Claude | **Trace de bout en bout des demandes vocales** (§16.15) : une ligne JSON par demande reçue sur `/api/chat` (satellite, texte reçu, chemin, outils, ordres au planificateur, réponse dite, état réel relu après 5 s, verdict), un fichier par jour dans `data/ia/traces-vocales/`, 90 jours ; WARN sur anomalie ; outil MCP `lire_traces_vocales`. v1.39 archivée. |
 | 11/11/2026 | **v1.39** | fonctionnelles-ia_specs_v1.39.md | Claude | **Lieu du satellite qui parle** (§16.14) : repère `[satellite: … | pièce: …]` dans le texte d'instructions de l'intégration Ollama de HA, table `satellites` → lieu d'origine pour la radio, l'interpréteur (`lieuOrigine` enfin alimenté) et les outils radio ; cache désactivé dans ce cas. v1.38 archivée. |
 | 11/11/2026 | **v1.38** | fonctionnelles-ia_specs_v1.38.md | Claude | **Radios à la voix** (§16.13) : « mets France Inter », « arrête la radio » reconnus sans Mistral, outils `jouer_radio`/`arreter_radio`, six stations favorites et table lieu → lecteur dans la configuration `radio`, exécution par planificateur (canal `ia:tool:execute`, champ `media`). v1.37 archivée. |
 | 11/11/2026 | **v1.13** | fonctionnelles-planificateur_specs_v1.13.md | Claude | **Commande d'un lecteur multimédia** (§8bis) : canal `ia:tool:execute` + champ `media` → `media_player.play_media`/`media_stop` sur l'entité demandée par `ia` ; premiers tests unitaires. v1.12 archivée. |

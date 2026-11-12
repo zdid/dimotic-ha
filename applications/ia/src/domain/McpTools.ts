@@ -371,6 +371,25 @@ MCP_ONLY_TOOLS.push({
   }
 });
 
+// ⭐ 12/11/2026 (specs v1.40 §16.15) — trace de bout en bout des demandes vocales.
+MCP_ONLY_TOOLS.push({
+  name: 'lire_traces_vocales',
+  description:
+    "Lit la trace de bout en bout des demandes vocales reçues par l'assistant (LECTURE SEULE) : satellite, texte reconnu, chemin " +
+    "(radio, cache, interpréteur, Mistral), outils appelés, ordres au planificateur et réponses, réponse dite, état réel des entités " +
+    "relu après l'action, verdict (action_verifiee, action_non_constatee, action_en_echec, reponse_sans_action, sans_action, erreur). " +
+    "Les plus récentes d'abord.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      jour: { type: 'string', description: 'Jour AAAA-MM-JJ (défaut : aujourd\'hui) ; la réponse liste les jours disponibles' },
+      limite: { type: 'number', description: 'Nombre maximum de traces (défaut 20, max 100)' },
+      anomalies: { type: 'boolean', description: 'Seulement les anomalies (erreur, échec, action non constatée, réponse sans action, texte reçu suspect)' },
+      texte: { type: 'string', description: 'Filtre sur le texte reçu ou la réponse' }
+    }
+  }
+});
+
 /** Les trois outils de Mistral, au format MCP, puis ceux propres à Claude Code. */
 export const MCP_TOOLS: McpToolDef[] = [
   ...IA_TOOLS.map((t) => t.function.name === 'lister_entites' ? LISTER_ENTITES_MCP : ({ name: t.function.name, description: t.function.description, inputSchema: t.function.parameters })),
@@ -438,6 +457,8 @@ function trimValue(value: unknown): unknown {
 
 export interface McpToolboxDeps {
   toolExecutor: ToolExecutor;
+  /** Lecture des traces vocales (IaService.lireTracesVocales, specs v1.40 §16.15). */
+  traces?: (opts: { jour?: string; limite?: number; anomalies?: boolean; texte?: string }) => unknown;
   registry: HaLecture;
   excludedQuoiIds: () => string[];
   /** Simulation d'une phrase (IaService.simulatePhrase). */
@@ -476,6 +497,14 @@ export class McpToolbox {
       case 'obtenir_details': return JSON.stringify(await this.details(args), null, 2);
       case 'diagnostiquer_resolution': return JSON.stringify(await this.diagnose(args), null, 2);
       case 'lire_planificateur': return JSON.stringify(await this.readPlanner(args), null, 2);
+      case 'lire_traces_vocales': return JSON.stringify(this.deps.traces
+        ? this.deps.traces({
+          jour: typeof args.jour === 'string' ? args.jour : undefined,
+          limite: typeof args.limite === 'number' ? args.limite : undefined,
+          anomalies: args.anomalies === true,
+          texte: typeof args.texte === 'string' ? args.texte : undefined
+        })
+        : { erreur: 'traces vocales indisponibles' }, null, 2);
       case 'lire_automatisations_ha': return JSON.stringify(await this.readAutomations(args), null, 2);
       case 'deposer_automatisation': return JSON.stringify(await this.deps.automations.deposit(String(args.id ?? ''), args.definition, args.confirme === true), null, 2);
       case 'supprimer_automatisation': return JSON.stringify(await this.deps.automations.remove(String(args.id ?? ''), args.confirme === true), null, 2);

@@ -120,7 +120,14 @@ export const iaConfigSchema = z.object({
 
   // ⭐ 11/11/2026 (specs v1.39 §16.14) — satellite vocal → lieu d'origine (nom d'appareil HA → lieu).
   // Sans entrée : la pièce HA de l'appareil (repère envoyé par le texte d'instructions de HA).
-  satellites: z.record(z.string()).default({})
+  satellites: z.record(z.string()).default({}),
+
+  // ⭐ 12/11/2026 (specs v1.40 §16.15) — trace de bout en bout des demandes vocales (data/ia/traces-vocales/).
+  traceVocale: z.object({
+    active: z.boolean().default(true),
+    joursConserves: z.number().int().positive().default(90),
+    delaiVerificationS: z.number().min(0).max(60).default(5)
+  }).default({ active: true, joursConserves: 90, delaiVerificationS: 5 })
 });
 
 export type IaConfig = z.infer<typeof iaConfigSchema>;
@@ -156,5 +163,6 @@ export const DEFAULT_IA_CONFIG: IaConfig = {
   toolExecuteTimeoutMs: 20000,
   excludedQuoiIds: ['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge'],
   radio: DEFAULT_RADIO_CONFIG,
-  satellites: {}
+  satellites: {},
+  traceVocale: { active: true, joursConserves: 90, delaiVerificationS: 5 }
 };
