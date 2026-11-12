@@ -9,6 +9,7 @@ import { Bibliotheque, FicheInvalide, type FicheElement, type FicheAppareil } fr
 import { resoudreAppareil, ResolutionImpossible } from './resolution';
 import { verifier } from './verification';
 import { CHEMIN_WIFI, genererWifi } from './wifi';
+import { CHEMIN_SITE, genererSite, type BrokerSite } from './site';
 import { ecrireZip } from './zip-ecriture';
 
 export interface ManifestePaquet {
@@ -43,14 +44,27 @@ export function secretsReferences(fichiers: Map<string, Buffer>, nom: string): s
   return [...noms].sort();
 }
 
-export function assemblerPaquet(racine: string, nom: string, revision: number, maintenant: () => Date = () => new Date(), generes: Map<string, Buffer> = new Map()): ResultatAssemblage {
+export function assemblerPaquet(
+  racine: string, nom: string, revision: number, maintenant: () => Date = () => new Date(), generes: Map<string, Buffer> = new Map(),
+  /** ⭐ 12/11/2026 (v1.8) — broker MQTT du site : `generes/site.yaml`, inclus par l'élément transport-mqtt. */
+  site?: { id: string; broker: BrokerSite }
+): ResultatAssemblage {
   const biblio = new Bibliotheque(racine);
   try {
     const appareil = biblio.appareil(nom);
     if (appareil.wifi.length > 0) { generes = new Map(generes); generes.set(CHEMIN_WIFI, Buffer.from(genererWifi(nom, appareil.wifi, biblio).yaml)); }
-    const sources = resoudreAppareil(racine, nom, generes);
+    if (site?.broker.hote) { generes = new Map(generes); generes.set(CHEMIN_SITE, Buffer.from(genererSite(site.id, site.broker))); }
+    let sources;
+    try {
+      sources = resoudreAppareil(racine, nom, generes);
+    } catch (e) {
+      if (e instanceof ResolutionImpossible && e.message.includes(CHEMIN_SITE)) {
+        return { ok: false, erreurs: ["broker MQTT du site inconnu : renseigner le paramètre MQTT général de dimotic-ha (ha.mqtt.host) ou mqtt.hote de l'application esps-assemble"], avertissements: [] };
+      }
+      throw e;
+    }
     // Les images de fond générées sont des fichiers du paquet au même titre que les sources.
-    for (const [chemin, contenu] of generes) if (!sources.fichiers.has(chemin) && chemin !== CHEMIN_WIFI) sources.fichiers.set(chemin, contenu);
+    for (const [chemin, contenu] of generes) if (!sources.fichiers.has(chemin) && chemin !== CHEMIN_WIFI && chemin !== CHEMIN_SITE) sources.fichiers.set(chemin, contenu);
     const materiel = biblio.materiel(appareil.materiel);
     const elements = new Map<string, FicheElement>();
     const erreursFiches: string[] = [];

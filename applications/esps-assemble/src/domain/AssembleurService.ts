@@ -103,7 +103,9 @@ export class AssembleurService implements IAssembleurService {
     /** Liaison HA du cœur (export des plans) ; absente = les appareils à pages de plans sont refusés. */
     private readonly clientHa?: ClientHa,
     /** Source de plans de remplacement (tests, anciens plans HAPLAN). */
-    private readonly sourcePlans?: SourcePlans
+    private readonly sourcePlans?: SourcePlans,
+    /** ⭐ 12/11/2026 (v1.8) — broker MQTT général de dimotic-ha (`ha.mqtt` du cœur), utilisé quand `mqtt.hote` est vide. */
+    private readonly brokerGeneral?: () => Partial<AssembleurConfig['mqtt']> | undefined
   ) {
     this.config = this.charger();
     this.eventBus.on(ASSEMBLEUR_CLIENT_EVENTS.GET_APPAREILS, () => this.emettreAppareils());
@@ -125,7 +127,18 @@ export class AssembleurService implements IAssembleurService {
   }
 
   private charger(): AssembleurConfig {
-    return assembleurConfigSchema.parse(this.configProvider.getAppConfig() as Partial<AssembleurConfig>);
+    const cfg = assembleurConfigSchema.parse(this.configProvider.getAppConfig() as Partial<AssembleurConfig>);
+    // ⭐ 12/11/2026 (v1.8) — `mqtt.hote` vide : broker général de dimotic-ha (un seul endroit à changer pour tout le site).
+    if (!cfg.mqtt.hote) {
+      const g = this.brokerGeneral?.();
+      if (g?.hote) cfg.mqtt = { hote: g.hote, port: g.port ?? cfg.mqtt.port, utilisateur: g.utilisateur ?? '', motDePasse: g.motDePasse ?? '' };
+    }
+    return cfg;
+  }
+
+  /** Broker du site compilé dans les appareils (`generes/site.yaml`). */
+  private siteAssemblage(): { id: string; broker: { hote: string; port: number } } {
+    return { id: this.config.site, broker: { hote: this.config.mqtt.hote, port: this.config.mqtt.port } };
   }
 
   async start(): Promise<void> {
@@ -270,7 +283,7 @@ export class AssembleurService implements IAssembleurService {
     }
 
     const revision = (this.revisions()[appareil] ?? 0) + 1;
-    const r = assemblerPaquet(this.racineApp, appareil, revision, this.maintenant, generes);
+    const r = assemblerPaquet(this.racineApp, appareil, revision, this.maintenant, generes, this.siteAssemblage());
     if (!r.ok) { this.logger.warn('AssembleurService', `Assemblage de ${appareil} refusé : ${r.erreurs.join(' ; ')}`); return fin({ ok: false, erreurs: r.erreurs }); }
 
     const dossier = path.join(this.dossierDonnees, 'machine_partage', 'paquets', appareil);
@@ -310,7 +323,7 @@ export class AssembleurService implements IAssembleurService {
       // Les pages de plans sont générées à l'assemblage : pour la simple vérification, des fichiers factices les remplacent.
       let plans: string[] = [];
       try { plans = biblio.appareil(nom).plans; } catch { /* la vérification ci-dessous le dira */ }
-      const v = assemblerPaquet(this.racineApp, nom, 0, this.maintenant, generesFactices(plans));
+      const v = assemblerPaquet(this.racineApp, nom, 0, this.maintenant, generesFactices(plans), this.siteAssemblage());
       return {
         nom, nomAffichage, materiel,
         etat: v.ok ? 'pret' as const : 'refuse' as const,

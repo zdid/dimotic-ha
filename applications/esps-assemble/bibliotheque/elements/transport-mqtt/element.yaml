@@ -3,8 +3,14 @@ substitutions:
   prefixe_decouverte: homeassist
   prefixe_sujet: esphome/${device_name}
 
+# ⭐ 12/11/2026 (assembleur v1.8) — broker DU SITE généré à l'assemblage (paramètre MQTT général de dimotic-ha) ;
+# une fiche peut le remplacer en passant `broker` / `port_broker` dans ses vars.
+packages:
+  site: !include ../../../generes/site.yaml
+
 mqtt:
   broker: ${broker}
+  port: ${port_broker}
   discovery: true
   discovery_prefix: ${prefixe_decouverte}
   topic_prefix: ${prefixe_sujet}

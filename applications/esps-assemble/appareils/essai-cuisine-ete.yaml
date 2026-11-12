@@ -15,5 +15,3 @@ packages:
       grand_pere: "maison"
   transport: !include
     file: bibliotheque/elements/transport-mqtt/element.yaml
-    vars:
-      broker: "192.168.1.51"

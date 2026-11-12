@@ -9,7 +9,8 @@
 import { z } from 'zod';
 
 const brokerSchema = z.object({
-  hote: z.string().default('127.0.0.1'),
+  /** ⭐ 12/11/2026 (v1.8) — vide = broker MQTT GÉNÉRAL de dimotic-ha (`ha.mqtt` du cœur) ; renseigné = remplacement pour cette application. */
+  hote: z.string().default(''),
   port: z.number().int().min(1).max(65535).default(1883),
   utilisateur: z.string().default(''),
   motDePasse: z.string().default('')

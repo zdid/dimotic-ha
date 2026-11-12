@@ -3,7 +3,13 @@ nom: "Transport vers HA : MQTT (découverte lue par NOMMAGE)"
 description: "Bloc mqtt: avec le préfixe de découverte alternatif (homeassist) que NOMMAGE écoute : il ajoute la taxonomie avant de donner l'entité à HA. Alternative à api: (jamais les deux, contrôlé à l'assemblage). Identifiant unique d'entité basé sur l'adresse MAC (discovery_unique_id_generator: mac). Pas de redémarrage automatique si le broker disparaît."
 parametres:
   - nom: broker
-    description: "Adresse du broker MQTT du site (ex. 192.168.1.51 pour Saint Fort)."
+    description: "Adresse du broker MQTT : par défaut celle DU SITE, générée à l'assemblage (paramètre MQTT général de dimotic-ha). À ne renseigner que pour un cas particulier (appareil d'un autre site)."
+    requis: false
+    defaut: "broker du site"
+  - nom: port_broker
+    description: "Port du broker MQTT : par défaut celui du site."
+    requis: false
+    defaut: "port du site"
   - nom: prefixe_decouverte
     description: "Préfixe de découverte lu par NOMMAGE."
     requis: false

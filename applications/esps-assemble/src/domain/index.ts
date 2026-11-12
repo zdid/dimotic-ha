@@ -77,15 +77,23 @@ export const ESPS_ASSEMBLE_APP: ApplicationModule & { menu?: ApplicationMenuConf
   runsAsSeparateProcess: true
 };
 
-export function createAssembleurService(eventBus: IEventBus, logger: Logger, configProvider: IAppConfigProvider<AssembleurConfig>, clientHa?: ClientHa): IAssembleurService {
-  const service = new AssembleurService(eventBus, logger, configProvider, undefined, undefined, undefined, undefined, undefined, clientHa);
+export function createAssembleurService(
+  eventBus: IEventBus, logger: Logger, configProvider: IAppConfigProvider<AssembleurConfig>, clientHa?: ClientHa,
+  brokerGeneral?: () => Partial<AssembleurConfig['mqtt']> | undefined
+): IAssembleurService {
+  const service = new AssembleurService(eventBus, logger, configProvider, undefined, undefined, undefined, undefined, undefined, clientHa, undefined, brokerGeneral);
   eventBus.emit('app:socket-events:registered', { appId: 'esps-assemble', socketEvents: ASSEMBLEUR_ALL_EVENTS, persistentEvents: ASSEMBLEUR_PERSISTENT_EVENTS });
   eventBus.emit('app:menu:register', { appId: 'esps-assemble', menuConfig: ESPS_ASSEMBLE_MENU_CONFIG });
   return service;
 }
 
 export function createAssembleurServiceWithConfig(eventBus: IEventBus, logger: Logger, configService: ConfigService, clientHa?: ClientHa): IAssembleurService {
-  return createAssembleurService(eventBus, logger, new AppConfigProvider<AssembleurConfig>('esps-assemble' as any, configService), clientHa);
+  // ⭐ 12/11/2026 (v1.8) — broker MQTT général de dimotic-ha (`ha.mqtt`), relu à chaque chargement de la configuration.
+  const brokerGeneral = (): Partial<AssembleurConfig['mqtt']> | undefined => {
+    const m = (configService.getConfig() as { ha?: { mqtt?: { host?: string; port?: number; username?: string; password?: string } } }).ha?.mqtt;
+    return m?.host ? { hote: m.host, port: m.port, utilisateur: m.username, motDePasse: m.password } : undefined;
+  };
+  return createAssembleurService(eventBus, logger, new AppConfigProvider<AssembleurConfig>('esps-assemble' as any, configService), clientHa, brokerGeneral);
 }
 
 export * from './AssembleurService';

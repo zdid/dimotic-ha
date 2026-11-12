@@ -6,6 +6,9 @@ import { composerNom, validerNom, lireNom } from '../convention-nom';
 import { assemblerPaquet } from '../paquet';
 import { resoudreAppareil, ResolutionImpossible } from '../resolution';
 
+// v1.8 : le broker du site est généré à l'assemblage (generes/site.yaml), plus écrit dans les fiches.
+const SITE_REEL = { id: 'stfort', broker: { hote: '192.168.178.51', port: 1883 } };
+
 describe('convention de nom', () => {
   it('compose le nom en ignorant les parties vides', () => {
     expect(composerNom({ quoi: 'poêle', lieuPrecis: 'switch thermostat', lieu: 'salle', pere: 'rez de chaussée', grandPere: 'maison' })).toBe('poêle---switch thermostat--salle--rez de chaussée--maison');
@@ -94,7 +97,7 @@ describe('transport et identité à l\'assemblage', () => {
 describe('bibliothèque réelle : appareils à identité', () => {
   const racineReelle = path.resolve(__dirname, '../../../..');
   it('essai-identite (identité dynamique) : assemblé, composant embarqué, un seul transport', () => {
-    const r = assemblerPaquet(racineReelle, 'essai-identite', 1);
+    const r = assemblerPaquet(racineReelle, 'essai-identite', 1, undefined, new Map(), SITE_REEL);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(Object.keys(r.manifeste.fichiers)).toEqual(expect.arrayContaining(['components/identite_dynamique/identite_dynamique.cpp', 'components/identite_dynamique/__init__.py']));
@@ -103,7 +106,7 @@ describe('bibliothèque réelle : appareils à identité', () => {
   });
   it('poele-thermostat-sam et essai-cuisine-ete s\'assemblent sans erreur', () => {
     for (const nom of ['poele-thermostat-sam', 'essai-cuisine-ete']) {
-      const r = assemblerPaquet(racineReelle, nom, 1);
+      const r = assemblerPaquet(racineReelle, nom, 1, undefined, new Map(), SITE_REEL);
       expect(r.ok, nom).toBe(true);
     }
   });
