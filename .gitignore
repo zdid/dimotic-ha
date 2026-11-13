@@ -66,6 +66,8 @@ scripts/agents/
 # Document de migration du site noisy : noms d'hôte et accès VPN/SSH, jamais publié (reste sur le disque)
 MIGRATION_noisy_*.md
 NEXTCLOUDSYNC.md
+# Plan de renumérotation du LAN de Saint-Fort : adresses et machines du site, jamais publié
+PLAN_renumerotation-lan-*.md
 
 # Applications retirées du dépôt et archivées à côté de applications/ (jamais commitées, jamais détectées par le core : hors applications/ et data/applications/)
 archives-applications/
