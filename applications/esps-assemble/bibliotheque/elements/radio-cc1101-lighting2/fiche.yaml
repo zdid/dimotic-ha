@@ -1,0 +1,35 @@
+id: radio-cc1101-lighting2
+nom: "Radio 433 MHz CC1101 : Lighting2 (AC / KAKU « new » / Chacon DIO) en réception et émission, X10 en réception"
+description: "Module CC1101 (bleu « 433M V2.0 ») sur le bus SPI. Chaque trame Lighting2 reçue part sur SES PROPRES sujets MQTT (pas la découverte) pour un décideur qui compare plusieurs récepteurs et le RFXCOM : <prefixe_rf>/<appareil>/lighting2/recu (adresse, groupe, état, unité, niveau, RSSI lu par SPI, écho), …/lighting2/envoyer (ordre à émettre, avec id et rafale), …/lighting2/emis (accusé), …/x10/recu (X10 radio décodé dans le firmware : maison, unité, état, ou commande spéciale), …/brut (autres trames ≥ 24 fronts, dont les sondes Oregon non décodées ; les trames Lighting2 y figurent aussi en double). idle 6 ms obligatoire (le CC1101 sort du bruit en continu : 10 ms = débordement). Présence : esphome/<appareil>/status. EXIGE un ESPHome qui contient le composant cc1101 natif (absent de la 2025.11.2 ; compilé en 2026.10.2). Broches par défaut pour NodeMCU / D1 mini : SCK D5, MISO D6, MOSI D7, CSN D8, GDO2 → D1 (réception), GDO0 → D0 (émission). Câblage du module : projets-DC recepteur-lighting2/specs/cablage-cc1101. CC1101 en 3,3 V SEULEMENT."
+parametres:
+  - nom: prefixe_rf
+    description: "Racine des sujets MQTT radio."
+    requis: false
+    defaut: "rf433"
+  - nom: broche_sck
+    requis: false
+    defaut: "GPIO14"
+  - nom: broche_miso
+    requis: false
+    defaut: "GPIO12"
+  - nom: broche_mosi
+    requis: false
+    defaut: "GPIO13"
+  - nom: broche_csn
+    requis: false
+    defaut: "GPIO15"
+  - nom: broche_reception
+    description: "Broche reliée à GDO2 (doit accepter une interruption : pas GPIO16)."
+    requis: false
+    defaut: "GPIO5"
+  - nom: broche_emission
+    description: "Broche reliée à GDO0 (le CC1101 n'émet que par GDO0)."
+    requis: false
+    defaut: "GPIO16"
+  - nom: rafale_defaut
+    description: "Nombre de trames par émission si l'ordre ne le précise pas."
+    requis: false
+    defaut: "5"
+exigences:
+  elements: [transport-mqtt]
+broches: [14, 12, 13, 15, 5, 16]

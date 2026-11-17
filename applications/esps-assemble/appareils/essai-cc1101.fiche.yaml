@@ -1,0 +1,5 @@
+# Fiche de l'appareil essai-cc1101 : plaque d'essai, NodeMCU (ESP8266) + CC1101 seul (14/11/2026). Compiler avec ESPHome 2026 (cc1101 natif).
+nom: essai-cc1101
+nom_affichage: "Essai CC1101 Lighting2 (plaque d'essai)"
+materiel: nodemcu-v3-lolin
+wifi: [stfort]

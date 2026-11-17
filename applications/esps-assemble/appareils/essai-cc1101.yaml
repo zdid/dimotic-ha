@@ -1,0 +1,19 @@
+# Appareil essai-cc1101 : plaque d'essai du CC1101 avec un ESP8266, sans sondes. Lighting2 sur rf433/essai-cc1101/… (élément radio-cc1101-lighting2).
+substitutions:
+  device_name: essai-cc1101
+
+packages:
+  materiel: !include bibliotheque/materiels/nodemcu-v3-lolin/base.yaml
+  wifi: !include generes/wifi.yaml   # généré d'après `wifi:` de la fiche
+  identite: !include
+    file: bibliotheque/elements/identite-taxonomie/element.yaml
+    vars:
+      quoi: "récepteur radio"
+      lieu_precis: "essai cc1101"
+      lieu: "bureau"
+      pere: "rez de chaussée"
+      grand_pere: "maison"
+  transport: !include
+    file: bibliotheque/elements/transport-mqtt/element.yaml
+  radio: !include
+    file: bibliotheque/elements/radio-cc1101-lighting2/element.yaml

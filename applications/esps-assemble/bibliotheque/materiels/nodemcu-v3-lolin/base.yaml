@@ -1,0 +1,14 @@
+# Base du matériel « NodeMCU v3 Lolin » : carte seule. Le nom technique vient de `device_name` (substitution de l'appareil).
+# Transport (api/mqtt), wifi, identité et périphériques : éléments.
+esphome:
+  name: ${device_name}
+
+esp8266:
+  board: nodemcuv2
+
+logger:
+  level: INFO
+
+ota:
+  - platform: esphome
+    password: !secret ota_password

@@ -1,0 +1,9 @@
+id: bus-onewire
+nom: "Bus 1-Wire (sondes DS18B20)"
+description: "Bus 1-Wire sur une broche, rappel 4,7 kΩ vers 3,3 V À CÂBLER (une seule résistance pour tout le bus). À inclure une fois ; chaque sonde est un élément sonde-ds18b20. Broche par défaut GPIO4 (D2 sur NodeMCU / D1 mini) : si on la change, la fiche ne contrôle plus le conflit de broche."
+parametres:
+  - nom: broche_onewire
+    description: "Broche du bus (GPIO)."
+    requis: false
+    defaut: "GPIO4"
+broches: [4]

@@ -35,6 +35,11 @@ des `packages:`. Conception : `specs/current/conception-esphome-assembleur_specs
 - **Satellite** : `assistant-vocal` (lecteur audio, assistant de HA, mot d'éveil, scripts de l'anneau, réglages exposés à HA,
   boutons ; automatismes de démarrage et de connexion).
 
+### Capteurs et radio (14/11/2026)
+- Matériel `nodemcu-v3-lolin` (ESP8266 nu) ; éléments `bus-onewire`, `sonde-ds18b20` (**une inclusion par sonde**, adresse en paramètre),
+  `radio-cc1101-lighting2` (Lighting2 reçu/émis sur sujets MQTT propres `rf433/<appareil>/…`, exige ESPHome 2026 et `transport-mqtt`).
+  Avec ou sans sondes, avec ou sans radio : ajouter ou retirer la ligne de `packages:`. Détail : `fonctionnelles-esps-assemble_specs_v1.3.md` §6.
+
 ### Appareils
 - `haplan-display` — Sunton + wifi-simple + polices + 6 pages + 3 instances de `page-climatisation`.
 - `hasat4`, `hasat5` — Waveshare + wifi-simple + assistant-vocal (`hasat3` archivé : même fichier au nom près).

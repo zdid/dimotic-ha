@@ -1,0 +1,8 @@
+# Élément : bus 1-Wire — voir fiche.yaml.
+substitutions:
+  broche_onewire: GPIO4
+
+one_wire:
+  - platform: gpio
+    id: bus_onewire
+    pin: ${broche_onewire}

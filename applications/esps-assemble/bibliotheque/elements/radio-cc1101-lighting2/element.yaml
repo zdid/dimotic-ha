@@ -1,0 +1,143 @@
+# Élément : radio CC1101 433 MHz, Lighting2 en réception et émission — voir fiche.yaml.
+# ESPHome appelle « Nexa » le codage Lighting2 AC (Arctech auto-apprenant : adresse 26 bits, groupe, état, unité, variation).
+# Sujets (racine ${prefixe_rf}/${device_name}) :
+#   lighting2/recu     -> {"recepteur","adresse","groupe","etat","unite","niveau","rssi","echo","ms"}
+#                         etat : 0 éteint, 1 allumé, 2 variation (niveau 0-15) ; rssi : dBm, le plus fort des 300 dernières ms ;
+#                         echo : reçu moins de 1,5 s après une émission de CE récepteur ; ms : horloge interne (ordre des trames)
+#   lighting2/envoyer  <- {"id":"…","adresse":n,"groupe":0,"etat":1,"unite":n,"niveau":0,"rafale":5}
+#   lighting2/emis     -> {"id":"…","recepteur":"…"}  accusé d'émission
+#   x10/recu           -> {"recepteur","maison":"A","unite":2,"etat":1,"valide","rssi","echo","ms"}  (ou "commande":"0x.." pour une commande spéciale)
+#   brut               -> {"recepteur","rssi","n","us":[…]}  toute autre trame d'au moins 24 fronts
+substitutions:
+  prefixe_rf: rf433
+  broche_sck: GPIO14
+  broche_miso: GPIO12
+  broche_mosi: GPIO13
+  broche_csn: GPIO15
+  broche_reception: GPIO5
+  broche_emission: GPIO16
+  rafale_defaut: "5"
+
+spi:
+  clk_pin: ${broche_sck}
+  miso_pin: ${broche_miso}
+  mosi_pin: ${broche_mosi}
+
+cc1101:
+  id: radio
+  cs_pin: ${broche_csn}
+  frequency: 433.92MHz
+
+globals:
+  - id: rssi_max      # dBm, le plus fort sur la fenêtre glissante
+    type: float
+    initial_value: '-120'
+  - id: rssi_t
+    type: uint32_t
+    initial_value: '0'
+  - id: tx_t          # instant de la dernière émission (marque l'écho)
+    type: uint32_t
+    initial_value: '0'
+  - id: tx_id
+    type: std::string
+    initial_value: '""'
+
+interval:
+  # Le composant cc1101 ne donne le RSSI qu'en mode paquet : lecture directe du registre d'état RSSI (0x34) par SPI.
+  - interval: 10ms
+    then:
+      - lambda: |-
+          id(radio)->enable();
+          id(radio)->transfer_byte(0x34 | 0xC0);
+          uint8_t v = id(radio)->transfer_byte(0x00);
+          id(radio)->disable();
+          float dbm = (v >= 128 ? ((int) v - 256) / 2.0f : v / 2.0f) - 74.0f;
+          uint32_t t = millis();
+          if (dbm > id(rssi_max) || t - id(rssi_t) > 300) { id(rssi_max) = dbm; id(rssi_t) = t; }
+
+remote_receiver:
+  pin: ${broche_reception}
+  dump: nexa
+  tolerance: 35%
+  filter: 150us
+  idle: 6ms            # NE PAS allonger : le CC1101 sort du bruit en continu, un idle de 10 ms ne laisse plus finir les trames (débordement)
+  buffer_size: 1kb
+  on_nexa:
+    - mqtt.publish:
+        topic: ${prefixe_rf}/${device_name}/lighting2/recu
+        payload: !lambda |-
+          char b[200];
+          bool echo = millis() - id(tx_t) < 1500;
+          snprintf(b, sizeof(b),
+            "{\"recepteur\":\"${device_name}\",\"adresse\":%u,\"groupe\":%u,\"etat\":%u,\"unite\":%u,\"niveau\":%u,\"rssi\":%.1f,\"echo\":%s,\"ms\":%u}",
+            (unsigned) x.device, (unsigned) x.group, (unsigned) x.state, (unsigned) x.channel, (unsigned) x.level,
+            id(rssi_max), echo ? "true" : "false", (unsigned) millis());
+          return std::string(b);
+  # X10 radio : avec idle 6 ms la trame arrive SANS la porteuse de 9 ms du préambule ; elle commence par le silence de 4,4 ms,
+  # puis 32 bits (marque ≈ 500 µs, silence ≈ 650 µs = 0 / ≈ 1 650 µs = 1), ordre CM17A : octet, octet inversé, octet, octet inversé.
+  on_raw:
+    - lambda: |-
+          bool echo = millis() - id(tx_t) < 1500;
+          size_t n = x.size();
+          if (n >= 65 && x[0] < -3800 && x[0] > -5200) {
+            uint32_t v = 0; bool ok = true;
+            for (int i = 0; i < 32; i++) {
+              int32_t m = x[1 + 2 * i], s = -x[2 + 2 * i];
+              if (m < 250 || m > 900 || s < 300 || s > 2400) { ok = false; break; }
+              v = (v << 1) | (s > 1100 ? 1 : 0);
+            }
+            uint8_t b1 = v >> 24, b2 = v >> 16, b3 = v >> 8, b4 = v;
+            if (ok && (uint8_t)(b1 ^ b2) == 0xFF && (uint8_t)(b3 ^ b4) == 0xFF) {
+              static const char MAISONS[16] = {'M','N','O','P','C','D','A','B','E','F','G','H','K','L','I','J'};
+              char b[220];
+              if (b3 & 0x80) {
+                snprintf(b, sizeof(b), "{\"recepteur\":\"${device_name}\",\"maison\":\"%c\",\"commande\":\"0x%02X\",\"rssi\":%.1f,\"echo\":%s,\"ms\":%u}",
+                         MAISONS[b1 >> 4], b3, id(rssi_max), echo ? "true" : "false", (unsigned) millis());
+              } else {
+                int unite = ((b1 & 0x04) ? 8 : 0) + ((b3 >> 4) & 1) + 2 * ((b3 >> 3) & 1) + 4 * ((b3 >> 6) & 1) + 1;
+                snprintf(b, sizeof(b), "{\"recepteur\":\"${device_name}\",\"maison\":\"%c\",\"unite\":%d,\"etat\":%d,\"rssi\":%.1f,\"echo\":%s,\"ms\":%u}",
+                         MAISONS[b1 >> 4], unite, (b3 & 0x20) ? 0 : 1, id(rssi_max), echo ? "true" : "false", (unsigned) millis());
+              }
+              id(mqtt_client).publish("${prefixe_rf}/${device_name}/x10/recu", std::string(b));
+              return;
+            }
+          }
+          if (n >= 24) {
+            std::string s = "{\"recepteur\":\"${device_name}\",\"rssi\":" + to_string((int) id(rssi_max)) + ",\"n\":" + to_string(n) + ",\"us\":[";
+            for (size_t i = 0; i < n && i < 200; i++) { if (i) s += ","; s += to_string(x[i]); }
+            id(mqtt_client).publish("${prefixe_rf}/${device_name}/brut", s + "]}");
+          }
+
+remote_transmitter:
+  id: emetteur_433
+  pin: ${broche_emission}
+  carrier_duty_percent: 100%
+  on_transmit:
+    then:
+      - cc1101.begin_tx
+  on_complete:
+    then:
+      - cc1101.begin_rx
+      - lambda: id(tx_t) = millis();
+
+mqtt:
+  id: mqtt_client     # publication directe depuis le décodage X10 (on_raw)
+  on_json_message:
+    - topic: ${prefixe_rf}/${device_name}/lighting2/envoyer
+      then:
+        - lambda: |-
+            id(tx_id) = x["id"] | "";
+            id(tx_t) = millis();
+        - remote_transmitter.transmit_nexa:
+            transmitter_id: emetteur_433
+            device: !lambda 'return x["adresse"].as<uint32_t>();'
+            group: !lambda 'return x["groupe"] | 0;'
+            state: !lambda 'return x["etat"].as<uint8_t>();'
+            channel: !lambda 'return x["unite"] | 0;'
+            level: !lambda 'return x["niveau"] | 0;'
+            repeat:
+              times: !lambda 'return x["rafale"] | ${rafale_defaut};'
+              wait_time: 10ms
+        - mqtt.publish:
+            topic: ${prefixe_rf}/${device_name}/lighting2/emis
+            payload: !lambda 'return std::string("{\"id\":\"") + id(tx_id) + "\",\"recepteur\":\"${device_name}\"}";'

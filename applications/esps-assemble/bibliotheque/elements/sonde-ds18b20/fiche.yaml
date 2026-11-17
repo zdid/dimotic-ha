@@ -1,0 +1,16 @@
+id: sonde-ds18b20
+nom: "Sonde de température DS18B20"
+description: "Une sonde DS18B20 sur le bus 1-Wire (élément bus-onewire exigé). À inclure UNE FOIS PAR SONDE avec son adresse. Adresse inconnue : laisser 0x0 le temps d'un premier démarrage, lire « Found sensors » dans le journal (une sonde réchauffée à la fois), puis la reporter. Résolution 11 bits (0,125 °C, ±0,5 °C)."
+parametres:
+  - nom: sonde_id
+    description: "Identifiant ESPHome unique dans l'appareil (ex. sonde_frigo)."
+  - nom: sonde_nom
+    description: "Nom de l'entité dans HA (ex. température frigo)."
+  - nom: sonde_adresse
+    description: "Adresse 64 bits de la sonde (ex. 0x2a0000001234ab28)."
+  - nom: intervalle
+    description: "Période de mesure."
+    requis: false
+    defaut: "60s"
+exigences:
+  elements: [bus-onewire]

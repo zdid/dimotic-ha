@@ -1,4 +1,5 @@
 #include "identite_dynamique.h"
+#include <type_traits>
 #include <cstring>
 #include "esphome/core/application.h"
 #include "esphome/core/helpers.h"
@@ -90,10 +91,23 @@ void IdentiteDynamique::sauver_() {
   global_preferences->sync();
 }
 
+// Choix à la compilation selon le type du nom de l'application (modèle : seule la branche utile est compilée).
+template<typename T> static void remplacer_nom(T &cible, const std::string &texte) {
+  if constexpr (std::is_same_v<T, std::string>) {
+    cible = texte;                                   // ESPHome jusqu'en 2025 : std::string
+  } else {
+    cible = T(texte.c_str(), texte.size());          // ESPHome 2026 : StringRef (le texte vit dans le composant)
+  }
+}
+
 void IdentiteDynamique::appliquer_() {
   // `App.get_friendly_name()` renvoie une référence constante vers le membre de l'application : le module MQTT la relit à chaque
   // envoi de découverte. On la remplace par le nom composé à partir des parties mémorisées.
-  const_cast<std::string &>(App.get_friendly_name()) = this->nom();
+  // ⭐ 14/11/2026 — compatible avant et depuis ESPHome 2026 : jusqu'en 2025 le membre est un std::string (on le remplace) ; depuis,
+  // c'est un StringRef (pointeur + longueur) : on garde le texte dans `nom_applique_` et on fait pointer l'application dessus.
+  this->nom_applique_ = this->nom();
+  using Nom = std::remove_cv_t<std::remove_reference_t<decltype(App.get_friendly_name())>>;
+  remplacer_nom(const_cast<Nom &>(App.get_friendly_name()), this->nom_applique_);
 }
 
 void IdentiteDynamique::dump_config() {

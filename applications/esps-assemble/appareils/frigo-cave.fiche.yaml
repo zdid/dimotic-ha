@@ -1,0 +1,6 @@
+# Fiche de l'appareil frigo-cave : thermomètre du frigo et du congélateur de la cuisine de Saint-Fort + récepteur/émetteur Lighting2 CC1101
+# (projets-DC chap. 15). Cave à vin : 3e sonde plus tard (même bus). Sans réservation DHCP pour l'instant (frigo-cave.local).
+nom: frigo-cave
+nom_affichage: "Thermomètre frigo et congélateur (cuisine)"
+materiel: nodemcu-v3-lolin
+wifi: [stfort]

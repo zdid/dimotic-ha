@@ -1,0 +1,35 @@
+# Appareil frigo-cave : NodeMCU v3 Lolin, 2 sondes DS18B20 (frigo, congélateur de la cuisine), CC1101 Lighting2. ESPHome sur MQTT.
+# Températures : découverte homeassist (NOMMAGE). Lighting2 : sujets propres rf433/frigo-cave/… (voir l'élément radio-cc1101-lighting2).
+# Sans radio : retirer le paquet `radio`. Sans sondes : retirer `onewire` et les `sonde_*`. Adresses des sondes : à relever au 1er démarrage.
+substitutions:
+  device_name: frigo-cave
+
+packages:
+  materiel: !include bibliotheque/materiels/nodemcu-v3-lolin/base.yaml
+  wifi: !include generes/wifi.yaml   # généré d'après `wifi:` de la fiche
+  identite: !include
+    file: bibliotheque/elements/identite-taxonomie/element.yaml   # pas identite-dynamique : son composant ne compile pas en ESPHome 2026 (exigé par cc1101)
+    vars:
+      quoi: "thermomètre"
+      lieu_precis: "frigo et congélateur"
+      lieu: "cuisine"
+      pere: "rez de chaussée"
+      grand_pere: "maison"
+  transport: !include
+    file: bibliotheque/elements/transport-mqtt/element.yaml
+  onewire: !include
+    file: bibliotheque/elements/bus-onewire/element.yaml
+  sonde_congelateur: !include
+    file: bibliotheque/elements/sonde-ds18b20/element.yaml
+    vars:
+      sonde_id: sonde_congelateur
+      sonde_nom: "température congélateur"
+      sonde_adresse: "0x0000000000000000"   # À RELEVER au premier démarrage
+  sonde_frigo: !include
+    file: bibliotheque/elements/sonde-ds18b20/element.yaml
+    vars:
+      sonde_id: sonde_frigo
+      sonde_nom: "température frigo"
+      sonde_adresse: "0x0000000000000001"   # À RELEVER (valeur provisoire distincte)
+  radio: !include
+    file: bibliotheque/elements/radio-cc1101-lighting2/element.yaml

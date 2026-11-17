@@ -1,0 +1,19 @@
+# Fiche du modèle de matériel — NodeMCU v3 « Lolin », ESP8266 (ESP-12), 30 broches, CH340, micro-USB (14/11/2026).
+# Carte nue : aucun périphérique câblé ; sondes, radio… sont des éléments. Cotes de la carte : projets-DC chap. 15 (57,9 × 30,8 mm).
+# Broches à éviter pour un élément : GPIO0 (D3), GPIO2 (D4), GPIO15 (D8) jouent un rôle au démarrage ; GPIO1/3 = série du journal.
+# GPIO15 reste utilisable comme CSN d'un module SPI (tiré au 0 V au repos), GPIO16 (D0) n'a pas d'interruption (sortie seulement).
+id: nodemcu-v3-lolin
+nom: "NodeMCU v3 Lolin (ESP8266, 30 broches)"
+plateforme: esp8266
+puce: esp8266
+cadre: arduino
+carte: nodemcuv2
+flash: 4MB
+port_ota: 8266
+memoire:
+  emplacement_ota_octets: 1044464     # relevé à la compilation (« from 1044464 bytes »), comme le module 4 relais
+  ram_interne_octets: 81920
+  psram: false
+audio: false
+broches_prises: []
+broches_libres: [16, 5, 4, 14, 12, 13, 15]

@@ -1,0 +1,12 @@
+# Élément : une sonde DS18B20 — voir fiche.yaml. Inclure une fois par sonde (clé de paquet différente à chaque fois).
+substitutions:
+  intervalle: 60s
+
+sensor:
+  - platform: dallas_temp
+    id: ${sonde_id}
+    one_wire_id: bus_onewire
+    address: ${sonde_adresse}
+    name: "${sonde_nom}"
+    resolution: 11
+    update_interval: ${intervalle}

@@ -46,6 +46,9 @@ class IdentiteDynamique : public Component {
 
   std::string defauts_[NB_PARTIES];
   std::string parties_[NB_PARTIES];
+  // ⭐ 14/11/2026 — ESPHome 2026 : App ne garde plus qu'un pointeur (StringRef) vers le nom convivial ; le texte doit donc
+  // vivre ici, dans le composant, aussi longtemps que l'application.
+  std::string nom_applique_;
   ESPPreferenceObject pref_;
 };
 
