@@ -1,5 +1,18 @@
 # Liste des problèmes à résoudre
 
+## 🐛 RFXCOM — protocoles matériel : conception à revoir (relevé le 14/11/2026, pas de correction faite)
+Constaté en relisant `RfxComService` (updateEnabledHardwareProtocols, pushEnabledHardwareProtocols) et la spec rfxcom v7.6 §5.6 ; l'utilisateur a activé X10 en plus par l'onglet « 📶 Protocoles » (page « ⚙️ Devices & Récepteurs », `/rfxcom/config`) : fonctionne.
+- **Erreur** : « liste vide = tous » → décocher le DERNIER protocole enregistre `[]`, relu comme TOUS (impossible de tout couper, effet inverse).
+- « Tous » inclut **UNDECODED** (mode de mise au point : remonte le bruit) et tous les protocoles inutiles (fausses détections) ; c'est l'état par défaut (config vide).
+- Aucun lien entre protocoles activés et devices déclarés : un device dont le protocole est décoché (ex. Lighting2 sans AC) n'est jamais reçu, sans avertissement.
+- Normalisation « tout coché » par comparaison de longueurs, pas des noms.
+- Piste : liste explicite (vide = rien), défaut déduit des devices déclarés (jamais UNDECODED), onglet indiquant les devices qui dépendent de chaque protocole + avertissement. Nouvelle version de spec avant tout code.
+
+## 🐛 ia / voix — « éteins » transcrit « Et tant. », Mistral RALLUME la chambre du bas (constaté 13/11/2026 10:49, hasat-respeaker → ha2) — NON CORRIGÉ
+- **Trace** (`data/ia/traces-vocales/2026-11-13.jsonl`) : 10:48:50 « Allume. » → interpréteur, lumière + dressing de la chambre du bas allumés (vérifié) ; 10:49:08 « Et tant. » (dit : « éteins ») → non reconnu par l'interpréteur → Mistral appelle `executer_action {verbe: allumer, quoi: lumière, lieux: [chambre du bas]}` → rallumé, réponse « C'est fait, j'ai allumé ».
+- **Défaut 1 — transcription** : mots courts mal reconnus par Voxtral sur ce micro (langue `fr` transmise ? cf. entrée du 12/11).
+- **Défaut 2 — ia** : Mistral exécute une action dont le verbe n'est pas dans la phrase (devinée d'après l'échange précédent). Piste : refuser `executer_action` quand la question ne contient aucun verbe d'action correspondant → « Je n'ai pas compris. Peux-tu répéter ? ».
+
 ## 🐛 Poêle (poele-thermostat-sam) et assembleur ESP de ha2 : adresses d'avant la renumérotation (constaté 12/11/2026) — POÊLE RÉPARÉ, ASSEMBLEUR DE ha2 CORRIGÉ (12/11 18 h 49)
 - **Cause** : le module relais du poêle n'avait jamais été reprogrammé après la renumérotation (broker 192.168.1.51 compilé) → plus de MQTT → thermostat « Poêle » sans relais.
 - **Erreur commise le 12/11** : recompilé d'abord depuis l'ancien fichier autonome `/docker/esphome/config/poele-thermostat-sam.yaml` (plus la référence) → autre `unique_id`, doublon `switch.salle_poele_switch_thermostat_salle_rez_de_chaussee_maison` dans HA. Rien à voir avec la version d'ESPHome (2025.11.2, inchangée depuis 11 mois — pas besoin de la figer).
