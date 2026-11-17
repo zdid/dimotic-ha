@@ -135,9 +135,13 @@ function matchEnum(source: 'verbe' | 'enum', table: string, captureName: string,
     const groupe = ctx.vocabulaire.verbeGroupes[table] ?? {};
     const flat = Object.entries(groupe).flatMap(([verbe, formes]) => formes.map((forme) => ({ forme, verbe })));
     flat.sort((a, b) => b.forme.split(/\s+/).length - a.forme.split(/\s+/).length);
-    for (const { forme, verbe } of flat) {
-      const next = matchWordSequence(forme.split(/\s+/), mots, p, ctx, strict);
-      if (next > -1) return ok(next, { [captureName]: [verbe] });
+    // ⭐ 13/11/2026 (specs v1.42 §16.17) — une forme qui COMMENCE par un mot ignorable (« et tant », transcription
+    // de « éteins ») est d'abord essayée à la position exacte : sinon `skipIgnorable` a déjà sauté le « et ».
+    for (const depart of p === pos ? [p] : [pos, p]) {
+      for (const { forme, verbe } of flat) {
+        const next = matchWordSequence(forme.split(/\s+/), mots, depart, ctx, strict);
+        if (next > -1) return ok(next, { [captureName]: [verbe] });
+      }
     }
     return FAIL;
   }

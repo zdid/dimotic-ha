@@ -59,3 +59,15 @@ describe('annonceActionSansExecution', () => {
     expect(annonceActionSansExecution('La lumière du salon est déjà allumée.', undefined)).toBe(false);
   });
 });
+
+import { corrigerTranscription } from '../reponseVocale';
+describe('transcription corrigée (specs v1.42 §16.17)', () => {
+  it('« Et tant. » → « Éteins. » (casse, ponctuation, accents ignorés)', () => {
+    expect(corrigerTranscription('Et tant.')).toBe('Éteins.');
+    expect(corrigerTranscription('  et  TANT ! ')).toBe('Éteins.');
+  });
+  it('phrase plus longue ou autre : pas de correction', () => {
+    expect(corrigerTranscription('Et tant pis.')).toBeUndefined();
+    expect(corrigerTranscription('Allume.')).toBeUndefined();
+  });
+});

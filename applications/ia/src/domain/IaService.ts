@@ -35,12 +35,13 @@ import { HaTableauClient } from './HaTableauClient';
 import { HaPieceClient } from './HaPieceClient';
 import { HaEtiquetteClient } from './HaEtiquetteClient';
 import { HaAppareilRenamer } from './HaAppareilRenamer';
+import { HaReglageClient } from './HaReglageClient';
 import { HaAuditNomsClient } from './HaAuditNomsClient';
 import { HaReferencesClient } from './HaReferencesClient';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
-import { phraseConfirmationAction, echangeLibre, annonceActionSansExecution, REPONSE_ACTION_NON_EXECUTEE, REPONSE_TEXTE_NON_COMPRIS } from './reponseVocale';
+import { phraseConfirmationAction, echangeLibre, annonceActionSansExecution, REPONSE_ACTION_NON_EXECUTEE, REPONSE_TEXTE_NON_COMPRIS, corrigerTranscription } from './reponseVocale';
 import { RadioService, reconnaitreCommandeRadio, DEFAULT_RADIO_CONFIG } from './radio';
 import { lieuDuSatellite } from './satellite';
 import { IA_CLIENT_EVENTS } from './socket-events';
@@ -383,6 +384,7 @@ export class IaService implements IIaService {
       etiquettes: new HaEtiquetteClient(this.haBridgeClient),
       audit: new HaAuditNomsClient(this.haBridgeClient),
       appareils: new HaAppareilRenamer(this.haBridgeClient),
+      reglages: new HaReglageClient(this.haBridgeClient),
       references: new HaReferencesClient(this.haBridgeClient, automations, tableauxClient, scriptsClient),
       aides: new HaAideClient(this.eventBus, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia')),
       entites: new HaEntiteRenamer(this.haBridgeClient, async (entityId) => {
@@ -535,17 +537,28 @@ export class IaService implements IIaService {
     const mistralModel = this.mistralClient.resolveModel(ollamaModel);
 
     const messages = this.rulesProvider.inject(this.buildMessages(body));
+    // ⭐ 13/11/2026 (specs v1.42 §16.17) — transcription connue fausse (« Et tant » pour « éteins ») corrigée
+    // AVANT tout traitement (radio, cache, interpréteur, Mistral, trace).
+    const questionRecue = extractQuestion(messages);
+    const questionCorrigee = corrigerTranscription(questionRecue);
+    if (questionCorrigee) {
+      const i = messages.map((m) => m.role).lastIndexOf('user');
+      messages[i] = { ...messages[i], content: questionCorrigee };
+      this.logger.info('IaService', `Transcription corrigée : « ${questionRecue} » → « ${questionCorrigee} »`);
+    }
     const question = extractQuestion(messages);
     // ⭐ 11/11/2026 (specs v1.37 §16.2) — « libre » = aucune réponse assistant, OU dernière réponse
     // sans « ? » : l'historique que renvoie HA (même conversation_id pendant 5 min) ne bloque plus
     // l'interpréteur après une simple action ; une demande de précision garde la main à Mistral.
     const fresh = echangeLibre(messages);
     // ⭐ 11/11/2026 (specs v1.39 §16.14) — lieu du satellite qui parle (repère du texte d'instructions de HA).
-    const lieuSatellite = lieuDuSatellite(messages, this.config.satellites ?? {});
+    // ⭐ 13/11/2026 (specs v1.42) — la pièce HA transmise, plus de table `satellites`.
+    const lieuSatellite = lieuDuSatellite(messages);
     if (lieuSatellite) this.logger.info('IaService', `Satellite : lieu d'origine « ${lieuSatellite} »`);
     // ⭐ 12/11/2026 (specs v1.40 §16.15) — trace de bout en bout.
     const debut = Date.now();
     const trace = this.config.traceVocale?.active !== false ? nouvelleTrace(question ?? '', fresh) : undefined;
+    if (trace && questionCorrigee) trace.transcriptionRecue = questionRecue;
     if (trace) {
       const repere = lireSatellite(messages);
       if (repere || lieuSatellite) trace.satellite = { nom: repere?.nom, piece: repere?.piece, lieu: lieuSatellite };

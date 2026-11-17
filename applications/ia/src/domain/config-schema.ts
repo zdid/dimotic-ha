@@ -118,10 +118,6 @@ export const iaConfigSchema = z.object({
   // À ajuster directement dans data/ia/config.yaml (section `radio`), rechargé à chaud.
   radio: radioSchema.default(DEFAULT_RADIO_CONFIG),
 
-  // ⭐ 11/11/2026 (specs v1.39 §16.14) — satellite vocal → lieu d'origine (nom d'appareil HA → lieu).
-  // Sans entrée : la pièce HA de l'appareil (repère envoyé par le texte d'instructions de HA).
-  satellites: z.record(z.string()).default({}),
-
   // ⭐ 12/11/2026 (specs v1.40 §16.15) — trace de bout en bout des demandes vocales (data/ia/traces-vocales/).
   traceVocale: z.object({
     active: z.boolean().default(true),
@@ -163,6 +159,5 @@ export const DEFAULT_IA_CONFIG: IaConfig = {
   toolExecuteTimeoutMs: 20000,
   excludedQuoiIds: ['bouton', 'telecommande', 'scenes_switch', 'zigbee2mqtt_bridge'],
   radio: DEFAULT_RADIO_CONFIG,
-  satellites: {},
   traceVocale: { active: true, joursConserves: 90, delaiVerificationS: 5 }
 };

@@ -34,6 +34,18 @@ export const REPONSE_ACTION_NON_EXECUTEE = "Je n'ai pas exécuté la commande. R
  *  Finit par « ? » : HA garde le micro ouvert pour la répétition. */
 export const REPONSE_TEXTE_NON_COMPRIS = "Je n'ai pas compris. Peux-tu répéter ?";
 
+/** ⭐ 13/11/2026 (specs v1.42 §16.17) — transcriptions connues fausses, phrase ENTIÈRE (casse, accents et ponctuation
+ *  ignorés) → phrase voulue. « éteins » est rendu « Et tant » par Voxtral comme par Whisper (constaté 13/11 10 h 49 :
+ *  Mistral avait RALLUMÉ la chambre du bas). Dans une phrase plus longue, le vocabulaire de l'interpréteur s'en charge. */
+const TRANSCRIPTIONS_CORRIGEES: Record<string, string> = {
+  'et tant': 'Éteins.'
+};
+
+export function corrigerTranscription(texte: string): string | undefined {
+  const cle = texte.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return TRANSCRIPTIONS_CORRIGEES[cle];
+}
+
 function normaliser(verbe: string): string {
   return verbe.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim().replace(/\s+/g, '_');
 }

@@ -22,6 +22,7 @@ import type { HaAuditNomsClient } from './HaAuditNomsClient';
 import type { HaAppareilRenamer } from './HaAppareilRenamer';
 import type { HaEtiquetteClient } from './HaEtiquetteClient';
 import type { HaReferencesClient } from './HaReferencesClient';
+import type { HaReglageClient } from './HaReglageClient';
 
 const CONFIRM_PROP = { type: 'boolean', description: 'false/absent = APERÇU seulement (rien n\'est modifié). true = exécute, À N\'UTILISER QU\'APRÈS l\'accord explicite de l\'utilisateur sur l\'aperçu.' };
 
@@ -196,6 +197,28 @@ export const HA_PIECE_TOOLS: McpToolDef[] = [
     name: 'supprimer_pieces_vides_ha',
     description: 'SUPPRIME des pièces VIDES de HA (aucun appareil ni entité). Sans « pieces » : toutes les pièces vides. Sans confirme:true, aperçu seulement (liste, automatisations qui les citent). Une pièce non vide est refusée. La définition supprimée est sauvegardée avant.',
     inputSchema: { type: 'object', properties: { pieces: { type: 'array', items: { type: 'string' }, description: 'Noms ou area_id (facultatif)' }, confirme: CONFIRM_PROP } }
+  }
+];
+
+/** Réglages de configuration des appareils (specs v1.43 §19.11decies) : ce qu'executer_action ne voit pas. */
+export const HA_REGLAGE_TOOLS: McpToolDef[] = [
+  {
+    name: 'lire_reglages_appareil',
+    description: 'LECTURE SEULE. Liste les RÉGLAGES d\'un appareil de Home Assistant (entités de catégorie « configuration » : sensibilité d\'un détecteur, mode de LED, seuils…), que executer_action ne voit pas : entity_id, valeur actuelle, valeurs permises (options, min/max/pas, on/off). cible = device_id, entity_id d\'une entité de l\'appareil, ou nom de l\'appareil (exact ou partiel s\'il est unique).',
+    inputSchema: { type: 'object', properties: { cible: { type: 'string', description: 'device_id, entity_id d\'une entité de l\'appareil, ou nom de l\'appareil' } }, required: ['cible'] }
+  },
+  {
+    name: 'modifier_reglage',
+    description: 'MODIFIE un réglage de configuration (select, number ou switch de catégorie « configuration ») d\'un appareil de Home Assistant. entity_id vient de lire_reglages_appareil ; la valeur est contrôlée (option existante, bornes et pas, on/off). Sans confirme:true, aperçu seulement et ne modifie RIEN ; la commande pour revenir à l\'ancienne valeur est donnée. Un appareil sur pile n\'applique le réglage qu\'à son prochain réveil.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entity_id: { type: 'string', description: 'Réglage à modifier (lire_reglages_appareil)' },
+        valeur: { type: ['string', 'number', 'boolean'], description: 'Nouvelle valeur : une option (select), un nombre (number), on/off (switch)' },
+        confirme: CONFIRM_PROP
+      },
+      required: ['entity_id', 'valeur']
+    }
   }
 ];
 
@@ -402,6 +425,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   ...HA_PIECE_TOOLS,
   ...HA_ETIQUETTE_TOOLS,
   ...HA_AUDIT_TOOLS,
+  ...HA_REGLAGE_TOOLS,
   ...HA_REFERENCES_TOOLS,
   ...PILOTES_TOOLS
 ];
@@ -483,6 +507,8 @@ export interface McpToolboxDeps {
   audit: HaAuditNomsClient;
   /** Renommage d'appareil. */
   appareils: HaAppareilRenamer;
+  /** Réglages de configuration des appareils. */
+  reglages: HaReglageClient;
   /** Vérification des références d'entités (lecture seule). */
   references: HaReferencesClient;
   /** Gestion des pilotes via le cœur (PilotesClient). */
@@ -513,6 +539,8 @@ export class McpToolbox {
         args.portee === 'appareils' || args.portee === 'identifiants' ? args.portee : 'tous',
         typeof args.limite === 'number' ? args.limite : 40), null, 2);
       case 'renommer_appareil_ha': return JSON.stringify(await this.deps.appareils.renommer(String(args.device_id ?? ''), String(args.nom ?? ''), args.confirme === true), null, 2);
+      case 'lire_reglages_appareil': return JSON.stringify(await this.deps.reglages.lire(String(args.cible ?? '')), null, 2);
+      case 'modifier_reglage': return JSON.stringify(await this.deps.reglages.modifier(String(args.entity_id ?? ''), args.valeur, args.confirme === true), null, 2);
       case 'lire_etiquettes_ha': return JSON.stringify(await this.deps.etiquettes.lire(), null, 2);
       case 'etiqueter_ha': return JSON.stringify(await this.deps.etiquettes.etiqueter(
         Array.isArray(args.entites) ? args.entites.map(String) : [],

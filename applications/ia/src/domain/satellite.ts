@@ -5,8 +5,9 @@
  * l'intégration Ollama est un modèle rendu à chaque demande avec `llm_context` (device_id). Il y
  * porte une ligne repère, par exemple :
  *   [satellite: hasat-cuisine | pièce: Cuisine]
- * `ia` la lit dans le message système et en déduit le lieu d'origine de la demande : table de la
- * configuration (`satellites`, nom d'appareil → lieu), sinon la pièce HA de l'appareil.
+ * `ia` la lit dans le message système et en déduit le lieu d'origine de la demande : la pièce HA de l'appareil.
+ * ⭐ 13/11/2026 (specs ia v1.42) — table `satellites` (nom d'appareil → lieu) SUPPRIMÉE, demande utilisateur :
+ * le lieu est celui que HA transmet (pièce de l'appareil), une seule source de vérité.
  */
 import type { OllamaMessage } from './types';
 
@@ -32,14 +33,8 @@ export function lireSatellite(messages: OllamaMessage[]): SatelliteRepere | unde
   return undefined;
 }
 
-/** Lieu d'origine : table `satellites` (nom d'appareil, sans tenir compte de la casse), sinon la
- *  pièce HA en minuscules, sinon `undefined`. */
-export function lieuDuSatellite(messages: OllamaMessage[], satellites: Record<string, string>): string | undefined {
-  const repere = lireSatellite(messages);
-  if (!repere) return undefined;
-  if (repere.nom) {
-    const cle = Object.keys(satellites).find((k) => k.toLowerCase() === repere.nom!.toLowerCase());
-    if (cle) return satellites[cle];
-  }
-  return repere.piece ? repere.piece.toLowerCase() : undefined;
+/** Lieu d'origine : la pièce HA de l'appareil, en minuscules ; `undefined` sans repère ou sans pièce. */
+export function lieuDuSatellite(messages: OllamaMessage[]): string | undefined {
+  const piece = lireSatellite(messages)?.piece;
+  return piece ? piece.toLowerCase() : undefined;
 }

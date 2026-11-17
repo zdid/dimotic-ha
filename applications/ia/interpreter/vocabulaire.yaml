@@ -14,7 +14,8 @@ verbeGroupes:
     allumer: [allume, allumes, allumer, allumez]
     activer: [active, actives, activer, activez]
     ouvrir: [ouvre, ouvres, ouvrir, ouvrez]
-    eteindre: [eteins, eteint, eteignez, eteindre]
+    # « et tant » : « éteins » mal transcrit par Voxtral/Whisper (specs v1.42 §16.17)
+    eteindre: [eteins, eteint, eteignez, eteindre, "et tant"]
     desactiver: [desactive, desactives, desactiver, desactivez]
     fermer: [ferme, fermes, fermez, fermer]
     basculer: [bascule, bascules, basculer, basculez]

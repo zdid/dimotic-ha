@@ -55,6 +55,8 @@ export interface TraceVocale {
   question: string;
   libre: boolean;
   questionSuspecte: boolean;
+  /** v1.42 §16.17 : texte reçu avant correction d'une transcription connue fausse. */
+  transcriptionRecue?: string;
   chemin?: CheminTrace;
   outils: OutilTrace[];
   actions: ActionTrace[];
