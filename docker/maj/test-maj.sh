@@ -14,6 +14,7 @@ echo "docker \$*" >> "$T/appels"
 case "\$1" in
   pull) [ "\${MAJ_FAUX_PULL:-ok}" = ok ] && exit 0 || exit 1 ;;
   inspect) echo "\${MAJ_FAUX_SANTE:-healthy}" ;;
+  run) echo "docker \$*" >> /dev/null; printf 'core\\nia\\nnommage\\n' ;;
   compose) echo "compose-up tag=\$(grep '^DIMOTIC_TAG=' "$T/dir/.env" | cut -d= -f2)" >> "$T/appels" ;;
 esac
 DEOF
@@ -64,6 +65,19 @@ echo "== conteneur non sain : retour arrière"
 raz; MAJ_FAUX_SANTE=unhealthy "$SCRIPT" mettre-a-jour 3.9.6 --oui >/dev/null 2>&1; verifie "code 6" "$?" "6"
 verifie "  .env revenu en 3.9.5" "$(tag)" "3.9.5"
 verifie "  deux redémarrages (bascule puis retour)" "$(grep -c compose-up "$T/appels")" "2"
+
+echo "== applications de la racine externe"
+raz; rm -rf "$T/dir/data/applications" "$T/dir/backups"; mkdir -p "$T/dir/data/applications/ia" "$T/dir/data/applications/nommage" "$T/dir/data/applications/perso"
+touch "$T/dir/data/applications/nommage/.garder"
+"$SCRIPT" mettre-a-jour 3.9.6 --oui >/dev/null 2>&1; verifie "mise à jour réussie" "$(tag)" "3.9.6"
+verifie "  ia (livrée) mise de côté" "$([ -d "$T/dir/data/applications/ia" ] && echo non || echo oui)" "oui"
+verifie "  sauvegarde créée" "$(ls "$T/dir/backups/apps-externes" | grep -c '^ia_')" "1"
+verifie "  nommage gardée (.garder)" "$([ -d "$T/dir/data/applications/nommage" ] && echo oui || echo non)" "oui"
+verifie "  perso (hors image) intacte" "$([ -d "$T/dir/data/applications/perso" ] && echo oui || echo non)" "oui"
+raz; rm -rf "$T/dir/backups"; mkdir -p "$T/dir/data/applications/ia"; echo v > "$T/dir/data/applications/ia/x"
+MAJ_FAUX_SANTE=unhealthy "$SCRIPT" mettre-a-jour 3.9.6 --oui >/dev/null 2>&1
+verifie "  retour arrière : ia remise en place" "$(cat "$T/dir/data/applications/ia/x" 2>/dev/null)" "v"
+rm -rf "$T/dir/data/applications" "$T/dir/backups"
 
 echo "== verrou"
 raz; mkdir "$T/dir/.maj.lock"; "$SCRIPT" mettre-a-jour 3.9.6 --oui >/dev/null 2>&1; verifie "mise à jour déjà en cours (code 4)" "$?" "4"

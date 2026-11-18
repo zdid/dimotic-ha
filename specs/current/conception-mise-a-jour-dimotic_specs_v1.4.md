@@ -1,6 +1,6 @@
 # Conception — Mise à jour de dimotic-ha par commande MQTT (agent hôte `maj-dimotic`)
 
-*Version 1.3 — 20 octobre 2026 — **plus d'ordres signés ni de secret** (`core.maj.secret`, `docker/definir-secret-maj.sh`, écoute `…/commande/+` retirés) : l'agent ne répond plus qu'au bouton « Installer » de HA (dernière version officielle, sauvegarde et retour arrière automatique conservés) ; 32 vérifications. *Version 1.2 — 18 octobre 2026 — **correctif du verrou** : il n'était libéré qu'à la fin du processus de l'agent (qui ne se termine jamais) → toute mise à jour suivant une première était refusée (« une mise à jour est déjà en cours »), constaté sur stfort et falbala ; il est maintenant libéré à la fin de chaque mise à jour (réussie, échouée ou avec retour arrière) ; 40 vérifications. *Version 1.1 — 17 octobre 2026 — **réalisée (étapes 1 à 3 du §10), non encore déployée** : l'agent est un conteneur `maj` du compose (profil `maj`), pas un service systemd ; **bouton « Installer » de HA** (§9) ; la supervision expose l'état à HA. *Version 1.0 — conception du 17/10/2026.*
+*Version 1.4 — 18 novembre 2026 — **applications de la racine externe** (§6bis) : à chaque mise à jour, une application livrée dans la nouvelle image et présente dans `data/applications/` est mise de côté (`backups/apps-externes/`, jamais supprimée) pour que l'image reprenne la main ; un fichier `.garder` l'en préserve ; remise en place au retour arrière. *Version 1.3 — 20 octobre 2026 — **plus d'ordres signés ni de secret** (`core.maj.secret`, `docker/definir-secret-maj.sh`, écoute `…/commande/+` retirés) : l'agent ne répond plus qu'au bouton « Installer » de HA (dernière version officielle, sauvegarde et retour arrière automatique conservés) ; 32 vérifications. *Version 1.2 — 18 octobre 2026 — **correctif du verrou** : il n'était libéré qu'à la fin du processus de l'agent (qui ne se termine jamais) → toute mise à jour suivant une première était refusée (« une mise à jour est déjà en cours »), constaté sur stfort et falbala ; il est maintenant libéré à la fin de chaque mise à jour (réussie, échouée ou avec retour arrière) ; 40 vérifications. *Version 1.1 — 17 octobre 2026 — **réalisée (étapes 1 à 3 du §10), non encore déployée** : l'agent est un conteneur `maj` du compose (profil `maj`), pas un service systemd ; **bouton « Installer » de HA** (§9) ; la supervision expose l'état à HA. *Version 1.0 — conception du 17/10/2026.*
 
 ## 1. Objet
 
@@ -70,7 +70,21 @@ Racine : `dimotic/<site>/maj/` (même notion de `site` que les pilotes, `core.si
 7. **Succès** : état `libre`, version publiée ; la supervision et HA voient la nouvelle version par l'annonce du cœur.
 8. **Échec** : `DIMOTIC_TAG=<ancien>` remis, `docker compose up -d`, état `echec` avec la raison ; l'ancienne image est toujours sur la machine, le retour est rapide.
 
-Le script ne touche **jamais** à `data/` ni `logs/`.
+Le script ne touche **jamais** à `logs/` ni à `data/`, sauf `data/applications/<app>` d'une application livrée (§6bis).
+
+## 6bis. Applications de la racine externe (nouveau v1.4)
+
+`data/applications/<app>` **masque** le code de même nom de l'image (CLAUDE.md règle 8). Sans ménage, une application déployée à la main reste figée à sa version après chaque mise à jour.
+
+1. Après le téléchargement (étape 4) et avant la bascule (étape 5), l'agent liste les applications de la **nouvelle** image (`docker run --rm --entrypoint ls <image> /app/applications`).
+2. Chaque dossier de `data/applications/` qui porte le nom d'une application livrée est **déplacé** (jamais supprimé) vers `backups/apps-externes/<app>_<date>_avant-<version>/`.
+3. **Exception** : un fichier **`.garder`** dans le dossier de l'application la préserve (correctif pas encore publié) ; l'agent le signale dans le journal (« elle masque la version X de l'image »).
+4. Une application absente de l'image (propre à la machine) n'est jamais touchée. Liste illisible = rien retiré.
+5. **Échec / retour arrière** (étape 8) : les dossiers déplacés sont remis en place (`.maj-retires` garde la liste).
+6. Chaque déplacement est écrit dans `logs/maj.log`.
+7. Pas de comparaison de version (les `package.json` des applications ne portent pas de version fiable) : la protection est `.garder`.
+
+Essais : `docker/maj/test-maj.sh` (38 vérifications, dont retrait, `.garder`, application hors image, retour arrière).
 
 ## 7. Sécurité
 

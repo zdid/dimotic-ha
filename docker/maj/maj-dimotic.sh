@@ -15,7 +15,8 @@
 #
 # Réglages (variables d'environnement) : MAJ_DIR (/docker/dimotic-ha), MAJ_SERVICE (app), MAJ_CONTAINER (dimotic-ha),
 # MAJ_REPO (zdid2/dimotic-ha), MAJ_HEALTH_TIMEOUT (300 s), MAJ_DOCKER, MAJ_CURL (pour les essais).
-# Ne touche jamais à data/ ni logs/.
+# Ne touche jamais à logs/ ni à data/ (sauf data/applications/<app> d'une application LIVRÉE dans la nouvelle image : mise de
+# côté dans backups/apps-externes/, remise en place au retour arrière ; un fichier `.garder` dans le dossier l'en préserve).
 # =============================================================================
 set -u
 
@@ -28,6 +29,7 @@ DOCKER="${MAJ_DOCKER:-docker}"
 CURL="${MAJ_CURL:-curl}"
 ENV_FILE="$DIR/.env"
 PRECEDENT="$DIR/.maj-precedent"
+RETIRES="$DIR/.maj-retires"
 LOCK="$DIR/.maj.lock"
 SEMVER='^[0-9]+\.[0-9]+\.[0-9]+$'
 
@@ -126,6 +128,41 @@ definir_tag() {  # fixe DIMOTIC_TAG dans .env (le crée / l'ajoute si besoin)
 
 relancer() { $DOCKER compose --project-directory "$DIR" -f "$DIR/compose.yaml" up -d "$SERVICE" >/dev/null 2>&1; }
 
+# --- applications de la racine externe qui masqueraient l'image ---------------------------------------------------------
+# data/applications/<app> masque le code de même nom de l'image : sans ce ménage, une application déployée à la main reste
+# figée à jamais. Après le téléchargement : toute application livrée dans la nouvelle image et présente dans la racine externe
+# est mise de côté (backups/apps-externes/, jamais supprimée), sauf `.garder`. Liste des déplacements dans $RETIRES.
+apps_de_image() {  # cible -> noms des applications de l'image, un par ligne
+  $DOCKER run --rm --entrypoint ls "$REPO:$1" /app/applications 2>/dev/null
+}
+
+mettre_de_cote_apps_externes() {  # cible
+  : > "$RETIRES"
+  racine="$DIR/data/applications"
+  [ -d "$racine" ] || return 0
+  livrees="$(apps_de_image "$1")"
+  [ -n "$livrees" ] || { log "Racine externe : liste des applications de l'image illisible, rien retiré"; return 0; }
+  for d in "$racine"/*/; do
+    [ -d "$d" ] || continue
+    nom="$(basename "$d")"
+    printf '%s\n' "$livrees" | grep -qx "$nom" || continue
+    if [ -e "$d/.garder" ]; then log "Racine externe : $nom gardée (.garder) : elle masque la version $1 de l'image"; continue; fi
+    dest="$DIR/backups/apps-externes/${nom}_$(date +%Y%m%d-%H%M%S)_avant-$1"
+    mkdir -p "$DIR/backups/apps-externes" && mv "$d" "$dest" || { log "ÉCHEC : $nom n'a pas pu être mise de côté"; continue; }
+    printf '%s|%s\n' "$nom" "$dest" >> "$RETIRES"
+    log "Racine externe : $nom mise de côté dans $dest (l'image $1 reprend la main)"
+  done
+  return 0
+}
+
+remettre_apps_externes() {  # retour arrière
+  [ -s "$RETIRES" ] || return 0
+  while IFS='|' read -r nom dest; do
+    [ -d "$dest" ] && [ ! -e "$DIR/data/applications/$nom" ] && mkdir -p "$DIR/data/applications" && mv "$dest" "$DIR/data/applications/$nom" && log "Racine externe : $nom remise en place"
+  done < "$RETIRES"
+  : > "$RETIRES"
+}
+
 # --- ordres ---------------------------------------------------------------------------------------------------------
 cmd_etat() {
   jq -cn --arg v "$(version_courante)" --arg l "$(derniere_version_hub)" --arg a "$(architecture)" '{version:$v, derniere_hub:$l, architecture:$a}'
@@ -149,6 +186,7 @@ executer_maj() {
   fi
   printf '%s\n' "$actuelle" > "$PRECEDENT"
   publier_etat en_cours "$cible" bascule
+  mettre_de_cote_apps_externes "$cible"
   definir_tag "$cible"
   if relancer && attendre_sante; then
     log "OK : dimotic-ha est en $cible"
@@ -159,6 +197,7 @@ executer_maj() {
   log "ÉCHEC : retour à $actuelle"
   publier_etat en_cours "$actuelle" retour_arriere
   definir_tag "$actuelle"
+  remettre_apps_externes
   relancer && attendre_sante
   publier_etat echec "$cible" retour_arriere
   jq -cn --arg de "$actuelle" --arg vers "$cible" '{effectue:false, raison:"le nouveau conteneur n a pas démarré correctement", retour:$de}'
