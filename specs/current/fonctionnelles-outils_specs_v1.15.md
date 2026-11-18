@@ -1,7 +1,7 @@
 # Spécifications Fonctionnelles — Application OUTILS
 
-**Version :** 1.14
-**Date :** 28 Octobre 2026
+**Version :** 1.15
+**Date :** 18 Novembre 2026
 **Statut :** Document de référence pour l'application `applications/outils`
 
 > **v1.14 (28/10/2026)** — **« Installer l'IA sur une machine Home Assistant »** (`installer-ia`, §7.4) **remplace** « Agent Claude Code —
@@ -408,7 +408,7 @@ Exigence de l'utilisateur : ouvrir le panneau « IA » de Home Assistant et y tr
 | `CLAUDE_USER` | `claude` | compte qui exécute Claude Code ; créé s'il manque, **sudo sans mot de passe et groupe docker** (décision du 28/10/2026) |
 | `DIMOTIC_DIR` | `/docker/dimotic-ha` | dimotic-ha (compose + `data/`) |
 | `HA_CONFIG_DIR` | `/docker/homeassistant/config` | configuration de Home Assistant (lecture de 4 fichiers autorisée, `secrets.yaml` et `.storage` interdits, aucune écriture) |
-| `FICHE_SITE` | `automatique` | fiche `sites/<nom>.md` ajoutée en `site.md` (jamais écrasée si présente) ; automatique : `ha2` pour le site `stfort`, `noisy2` pour `noisy` |
+| `FICHE_SITE` | `automatique` | fiche `sites/<nom>.md` copiée en `site-modele.md` (**renouvelée** à chaque mise à jour) ; les notes de l'agent, `notes-agent.md`, ne sont **jamais écrasées** (trois couches, v1.15) ; automatique : `ha2` pour le site `stfort`, `noisy2` pour `noisy` |
 | `NOM_SESSION` | vide | nom de la session dans le Remote Control ; vide = **« <site> automatisation HA »** (site lu dans `data/core/machine_config.yaml`) |
 | `ADRESSE_MACHINE` | vide | IP réseau de la machine pour le MCP ; vide = adresse de la route par défaut ; **jamais 127.0.0.1** |
 | `PERMISSION_MODE` | `default` | `default` ou `acceptEdits` |
@@ -422,7 +422,7 @@ jeton de dimotic-ha (`ha.ws.token` des secrets du cœur, pour créer l'entrée d
 2. Claude Code : cherché dans le compte puis globalement ; sinon **installeur natif** dans le compte ;
 3. **MCP de `ia`** (`fonctionnelles-ia` §19) : `mcpEnabled: true`, `mcpHost` = IP de la machine, jeton `mcpToken` généré s'il manque (fichiers
    sauvegardés avant), redémarrage de dimotic-ha si quelque chose a changé ; contrôle par une requête `initialize` ;
-4. dossier de travail **`/dimotic-ha-addons/agent-ha`** (700, au compte) : `CLAUDE.md` (modèle v1.3.0 + `site.md`), `.mcp.json` (serveur `dimotic`,
+4. dossier de travail **`/dimotic-ha-addons/agent-ha`** (700, au compte) : `CLAUDE.md` (modèle v1.4.0 + fiche `site-modele.md` + notes `notes-agent.md`), `.mcp.json` (serveur `dimotic`,
    `http://<IP>:8765/mcp`, jeton), `.claude/settings.json` (`enabledMcpjsonServers: ["dimotic"]`, `ask` = `executer_action`, règles de lecture de HA),
    `lancer-claude.sh` ;
 5. **premières questions pré-répondues** dans `~/.claude.json` du compte (service arrêté avant, copie de sauvegarde) : accueil terminé, thème,
@@ -565,6 +565,7 @@ l'historique git (commit d'avant le 29/09/2026).
 |---------|------|--------|-------------|
 | 1.13 | 26/10/2026 | Claude | Nouveaux scripts intégrés **« Gérer les images de cartes SD/clés USB »** (§7.5 : écrire, supprimer, monter) et **« Durcir l'accès d'une machine (SSH + fail2ban) »** (§7.6) ; carte SD : `screen_console`, saisie DuckDNS simplifiée, root par mot de passe à l'installation (même que l'utilisateur ; retiré ensuite par §7.6), `data/`/`logs/` de dimotic-ha à l'uid 1000, chemins `~` cherchés dans `/home`. v1.12 archivée. |
 | 1.12 | 26/10/2026 | Claude | Script « Carte SD » : **cases à cocher** (services Docker dont Whisper/Piper, intégrations HA, comptes didier/claude, options système, **DuckDNS + Caddy** avec 2 adresses externes), tout posé et non démarré (§7.2). v1.11 archivée. |
+| 1.15 | 18/11/2026 | Claude | Script « Installer l'IA » : **trois couches** pour le `CLAUDE.md` de l'agent (modèle commun, fiche du site `site-modele.md` renouvelée, `notes-agent.md` jamais écrasé) ; migration de l'ancien `site.md` (sauvegarde `site.md.avant-trois-couches`). v1.14 archivée. |
 | 1.10 | 08/10/2026 | Claude | Script « Agent Claude Code » : section « Site » (`site.md`) ajoutée au `CLAUDE.md` rendu, variable `{{HA_TOKEN_FILE}}` (`~/.ha_token` si déjà en place) (§7.4). |
 | 1.11 | 12/10/2026 | Claude | Script « Agent Claude Code » : souris de Claude Code désactivée (`CLAUDE_CODE_DISABLE_MOUSE=1` dans `~/.bashrc` du compte dédié et dans la commande de lancement du screen). Champ `DIMOTIC_DATA_DIR` : ACL lecture/écriture sur les données de dimotic-ha, secrets refusés ; modèle `CLAUDE.md` 1.2.3. |
 | 1.9 | 08/10/2026 | Claude | **Modèle versionné du `CLAUDE.md`** (§7.4) : `applications/ia/agent/claude-md/`, embarqué par `@outils:bundle`, rendu sur la machine ; nouveau mode `mettre_a_jour_claude_md` (réécrit seulement le `CLAUDE.md`, sans ressaisir de jeton) ; `agent.conf` mémorise les choix sans secret. v1.8 archivée. |

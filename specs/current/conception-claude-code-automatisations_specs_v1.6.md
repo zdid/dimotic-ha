@@ -1,7 +1,7 @@
 # Conception — Claude Code, accès au système et génération d'automatisations
 
 *Version 1.5 - 8 Octobre 2026*
-*v1.5 : **mise à jour de l'état d'avancement (§0, §5, §10)** d'après les commits du Claude Code de développement (`3e9780f`, `ac9f07b`, `27d3233` : outils MCP de dépôt d'automatisations, CLAUDE.md v1.2.x avec sections de site, script de lancement sur la machine de dév) ; v1.4 archivée.*
+*v1.6 (18/11/2026) : **trois couches pour le `CLAUDE.md` de l'agent** (§2quinquies) — modèle commun et fiche du site renouvelés à chaque mise à jour, `notes-agent.md` tenu par l'agent et jamais écrasé ; modèle 1.4.0. *v1.5 : **mise à jour de l'état d'avancement (§0, §5, §10)** d'après les commits du Claude Code de développement (`3e9780f`, `ac9f07b`, `27d3233` : outils MCP de dépôt d'automatisations, CLAUDE.md v1.2.x avec sections de site, script de lancement sur la machine de dév) ; v1.4 archivée.*
 *Version 1.4 - 8 Octobre 2026*
 *v1.4 : **le `CLAUDE.md` de l'agent devient un modèle versionné du dépôt** (§2quater) — mis au point dans le Claude Code de développement, embarqué avec dimotic-ha, redéposé sur la machine Home Assistant à chaque évolution ; v1.3 archivée.*
 *Version 1.3 - 8 Octobre 2026*
@@ -54,7 +54,7 @@ document pour savoir « où on en est ».
 | Règles Mistral révisées + noms de macros dans le catalogue | 🟡 | `fonctionnelles-ia` §5 ; fichier `regles_mistral.txt` |
 | Script « Agent Claude Code » (compte dédié, MCP, permissions, `claude` cherché dans le compte) | 🟡 — jamais lancé sur une vraie machine | `fonctionnelles-outils` §7.4 |
 | Modèle versionné du `CLAUDE.md` de l'agent (v1.2.1) + mode « mettre à jour le CLAUDE.md » | 🟡 | §2quater ; `fonctionnelles-outils` §7.4 |
-| Section « Site » du `CLAUDE.md` (`sites/ha2.md`, `sites/dev.md`, `site.md` sur la machine, jamais écrasé) | 🟡 — rédigée d'après les specs, « à vérifier » signalé dans le texte | `applications/ia/agent/claude-md/LISEZ-MOI.md` |
+| Section « Site » du `CLAUDE.md` (`sites/ha2.md`, `sites/dev.md`, `site-modele.md` renouvelée et `notes-agent.md` jamais écrasé sur la machine, v1.6) | 🟡 — rédigée d'après les specs, « à vérifier » signalé dans le texte | `applications/ia/agent/claude-md/LISEZ-MOI.md` |
 | Lancement de Claude Code sur la machine de développement (`claude-screen-dev.sh`, `screen`, `.mcp.json`, CLAUDE.md + section « dev ») | 🟡 | `applications/ia/agent/claude-screen-dev.sh` |
 | Pilotage à distance par Remote Control | 🟡 — repris par le script ; mode de connexion et reprise après redémarrage à vérifier | §2bis |
 | Un Claude Code par site, MCP local en `127.0.0.1` | 🟡 ici (selon l'essai) · ⚪ site distant | §2 |
@@ -166,6 +166,22 @@ et à mesure de sa mise au point**.
   des sections (MCP relié ? jeton Home Assistant ?) sont propres à la machine, mémorisés dans `agent.conf` (sans secret).
 - **À prévoir avec l'écran Déploiement** : comparer la version du modèle à celle lue sur la machine, proposer « Mettre à jour ».
 - **Distinct du `CLAUDE.md` de la racine du dépôt**, qui règle le **développement** de dimotic-ha (specs immuables, sauvegardes, build).
+
+## 2quinquies. Trois couches : le `CLAUDE.md` évolue à la maintenance ET à l'usage (⭐ v1.6)
+
+**Demande de l'utilisateur (18/11/2026)** : le `CLAUDE.md` de l'agent peut évoluer lors des maintenances, et aussi **de lui-même**, à l'usage de l'agent. Les deux sources ne doivent pas s'écraser.
+
+| Couche | Où | Qui l'écrit | À chaque mise à jour |
+|---|---|---|---|
+| Modèle commun | `applications/ia/agent/claude-md/*.md` (dépôt, image) | le développement | remplacé |
+| Fiche du site | `sites/<fiche>.md` du dépôt, copiée en `site-modele.md` | le développement | remplacée |
+| Notes locales | `notes-agent.md` sur la machine (`/dimotic-ha-addons/agent-ha`) | l'agent et l'utilisateur | **jamais touché** |
+
+- `CLAUDE.md` (fichier **généré**) = modèle, puis section `80-notes-agent.md` (la règle), puis `90-securite`, puis `site-modele.md`, puis `notes-agent.md`. Les notes locales sont en dernier : elles priment, **sauf** sécurité et niveau d'autorisation, que seul l'utilisateur change.
+- L'agent a pour règle (section `80-notes-agent.md`) de ne **jamais modifier `CLAUDE.md`** et de noter ce qu'il apprend dans `notes-agent.md` : une ligne par fait (date — fait — origine), pas de secret, note fausse remplacée plutôt qu'empilée.
+- Une note utile à toutes les maisons **ne remonte pas toute seule** dans le dépôt : l'utilisateur décide.
+- **Migration** de l'ancien `site.md` : sauvegardé (`site.md.avant-trois-couches`) ; identique à la fiche = retiré ; retouché = seules les lignes ajoutées par rapport à la fiche deviennent `notes-agent.md`.
+- Mise en œuvre : `installer-ia.sh` (`rendre_claude_md`), modèle `claude-md` VERSION 1.4.0, essai sur quatre cas (neuf, notes conservées à la mise à jour, `site.md` identique, `site.md` retouché). **Non déployé** sur les machines au moment de l'écriture.
 
 ## 3. Ce qui existe déjà (livré le 08/10/2026)
 
@@ -279,6 +295,7 @@ Home Assistant par le socle), `PROMPT_PROJET` §11 (table de correspondance, à 
 
 | Version | Date | Auteur | Changements |
 |---------|------|--------|-------------|
+| 1.6 | 18/11/2026 | Claude | **Trois couches pour le `CLAUDE.md` de l'agent** (§2quinquies) : modèle commun + fiche du site renouvelés, `notes-agent.md` jamais écrasé, règle « ne modifie pas CLAUDE.md » ; modèle 1.4.0. v1.5 archivée. |
 | 1.5 | 08/10/2026 | Claude | **État d'avancement mis à jour** (§0, §5, §10) d'après les commits du Claude Code de développement : outils MCP de dépôt d'automatisations (niveau 2), CLAUDE.md v1.2.1 + sections de site, `claude-screen-dev.sh`, MCP et lecture éprouvés en réel. v1.4 archivée. |
 | 1.4 | 08/10/2026 | Claude | **Le `CLAUDE.md` de l'agent = modèle versionné du dépôt** (§2quater) : source unique, embarqué, version visible, mode de mise à jour sans réinstallation. v1.3 archivée. |
 | 1.3 | 08/10/2026 | Claude | **§0 État d'avancement** (fait / éprouvé / seulement spécifié). v1.2 archivée. |

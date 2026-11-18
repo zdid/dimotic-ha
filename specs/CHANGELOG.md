@@ -10,6 +10,8 @@
 
 | Date | Version | Fichier | Auteur | Changements |
 |------|---------|---------|--------|-------------|
+| 18/11/2026 | **v1.6** | conception-claude-code-automatisations_specs_v1.6.md | Claude | **Trois couches pour le `CLAUDE.md` de l'agent** (§2quinquies) : modèle commun et fiche du site renouvelés à chaque mise à jour, `notes-agent.md` tenu par l'agent et jamais écrasé ; migration de l'ancien `site.md` ; modèle 1.4.0. v1.5 archivée. |
+| 18/11/2026 | **v1.15** | fonctionnelles-outils_specs_v1.15.md | Claude | **Script « Installer l'IA » : trois couches** du `CLAUDE.md` (`site-modele.md` renouvelée, `notes-agent.md` jamais écrasé). v1.14 archivée. |
 | 18/11/2026 | **v1.4** | conception-mise-a-jour-dimotic_specs_v1.4.md | Claude | **Applications de la racine externe** (§6bis) : à chaque mise à jour, une application livrée dans la nouvelle image et présente dans `data/applications/` est mise de côté (`backups/apps-externes/`), sauf `.garder` ; remise en place au retour arrière ; 38 vérifications. v1.3 archivée. |
 | 08/11/2026 | **v1.3** | fonctionnelles-zigbee2mqtt_specs_v1.3.md | Claude | **Premier déploiement réel** sur noisy3 (site noisy) : vrai zigbee2mqtt (Sonoff ZBDongle Plus V2, ember), pont `z2m_bridge_noisy2` présent, ordres passés par l'agent IA du site et confirmés par l'utilisateur ; règle 11 de la fiche du site ; `remplacer` de bout en bout et effet sur l'`entity_id` toujours non vérifiés en détail. v1.2 archivée. |
 | 20/10/2026 | **v1.3** | conception-mise-a-jour-dimotic_specs_v1.3.md | Claude | **Plus d'ordres signés ni de secret** : `core.maj.secret`, `docker/definir-secret-maj.sh` et l'écoute `…/commande/+` retirés ; l'agent ne répond qu'au bouton « Installer » de HA ; déployé sur les 5 machines. v1.2 archivée. |

@@ -5,10 +5,11 @@ l'application Outils (`applications/outils/reposcripts/wrappers/installer-ia.sh`
 (§2ter) et `fonctionnelles-outils` (§7.4).
 
 - **Sections** (concaténées dans cet ordre) : `00-role.md`, `10-dimotic-mcp.md`, `20-ha-config.md` (si le dossier de configuration
-  Home Assistant existe), `90-securite.md`. L'accès direct à Home Assistant par jeton (ancienne section `30-ha-direct`) est retiré
+  Home Assistant existe), `80-notes-agent.md`, `90-securite.md`. L'accès direct à Home Assistant par jeton (ancienne section `30-ha-direct`) est retiré
   depuis la v1.3.0 (décision du 28/10/2026) : l'agent passe uniquement par le serveur MCP de dimotic-ha.
-- **Section « Site »** : si `site.md` existe à côté du `CLAUDE.md` sur la machine (copie de `sites/<fiche>.md`, choisie par le script),
-  il est ajouté à la fin (connaissances propres au site, niveau d'autorisation). Il n'est jamais écrasé par une mise à jour du modèle.
+- **Trois couches (v1.4.0)** : modèle commun (ces sections, remplacé à chaque mise à jour) + fiche du site `site-modele.md` (copie de
+  `sites/<fiche>.md`, **renouvelée** à chaque mise à jour) + `notes-agent.md` (sur la machine, tenu par l'agent et l'utilisateur,
+  **jamais écrasé**). Ordre dans le `CLAUDE.md` : modèle, fiche, notes. L'ancien `site.md` est migré (sauvegarde `site.md.avant-trois-couches`).
 - **Variables** : `{{TARGET_HOST}}` (nom, adresse et site de la machine), `{{HA_CONFIG_DIR}}`.
 - **Version** : `VERSION` — à incrémenter à chaque modification du texte ; elle figure en tête du `CLAUDE.md`
   rendu, ce qui permet de voir si une machine est à jour.

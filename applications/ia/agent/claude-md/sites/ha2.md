@@ -1,6 +1,6 @@
 ## Site ha2 (Saint Fort) — connaissances propres à cette maison
 
-Section propre à CE site (fichier `site.md` posé à côté du CLAUDE.md ; modèle versionné : `applications/ia/agent/claude-md/sites/ha2.md`).
+Section propre à CE site (fichier `site-modele.md` posé à côté du CLAUDE.md, renouvelé à chaque mise à jour ; tes notes vont dans `notes-agent.md`, jamais écrasé ; modèle versionné : `applications/ia/agent/claude-md/sites/ha2.md`).
 Mission sur ce site : **créer et maintenir des automatismes dans Home Assistant** ; tu utilises le système en place, tu ne le développes pas.
 **Niveau d'autorisation de ce site : niveau 2 : dépôt dans Home Assistant par les outils MCP de dimotic**, de façon encadrée (aperçu, accord de l'utilisateur, sauvegarde —
 voir « Déposer un automatisme dans HA ») ; ceci remplace le « niveau 0 » par défaut du rôle ci-dessus.

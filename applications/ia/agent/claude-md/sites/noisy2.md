@@ -1,6 +1,6 @@
 ## Site noisy (noisy3) — connaissances propres à cette maison
 
-Section propre à CE site (fichier `site.md` posé à côté du CLAUDE.md ; modèle versionné : `applications/ia/agent/claude-md/sites/noisy2.md`).
+Section propre à CE site (fichier `site-modele.md` posé à côté du CLAUDE.md, renouvelé à chaque mise à jour ; tes notes vont dans `notes-agent.md`, jamais écrasé ; modèle versionné : `applications/ia/agent/claude-md/sites/noisy2.md`).
 Tu tournes sur **noisy3** (Raspberry Pi 4, 4 Go de RAM : Home Assistant, zigbee2mqtt, mosquitto, dimotic-ha), qui a **remplacé noisy2** le 08/11/2026
 (même adresse 192.168.1.201 ; dans dimotic-ha la machine garde l'identifiant `noisy2`). Mission : **créer et maintenir des
 automatismes dans Home Assistant** ; tu utilises le système en place, tu ne le développes pas.

@@ -10,7 +10,7 @@
 #   1. compte « claude » (sudo sans mot de passe, docker — décision du 28/10/2026), paquets screen/acl/python3 ;
 #   2. Claude Code dans le compte (installeur natif) s'il n'est trouvé nulle part ;
 #   3. serveur MCP de ia : activé, jeton généré s'il manque, à l'écoute sur l'IP réseau de la machine (jamais 127.0.0.1) ;
-#   4. dossier de travail /dimotic-ha-addons/agent-ha : CLAUDE.md (modèle du dépôt + fiche du site), .mcp.json, permissions ;
+#   4. dossier de travail /dimotic-ha-addons/agent-ha : CLAUDE.md (modèle du dépôt + fiche du site + notes de l'agent), .mcp.json, permissions ;
 #   5. premières questions de Claude Code pré-répondues (accueil, confiance du dossier, approbation du serveur « dimotic ») ;
 #   6. service claude-screen : screen « claude » + Remote Control nommé « <site> automatisation HA », relancé après /exit ;
 #   7. panneau « IA » : clé de screen_console, script de contrôle, ligne authorized_keys, entrée de l'intégration dans HA.
@@ -31,7 +31,7 @@
 # @outils:hint HA_CONFIG_DIR = Dossier de configuration de Home Assistant. Lecture autorisée de automations.yaml, scripts.yaml, scenes.yaml, configuration.yaml ; secrets.yaml et .storage interdits.
 # @outils:select FICHE_SITE = automatique, aucune, ha2, noisy2, dev
 # @outils:default FICHE_SITE = automatique
-# @outils:hint FICHE_SITE = Connaissances propres au site ajoutées à la fin du CLAUDE.md (site.md, jamais écrasé s'il existe déjà). automatique : ha2 pour le site stfort, noisy2 pour noisy.
+# @outils:hint FICHE_SITE = Connaissances propres au site ajoutées à la fin du CLAUDE.md (site-modele.md, renouvelée à chaque mise à jour ; les notes de l'agent, notes-agent.md, ne sont jamais écrasées). automatique : ha2 pour le site stfort, noisy2 pour noisy.
 # @outils:hint NOM_SESSION = Nom de la session dans le Remote Control. Vide = « <site> automatisation HA » (ex. « stfort automatisation HA »).
 # @outils:hint ADRESSE_MACHINE = IP réseau de cette machine pour le serveur MCP. Vide = détectée (adresse de la route par défaut).
 # @outils:select PERMISSION_MODE = default, acceptEdits
@@ -138,8 +138,31 @@ rendre_claude_md() {
   mkdir -p "$AGENT_DIR"
   rm -rf "$AGENT_DIR/claude-md.new" && cp -r "$TPL_SRC" "$AGENT_DIR/claude-md.new" \
     && rm -rf "$AGENT_DIR/claude-md" && mv "$AGENT_DIR/claude-md.new" "$AGENT_DIR/claude-md"
-  if [ ! -s "$AGENT_DIR/site.md" ] && [ "$FICHE_SITE" != aucune ] && [ -f "$TPL_SRC/sites/$FICHE_SITE.md" ]; then
-    cp "$TPL_SRC/sites/$FICHE_SITE.md" "$AGENT_DIR/site.md"; echo "Fiche du site : sites/$FICHE_SITE.md -> site.md"
+  # Trois couches (specs conception-claude-code-automatisations v1.6 §2quinquies) :
+  #   modèle commun (repo, remplacé) + fiche du site `site-modele.md` (repo, remplacée) + `notes-agent.md` (machine, JAMAIS touché).
+  if [ "$FICHE_SITE" != aucune ] && [ -f "$TPL_SRC/sites/$FICHE_SITE.md" ]; then
+    cp "$TPL_SRC/sites/$FICHE_SITE.md" "$AGENT_DIR/site-modele.md"
+  else
+    rm -f "$AGENT_DIR/site-modele.md"
+  fi
+  # Migration de l'ancien `site.md` (copie de la fiche, éventuellement retouchée) : identique à la fiche = redondant, retiré ;
+  # différent = c'est un texte local, conservé comme notes de l'agent. Sauvegarde dans tous les cas.
+  if [ -f "$AGENT_DIR/site.md" ]; then
+    cp -p "$AGENT_DIR/site.md" "$AGENT_DIR/site.md.avant-trois-couches"
+    if [ ! -e "$AGENT_DIR/notes-agent.md" ] && [ -s "$AGENT_DIR/site.md" ] && ! { [ -f "$AGENT_DIR/site-modele.md" ] && cmp -s "$AGENT_DIR/site.md" "$AGENT_DIR/site-modele.md"; }; then
+      # seules les lignes qui diffèrent de la fiche deviennent des notes (le reste de la fiche revient par site-modele.md)
+      { printf '%s\n' '## Notes locales de l'"'"'agent (ce site)' '' '_Repris de l'"'"'ancien site.md (lignes qui différaient de la fiche du site)._' ''
+        if [ -f "$AGENT_DIR/site-modele.md" ]; then
+          diff --old-line-format= --unchanged-line-format= --new-line-format='%L' "$AGENT_DIR/site-modele.md" "$AGENT_DIR/site.md"
+        else cat "$AGENT_DIR/site.md"; fi; } > "$AGENT_DIR/notes-agent.md"
+      rm -f "$AGENT_DIR/site.md"; echo "Ancien site.md retouché -> notes-agent.md, lignes ajoutées seulement (sauvegarde : site.md.avant-trois-couches)"
+    else
+      rm -f "$AGENT_DIR/site.md"; echo "Ancien site.md retiré (sauvegarde : site.md.avant-trois-couches)"
+    fi
+  fi
+  if [ ! -e "$AGENT_DIR/notes-agent.md" ]; then
+    printf '%s\n' '## Notes locales de l'"'"'agent (ce site)' '' \
+      '_Fichier tenu par l'"'"'agent et l'"'"'utilisateur : jamais écrasé par une mise à jour. Ce qui est appris sur ce site se note ici (date, fait, source)._' > "$AGENT_DIR/notes-agent.md"
   fi
   # (redirection et non tube : ecrire_si_change doit tourner dans ce shell pour garder SESSION_A_RELANCER)
   ecrire_si_change "$AGENT_DIR/CLAUDE.md" < <({
@@ -147,8 +170,10 @@ rendre_claude_md() {
     render_section "$TPL_SRC/00-role.md"; echo
     render_section "$TPL_SRC/10-dimotic-mcp.md"; echo
     if [ -d "$HA_CONFIG_DIR" ]; then render_section "$TPL_SRC/20-ha-config.md"; echo; fi
+    render_section "$TPL_SRC/80-notes-agent.md"; echo
     render_section "$TPL_SRC/90-securite.md"
-    if [ -s "$AGENT_DIR/site.md" ]; then echo; cat "$AGENT_DIR/site.md"; fi
+    if [ -s "$AGENT_DIR/site-modele.md" ]; then echo; cat "$AGENT_DIR/site-modele.md"; fi
+    if [ -s "$AGENT_DIR/notes-agent.md" ]; then echo; cat "$AGENT_DIR/notes-agent.md"; fi
   })
   echo "CLAUDE.md : v$(tr -d '[:space:]' < "$TPL_SRC/VERSION") ($AGENT_DIR/CLAUDE.md)"
 }
