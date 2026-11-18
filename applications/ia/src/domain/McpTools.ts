@@ -23,6 +23,7 @@ import type { HaAppareilRenamer } from './HaAppareilRenamer';
 import type { HaEtiquetteClient } from './HaEtiquetteClient';
 import type { HaReferencesClient } from './HaReferencesClient';
 import type { HaReglageClient } from './HaReglageClient';
+import type { HaAideCalculeeClient } from './HaAideCalculeeClient';
 
 const CONFIRM_PROP = { type: 'boolean', description: 'false/absent = APERÇU seulement (rien n\'est modifié). true = exécute, À N\'UTILISER QU\'APRÈS l\'accord explicite de l\'utilisateur sur l\'aperçu.' };
 
@@ -218,6 +219,28 @@ export const HA_REGLAGE_TOOLS: McpToolDef[] = [
         confirme: CONFIRM_PROP
       },
       required: ['entity_id', 'valeur']
+    }
+  }
+];
+
+/** Aides « modèle » (template) créées dans l'interface de HA (specs v1.44 §19.11undecies). */
+export const HA_AIDE_CALCULEE_TOOLS: McpToolDef[] = [
+  {
+    name: 'lire_aide_calculee',
+    description: 'LECTURE SEULE. Lit la FORMULE d\'une aide « modèle » (capteur template créé dans l\'interface de Home Assistant : « Autres appareils » du tableau Énergie, totaux, différences…). Sans cible : liste des aides modèle. cible = entity_id, entry_id ou nom. Renvoie la formule, la valeur actuelle, l\'unité et les autres champs. Les templates écrits en YAML sont invisibles.',
+    inputSchema: { type: 'object', properties: { cible: { type: 'string', description: 'entity_id, entry_id ou nom de l\'aide (facultatif : liste)' } } }
+  },
+  {
+    name: 'modifier_aide_calculee',
+    description: 'MODIFIE la formule d\'une aide « modèle » de Home Assistant. Sans confirme:true, aperçu seulement et ne modifie RIEN : formule avant/après, rendu de chacune, commande pour revenir en arrière. Une formule dont le rendu échoue est refusée. Toujours lire_aide_calculee d\'abord et montrer l\'aperçu à l\'utilisateur.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cible: { type: 'string', description: 'entity_id, entry_id ou nom de l\'aide (lire_aide_calculee)' },
+        formule: { type: 'string', description: 'Nouvelle formule Jinja2 complète' },
+        confirme: CONFIRM_PROP
+      },
+      required: ['cible', 'formule']
     }
   }
 ];
@@ -426,6 +449,7 @@ export const MCP_TOOLS: McpToolDef[] = [
   ...HA_ETIQUETTE_TOOLS,
   ...HA_AUDIT_TOOLS,
   ...HA_REGLAGE_TOOLS,
+  ...HA_AIDE_CALCULEE_TOOLS,
   ...HA_REFERENCES_TOOLS,
   ...PILOTES_TOOLS
 ];
@@ -509,6 +533,7 @@ export interface McpToolboxDeps {
   appareils: HaAppareilRenamer;
   /** Réglages de configuration des appareils. */
   reglages: HaReglageClient;
+  aidesCalculees: HaAideCalculeeClient;
   /** Vérification des références d'entités (lecture seule). */
   references: HaReferencesClient;
   /** Gestion des pilotes via le cœur (PilotesClient). */
@@ -540,6 +565,8 @@ export class McpToolbox {
         typeof args.limite === 'number' ? args.limite : 40), null, 2);
       case 'renommer_appareil_ha': return JSON.stringify(await this.deps.appareils.renommer(String(args.device_id ?? ''), String(args.nom ?? ''), args.confirme === true), null, 2);
       case 'lire_reglages_appareil': return JSON.stringify(await this.deps.reglages.lire(String(args.cible ?? '')), null, 2);
+      case 'lire_aide_calculee': return JSON.stringify(await this.deps.aidesCalculees.lire(args.cible === undefined ? undefined : String(args.cible)), null, 2);
+      case 'modifier_aide_calculee': return JSON.stringify(await this.deps.aidesCalculees.modifier(String(args.cible ?? ''), String(args.formule ?? ''), args.confirme === true), null, 2);
       case 'modifier_reglage': return JSON.stringify(await this.deps.reglages.modifier(String(args.entity_id ?? ''), args.valeur, args.confirme === true), null, 2);
       case 'lire_etiquettes_ha': return JSON.stringify(await this.deps.etiquettes.lire(), null, 2);
       case 'etiqueter_ha': return JSON.stringify(await this.deps.etiquettes.etiqueter(

@@ -1,6 +1,6 @@
 # CHANGELOG - Historique des Spécifications
 
-**Dernière mise à jour :** 17 Novembre 2026
+**Dernière mise à jour :** 18 Novembre 2026
 
 ---
 
@@ -36,6 +36,7 @@
 | 18/10/2026 | **v7.5** | fonctionnelles-rfxcom_specs_v7.5.md | Claude | **Commandes de groupe Lighting2** (§12bis) : reçues avec `unitCode = 1`, elles prenaient l'identifiant du bouton 1 ; le numéro de bouton est maintenant effacé et non transmis (device de groupe sans numéro, commande `<id>/0`) ; 4 vérifications |
 | 16/10/2026 | **v7.4** | fonctionnelles-rfxcom_specs_v7.4.md | Claude | **§13bis : nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v7.3 archivée. |
 | 16/10/2026 | **v1.2** | fonctionnelles-zigbee2mqtt_specs_v1.2.md | Claude | **Nommage corrigé** — lieu précis absent = lieu ; père / grand-père facultatifs, sans sens imposé. v1.1 archivée. |
+| 18/11/2026 | **v1.44** | fonctionnelles-ia_specs_v1.44.md | Claude | **Aides « modèle » (template)** (§19.11undecies) : outils MCP `lire_aide_calculee` (lecture seule) et `modifier_aide_calculee` (aperçu avec rendu, puis `confirme`) pour la formule d'un capteur modèle créé dans l'interface (cas « Autres appareils » du tableau Énergie), par l'options flow de l'entrée `template` ; jamais `core.config_entries`. À vérifier en réel sur ha2. v1.43 archivée. |
 | 17/11/2026 | **v1.43** | fonctionnelles-ia_specs_v1.43.md | Claude | **Réglages de configuration des appareils** (§19.11decies) : outils MCP `lire_reglages_appareil` (lecture seule) et `modifier_reglage` (aperçu puis `confirme`) pour les select / number / switch de catégorie « configuration », que `executer_action` ne voit pas ; valeur contrôlée (options, bornes et pas, on/off) ; appareil sur pile = appliqué au prochain réveil. |
 | 13/11/2026 | **v1.42** | fonctionnelles-ia_specs_v1.42.md | Claude | **Table `satellites` supprimée** (§16.14) : lieu d'origine = pièce HA transmise par le repère du satellite (demande utilisateur) ; `radio.lecteurs` de ha2 complété de la clé `salle`. **Transcription « Et tant » = « éteins »** (§16.17) : phrase entière remplacée avant traitement, synonyme ajouté au vocabulaire de l'interpréteur. v1.41 archivée. |
 | 12/11/2026 | **v1.41** | fonctionnelles-ia_specs_v1.41.md | Claude | **Texte reçu suspect refusé avant Mistral** (§16.16) : transcription dans une autre langue ou vide → « Je n'ai pas compris. Peux-tu répéter ? », sans appel à Mistral ni exécution (cas du 12/11 15 h 42). v1.40 archivée. |

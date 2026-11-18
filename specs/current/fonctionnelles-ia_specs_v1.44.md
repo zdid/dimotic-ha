@@ -1,9 +1,14 @@
 # Spécifications Fonctionnelles — Application IA
 
-**Version :** 1.43
-**Date :** 17 Novembre 2026
+**Version :** 1.44
+**Date :** 18 Novembre 2026
 **Statut :** Document de référence pour l'application `applications/ia`
 
+> **v1.44** : **aides « modèle » (template)** (§19.11undecies) — outils MCP `lire_aide_calculee` (lecture seule) et
+> `modifier_aide_calculee` (aperçu puis `confirme`) : lecture et correction de la formule d'un capteur modèle créé dans
+> l'interface de HA (cas « Autres appareils » du tableau Énergie), par l'options flow de l'entrée `template` — jamais par
+> `.storage/core.config_entries` (secrets). Demande du 18/11 (agent d'automatisation bloqué sur la formule).
+>
 > **v1.43** : **réglages de configuration des appareils** (§19.11decies) — outils MCP `lire_reglages_appareil` (lecture
 > seule) et `modifier_reglage` (aperçu puis `confirme`) : select / number / switch de catégorie « configuration »
 > (sensibilité d'un détecteur, mode de LED, seuils…), que `executer_action` ne voit pas (entités principales seulement).
@@ -1549,6 +1554,23 @@ mode de LED ou mémoire d'état d'une prise, seuils de protection d'un module…
 - Enchaînement guidé : `lire_reglages_appareil` → proposer la valeur à l'utilisateur → `modifier_reglage` en aperçu → accord
   → `confirme: true` → relire.
 - Code : `applications/ia/src/domain/HaReglageClient.ts`, tests `__tests__/HaReglageClient.test.ts`.
+
+### 19.11undecies Aides « modèle » : `lire_aide_calculee`, `modifier_aide_calculee` (nouveau v1.44)
+
+La formule d'un capteur **modèle** (template) créé dans l'interface de HA est dans les `options` d'une config entry du domaine
+`template` (`.storage/core.config_entries`, fichier qui contient aussi les secrets de toutes les intégrations : **jamais lu**).
+Elle n'est ni dans le registre des entités ni dans `config_entries/get`. Chemin retenu : l'**options flow** de l'entrée (REST,
+`callRest` du cœur), qui rend la formule en valeur suggérée ; ouvert, lu, puis **abandonné** (`DELETE`).
+
+| Outil | Rôle |
+|---|---|
+| `lire_aide_calculee` | lecture seule. Sans `cible` : liste des aides modèle (entry_id, titre, entity_id, valeur). Avec `cible` (entity_id, entry_id ou nom exact/partiel unique) : formule, valeur actuelle, unité, autres champs du formulaire. |
+| `modifier_aide_calculee` | `cible`, `formule`, `confirme`. Seulement une entrée du domaine `template`. Aperçu (sans `confirme`) : formule avant/après, **rendu** de chacune (`POST /api/template`), commande pour revenir en arrière ; une formule dont le rendu échoue est refusée. Avec `confirme: true` : le flux est rouvert et **tous** les champs sont renvoyés (un champ facultatif omis serait effacé) avec la nouvelle formule ; flux abandonné en cas d'échec. |
+
+- Les templates écrits en **YAML** (`configuration.yaml`, packages) ne sont pas des config entries : invisibles et non modifiables.
+- Enchaînement : `lire_aide_calculee` → lister les entités citées par la formule → proposer la nouvelle formule → aperçu → accord → `confirme: true` → relire.
+- Code : `applications/ia/src/domain/HaAideCalculeeClient.ts`, tests `__tests__/HaAideCalculeeClient.test.ts` (3, avec un HA simulé).
+- **Non vérifié en réel** : le contenu exact du formulaire de l'options flow (`suggested_value` de `state`) sur ha2 est à confirmer par une première lecture.
 
 ### 19.12 Gestion des pilotes (nouveau v1.24)
 

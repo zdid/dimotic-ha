@@ -36,6 +36,7 @@ import { HaPieceClient } from './HaPieceClient';
 import { HaEtiquetteClient } from './HaEtiquetteClient';
 import { HaAppareilRenamer } from './HaAppareilRenamer';
 import { HaReglageClient } from './HaReglageClient';
+import { HaAideCalculeeClient } from './HaAideCalculeeClient';
 import { HaAuditNomsClient } from './HaAuditNomsClient';
 import { HaReferencesClient } from './HaReferencesClient';
 import { IA_TOOLS } from './tools';
@@ -385,6 +386,7 @@ export class IaService implements IIaService {
       audit: new HaAuditNomsClient(this.haBridgeClient),
       appareils: new HaAppareilRenamer(this.haBridgeClient),
       reglages: new HaReglageClient(this.haBridgeClient),
+      aidesCalculees: new HaAideCalculeeClient(this.haBridgeClient),
       references: new HaReferencesClient(this.haBridgeClient, automations, tableauxClient, scriptsClient),
       aides: new HaAideClient(this.eventBus, path.join(process.env.PROJECT_ROOT || process.cwd(), 'data', 'ia')),
       entites: new HaEntiteRenamer(this.haBridgeClient, async (entityId) => {
