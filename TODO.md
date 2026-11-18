@@ -1,5 +1,10 @@
 # Liste des problèmes à résoudre
 
+## 🐛 supervision — « dernière version » fausse dans HA (relevé 18/11/2026) — PRIORITÉ FAIBLE, pas de correction demandée
+- **Constaté** : pendant la mise à jour 4.3.1 de l'orangepi et de stfort, l'entité « Mise à jour » de HA affichait « 4.2.1 » (installée « dev » pour stfort) alors que le hub (`dimotic/supervision/hub/latest-version`) disait 4.3.1 et que les agents `maj` installaient bien la 4.3.1 (journaux `maj.log`). Seul l'affichage est faux ; rien d'installé de travers.
+- **Cause probable** (non prouvée) : chaque supervision publie, en retenu, `dimotic/supervision/maj-etat/<machine>` pour toutes les machines qu'elle connaît, avec SA dernière version du hub (relue toutes les `hubRefreshHours`) ; une supervision restée sur une lecture antérieure à la publication de la 4.3.1 (falbala en 4.2.1 ?) écrase la bonne valeur. Le « dev » de stfort reste inexpliqué.
+- **Piste si on le reprend** : un seul publicateur par machine (la supervision de la machine elle-même), ou latest_version relue du sujet `hub/latest-version` plutôt que d'une lecture locale. Se corrige de lui-même quand toutes les machines relisent le hub.
+
 ## 🐛 RFXCOM — protocoles matériel : conception à revoir (relevé le 14/11/2026, pas de correction faite)
 Constaté en relisant `RfxComService` (updateEnabledHardwareProtocols, pushEnabledHardwareProtocols) et la spec rfxcom v7.6 §5.6 ; l'utilisateur a activé X10 en plus par l'onglet « 📶 Protocoles » (page « ⚙️ Devices & Récepteurs », `/rfxcom/config`) : fonctionne.
 - **Erreur** : « liste vide = tous » → décocher le DERNIER protocole enregistre `[]`, relu comme TOUS (impossible de tout couper, effet inverse).
