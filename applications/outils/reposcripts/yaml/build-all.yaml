@@ -10,4 +10,4 @@ requiresSudo: false
 execution:
   machine: falbala_817412
   utilisateur: didier
-  dossier: /home/didier/ownCloud/dimotic-ha
+  dossier: /home/didier/NeWDevelopment/dimotic-ha
