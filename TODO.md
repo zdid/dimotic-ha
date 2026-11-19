@@ -11,7 +11,7 @@
 - **Cause probable** (non prouvée) : chaque supervision publie, en retenu, `dimotic/supervision/maj-etat/<machine>` pour toutes les machines qu'elle connaît, avec SA dernière version du hub (relue toutes les `hubRefreshHours`) ; une supervision restée sur une lecture antérieure à la publication de la 4.3.1 (falbala en 4.2.1 ?) écrase la bonne valeur. Le « dev » de stfort reste inexpliqué.
 - **Piste si on le reprend** : un seul publicateur par machine (la supervision de la machine elle-même), ou latest_version relue du sujet `hub/latest-version` plutôt que d'une lecture locale. Se corrige de lui-même quand toutes les machines relisent le hub.
 
-## 🐛 RFXCOM — protocoles matériel : conception à revoir (relevé le 14/11/2026, pas de correction faite)
+## 🐛 RFXCOM — protocoles matériel : conception à revoir (relevé le 14/11/2026, pas de correction faite) — PRIORITÉ FAIBLE
 Constaté en relisant `RfxComService` (updateEnabledHardwareProtocols, pushEnabledHardwareProtocols) et la spec rfxcom v7.6 §5.6 ; l'utilisateur a activé X10 en plus par l'onglet « 📶 Protocoles » (page « ⚙️ Devices & Récepteurs », `/rfxcom/config`) : fonctionne.
 - **Erreur** : « liste vide = tous » → décocher le DERNIER protocole enregistre `[]`, relu comme TOUS (impossible de tout couper, effet inverse).
 - « Tous » inclut **UNDECODED** (mode de mise au point : remonte le bruit) et tous les protocoles inutiles (fausses détections) ; c'est l'état par défaut (config vide).
@@ -19,25 +19,26 @@ Constaté en relisant `RfxComService` (updateEnabledHardwareProtocols, pushEnabl
 - Normalisation « tout coché » par comparaison de longueurs, pas des noms.
 - Piste : liste explicite (vide = rien), défaut déduit des devices déclarés (jamais UNDECODED), onglet indiquant les devices qui dépendent de chaque protocole + avertissement. Nouvelle version de spec avant tout code.
 
-## 🐛 ia / voix — « éteins » transcrit « Et tant. », Mistral RALLUME la chambre du bas (constaté 13/11/2026 10:49, hasat-respeaker → ha2) — NON CORRIGÉ
+## 🐛 ia / voix — « éteins » transcrit « Et tant. », Mistral RALLUME la chambre du bas (constaté 13/11/2026 10:49, hasat-respeaker → ha2) — PROBABLEMENT RÉGLÉ (avis utilisateur 19/11, à confirmer)
 - **Trace** (`data/ia/traces-vocales/2026-11-13.jsonl`) : 10:48:50 « Allume. » → interpréteur, lumière + dressing de la chambre du bas allumés (vérifié) ; 10:49:08 « Et tant. » (dit : « éteins ») → non reconnu par l'interpréteur → Mistral appelle `executer_action {verbe: allumer, quoi: lumière, lieux: [chambre du bas]}` → rallumé, réponse « C'est fait, j'ai allumé ».
 - **Défaut 1 — transcription** : mots courts mal reconnus par Voxtral sur ce micro (langue `fr` transmise ? cf. entrée du 12/11).
 - **Défaut 2 — ia** : Mistral exécute une action dont le verbe n'est pas dans la phrase (devinée d'après l'échange précédent). Piste : refuser `executer_action` quand la question ne contient aucun verbe d'action correspondant → « Je n'ai pas compris. Peux-tu répéter ? ».
 
-## 🐛 Poêle (poele-thermostat-sam) et assembleur ESP de ha2 : adresses d'avant la renumérotation (constaté 12/11/2026) — POÊLE RÉPARÉ, ASSEMBLEUR DE ha2 CORRIGÉ (12/11 18 h 49)
+## ✅ Poêle (poele-thermostat-sam) et assembleur ESP de ha2 : adresses d'avant la renumérotation (constaté 12/11/2026) — RÉGLÉ : fiches renumérotées et broker du site (v1.8) présents dans le dépôt ET dans l'image 4.3.1, l'opi4pro tourne sur l'image (vérifié le 19/11/2026)
+- **19/11/2026** : la mise à jour 4.3.1 a mis de côté les applications externes de l'opi4pro (`backups/apps-externes/*_20261118-094959_avant-4.3.1`) ; restent dans `data/applications/` des dossiers résiduels sans `package.json` (`esps-assemble` : appareils/bibliotheque/src/tools ; `ia/interpreter` ; `planificateur/package-lock.json`), plus anciens que l'image — à supprimer après accord.
 - **Cause** : le module relais du poêle n'avait jamais été reprogrammé après la renumérotation (broker 192.168.1.51 compilé) → plus de MQTT → thermostat « Poêle » sans relais.
 - **Erreur commise le 12/11** : recompilé d'abord depuis l'ancien fichier autonome `/docker/esphome/config/poele-thermostat-sam.yaml` (plus la référence) → autre `unique_id`, doublon `switch.salle_poele_switch_thermostat_salle_rez_de_chaussee_maison` dans HA. Rien à voir avec la version d'ESPHome (2025.11.2, inchangée depuis 11 mois — pas besoin de la figer).
 - **Réparé** : paquet officiel de l'assembleur (r1, 12/11) recompilé avec le broker corrigé (`/docker/esphome/config/_paquet-poele-r1/`) et téléversé → `unique_id` d'origine `840d8ea9f97b-switch-649aea45` (`switch.salle_switch_thermostat_switch`) et les 5 textes de taxonomie revenus ; découverte du doublon effacée sur le broker.
 - **Conception corrigée (12/11, assembleur v1.8 §3.13)** : le broker n'est plus dans les fiches ; `generes/site.yaml` généré d'après le paramètre MQTT général de dimotic-ha (`ha.mqtt`), `mqtt.hote` de l'application vidé sur ha2 ; déployé sur ha2 (racine externe, sauvegarde `backups/esps-assemble_backup_2026-11-12_avant-broker-du-site`) ; contrôle : paquet r3 sans broker dans la fiche, firmware compilé par l'usine avec 192.168.178.51. Racine externe de falbala (`data/applications/esps-assemble`) pas mise à jour (instance non utilisée pour l'assemblage). À publier dans la prochaine image.
 - **Assembleur de ha2 corrigé (12/11)** : racine externe `data/applications/esps-assemble` posée (copie de l'image + 6 fiches renumérotées, copies `*.avant-renum_2026-11-12`), basculé à chaud ; paquet de contrôle r2 avec `broker: 192.168.178.51`. À reporter dans la prochaine image (fiches du dépôt).
 - **Avant correction** : l'assembleur de **ha2** tournait depuis l'**image** : ses fiches (`/app/applications/esps-assemble/appareils/`) ont encore 192.168.1.x (seule la copie de falbala a été renumérotée le 11/11) → le déployer par la racine externe `data/applications/esps-assemble` de ha2 avec les fiches renumérotées, sinon toute nouvelle fabrication recompile l'ancienne adresse. Le « poseur » (téléversement OTA) est inactif sur falbala. Vérifier ensuite essai-cuisine-ete (absent du broker). Supprimer dans HA l'entité doublon si elle reste (orpheline).
-## 🐛 ia / voix — « allume le plan de travail » : transcrit en arabe, réponse qui ressemble à une confirmation, rien exécuté (constaté 12/11/2026 15:42, hasat-cuisine → ha2) — NON CORRIGÉ
+## 🐛 ia / voix — « allume le plan de travail » : transcrit en arabe, réponse qui ressemble à une confirmation, rien exécuté (constaté 12/11/2026 15:42, hasat-cuisine → ha2) — PRIORITÉ FAIBLE (pas reproduit depuis, 19/11)
 - **Trace (mémoire d'ia, `ia:exchanges:list`)** : question reçue `أدوم لقلون خبايل` → réponse `Allume la lumière de la cuisine.` ; aucun appel d'outil, aucun ordre au planificateur ; `light.lumiere_plan_de_travail_cuisine_rez_de_chaussee` inchangée (historique HA).
 - **Défaut 1 — langue de Voxtral** : le pipeline HA est en `fr`, mais l'intégration HACS `mistral_conversation` (STT Voxtral) a rendu de l'arabe ; à vérifier : paramètre de langue transmis à l'API (`language=fr`) par `custom_components/mistral_conversation/stt.py`.
 - **Défaut 2 — ia** (CORRIGÉ en partie, ia v1.41 §16.16 : texte non latin ou vide refusé avant Mistral ; reste le garde-fou des réponses impératives) : une question incompréhensible part à Mistral, qui « traduit » et répond une phrase à l'impératif ; le garde-fou §16.12 (annonce d'action sans `executer_action`) ne la reconnaît pas. À étudier : rejeter une question majoritairement non latine / non française avant Mistral (« je n'ai pas compris »), et élargir le garde-fou aux réponses qui reprennent un verbe d'action sans exécution.
 - **Trace de bout en bout** : livrée (ia v1.40 §16.15, `data/ia/traces-vocales/`).
 
-## 🐛 arbreouquoi — journal noyé : arbre des lieux rediffusé toutes les 5 s (constaté 12/11/2026, ha2) — APPLICATION DÉSACTIVÉE sur ha2, NON CORRIGÉ
+## 🐛 arbreouquoi — journal noyé : arbre des lieux rediffusé toutes les 5 s (constaté 12/11/2026, ha2) — APPLICATION DÉSACTIVÉE PARTOUT (opi4pro, stfort, noisy, noisy3 le 19/11/2026 ; orangepizero2 et falbala : absent de leurs annonces, vérifié par MQTT), NON CORRIGÉ
 - **Symptôme** : `[SocketBridge] Broadcast arbreouquoi:tree:structure` avec l'arbre complet toutes les 5 s → ≈ 11 Mo de journal par minute, rotation à la minute : le journal de dimotic-ha de ha2 ne couvrait plus que ≈ 5 minutes (trace d'une commande vocale de 15 h 42 perdue).
 - **Mesure prise (12/11, demande de l'utilisateur)** : `arbreouquoi` désactivée à chaud sur ha2 (message `app:applications:disable`, comme le bouton de l'interface ; copie `data/core/machine_config.yaml.bak-20261112-avant-desactivation-arbreouquoi`). Journal tombé à ≈ 30 Ko/min. ia et planificateur n'en dépendent pas.
 - **À faire** : trouver ce qui redéclenche la diffusion toutes les 5 s (minuterie, rafraîchissement de la structure HA ?), ne diffuser que sur changement réel, et ne pas journaliser le contenu complet en INFO ; puis réactiver.
@@ -51,7 +52,7 @@ Constaté en relisant `RfxComService` (updateEnabledHardwareProtocols, pushEnabl
 
 ## ✅ ia v1.38 / planificateur v1.13 — radios à la voix (11/11/2026) — FAIT, déployé sur ha2 (racine externe), vérifié par HA ; à valider à la voix sur hasat3 et à publier en image
 
-## 🐛 ia / planificateur — assistant vocal (hasat3 → ha2) : réponses techniques et succès annoncés sans action (constaté 11/11/2026, ha2) — CORRIGÉ (ia v1.37, commit sur fix/ia-reponses-vocales), déployé sur ha2 par la racine externe, À VALIDER EN RÉEL
+## ✅ ia / planificateur — assistant vocal (hasat3 → ha2) : réponses techniques et succès annoncés sans action (constaté 11/11/2026, ha2) — CORRIGÉ (ia v1.37, commit sur fix/ia-reponses-vocales), déployé sur ha2 par la racine externe, RÉGLÉ (confirmé par l'utilisateur le 19/11/2026)
 - **Chaîne testée** : hasat3 (« Okay Nabu ») → whisper `small-int8` (Pi 5 .167) → pipeline HA « Home Assistant » → intégration Ollama → ia de ha2 (`192.168.178.51:11434`) → piper. Traces : `assist_pipeline/pipeline_debug` de HA.
 - **Défaut 1 — réponse technique lue à voix haute** : l'interpréteur déterministe renvoie tel quel le message de `ExecutionEngine.executeImmediateAction` (`applications/planificateur/src/domain/execution.ts`) : « homeassistant.turn_on exécuté sur light.salle_salon. ». Attendu : phrase naturelle (« J'ai allumé la lumière du salon »).
 - **Défaut 2 — succès annoncé pour une entité inexistante** : 16:08:23 « Allume la bibliothèque » → réponse « homeassistant.turn_on exécuté sur light.bibliothèque_bibliothèque. » ; l'entité n'existe pas (HA 404), aucune ligne `ExecutionEngine: Exécution` dans le journal, `light.salle_bibliotheque` restée off.
@@ -60,7 +61,7 @@ Constaté en relisant `RfxComService` (updateEnabledHardwareProtocols, pushEnabl
 - **Cause des défauts 2 et 3 (même mécanisme)** : l'intégration Ollama de HA renvoie l'historique de la conversation du satellite (même `conversation_id` pendant quelques minutes). `isFreshExchange` (`IaService.ts`) = « aucun message assistant » → dès le 2e tour, cache et interpréteur sont **sautés** et tout part à Mistral, qui voit dans l'historique les réponses techniques du défaut 1 et les **imite en texte libre sans appeler `executer_action`** (16:08:23 : aucun Round ni Interpréteur dans le journal = réponse texte directe de Mistral ; 16:08:50 : Round 1 `lister_entites` puis texte inventé). Le défaut 1 est donc la source des défauts 2 et 3.
 - **Correctif (validé par l utilisateur, fait le 11/11)** : (a) réponse parlée naturelle pour une action immédiate ; (b) interpréteur/cache tentés aussi quand le dernier tour assistant était une action conclue (pas une demande de précision) ; (c) garde-fou : une réponse Mistral qui annonce une action sans `executer_action` réussi dans le même échange est remplacée par un refus explicite.
 
-## 🐛 core — installation neuve : impossible d'enregistrer le seul « site » tant que les paramètres HA/MQTT manquent (constaté 13/10/2026, instance réelle de falbala) — NON CORRIGÉ (demande utilisateur : noter seulement)
+## 🐛 core — installation neuve : impossible d'enregistrer le seul « site » tant que les paramètres HA/MQTT manquent (constaté 13/10/2026, instance réelle de falbala) — NON CORRIGÉ — PRIORITÉ MOYENNE (« très embêtant », 19/11)
 - **Symptôme** : sur une instance toute neuve (`/docker/dimotic-ha` de falbala, image 3.7.0, identité `falbala_410210`), l'utilisateur saisit uniquement le **site** dans l'interface ; l'enregistrement est **refusé** parce que les paramètres des Web-services (HA WebSocket, MQTT…) sont absents. Retour de l'utilisateur : « c'est nul, on est sans cesse embêté avec ces contrôles ».
 - **Attendu** : pouvoir enregistrer une section indépendante (le site) sans être bloqué par la validation d'autres sections encore vides — sur une installation neuve, rien n'est rempli au départ.
 - **Contournement appliqué (13/10)** : fichiers écrits à la main dans `/docker/dimotic-ha/data` (site `stfort`, HA WS + MQTT de ha2 repris du dev, jeton dans `secrets_config.yaml` 0600, config `sauvegarde` du site) ; instance redémarrée : HA WebSocket authentifié (822 entités), MQTT connecté. Sauvegarde de l'état initial : `backups/falbala-reel/core_backup_2026-10-13_avant-parametrage`.
@@ -90,7 +91,7 @@ Constaté en relisant `RfxComService` (updateEnabledHardwareProtocols, pushEnabl
 - Sauvegarde : au core = serveur Nextcloud, utilisateur, mot de passe d application ; dans l application = machines sauvegardées, état, assistant de restauration ; l envoi script + cron va à l écran Déploiement.
 - **Spec écrite** : `specs/current/conception-agents-distants-reglages_specs_v1.0.md` (D1–D7, plan en 6 étapes, 5 points ouverts §10). Inclut le déploiement de l'agent **DDSU666-H** (compteurmodbus), aujourd'hui posé à la main sur noisy.
 
-## 🔴 NOISY (RPi3) BLOQUÉ depuis le 02/10/2026 ~12h25 — en attente d'une coupure d'alimentation sur place
+## ✅ NOISY (RPi3) BLOQUÉ le 02/10/2026 ~12h25 — RÉGLÉ (confirmé par l'utilisateur le 19/11/2026 ; noisy joignable en SSH par le port 2222)
 - Cause probable (faute de Claude) : `ls -dt /logs/*` sur un répertoire `/logs` géant (entrée de 158 Mo = des millions de fichiers) → RPi3 saturé ; plus de SSH ni de Caddy (le domaine DuckDNS de noisy), accès à noisy2 coupé aussi (rebond par noisy).
 - **À reprendre ensuite (sans jamais parcourir `/logs` en entier)** :
   1. `/logs` : **03/10, l utilisateur a renommé `/logs` en `/logs2` et supprimé 1 560 000 fichiers.** `/logs2` supprimé. **Cause trouvée et corrigée (03/10)** : module `zigbee` de l ancienne domotique (clé CC2531 `0451:16a8` absente) relancé toutes les ~12 s, un `zigbee2mqtt_*.log` vide à chaque fois ; désactivé par `"host": ["none"]` dans `/home/datadomo/SUPERVISEDNODES.json` (sur une machine non maître, `autostart: false` est ignoré). Sauvegarde `SUPERVISEDNODES.json.bak-20261003-avant-zigbee-off`. Restent à vérifier : `x10`, `smsusb` (matériel absent) — ne PAS toucher `arexx`.
@@ -114,7 +115,7 @@ Constaté en relisant `RfxComService` (updateEnabledHardwareProtocols, pushEnabl
 - Lit adresse 11, 9600 8N1, port `/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0`, toutes les 5 s ; publie la découverte HA (retenue) et l'état JSON `ddsu666h/noisy/state` sur le **broker de noisy2** (192.168.1.201:1883, `homeassistant/`) : **10 entités créées dans le HA de noisy2** (`sensor.compteur_reseau_noisy_ddsu666_h_*`). Puissance positive = soutirage, négative = injection.
 - **Reste** : comparer avec l'afficheur du compteur ; renommer les entités (noms longs) ; brancher Omnibattery (entité de puissance du réseau) quand la batterie est installée ; décider si le script entre dans l'app `outils` / un modèle d'installation.
 
-## 🟡 DÉPLOIEMENT — sur la machine LOCALE, le conteneur Docker ne redémarrait pas (constaté 30/09/2026 sur noisy2) — CORRIGÉ et VALIDÉ sur ha2 le 01/10/2026, reste à publier dans l'image
+## ✅ DÉPLOIEMENT — sur la machine LOCALE, le conteneur Docker ne redémarrait pas (constaté 30/09/2026 sur noisy2) — CORRIGÉ et VALIDÉ sur ha2 le 01/10/2026 ; publié (commit 149117b du 01/10, présent dans les images 4.x — vérifié le 19/11)
 - **Constat** : depuis l'écran Déploiement, déployer vers la machine locale (celle qui porte le core) ne relance pas le conteneur.
 - **Code concerné** : `applications/core/src/application/CoreDeployService.ts`, `deploy()` : `docker compose pull && docker compose up -d` via SSH (`runSshStreaming`), puis `waitHealthy()`.
 - **Pistes, à vérifier** (aucune prouvée) :
@@ -124,7 +125,7 @@ Constaté en relisant `RfxComService` (updateEnabledHardwareProtocols, pushEnabl
 - **Cause probable confirmée par l'utilisateur (noisy2, 01/10/2026)** : `docker compose up -d` sans `nohup` — l'ancien conteneur arrêté tue le client SSH, donc `compose` est interrompu avant la recréation. **Correction écrite (01/10/2026)** dans `CoreDeployService.deploy()` (`up -d` détaché par `setsid nohup`, code de sortie relu dans `.deploy-up.rc`) ; appliquée à la main dans le conteneur ha2 (fichier `.orig-2026-10-01` conservé), **validé en réel le 01/10/2026 (utilisateur) : ha2 déployé sur lui-même, l'application redémarre bien**. Pas dans l'image publiée : à reconstruire/publier pour noisy2 et les autres (le conteneur ha2 a depuis été recréé depuis l'image publiée, donc sans le correctif).
 - **À demander/observer** : sur quelle machine (falbala ou une autre), ce que montre le journal de l'étape `pull-up`, et `docker ps` avant/après.
 
-## 🟡 TASMOTA — voies et thermostats réalisés le 30/09/2026 (spec v1.3 / v1.4), points à valider en réel
+## ⏹️ TASMOTA — voies et thermostats réalisés le 30/09/2026 (spec v1.3 / v1.4), points à valider en réel — ABANDONNÉ : on laisse tomber les points restants (décision utilisateur 19/11/2026)
 
 - **Thermostat ESP32 (Berry)** : essayé en réel sur le R4 (dépôt par `Br`, régulation, `persist`, MQTT natif,
   chaîne complète depuis HA, retrait, **remise d'usine + remise en service**). **Bogue corrigé** : « Remise d'usine »
@@ -143,15 +144,16 @@ sur falbala (`~/bin/espdisplay-agent-run.sh`, essai réel par SSH). **Reste** : 
 falbala (`ssh-copy-id`, une fois) et décider d'une restriction `command=` ; vérifier dans le navigateur la
 page « Écrans ESP » (champ Hôte obligatoire).
 
-## 🔴 HA2 (orangepi4pro, .51) N'EST PLUS SAUVEGARDÉ depuis son remplacement (constaté 25/09/2026)
-- Ni /dimotic-backup/nextcloud-backup.sh, ni cron, ni /dimotic-secrets/ sur la machine restaurée : la
-  restauration remet /docker mais pas le script de sauvegarde (hors /docker). stfort, lui, sauvegarde
-  bien (status.json du 25/09 03:05, succès).
-- À faire tout de suite : Sauvegarde/Restauration → ligne ha2 → « 📤 Pousser » (mot de passe Nextcloud).
-- À corriger ensuite : l'assistant de restauration doit rappeler (ou faire) cette poussée après
-  l'étape 2 — sinon toute machine restaurée cesse d'être sauvegardée sans que rien ne le signale.
+## 🟢 Sauvegarde — l'assistant de restauration ne rappelle pas de repousser le script de sauvegarde (constaté 25/09/2026) — PRIORITÉ FAIBLE
+- **Rétabli et vérifié le 19/11/2026** : l'opi4pro (.51) est de nouveau sauvegardé —
+  `/dimotic-backup/nextcloud-backup.sh` (reposé le 26/10), cron root `5 3 * * *`, `status.json` du
+  19/11 03:06 en succès (docker + dimotic-ha-addons, journalier ; hebdomadaire le 15/11).
+- **Reste à corriger** : la restauration remet /docker mais pas le script de sauvegarde (hors /docker) ;
+  l'assistant de restauration doit rappeler (ou faire) la poussée « 📤 Pousser » après l'étape 2 —
+  sinon toute machine restaurée cesse d'être sauvegardée sans que rien ne le signale.
 
 ## 🟡 SUPERVISION — implémentée (spec v1.3), vérifiée en local seulement (25/09/2026)
+- **19/11/2026 (vérifié sur le broker de Saint-Fort)** : stfort_578666, ha2_811876 (opi4pro), orangepizero2_453502 (.130) et falbala_410210 publient bien leur annonce `dimotic/core/<machine>/known-apps` (retenue, à jour). Constat : **toutes annoncent `dimoticVersion: "dev"`** (piste pour l'entrée « dernière version fausse ») ; ha2 annonce encore l'alias `192.168.1.254` (EMMA).
 
 - Reste l'étape 5 (réel multi-machines) : sélection faite sur une machine retrouvée sur une autre, application arrêtée visible en quelques secondes, machine débranchée « perdue » en ~90 s — nécessite une image Docker publiée.
 - ✅ Adresses multiples (ha2 .51 ethernet / .106 wifi) : corrigé en v1.4.
@@ -184,7 +186,7 @@ page « Écrans ESP » (champ Hôte obligatoire).
 - **Radio retenue (26/09/2026) : EBYTE E95-DTU(433L20-485)-V8** (LoRa 433 MHz, 20 dBm, RS485 transparent, half-duplex, alimentation 8–28 V DC). Débit radio (« air rate ») 0,3k à 19,2k, **2,4k par défaut** : c'est lui qui limite, pas les 9600 bauds série → à monter (9,6k/19,2k) vu les 70 m. Réglages identiques des deux côtés (canal, débit radio, adresse) par le logiciel EBYTE en mode configuration. ESP32 alimenté depuis la même alimentation 12/24 V par un petit abaisseur DC-DC. Vérifier la limite de temps d'émission de la bande 433 MHz (rythme d'interrogation).
 - Face à GARAGE1 : < 1 W, démarrage instantané, pas de carte SD ; mais micrologiciel spécifique, broker limité à quelques clients (suffisant ici), mises à jour sur place par le Wi-Fi du garage.
 
-## 🟡 OUTILS — préparation de carte SD : passage à Trixie + cloud-init, étapes réunies — FAIT le 26/09/2026 (spec outils v1.2 §7.2), reste l'essai sur un vrai Pi
+## 🟢 OUTILS — préparation de carte SD : passage à Trixie + cloud-init, étapes réunies — FAIT le 26/09/2026 (spec outils v1.2 §7.2), reste l'essai sur un vrai Pi — PROJET, PRIORITÉ FAIBLE (19/11/2026)
 
 - ✅ Fait et vérifié sur falbala (images inspectées, arrêt au choix de la carte) : trixie-lite ET bookworm-lite, image de base en cache (une par distribution/architecture), nettoyage avant clonage, questions toutes au départ (WiFi compris), un seul script, pause pour la carte avec « q », reprise directe à la relance.
 - ✅ **bookworm validé en réel le 27/09/2026** sur le Pi 1 « rs485garage » (192.168.1.179) : nom, utilisateur didier + clés, root par clé dimotic-ha, Wi-Fi par la clé Edimax, Docker/containerd actifs, Node/npm/serialport/mqtt, carte agrandie (29 Go), clés d'hôte SSH régénérées, machine-id unique.
@@ -461,14 +463,14 @@ page « Écrans ESP » (champ Hôte obligatoire).
   local** avec pont filtré vers ha2, **dimotic-ha local** (supervisé comme les autres machines), **découvertes Tasmota via nommage**
   (voir TASMOTA ci-dessus, pas de renommage dans le pont). **Après** l'étude Tasmota.
 
-## ⏸️ OUTILS — sécurité de l'exécution par SSH (décision utilisateur 25/09/2026 : « à noter, pour l'instant on fait »)
+## ⏸️ OUTILS — sécurité de l'exécution par SSH (décision utilisateur 25/09/2026 : « à noter, pour l'instant on fait ») — 19/11/2026 : retenu = un JOURNAL DES EXÉCUTIONS, travail à chiffrer
 - L'exécution d'un script depuis la page Outils donne un accès root à distance depuis une page web
   sans mot de passe, ouverte au réseau local. À faire plus tard : confirmation affichant script +
   machine + utilisateur avant lancement ; journal de chaque exécution (qui, quand, où, code de
   retour) dans data/outils/ ; éventuellement exécution autorisée seulement depuis localhost ou
   derrière un mot de passe.
 
-## 🔴 ESPDISPLAY — revue de code (24/09/2026) — constats, rien corrigé
+## 🟡 ESPDISPLAY — revue de code (24/09/2026) — constats, rien corrigé — PRIORITÉ MOYENNE, projet à terminer (19/11)
 - 🟠 Config jamais relue (process séparé, ni `reload()` ni écoute de l'enregistrement) → changer
   l'hôte distant / le conteneur esphome depuis l'écran n'a aucun effet avant redémarrage.
 - 🟠 Pipeline (compilation locale ou SSH) sans délai d'expiration → une compilation/SSH bloquée ne
@@ -477,7 +479,7 @@ page « Écrans ESP » (champ Hôte obligatoire).
   de format côté espdisplay.
 - 🟡 Sortie du pipeline accumulée entièrement en mémoire (logs de compilation ESPHome volumineux).
 
-## 🟡 SCRIPTSHA + HAPLAN + OUTILS — revue de code (24/09/2026) — CORRIGÉ (scriptsha v1.3, haplan v1.8 ; outils : pas de spec dédiée), à valider en réel
+## ✅ SCRIPTSHA + HAPLAN + OUTILS — revue de code (24/09/2026) — CORRIGÉ (scriptsha v1.3, haplan v1.8 ; outils : pas de spec dédiée), à valider en réel — FAIT (en service via les images 4.x, clos par l'utilisateur le 19/11/2026)
 - Fait : outils (id/noms de fichiers contrôlés partout, messages lisibles), haplan (abonnement aux
   états toujours posé, verrous de déploiement avec délai d'expiration), scriptsha (délai de 30 s sur
   les requêtes vers le core, dépôt raté annulé). Vérifié hors ligne (délais raccourcis).
@@ -509,7 +511,7 @@ page « Écrans ESP » (champ Hôte obligatoire).
   silence (cas réel : 33/33 après un renommage nommage).
 - ✅ scriptsha : protection anti-boucle de la minuterie (incident du 18/08) toujours en place.
 
-## 🟡 NOMMAGE + TELEINFO + RPIGPIO — revue de code (24/09/2026) — CORRIGÉ (nommage v2.1, teleinfo v1.4, rpigpio v1.5), à valider en réel
+## ✅ NOMMAGE + TELEINFO + RPIGPIO — revue de code (24/09/2026) — CORRIGÉ (nommage v2.1, teleinfo v1.4, rpigpio v1.5), à valider en réel — FAIT (en service via les images 4.x, clos par l'utilisateur le 19/11/2026)
 - Fait : nommage sans sources MQTT propres (préfixes via la connexion du socle, migration auto,
   testée sur la vraie config de falbala), retrait propagé, taxonomies par topic, rejeu au retour de
   HA ; teleinfo/rpigpio : présence reconnectée, ADCO/GPIO uniques, mémoire alignée, bridgeInstance
@@ -541,7 +543,7 @@ page « Écrans ESP » (champ Hôte obligatoire).
 - 🟡 rpigpio : `bridgeInstance` modifié à chaud = nouveaux topics au prochain déploiement →
   entités HA en double.
 
-## 🟡 EVOO7 + AREXX — revue de code (24/09/2026) — CORRIGÉ (specs evoo7 v1.4, arexx v1.6), à valider en réel
+## ✅ EVOO7 + AREXX — revue de code (24/09/2026) — CORRIGÉ (specs evoo7 v1.4, arexx v1.6), à valider en réel — FAIT (en service via les images 4.x, clos par l'utilisateur le 19/11/2026)
 - Fait : reload() dans les deux, bridgeInstance figé à chaud (journalisé), arexx : acquisition
   relancée à chaud + entité retirée à la désélection/suppression, evoo7 : thermostat publié après
   enregistrement. Vérifié hors ligne (faux bus, config changeante). Reste : image Docker + déploiement.
@@ -563,7 +565,7 @@ page « Écrans ESP » (champ Hôte obligatoire).
   republication au démarrage quasi jamais utile (filtre 30 min) ; conforme au principe « états hors
   config » décidé pour RFXCOM, sans usure.
 
-## 🟡 RFXCOM — revue de code (24/09/2026) — CORRIGÉ (spec v6.1), à déployer/valider en réel
+## ✅ RFXCOM — revue de code (24/09/2026) — CORRIGÉ (spec v6.1), à déployer/valider en réel — FAIT (en service via les images 4.x, clos par l'utilisateur le 19/11/2026)
 - Fait (décisions utilisateur) : derniers états dans `rfxcom-derniers-etats.json` (écriture groupée
   ≤ 1/30 s + à l'arrêt, sans .bak), config réécrite seulement sur changement réel, migration auto
   (testée sur une copie de la config réelle de stfort : 43 valeurs + 23 récepteurs, config identique
@@ -585,7 +587,7 @@ page « Écrans ESP » (champ Hôte obligatoire).
 - 🟡 `stop()` : arrête la boucle de reconnexion PUIS déconnecte — la déconnexion la relance
   (sans effet réel : le process s'arrête juste après).
 
-## 🟡 Planificateur — revue de code (24/09/2026) — CORRIGÉ (spec v1.11 + ia v1.14), à valider en réel
+## ✅ Planificateur — revue de code (24/09/2026) — CORRIGÉ (spec v1.11 + ia v1.14), à valider en réel — FAIT (en service via les images 4.x, clos par l'utilisateur le 19/11/2026)
 - Fait : refonte du déclenchement (structure exécutée et recalculée en code, plus de
   réinterprétation ni de resolvedCache, conditions soleil/numérique/état en code sinon vrai/faux via
   ia `ConditionEvaluator`, repli Assist supprimé) + tous les constats ci-dessous + macro dite
@@ -633,7 +635,7 @@ page « Écrans ESP » (champ Hôte obligatoire).
 - Décision utilisateur (24/09) : condition « soleil couché / levé » évaluée en code avec le même
   calcul daté (suncalc, position HA), pas par Mistral.
 
-## 🟡 IA — revue de code (24/09/2026) — CORRIGÉ (spec v1.14), à valider en réel
+## ✅ IA — revue de code (24/09/2026) — CORRIGÉ (spec v1.14), à valider en réel — FAIT (en service via les images 4.x, clos par l'utilisateur le 19/11/2026)
 - Fait : les 5 corrections ci-dessous (build OK, corpus interpréteur 59/59, watcher vérifié :
   5 enregistrements par rename → 5 rechargements, fichier créé après coup détecté). Reste à
   vérifier en réel : planification créée par l'interpréteur puis déclenchée, commande HA répétée.
@@ -917,7 +919,7 @@ chemin « à chaud » (ProcessSupervisor), le redémarrage complet de 15 s n'est
 - Réparer `data/sauvegarde/config.yaml` (falbala) : remettre ha2 (192.168.1.51, déployé) en
   `stfort-ha2`, stfort en `stfort-stfort`, supprimer l'id `-`.
 
-## 🐛 Sauvegarde : anomalies constatées en test live (23/09/2026)
+## 🐛 Sauvegarde : anomalies constatées en test live (23/09/2026) — PRIORITÉ FAIBLE (19/11/2026)
 - ✅ Corrigé le 23/09 (spec v1.4) : import gossip supprimé ; « Pousser »/« Lancer maintenant »
   sur les données à l'écran + enregistrement automatique après poussée réussie ; mot de passe
   visible à la saisie ; id `-` (recalcul tant que la ligne est nouvelle) ; timeout 15 min.

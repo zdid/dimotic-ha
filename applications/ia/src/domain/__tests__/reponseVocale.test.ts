@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { phraseConfirmationAction, echangeLibre, annonceActionSansExecution, DEBUT_CONFIRMATION } from '../reponseVocale';
+import { phraseConfirmationAction, echangeLibre, annonceActionSansExecution, DEBUT_CONFIRMATION, texteParle } from '../reponseVocale';
 import type { OllamaMessage } from '../types';
 
 const u = (content: string): OllamaMessage => ({ role: 'user', content });
@@ -69,5 +69,30 @@ describe('transcription corrigée (specs v1.42 §16.17)', () => {
   it('phrase plus longue ou autre : pas de correction', () => {
     expect(corrigerTranscription('Et tant pis.')).toBeUndefined();
     expect(corrigerTranscription('Allume.')).toBeUndefined();
+  });
+});
+
+describe('texteParle (§16.18)', () => {
+  it('cas réel du 11/11 : code interne et gras retirés', () => {
+    expect(texteParle('"quoi_introuvable" : aucun "salons" trouvé dans les lieux connus. Vérifie avec **salon** ?'))
+      .toBe('Aucun "salons" trouvé dans les lieux connus. Vérifie avec salon ?');
+  });
+  it('erreur §0.4 au format JSON → phrase', () => {
+    expect(texteParle('{"error": "quoi_introuvable", "quoi": "radiateur", "area": "garage", "phrase_originale": "allume le radiateur du garage"}'))
+      .toBe("Je n'ai pas trouvé de radiateur dans garage.");
+  });
+  it('erreur §0.4 dans un bloc ```json', () => {
+    expect(texteParle('```json\n{"error":"quoi_introuvable","quoi":"volet"}\n```')).toBe("Je n'ai pas trouvé de volet.");
+  });
+  it('Markdown : italique, code, titre, puces, lien', () => {
+    expect(texteParle('# Réponse\n- il fait *20* degrés\n- voir `sensor.x` et [la doc](http://a)'))
+      .toBe('Réponse\nil fait 20 degrés\nvoir sensor.x et la doc');
+  });
+  it('texte propre rendu à l’identique (même objet)', () => {
+    const s = "C'est fait, j'ai allumé : lumière, salon.";
+    expect(texteParle(s)).toBe(s);
+  });
+  it('multiplication et astérisque isolé conservés', () => {
+    expect(texteParle('2 * 3 = 6')).toBe('2 * 3 = 6');
   });
 });

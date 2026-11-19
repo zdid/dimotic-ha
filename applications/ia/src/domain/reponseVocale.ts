@@ -81,3 +81,47 @@ export function annonceActionSansExecution(texte: string, executerActionOk: bool
   const t = texte.trim();
   return t.startsWith(DEBUT_CONFIRMATION) || /\b[a-z_]+\.[a-z_]+ exécuté sur\b/i.test(t);
 }
+
+/**
+ * ⭐ 19/11/2026 (specs v1.45 §16.18) — texte rendu à HA, lu tel quel par la synthèse vocale.
+ * Constat réel (11/11, hasat3) : « "quoi_introuvable" : aucun "salons" trouvé dans les lieux connus.
+ * Vérifie avec **salon** ? » — code interne et gras Markdown lus à voix haute.
+ * - erreur §0.4 (`{"error":"quoi_introuvable",…}`, éventuellement dans un bloc ```json) → phrase française ;
+ * - code `quoi_introuvable` cité dans une phrase → retiré ;
+ * - Markdown (gras, italique, code, titres, puces, liens) → texte simple.
+ * Un texte déjà propre est rendu à l'identique (l'appelant compare pour savoir s'il doit réécrire).
+ */
+export function texteParle(texte: string): string {
+  let t = texte;
+
+  // Erreur §0.4 au format JSON (avec ou sans bloc de code autour).
+  const json = t.match(/(?:```(?:json)?\s*)?(\{[^{}]*"error"\s*:\s*"quoi_introuvable"[^{}]*\})(?:\s*```)?/);
+  if (json) {
+    let phrase = "Je n'ai rien trouvé qui corresponde.";
+    try {
+      const e = JSON.parse(json[1]) as { quoi?: string; area?: string };
+      const quoi = e.quoi?.trim();
+      const lieu = e.area?.trim();
+      if (quoi) phrase = `Je n'ai pas trouvé de ${quoi}${lieu ? ` dans ${lieu}` : ''}.`;
+    } catch { /* JSON abîmé : phrase générique */ }
+    t = t.replace(json[0], phrase);
+  }
+
+  // Code interne cité en texte libre : « "quoi_introuvable" : aucun … » → « aucun … ».
+  t = t.replace(/["«]?\s*quoi_introuvable\s*["»]?\s*[:\-–—]?\s*/gi, '');
+
+  // Markdown → texte simple.
+  t = t
+    .replace(/```[a-z]*\n?([\s\S]*?)```/gi, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/(\*\*|__)(.+?)\1/g, '$2')
+    .replace(/(^|[^\w*])\*(?!\s)([^*\n]+?)\*(?!\w)/g, '$1$2')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*•]\s+/gm, '');
+
+  // Première lettre en majuscule si on a coupé le début.
+  t = t.replace(/[ \t]{2,}/g, ' ').trim();
+  if (t !== texte.trim()) t = t.charAt(0).toUpperCase() + t.slice(1);
+  return t === texte.trim() ? texte : t;
+}

@@ -42,7 +42,7 @@ import { HaReferencesClient } from './HaReferencesClient';
 import { IA_TOOLS } from './tools';
 import { translateMistralStream, extractStructuredJson, makeOllamaDoneChunk, makeOllamaErrorChunk } from './streaming';
 import type { OllamaChatRequestBody, OllamaMessage, MistralToolCall } from './types';
-import { phraseConfirmationAction, echangeLibre, annonceActionSansExecution, REPONSE_ACTION_NON_EXECUTEE, REPONSE_TEXTE_NON_COMPRIS, corrigerTranscription } from './reponseVocale';
+import { phraseConfirmationAction, echangeLibre, annonceActionSansExecution, REPONSE_ACTION_NON_EXECUTEE, REPONSE_TEXTE_NON_COMPRIS, corrigerTranscription, texteParle } from './reponseVocale';
 import { RadioService, reconnaitreCommandeRadio, DEFAULT_RADIO_CONFIG } from './radio';
 import { lieuDuSatellite } from './satellite';
 import { IA_CLIENT_EVENTS } from './socket-events';
@@ -606,6 +606,15 @@ export class IaService implements IIaService {
       return;
     }
 
+    // ⭐ 19/11/2026 (specs v1.45 §16.18) — code interne (`quoi_introuvable`) et Markdown retirés : le texte est lu
+    // tel quel par la synthèse vocale. Texte modifié → réécrit d'un bloc à la place des morceaux de Mistral.
+    const gardeFou = result.texteRemplace === true;
+    const parle = texteParle(result.finalText);
+    if (parle !== result.finalText) {
+      this.logger.info('IaService', `Réponse nettoyée pour la voix : « ${result.finalText.slice(0, 120)} » → « ${parle.slice(0, 120)} »`);
+      result = { ...result, finalText: parle, texteRemplace: true };
+    }
+
     if (result.wasStructured || result.texteRemplace) {
       res.write(JSON.stringify({ model: ollamaModel, created_at: new Date().toISOString(), message: { role: 'assistant', content: result.finalText }, done: false }) + '\n');
     } else {
@@ -619,7 +628,7 @@ export class IaService implements IIaService {
     if (trace) {
       trace.dureeMs = Date.now() - debut;
       trace.reponse = result.finalText;
-      trace.gardeFou = result.texteRemplace === true;
+      trace.gardeFou = gardeFou;
       trace.jetons = { prompt: result.promptTokens, completion: result.completionTokens, cache: result.cachedTokens };
       this.terminerTrace(trace);
     }
