@@ -211,3 +211,40 @@ describe('ConfigService — démarrage tolérant (01/10/2026)', () => {
     expect(service.getConfig().ha.ws_enable).toBe(true);
   });
 });
+
+describe('ConfigService — enregistrement d\'une seule section (19/11/2026, socle v4.53 §10.4ter)', () => {
+  const logger = { info() {}, warn() {}, error() {}, debug() {} } as any;
+  // Installation neuve : Web-services et MQTT demandés mais pas encore remplis.
+  const neuve = { ha: { ws_enable: true, mqtt_enable: true, ws: { host: '192.168.1.201', port: 8123, reconnect_delay: 15 }, mqtt: { port: 1883 } } };
+
+  it('enregistre le Site alors que Web-services et MQTT sont vides (incident du 13/10/2026)', () => {
+    fs.writeFileSync(configPath, yaml.dump(neuve));
+    const service = new ConfigService(new ConfigLoader(configPath), new ConfigWriter(configPath), logger);
+    const cfg = service.getConfig();
+    const result = service.saveConfig({ ...cfg, core: { ...cfg.core, site: 'stfort' } } as any, 'machine');
+    expect(result.success).toBe(true);
+    const onDisk = yaml.load(fs.readFileSync(configPath, 'utf-8')) as any;
+    expect(onDisk.ha.ws_enable).toBe(true);                        // rien d'autre n'est touché
+    expect(onDisk.ha.ws.host).toBe('192.168.1.201');
+  });
+
+  it('enregistre MQTT sans être bloqué par des Web-services incomplets', () => {
+    fs.writeFileSync(configPath, yaml.dump(neuve));
+    const service = new ConfigService(new ConfigLoader(configPath), new ConfigWriter(configPath), logger);
+    const cfg = service.getConfig();
+    const ha = { ...cfg.ha, mqtt_enable: true, mqtt: { host: '192.168.178.51', port: 1883, client_id: 'essai', username: '', password: '', keepalive: 60, reconnect_delay: 10 } };
+    expect(service.saveConfig({ ...cfg, ha } as any, 'mqtt').success).toBe(true);
+    const onDisk = yaml.load(fs.readFileSync(configPath, 'utf-8')) as any;
+    expect(onDisk.ha.mqtt.host).toBe('192.168.178.51');
+    expect(onDisk.ha.ws.token).toBeUndefined();
+  });
+
+  it('refuse toujours des Web-services incomplets quand c\'est cette section qu\'on enregistre', () => {
+    fs.writeFileSync(configPath, yaml.dump(neuve));
+    const service = new ConfigService(new ConfigLoader(configPath), new ConfigWriter(configPath), logger);
+    const cfg = service.getConfig();
+    const result = service.saveConfig({ ...cfg, ha: { ...cfg.ha, ws_enable: true } } as any, 'ha');
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Long-Lived Access Token is required/);
+  });
+});

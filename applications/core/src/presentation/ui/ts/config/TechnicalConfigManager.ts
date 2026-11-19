@@ -293,6 +293,9 @@ export class TechnicalConfigManager {
     }
     console.log(`[TechnicalConfigManager] Envoi de config:save au serveur (${section ?? 'toute la configuration'})`);
 
+    // ⭐ 19/11/2026 (socle v4.53 §10.4ter) — le serveur ne vérifie et n'enregistre que cette section.
+    if (prefixes) payload = { ...payload, _saveSection: section };
+
     this.saveInProgress = true;
     this.savingSection = section ?? null;
     this.socket.emit('config:save', payload);

@@ -36,6 +36,16 @@ import { redactForLog } from '../logger/redact';
  * }
  * ```
  */
+/** ⭐ 19/11/2026 (socle v4.53 §10.4ter) — sections enregistrables séparément : clés `ha` reprises du client et
+ *  connexions HA dont la validation est sautée (celles qui n'appartiennent pas à la section). */
+const SECTIONS_SOCLE: Record<string, { haKeys: string[]; skip: Array<'ws' | 'mqtt'> }> = {
+  machine: { haKeys: [], skip: ['ws', 'mqtt'] },
+  web: { haKeys: [], skip: ['ws', 'mqtt'] },
+  logging: { haKeys: [], skip: ['ws', 'mqtt'] },
+  ha: { haKeys: ['ws_enable', 'ws'], skip: ['mqtt'] },
+  mqtt: { haKeys: ['mqtt_enable', 'mqtt'], skip: ['ws'] }
+};
+
 export class ConfigService {
   private config: AppConfig;
   private readonly loader: ConfigLoader;
@@ -145,7 +155,7 @@ export class ConfigService {
    * @param newConfig - Nouvelle configuration complète
    * @returns Résultat de la sauvegarde
    */
-  saveConfig(newConfig: AppConfig): SaveResult {
+  saveConfig(newConfig: AppConfig, section?: string): SaveResult {
     console.log('[ConfigService SERVEUR] Sauvegarde configuration globale');
     console.log('[ConfigService SERVEUR] Config complète:', redactForLog(newConfig, 2));
     // Le client envoie l'objet fusionné complet (TechnicalConfigManager.config, qui reflète
@@ -166,6 +176,25 @@ export class ConfigService {
     // accepté depuis newConfig — `machineId`, lui, reste TOUJOURS repris de this.config, jamais du
     // client (auto-généré, ne doit jamais pouvoir être corrompu/écrasé par un formulaire). Tout le
     // reste du socle (disabledApps, knownApps, cibles, sites externes) vient de this.config via socle().
+    // ⭐ 19/11/2026 (socle v4.53 §10.4ter) — enregistrement d'UNE section de la page Réglages / Site : seule cette
+    // section est reprise du client, et seules ses propres règles sont vérifiées. Avant, enregistrer le Site d'une
+    // installation neuve était refusé tant que Web-services et MQTT étaient vides (incident du 13/10/2026).
+    if (section && SECTIONS_SOCLE[section]) {
+      const s = SECTIONS_SOCLE[section];
+      const overrides: Partial<AppConfig> = {};
+      if (section === 'machine') overrides.core = { ...this.config.core, site: newConfig.core?.site ?? this.config.core.site };
+      if (section === 'web') overrides.web = newConfig.web;
+      if (section === 'logging') overrides.logging = newConfig.logging;
+      // Connexions désactivées EN MÉMOIRE par le démarrage tolérant (§7.2) : le fichier garde l'activation voulue.
+      const ha = { ...this.config.ha } as Record<string, unknown>;
+      for (const issue of this.loader.getLoadIssues?.() ?? []) ha[issue.section === 'ha.ws' ? 'ws_enable' : 'mqtt_enable'] = issue.wasEnabled;
+      const recu = (newConfig.ha ?? {}) as unknown as Record<string, unknown>;
+      for (const k of s.haKeys) if (k in recu) ha[k] = recu[k];
+      overrides.ha = ha as unknown as HaConfig;
+      const result = this.writer.save(this.socle(overrides), { skipHaConnectionValidation: s.skip });
+      console.log(`[ConfigService SERVEUR] Résultat sauvegarde (section ${section}):`, result);
+      return result;
+    }
     const result = this.saveSocle({
       core: { ...this.config.core, site: newConfig.core?.site ?? this.config.core.site },
       ha: newConfig.ha,

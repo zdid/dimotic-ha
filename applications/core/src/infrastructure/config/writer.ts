@@ -68,14 +68,18 @@ export class ConfigWriter {
    * @param config - Config à sauvegarder
    * @returns Résultat { success, error? }
    */
-  save(config: AppConfig, options: { skipHaConnectionValidation?: boolean } = {}): SaveResult {
+  save(config: AppConfig, options: { skipHaConnectionValidation?: boolean | Array<'ws' | 'mqtt'> } = {}): SaveResult {
     try {
       // ⭐ 01/10/2026 (démarrage tolérant) : quand on n'écrit PAS la section `ha` (liste d'applications, cibles,
       // diffusion…) alors qu'elle est invalide en mémoire, ses connexions fautives ne doivent pas bloquer l'écriture
       // du reste. La section `ha` modifiée depuis l'IHM reste, elle, validée strictement.
       let toValidate: unknown = config;
-      if (options.skipHaConnectionValidation && config.ha) {
-        const { ws: _ws, mqtt: _mqtt, ...haRest } = config.ha as unknown as Record<string, unknown>;
+      // ⭐ 19/11/2026 (socle v4.53 §10.4ter) : une liste permet de ne sauter que l'une des deux connexions
+      // (enregistrer la section Web-services ne doit pas être bloqué par un MQTT encore vide, et inversement).
+      const skip = options.skipHaConnectionValidation === true ? ['ws', 'mqtt'] : (options.skipHaConnectionValidation || []);
+      if (skip.length > 0 && config.ha) {
+        const haRest = { ...(config.ha as unknown as Record<string, unknown>) };
+        for (const k of skip) delete haRest[k];
         toValidate = { ...config, ha: haRest };
       }
       this.schema.parse(toValidate);
