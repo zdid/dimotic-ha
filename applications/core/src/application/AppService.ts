@@ -1939,9 +1939,13 @@ export class AppService {
    */
   private handleConfigSave(config: TechnicalConfig): void {
     console.log('[AppService SERVEUR] Traitement de config:save:requested');
-    console.log('[AppService SERVEUR] Config à valider:', redactForLog(config, 2));
-    
-    const validationResult = this.validateConfig(config);
+    // ⭐ 19/11/2026 (socle v4.53 §10.4ter) — `_saveSection` : le client n'enregistre qu'UNE section (page Réglages,
+    // page Site) ; seules les erreurs de cette section bloquent l'enregistrement.
+    const { _saveSection: section, ...reste } = config as TechnicalConfig & { _saveSection?: string };
+    config = reste as TechnicalConfig;
+    console.log(`[AppService SERVEUR] Config à valider (${section ?? 'toute la configuration'}):`, redactForLog(config, 2));
+
+    const validationResult = filtrerParSection(this.validateConfig(config), section);
     console.log('[AppService SERVEUR] Résultat validation:', validationResult);
     
     if (!validationResult.valid) {
@@ -1955,7 +1959,7 @@ export class AppService {
     }
 
     // @ts-ignore
-    const saveResult = this.configService.saveConfig(config as unknown as AppConfig);
+    const saveResult = this.configService.saveConfig(config as unknown as AppConfig, section);
     
     if (saveResult.success) {
       this.eventBus.emit('config:save:result', {
@@ -2087,3 +2091,22 @@ export class AppService {
 }
 
 export default AppService;
+
+/** ⭐ 19/11/2026 (socle v4.53 §10.4ter) — préfixes de chemin de chaque section enregistrable séparément
+ *  (mêmes que `TechnicalConfigManager.SECTION_PATHS` côté navigateur). */
+const PREFIXES_SECTION: Record<string, string[]> = {
+  machine: ['core'],
+  ha: ['ha.ws_enable', 'ha.ws'],
+  mqtt: ['ha.mqtt_enable', 'ha.mqtt'],
+  web: ['web'],
+  logging: ['logging']
+};
+
+/** Ne garde que les erreurs de la section enregistrée (toutes si aucune section, ou section inconnue). */
+export function filtrerParSection(result: ConfigValidationResult, section?: string): ConfigValidationResult {
+  const prefixes = section ? PREFIXES_SECTION[section] : undefined;
+  if (!prefixes || result.valid) return result;
+  const dedans = (chemin: string) => prefixes.some((p) => chemin === p || chemin.startsWith(p + '.'));
+  const errors = result.errors.filter((e) => dedans(e.path));
+  return { ...result, valid: errors.length === 0, errors, requiredMissing: errors.map((e) => e.path) };
+}

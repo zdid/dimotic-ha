@@ -369,16 +369,12 @@ const createTemplate = (): HTMLTemplateElement => {
                   <span class="nav-label">Site</span>
                 </a>
               </li>
+              <!-- ⭐ 19/11/2026 (socle v4.53 §10.4ter) : « Réglages » = Web-services, MQTT, Serveur Web, Journalisation
+                   ET Gestion des applications sur une page ; l'ancien lien #applications-manager ouvre cette page. -->
               <li class="nav-item">
                 <a href="#tech" class="nav-link" data-section="tech">
                   <span class="nav-icon">⚙️</span>
-                  <span class="nav-label">Paramètres généraux</span>
-                </a>
-              </li>
-              <li class="nav-item">
-                <a href="#applications-manager" class="nav-link" data-section="applications-manager">
-                  <span class="nav-icon">📦</span>
-                  <span class="nav-label">Gestion des applications</span>
+                  <span class="nav-label">Réglages</span>
                 </a>
               </li>
               <li class="nav-item">
@@ -624,6 +620,9 @@ export class Sidebar extends HTMLElement {
   
   private showContentSection(sectionId: string): void {
     console.log('[Sidebar] showContentSection - Début, sectionId:', sectionId);
+    // ⭐ 19/11/2026 (socle v4.53 §10.4ter) — la Gestion des applications fait partie de la page « Réglages ».
+    const versApplications = sectionId === 'applications-manager';
+    if (versApplications) sectionId = 'tech';
     this.hideAllContentSections();
     console.log('[Sidebar] showContentSection - hideAllContentSections terminé');
     
@@ -699,6 +698,14 @@ export class Sidebar extends HTMLElement {
       const section = document.getElementById(contentSectionId);
       if (section) {
         section.style.display = 'block';
+      }
+    }
+    // Page « Réglages » : la Gestion des applications suit les réglages techniques (§10.4ter).
+    if (contentSectionId === 'section-ha') {
+      const apps = document.getElementById('section-applications-manager');
+      if (apps) {
+        apps.style.display = 'block';
+        if (versApplications) apps.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     }
   }
